@@ -478,24 +478,28 @@ export default function ChatPage() {
     );
   };
 
+  const isEmbed = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("embed");
+
   return (
     <div style={{ minHeight: "100vh", background: "#fafaf9", fontFamily: "system-ui, sans-serif" }}>
       {/* Header */}
-      <div style={{ borderBottom: "1px solid #e5e7eb", background: "#fff", padding: "0 40px", height: "56px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div style={{ fontSize: "15px", fontWeight: 600, color: "#1c1a17", letterSpacing: "-0.01em" }}>UK Policy Assistant</div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          {hasMessages && (
-            <button onClick={() => { navigator.clipboard.writeText(debugLog.current.join("\n")); }} style={{ fontSize: "12px", color: "#9ca3af", cursor: "pointer", padding: "4px 10px", border: "1px solid #e5e7eb", background: "transparent", fontFamily: "inherit" }}>
-              Copy debug
-            </button>
-          )}
-          {hasMessages && (
-            <button onClick={startNewChat} style={{ fontSize: "13px", color: "#228be6", cursor: "pointer", padding: "5px 12px", border: "1px solid #228be6", background: "transparent", fontFamily: "inherit" }}>
-              New chat
-            </button>
-          )}
+      {!isEmbed && (
+        <div style={{ borderBottom: "1px solid #e5e7eb", background: "#fff", padding: "0 40px", height: "56px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+          <img src="/policyengine-logo.svg" alt="PolicyEngine" style={{ height: "24px" }} />
+          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            {hasMessages && (
+              <button onClick={() => { navigator.clipboard.writeText(debugLog.current.join("\n")); }} style={{ fontSize: "12px", color: "#9ca3af", cursor: "pointer", padding: "4px 10px", border: "1px solid #e5e7eb", background: "transparent", fontFamily: "inherit" }}>
+                Copy debug
+              </button>
+            )}
+            {hasMessages && (
+              <button onClick={startNewChat} style={{ fontSize: "13px", color: "#228be6", cursor: "pointer", padding: "5px 12px", border: "1px solid #228be6", background: "transparent", fontFamily: "inherit" }}>
+                New chat
+              </button>
+            )}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Body */}
       <div style={{ display: "flex", maxWidth: "1200px", margin: "0 auto", padding: "0 40px", gap: "0" }}>
