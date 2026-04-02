@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+psycopg2-binary
+anthropic
+pydantic-ai[anthropic]
+policyengine-uk-compiled>=0.3.3
+policyengine_uk
+pandas
+httpx
