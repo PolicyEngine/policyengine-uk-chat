@@ -87,7 +87,7 @@ def calculate_household(
     person: List[Dict[str, Any]],
     benunit: List[Dict[str, Any]],
     household: List[Dict[str, Any]],
-    year: int = 2023,
+    year: int = 2025,
     reform: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     try:
@@ -163,7 +163,7 @@ def calculate_household(
         return {"error": str(e)}
 
 
-def run_economy_simulation(year: int = 2023, reform: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     try:
         from policyengine_uk_compiled import Simulation
         policy = _build_compiled_policy(reform)
@@ -189,7 +189,7 @@ def run_economy_simulation(year: int = 2023, reform: Optional[Dict[str, Any]] = 
 def analyse_microdata(
     entity: str,
     operation: str,
-    year: int = 2023,
+    year: int = 2025,
     reform: Optional[Dict[str, Any]] = None,
     filters: Optional[Dict[str, Any]] = None,
     columns: Optional[List[str]] = None,
@@ -433,7 +433,7 @@ TOOL_DEFINITIONS = [
                 "person": {"type": "array", "items": {"type": "object", "properties": {"person_id": {"type": "integer"}, "benunit_id": {"type": "integer"}, "household_id": {"type": "integer"}, "age": {"type": "integer"}, "employment_income": {"type": "number"}, "self_employment_income": {"type": "number"}, "private_pension_income": {"type": "number"}, "state_pension": {"type": "number"}, "savings_interest": {"type": "number"}, "is_in_scotland": {"type": "boolean"}}, "required": ["person_id", "benunit_id", "household_id", "age"]}},
                 "benunit": {"type": "array", "items": {"type": "object", "properties": {"benunit_id": {"type": "integer"}, "household_id": {"type": "integer"}, "rent_monthly": {"type": "number"}, "is_lone_parent": {"type": "boolean"}}, "required": ["benunit_id", "household_id"]}},
                 "household": {"type": "array", "items": {"type": "object", "properties": {"household_id": {"type": "integer"}, "region": {"type": "string"}, "rent_annual": {"type": "number"}, "council_tax_annual": {"type": "number"}}, "required": ["household_id"]}},
-                "year": {"type": "integer", "default": 2023},
+                "year": {"type": "integer", "default": 2025},
                 "reform": {"type": "object", "description": "Optional policy reform dict. Example: {\"income_tax\": {\"personal_allowance\": 15000}}"},
             },
         },
@@ -444,7 +444,7 @@ TOOL_DEFINITIONS = [
         "input_schema": {
             "type": "object",
             "properties": {
-                "year": {"type": "integer", "description": "Fiscal year. Microdata available 1994–2023. Default: 2023.", "default": 2023},
+                "year": {"type": "integer", "description": "Fiscal year. Default: 2025 (current FY).", "default": 2025},
                 "reform": {"type": "object", "description": "Optional policy reform. Top-level keys: income_tax, national_insurance, universal_credit, child_benefit, state_pension, pension_credit, benefit_cap, housing_benefit, tax_credits, scottish_child_payment."},
             },
         },
@@ -457,7 +457,7 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "entity": {"type": "string", "enum": ["persons", "benunits", "households"]},
                 "operation": {"type": "string", "enum": ["mean", "sum", "count", "sample", "describe"]},
-                "year": {"type": "integer", "default": 2023},
+                "year": {"type": "integer", "default": 2025},
                 "reform": {"type": "object"},
                 "filters": {"type": "object", "description": "Filter rows. Keys are column names. Values: exact, list, range {min/max}, or comparison {gt/lt/gte/lte/ne}. E.g. {\"net_income_change\": {\"lt\": 0}}"},
                 "columns": {"type": "array", "items": {"type": "string"}},

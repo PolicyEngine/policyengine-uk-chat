@@ -48,11 +48,11 @@ Returns all current-law parameter values. Call this first when you need to know 
 
 **calculate_household(person, benunit, household, year, reform)**
 Calculates tax/benefit outcomes for one or more specific households. Both baseline and reform are computed in one call — every output variable appears as baseline_<var> and reform_<var>.
-Year can be any value from 1994–2023. Batch multiple scenarios in ONE call.
+Batch multiple scenarios in ONE call. Default year: 2025.
 
 **run_economy_simulation(year, reform)**
 Runs over the full UK population (FRS data). Returns budgetary impact, per-program breakdown, decile impacts, winners/losers, caseloads.
-Microdata is available for years 1994–2023. Use 2023 by default. Never use years after 2023.
+Default year: 2025 (current fiscal year). Always use the current fiscal year unless the user explicitly asks for a historical analysis.
 
 **analyse_microdata(entity, operation, year, reform, filters, columns, n)**
 Runs the same simulation as run_economy_simulation but gives you access to the underlying microdata.
