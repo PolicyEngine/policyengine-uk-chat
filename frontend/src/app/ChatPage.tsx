@@ -112,7 +112,11 @@ async function apiRequest<T>(method: string, endpoint: string, params?: Record<s
   const options: RequestInit = { method, headers: { "Content-Type": "application/json" } };
   if (body && ["POST", "PUT", "PATCH"].includes(method)) options.body = JSON.stringify(body);
   const res = await fetch(url.toString(), options);
-  if (!res.ok) throw new Error(`API error ${res.status}`);
+  if (!res.ok) {
+    let detail = "";
+    try { const body = await res.json(); detail = body.details || body.error || ""; } catch {}
+    throw new Error(`API error ${res.status}: ${detail}`);
+  }
   if (res.status === 204) return undefined as T;
   return res.json();
 }
