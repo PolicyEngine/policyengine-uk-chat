@@ -26,7 +26,7 @@ image = (
         "psycopg2-binary",
         "anthropic",
         "pydantic-ai[anthropic]",
-        "policyengine-uk-compiled>=0.5.0",
+        "policyengine-uk-compiled>=0.6.1",
         "policyengine_uk>=2.75.0",
         "pandas",
         "httpx",
