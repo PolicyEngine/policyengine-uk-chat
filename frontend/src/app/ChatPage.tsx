@@ -398,11 +398,12 @@ export default function ChatPage() {
     const { charts, cleanContent } = extractChartSpecs(content);
 
     const markdownComponents = {
-      code({ inline, className, children, ...props }: { inline?: boolean; className?: string; children?: React.ReactNode }) {
+      code({ className, children, ...props }: { className?: string; children?: React.ReactNode; [key: string]: unknown }) {
         const match = /language-(\w+)/.exec(className || "");
-        if (!inline && match) return <SyntaxHighlighter style={oneLight} language={match[1]} customStyle={{ margin: "12px 0", fontSize: "13px", background: "#f6f6f6", border: "none", borderRadius: 0 }}>{String(children).replace(/\n$/, "")}</SyntaxHighlighter>;
-        if (!inline && !match) return <span style={{ display: "block", margin: "0 0 14px 0", lineHeight: 1.75 }}>{children}</span>;
-        return <code style={{ background: "#f0f0f0", padding: "2px 5px", fontSize: "13px" }}>{children}</code>;
+        const isInline = !match && !String(children).includes("\n");
+        if (!isInline && match) return <SyntaxHighlighter style={oneLight} language={match[1]} customStyle={{ margin: "12px 0", fontSize: "13px", background: "#f6f6f6", border: "none", borderRadius: 0 }}>{String(children).replace(/\n$/, "")}</SyntaxHighlighter>;
+        if (isInline) return <code style={{ background: "#f0f0f0", padding: "2px 5px", fontSize: "13px" }}>{children}</code>;
+        return <pre style={{ display: "block", margin: "0 0 14px 0", lineHeight: 1.75, whiteSpace: "pre-wrap" }}><code>{children}</code></pre>;
       },
       p: ({ children }: { children?: React.ReactNode }) => <p style={{ margin: "0 0 14px 0", lineHeight: 1.75 }}>{children}</p>,
       strong: ({ children }: { children?: React.ReactNode }) => <strong style={{ fontWeight: 600, color: "#1c1a17" }}>{children}</strong>,
