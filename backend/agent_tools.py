@@ -176,23 +176,30 @@ def _patch_frs_flag(sim):
     sim._build_cmd = patched
 
 
+def _build_simulation(year: int, dataset: str = "frs"):
+    """Build a Simulation with the right data source and CLI flags."""
+    from policyengine_uk_compiled import Simulation
+    if dataset != "frs":
+        from policyengine_uk_compiled.data import ensure_dataset
+        data_dir = ensure_dataset(dataset, year)
+        sim = Simulation(year=year, data_dir=data_dir)
+    else:
+        sim = Simulation(year=year)
+    _patch_frs_flag(sim)
+    if dataset == "spi":
+        original_build = sim._build_cmd
+        def _add_persons_only(policy=None, extra_args=None):
+            cmd = original_build(policy, extra_args)
+            cmd.append("--persons-only")
+            return cmd
+        sim._build_cmd = _add_persons_only
+    return sim
+
+
 def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = None, dataset: str = "frs") -> Dict[str, Any]:
     try:
-        from policyengine_uk_compiled import Simulation
         policy = _build_compiled_policy(reform)
-        kwargs = {"year": year}
-        if dataset != "frs":
-            kwargs["dataset"] = dataset
-        sim = Simulation(**kwargs)
-        _patch_frs_flag(sim)
-        if dataset == "spi":
-            # SPI has no household structure — pass --persons-only
-            original_build = sim._build_cmd
-            def _add_persons_only(policy=None, extra_args=None):
-                cmd = original_build(policy, extra_args)
-                cmd.append("--persons-only")
-                return cmd
-            sim._build_cmd = _add_persons_only
+        sim = _build_simulation(year, dataset)
         # Always run baseline to compute program-level changes
         baseline_result = sim.run()
         reform_result = sim.run(policy=policy) if policy else baseline_result
@@ -233,21 +240,9 @@ def analyse_microdata(
 ) -> Dict[str, Any]:
     try:
         import pandas as pd
-        from policyengine_uk_compiled import Simulation
 
         policy = _build_compiled_policy(reform)
-        kwargs = {"year": year}
-        if dataset != "frs":
-            kwargs["dataset"] = dataset
-        sim = Simulation(**kwargs)
-        _patch_frs_flag(sim)
-        if dataset == "spi":
-            original_build = sim._build_cmd
-            def _add_persons_only(policy=None, extra_args=None):
-                cmd = original_build(policy, extra_args)
-                cmd.append("--persons-only")
-                return cmd
-            sim._build_cmd = _add_persons_only
+        sim = _build_simulation(year, dataset)
         microdata = sim.run_microdata(policy=policy)
 
         entity_map = {"persons": microdata.persons, "benunits": microdata.benunits, "households": microdata.households}
