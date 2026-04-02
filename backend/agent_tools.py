@@ -97,6 +97,22 @@ def calculate_household(
         def fill_defaults(records, defaults):
             return pd.DataFrame([{**defaults, **rec} for rec in records])
 
+        # Remap IDs to 0-based (the compiled engine uses IDs as array indices)
+        hh_id_map = {rec["household_id"]: i for i, rec in enumerate(household)}
+        bu_id_map = {rec["benunit_id"]: i for i, rec in enumerate(benunit)}
+        person = [
+            {**rec, "person_id": i, "benunit_id": bu_id_map[rec["benunit_id"]], "household_id": hh_id_map[rec["household_id"]]}
+            for i, rec in enumerate(person)
+        ]
+        benunit = [
+            {**rec, "benunit_id": bu_id_map[rec["benunit_id"]], "household_id": hh_id_map[rec["household_id"]]}
+            for rec in benunit
+        ]
+        household = [
+            {**rec, "household_id": hh_id_map[rec["household_id"]]}
+            for rec in household
+        ]
+
         persons_df = fill_defaults(person, PERSON_DEFAULTS)
         benunits_df = fill_defaults(benunit, BENUNIT_DEFAULTS)
         households_df = fill_defaults(household, HOUSEHOLD_DEFAULTS)
