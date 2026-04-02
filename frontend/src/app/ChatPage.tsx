@@ -479,11 +479,12 @@ export default function ChatPage() {
       tr: ({ children }: { children?: React.ReactNode }) => <tr style={{ borderBottom: "1px solid #e2e8f0" }}>{children}</tr>,
       th: ({ children }: { children?: React.ReactNode }) => <th style={{ padding: "9px 14px", textAlign: "left", fontWeight: 600, color: "#1c1a17" }}>{children}</th>,
       td: ({ children }: { children?: React.ReactNode }) => <td style={{ padding: "9px 14px", color: "#4b4843" }}>{children}</td>,
+      del: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
     };
 
     const hasChartPlaceholder = cleanContent.includes("[CHART_PLACEHOLDER_") || cleanContent.includes("[CHART_LOADING]");
     if (!hasChartPlaceholder) {
-      return <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents as never}>{cleanContent}</ReactMarkdown>;
+      return <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]} components={markdownComponents as never}>{cleanContent}</ReactMarkdown>;
     }
 
     const segments: Array<{ type: "text" | "chart" | "loading"; content?: string; chartIdx?: number }> = [];
@@ -503,7 +504,7 @@ export default function ChatPage() {
         {segments.map((segment, idx) => {
           if (segment.type === "text") {
             if (!segment.content?.trim()) return null;
-            return <ReactMarkdown key={idx} remarkPlugins={[remarkGfm]} components={markdownComponents as never}>{segment.content}</ReactMarkdown>;
+            return <ReactMarkdown key={idx} remarkPlugins={[[remarkGfm, { singleTilde: false }]]} components={markdownComponents as never}>{segment.content}</ReactMarkdown>;
           }
           if (segment.type === "loading") return <div key={idx} style={{ margin: "16px 0", padding: "40px", background: "#f9fafb", border: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", color: "#9ca3af", fontSize: "13px" }}><Loader size={14} color="#228be6" /><span>Generating chart…</span></div>;
           if (segment.type === "chart" && segment.chartIdx !== undefined) {
