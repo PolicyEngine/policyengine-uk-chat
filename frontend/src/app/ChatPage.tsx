@@ -10,6 +10,31 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Chart, extractChartSpecs, ChartSpec } from "@/components/charts";
 
+function StreamingText({ content }: { content: string }) {
+  const prevLenRef = useRef(0);
+  const prevLen = prevLenRef.current;
+
+  useEffect(() => {
+    prevLenRef.current = content.length;
+  });
+
+  const stableText = content.slice(0, prevLen);
+  const newText = content.slice(prevLen);
+
+  if (!newText) return <>{stableText}</>;
+
+  const words = newText.match(/\S+|\s+/g) || [];
+
+  return (
+    <>
+      {stableText}
+      {words.map((word, i) => (
+        <span key={prevLen + i} style={{ animation: `blurIn 350ms ${i * 25}ms both`, display: "inline" }}>{word}</span>
+      ))}
+    </>
+  );
+}
+
 const EXAMPLE_QUERIES = [
   "What's the current personal allowance?",
   "How much tax would I pay on £50,000?",
@@ -492,9 +517,18 @@ export default function ChatPage() {
       );
     }
 
-    return msg.events.map((event, idx) =>
-      event.type === "text" ? <div key={idx}>{renderMarkdown(event.content)}</div> : renderTool(event.data)
-    );
+    return msg.events.map((event, idx) => {
+      if (event.type === "tool") return renderTool(event.data);
+      // During streaming, apply blur-in to new text
+      if (!msg.isComplete && idx === msg.events!.length - 1 && event.type === "text") {
+        return (
+          <div key={idx} style={{ whiteSpace: "pre-wrap", lineHeight: 1.75 }}>
+            <StreamingText content={event.content} />
+          </div>
+        );
+      }
+      return <div key={idx}>{renderMarkdown(event.content)}</div>;
+    });
   };
 
   const isEmbed = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("embed");
@@ -608,7 +642,8 @@ export default function ChatPage() {
                     <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#9ca3af", animation: "thinking-dot 1.2s ease-in-out 0s infinite" }} />
                     <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#9ca3af", animation: "thinking-dot 1.2s ease-in-out 0.2s infinite" }} />
                     <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#9ca3af", animation: "thinking-dot 1.2s ease-in-out 0.4s infinite" }} />
-                    <style>{`@keyframes thinking-dot { 0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)} }`}</style>
+                    <style>{`@keyframes thinking-dot { 0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)} }
+@keyframes blurIn { from{opacity:0;filter:blur(4px)}to{opacity:1;filter:blur(0)} }`}</style>
                   </div>
                 </div>
               )}
