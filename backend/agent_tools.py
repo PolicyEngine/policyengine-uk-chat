@@ -176,12 +176,23 @@ def _patch_frs_flag(sim):
     sim._build_cmd = patched
 
 
-def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = None, dataset: str = "frs") -> Dict[str, Any]:
     try:
         from policyengine_uk_compiled import Simulation
         policy = _build_compiled_policy(reform)
-        sim = Simulation(year=year)
+        kwargs = {"year": year}
+        if dataset != "frs":
+            kwargs["dataset"] = dataset
+        sim = Simulation(**kwargs)
         _patch_frs_flag(sim)
+        if dataset == "spi":
+            # SPI has no household structure — pass --persons-only
+            original_build = sim._build_cmd
+            def _add_persons_only(policy=None, extra_args=None):
+                cmd = original_build(policy, extra_args)
+                cmd.append("--persons-only")
+                return cmd
+            sim._build_cmd = _add_persons_only
         result = sim.run(policy=policy)
         return {
             "fiscal_year": result.fiscal_year,
@@ -193,7 +204,7 @@ def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = 
             "avg_hbai_net_income": result.avg_hbai_net_income,
         }
     except FileNotFoundError as e:
-        return {"error": "FRS microdata not available", "detail": str(e), "hint": "Ensure POLICYENGINE_UK_DATA_TOKEN is set."}
+        return {"error": f"{dataset.upper()} microdata not available", "detail": str(e), "hint": "Ensure POLICYENGINE_UK_DATA_TOKEN is set."}
     except Exception as e:
         logger.error(f"Error in run_economy_simulation: {e}")
         import traceback; logger.error(traceback.format_exc())
@@ -208,14 +219,25 @@ def analyse_microdata(
     filters: Optional[Dict[str, Any]] = None,
     columns: Optional[List[str]] = None,
     n: int = 5,
+    dataset: str = "frs",
 ) -> Dict[str, Any]:
     try:
         import pandas as pd
         from policyengine_uk_compiled import Simulation
 
         policy = _build_compiled_policy(reform)
-        sim = Simulation(year=year)
+        kwargs = {"year": year}
+        if dataset != "frs":
+            kwargs["dataset"] = dataset
+        sim = Simulation(**kwargs)
         _patch_frs_flag(sim)
+        if dataset == "spi":
+            original_build = sim._build_cmd
+            def _add_persons_only(policy=None, extra_args=None):
+                cmd = original_build(policy, extra_args)
+                cmd.append("--persons-only")
+                return cmd
+            sim._build_cmd = _add_persons_only
         microdata = sim.run_microdata(policy=policy)
 
         entity_map = {"persons": microdata.persons, "benunits": microdata.benunits, "households": microdata.households}
@@ -455,12 +477,13 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "run_economy_simulation",
-        "description": "Run an economy-wide UK microsimulation over the full FRS population. Returns budgetary impact, program breakdown, decile impacts, winners/losers, and caseloads. Microdata available 1994–2023.",
+        "description": "Run an economy-wide UK microsimulation. Returns budgetary impact, program breakdown, decile impacts, winners/losers, and caseloads. Default dataset is FRS (full household survey). Use 'spi' for the Survey of Personal Incomes (income tax/NI only, no benefits — better for high-income analysis).",
         "input_schema": {
             "type": "object",
             "properties": {
                 "year": {"type": "integer", "description": "Fiscal year. Default: 2025 (current FY).", "default": 2025},
                 "reform": {"type": "object", "description": "Optional policy reform. Top-level keys: income_tax, national_insurance, universal_credit, child_benefit, state_pension, pension_credit, benefit_cap, housing_benefit, tax_credits, scottish_child_payment."},
+                "dataset": {"type": "string", "enum": ["frs", "spi"], "description": "Dataset to use. 'frs' (default): Family Resources Survey — full tax-benefit model with households. 'spi': Survey of Personal Incomes — person-level only (income tax and NI), better sample of high earners.", "default": "frs"},
             },
         },
     },
@@ -477,6 +500,7 @@ TOOL_DEFINITIONS = [
                 "filters": {"type": "object", "description": "Filter rows. Keys are column names. Values: exact, list, range {min/max}, or comparison {gt/lt/gte/lte/ne}. E.g. {\"net_income_change\": {\"lt\": 0}}"},
                 "columns": {"type": "array", "items": {"type": "string"}},
                 "n": {"type": "integer", "default": 5},
+                "dataset": {"type": "string", "enum": ["frs", "spi"], "description": "Dataset. 'frs' (default) or 'spi' (person-level only, entity must be 'persons').", "default": "frs"},
             },
             "required": ["entity", "operation"],
         },

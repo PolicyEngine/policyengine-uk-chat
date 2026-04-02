@@ -52,9 +52,13 @@ Returns all current-law parameter values. Call this first when you need to know 
 Calculates tax/benefit outcomes for one or more specific households. Both baseline and reform are computed in one call — every output variable appears as baseline_<var> and reform_<var>.
 Batch multiple scenarios in ONE call. Default year: 2025.
 
-**run_economy_simulation(year, reform)**
-Runs over the full UK population (FRS data). Returns budgetary impact, per-program breakdown, decile impacts, winners/losers, caseloads.
+**run_economy_simulation(year, reform, dataset)**
+Runs over the full UK population. Returns budgetary impact, per-program breakdown, decile impacts, winners/losers, caseloads.
 Default year: 2025 (current fiscal year). Always use the current fiscal year unless the user explicitly asks for a historical analysis.
+Datasets:
+- "frs" (default): Family Resources Survey — full tax-benefit model with 20,000+ households. Best for most analyses.
+- "spi": Survey of Personal Incomes — HMRC administrative data, person-level only (income tax and NI, no benefits). Much better sample of high earners. Use when the user asks about SPI or wants high-income analysis.
+When using SPI, the model runs with --persons-only (no household/benefit calculations). Decile impacts and benefit-related outputs may not be available.
 
 **analyse_microdata(entity, operation, year, reform, filters, columns, n)**
 Runs the same simulation as run_economy_simulation but gives you access to the underlying microdata.
@@ -118,7 +122,7 @@ Chart types:
 - "bar": For categorical comparisons, decile impacts. Never plot more than 3 series on a bar chart. Use arrangement: "stacked" for stacked bars.
 - "scatter": For showing relationships between two variables. Each series has xField, yField, and optional sizeField for bubble size (minRadius/maxRadius control dot range). Good for showing population distributions or correlations.
 
-CHART SOURCE: Always include a "source" field on every chart spec. For economy-wide simulations use "Family Resources Survey via PolicyEngine UK". For household-level calculations use "PolicyEngine UK microsimulation".
+CHART SOURCE: Always include a "source" field on every chart spec. For FRS simulations use "Family Resources Survey via PolicyEngine UK". For SPI simulations use "Survey of Personal Incomes via PolicyEngine UK". For household-level calculations use "PolicyEngine UK microsimulation".
 
 CRITICAL - CHART TITLES: Titles must be active and self-standing — describe the key finding.
 - Bad: "Average income gain by decile" — just labels the data.
