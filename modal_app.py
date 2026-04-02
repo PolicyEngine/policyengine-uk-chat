@@ -44,7 +44,6 @@ chat_secrets = modal.Secret.from_name("policyengine-uk-chat-secrets")
     cpu=2.0,
     memory=4096,
     timeout=600,
-    min_containers=1,
     max_containers=10,
 )
 @modal.concurrent(max_inputs=100)
