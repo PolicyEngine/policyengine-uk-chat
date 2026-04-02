@@ -22,7 +22,7 @@ image = (
     .pip_install(
         "fastapi",
         "uvicorn[standard]",
-        "sqlalchemy",
+        "sqlmodel",
         "psycopg2-binary",
         "anthropic",
         "pydantic-ai[anthropic]",
@@ -54,18 +54,6 @@ def web():
 
     sys.path.insert(0, "/app/backend")
     os.chdir("/app/backend")
-
-    # Map DATABASE_URL env var to the individual DB_* vars the app expects
-    database_url = os.environ.get("DATABASE_URL", "")
-    if database_url and not os.environ.get("DB_HOST"):
-        # Parse postgresql://user:pass@host:port/dbname
-        from urllib.parse import urlparse
-        u = urlparse(database_url)
-        os.environ["DB_HOST"] = u.hostname or "localhost"
-        os.environ["DB_PORT"] = str(u.port or 5432)
-        os.environ["DB_NAME"] = (u.path or "/microsim").lstrip("/")
-        os.environ["DB_USERNAME"] = u.username or "postgres"
-        os.environ["DB_PASSWORD"] = u.password or ""
 
     from main import app as fastapi_app
     return fastapi_app

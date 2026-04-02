@@ -1,6 +1,6 @@
 fastapi
 uvicorn[standard]
-sqlalchemy
+sqlmodel
 psycopg2-binary
 anthropic
 pydantic-ai[anthropic]
