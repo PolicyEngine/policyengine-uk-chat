@@ -52,6 +52,11 @@ app.include_router(chatbot.router)
 app.include_router(conversations.router)
 
 
+@app.on_event("startup")
+def startup():
+    conversations.ensure_table()
+
+
 @app.get("/health")
 def health():
     return {"status": "ok"}

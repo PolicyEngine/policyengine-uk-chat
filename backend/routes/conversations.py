@@ -75,8 +75,7 @@ def _ensure_table():
         conn.execute(text("CREATE INDEX IF NOT EXISTS ix_conversations_updated ON chat_conversations (updated_at)"))
 
 
-@router.on_event("startup")
-def startup():
+def ensure_table():
     try:
         _ensure_table()
     except Exception as e:
