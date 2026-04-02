@@ -80,6 +80,9 @@ CRITICAL — INCOME TAX RATES: There is NO "basic_rate", "higher_rate", or "addi
 HOUSEHOLD INPUT FORMAT:
 - Required person fields: person_id, benunit_id, household_id, age
 - Simple single adult: person=[{person_id:0, benunit_id:0, household_id:0, age:30, employment_income:30000}], benunit=[{benunit_id:0, household_id:0}], household=[{household_id:0}]
+- Children must share the same benunit_id and household_id as their parent
+- The engine automatically sets is_benunit_head and is_household_head — the first adult per unit is head, children are never head
+- BENEFIT CLAIMING: All "would claim" flags (UC, CB, HB, PC, CTC, WTC, IS, ESA, JSA) default to TRUE. Benefits will be computed for eligible households automatically. You do NOT need to set any would_claim flags.
 
 MARGINAL TAX RATE ANALYSIS:
 Use calculate_household in a SINGLE batched call with ~20 persons at income steps, then use compute(operation="marginal_rate", ...) to derive MTR.

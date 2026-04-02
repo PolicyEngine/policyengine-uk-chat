@@ -113,6 +113,20 @@ def calculate_household(
             for rec in household
         ]
 
+        # Set is_benunit_head/is_household_head: first adult (age>=16) per unit is head
+        seen_bu_heads = set()
+        seen_hh_heads = set()
+        for rec in person:
+            bu_id = rec["benunit_id"]
+            hh_id = rec["household_id"]
+            is_adult = rec.get("age", 30) >= 16
+            rec["is_benunit_head"] = is_adult and bu_id not in seen_bu_heads
+            rec["is_household_head"] = is_adult and hh_id not in seen_hh_heads
+            if rec["is_benunit_head"]:
+                seen_bu_heads.add(bu_id)
+            if rec["is_household_head"]:
+                seen_hh_heads.add(hh_id)
+
         persons_df = fill_defaults(person, PERSON_DEFAULTS)
         benunits_df = fill_defaults(benunit, BENUNIT_DEFAULTS)
         households_df = fill_defaults(household, HOUSEHOLD_DEFAULTS)
