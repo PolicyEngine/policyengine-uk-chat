@@ -179,20 +179,8 @@ def _patch_frs_flag(sim):
 def _build_simulation(year: int, dataset: str = "frs"):
     """Build a Simulation with the right data source and CLI flags."""
     from policyengine_uk_compiled import Simulation
-    if dataset != "frs":
-        from policyengine_uk_compiled.data import ensure_dataset
-        data_dir = ensure_dataset(dataset, year)
-        sim = Simulation(year=year, data_dir=data_dir)
-    else:
-        sim = Simulation(year=year)
+    sim = Simulation(year=year, dataset=dataset)
     _patch_frs_flag(sim)
-    if dataset == "spi":
-        original_build = sim._build_cmd
-        def _add_persons_only(policy=None, extra_args=None):
-            cmd = original_build(policy, extra_args)
-            cmd.append("--persons-only")
-            return cmd
-        sim._build_cmd = _add_persons_only
     return sim
 
 
