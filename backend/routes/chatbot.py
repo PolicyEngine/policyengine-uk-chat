@@ -8,6 +8,8 @@ import logging
 import uuid
 from typing import Any, Dict, List
 
+import httpx
+
 from fastapi import APIRouter, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -246,48 +248,59 @@ async def chat_message(request: ChatRequest, http_request: Request):
                 assistant_content = ""
 
                 logger.info(f"[CHAT] Iteration {iteration}: calling Anthropic, {len(conversation)} messages")
-                # Stream from Anthropic (async to avoid blocking the event loop)
-                async with client.messages.stream(
-                    model=model,
-                    max_tokens=16000,
-                    system=SYSTEM_PROMPT,
-                    tools=tools,
-                    messages=conversation,
-                ) as stream:
-                    announced_tools: set = set()
+                # Stream from Anthropic with retry on transient errors
+                max_retries = 2
+                for attempt in range(max_retries + 1):
+                    try:
+                        async with client.messages.stream(
+                            model=model,
+                            max_tokens=16000,
+                            system=SYSTEM_PROMPT,
+                            tools=tools,
+                            messages=conversation,
+                        ) as stream:
+                            announced_tools: set = set()
 
-                    async for event in stream:
-                        event_type = type(event).__name__
+                            async for event in stream:
+                                event_type = type(event).__name__
 
-                        if event_type == "RawContentBlockStartEvent":
-                            block = event.content_block
-                            if block.type == "tool_use" and block.id not in announced_tools:
-                                announced_tools.add(block.id)
-                                yield f"data: {json.dumps({'type': 'tool_start', 'tool_name': block.name, 'tool_id': block.id})}\n\n"
+                                if event_type == "RawContentBlockStartEvent":
+                                    block = event.content_block
+                                    if block.type == "tool_use" and block.id not in announced_tools:
+                                        announced_tools.add(block.id)
+                                        yield f"data: {json.dumps({'type': 'tool_start', 'tool_name': block.name, 'tool_id': block.id})}\n\n"
 
-                        elif event_type == "RawContentBlockDeltaEvent":
-                            delta = event.delta
-                            if delta.type == "text_delta" and delta.text:
-                                assistant_content += delta.text
-                                yield f"data: {json.dumps({'type': 'chunk', 'content': delta.text})}\n\n"
+                                elif event_type == "RawContentBlockDeltaEvent":
+                                    delta = event.delta
+                                    if delta.type == "text_delta" and delta.text:
+                                        assistant_content += delta.text
+                                        yield f"data: {json.dumps({'type': 'chunk', 'content': delta.text})}\n\n"
 
-                        elif event_type == "RawMessageStartEvent":
-                            usage = getattr(event.message, "usage", None)
-                            if usage:
-                                total_input_tokens += getattr(usage, "input_tokens", 0)
+                                elif event_type == "RawMessageStartEvent":
+                                    usage = getattr(event.message, "usage", None)
+                                    if usage:
+                                        total_input_tokens += getattr(usage, "input_tokens", 0)
 
-                        elif event_type == "RawMessageDeltaEvent":
-                            usage = getattr(event, "usage", None)
-                            if usage:
-                                total_output_tokens += getattr(usage, "output_tokens", 0)
+                                elif event_type == "RawMessageDeltaEvent":
+                                    usage = getattr(event, "usage", None)
+                                    if usage:
+                                        total_output_tokens += getattr(usage, "output_tokens", 0)
 
-                    # Use final message for complete, parsed tool inputs
-                    final = await stream.get_final_message()
-                    for block in final.content:
-                        if block.type == "tool_use":
-                            tool_input = block.input if isinstance(block.input, dict) else {}
-                            tool_uses.append({"id": block.id, "name": block.name, "input": tool_input})
-                            yield f"data: {json.dumps({'type': 'tool_use', 'tool_name': block.name, 'tool_id': block.id, 'tool_input': tool_input, 'status': 'pending'})}\n\n"
+                            # Use final message for complete, parsed tool inputs
+                            final = await stream.get_final_message()
+                            for block in final.content:
+                                if block.type == "tool_use":
+                                    tool_input = block.input if isinstance(block.input, dict) else {}
+                                    tool_uses.append({"id": block.id, "name": block.name, "input": tool_input})
+                                    yield f"data: {json.dumps({'type': 'tool_use', 'tool_name': block.name, 'tool_id': block.id, 'tool_input': tool_input, 'status': 'pending'})}\n\n"
+                        break  # success — exit retry loop
+                    except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectError) as e:
+                        logger.warning(f"[CHAT] Anthropic stream error (attempt {attempt+1}/{max_retries+1}): {e}")
+                        if attempt == max_retries:
+                            raise
+                        tool_uses = []
+                        assistant_content = ""
+                        await asyncio.sleep(1)
 
                 if not tool_uses:
                     yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens}})}\n\n"
