@@ -77,7 +77,30 @@ export interface AreaChartSpec {
   stacked?: boolean;
 }
 
-export type ChartSpec = LineChartSpec | BarChartSpec | AreaChartSpec;
+export interface ScatterSeriesConfig {
+  xField: string;
+  yField: string;
+  sizeField?: string;
+  label?: string;
+  color?: string;
+  minRadius?: number;
+  maxRadius?: number;
+}
+
+export interface ScatterChartSpec {
+  type: "scatter";
+  title?: string;
+  subtitle?: string;
+  source?: string;
+  x: AxisConfig;
+  y: AxisConfig;
+  series: ScatterSeriesConfig[];
+  data: Record<string, number | string>[];
+  showLegend?: boolean;
+  showGrid?: boolean;
+}
+
+export type ChartSpec = LineChartSpec | BarChartSpec | AreaChartSpec | ScatterChartSpec;
 
 export interface TooltipData {
   x: number;

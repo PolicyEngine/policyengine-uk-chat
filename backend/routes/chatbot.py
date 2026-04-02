@@ -110,7 +110,8 @@ Formatting guidelines:
 VISUALISATIONS:
 Chart types:
 - "line": For continuous data, trends. series_curves: "step" for policy rates/thresholds, "linear" for most things.
-- "bar": For categorical comparisons, decile impacts. Never plot more than 3 series on a bar chart.
+- "bar": For categorical comparisons, decile impacts. Never plot more than 3 series on a bar chart. Use arrangement: "stacked" for stacked bars.
+- "scatter": For showing relationships between two variables. Each series has xField, yField, and optional sizeField for bubble size (minRadius/maxRadius control dot range). Good for showing population distributions or correlations.
 
 CHART SOURCE: Always include a "source" field on every chart spec. For economy-wide simulations use "Family Resources Survey via PolicyEngine UK". For household-level calculations use "PolicyEngine UK microsimulation".
 
