@@ -78,8 +78,10 @@ def _ensure_table():
 def ensure_table():
     try:
         _ensure_table()
+        logger.info("Conversations table ensured successfully")
     except Exception as e:
-        logger.warning(f"Could not ensure conversations table: {e}")
+        logger.error(f"Could not ensure conversations table: {e}")
+        import traceback; logger.error(traceback.format_exc())
 
 
 @router.post("", response_model=ConversationDetail)
@@ -107,7 +109,7 @@ def save_conversation(request: SaveConversationRequest):
     return ConversationDetail(id=row.id, session_id=row.session_id, title=row.title, messages=row.messages, created_at=row.created_at.isoformat(), updated_at=row.updated_at.isoformat())
 
 
-@router.get("", response_model=List[ConversationSummary])
+@router.get("")
 def list_conversations(user_id: str | None = None):
     engine = get_engine()
     with engine.connect() as conn:
