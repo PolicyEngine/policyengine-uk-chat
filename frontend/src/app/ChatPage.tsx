@@ -132,7 +132,7 @@ export default function ChatPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
-  const [loadingConversationId, setLoadingConversationId] = useState<number | null>(null);
+  const conversationCache = useRef<Map<number, ConversationDetail>>(new Map());
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
@@ -158,10 +158,19 @@ export default function ChatPage() {
     inputRef.current?.focus();
     if (!authLoading && user) {
       apiRequest<ConversationSummary[]>("GET", "conversations", { user_id: user.id })
-        .then(setConversations)
+        .then((convs) => {
+          setConversations(convs);
+          // Preload conversation details in background
+          convs.slice(0, 50).forEach((conv) => {
+            apiRequest<ConversationDetail>("GET", `conversations/${conv.id}`)
+              .then((data) => { conversationCache.current.set(conv.id, data); })
+              .catch(() => {});
+          });
+        })
         .catch(() => {});
     } else if (!authLoading && !user) {
       setConversations([]);
+      conversationCache.current.clear();
     }
   }, [user, authLoading]);
 
@@ -172,9 +181,8 @@ export default function ChatPage() {
   }, [messages]);
 
   const loadConversation = async (conv: ConversationSummary) => {
-    setLoadingConversationId(conv.id);
     try {
-      const data = await apiRequest<ConversationDetail>("GET", `conversations/${conv.id}`);
+      const data = conversationCache.current.get(conv.id) || await apiRequest<ConversationDetail>("GET", `conversations/${conv.id}`);
       if (!data?.messages?.length) { console.error("No messages in conversation", data); return; }
       const loaded: Message[] = data.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content || "", isComplete: true, events: m.events }));
       const collapsed = new Set(loaded.map((m, i) => (m.role === "assistant" && m.events?.some((e) => e.type === "tool") ? i : -1)).filter((i) => i >= 0));
@@ -186,7 +194,7 @@ export default function ChatPage() {
     } catch (e) {
       console.error("Failed to load conversation", e);
       setMessages([{ role: "assistant", content: `Failed to load conversation: ${e instanceof Error ? e.message : "Unknown error"}` }]);
-    } finally { setLoadingConversationId(null); }
+    }
   };
 
   const deleteConversation = async (e: React.MouseEvent, id: number) => {
@@ -602,10 +610,7 @@ export default function ChatPage() {
                       onMouseLeave={(e) => { if (activeConversationId !== conv.id) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: "14px", color: "#1c1a17", lineHeight: 1.45, display: "flex", alignItems: "center", gap: "6px" }}>
-                          {conv.title}
-                          {loadingConversationId === conv.id && <Loader size={10} color="#228be6" />}
-                        </div>
+                        <div style={{ fontSize: "14px", color: "#1c1a17", lineHeight: 1.45 }}>{conv.title}</div>
                         <div style={{ fontSize: "12px", color: "#9e9a90", marginTop: "4px" }}>{formatRelativeTime(conv.updated_at)}</div>
                       </div>
                       <button onClick={(e) => deleteConversation(e, conv.id)} style={{ flexShrink: 0, background: "none", border: "none", color: "#d1d5db", cursor: "pointer", display: "flex", padding: "2px" }}
