@@ -219,9 +219,9 @@ export default function ChatPage() {
 
     let title = firstUserMsg.content.slice(0, 60);
     try {
-      const { title: generated } = await apiRequest<{ title: string }>("POST", "chat/title", undefined, { first_user_message: firstUserMsg.content, first_assistant_message: firstAssistantContent });
-      title = generated;
-    } catch {}
+      const { title: generated } = await apiRequest<{ title: string }>("POST", "chat/title", undefined, { first_user_message: firstUserMsg.content, first_assistant_message: firstAssistantContent || "" });
+      if (generated) title = generated;
+    } catch (e) { console.error("Title generation failed", e); }
 
     const apiMessages = msgs.map((m) => {
       if (m.role === "assistant" && m.isComplete && m.events?.length) {
