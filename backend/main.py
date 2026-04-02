@@ -60,3 +60,13 @@ def startup():
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+
+@app.get("/version")
+def version():
+    try:
+        from importlib.metadata import version as pkg_version
+        compiled_version = pkg_version("policyengine-uk-compiled")
+    except Exception:
+        compiled_version = "unknown"
+    return {"policyengine_uk_compiled": compiled_version}

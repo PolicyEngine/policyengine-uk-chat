@@ -139,8 +139,15 @@ export default function ChatPage() {
   const sessionId = useRef<string | null>(null);
   const debugLog = useRef<string[]>([]);
 
+  const [modelVersion, setModelVersion] = useState<string | null>(null);
   const hasMessages = messages.length > 0;
   const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, !hasMessages && !input);
+
+  useEffect(() => {
+    apiRequest<{ policyengine_uk_compiled: string }>("GET", "version")
+      .then((v) => setModelVersion(v.policyengine_uk_compiled))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -631,7 +638,12 @@ export default function ChatPage() {
                 />
               </div>
             </div>
-            {!hasMessages && <div style={{ marginTop: "14px", color: "#b5b1a9", fontSize: "12px" }}>Press Enter to send · Shift+Enter for new line</div>}
+            {!hasMessages && (
+              <div style={{ marginTop: "14px", color: "#b5b1a9", fontSize: "12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>Press Enter to send · Shift+Enter for new line</span>
+                {modelVersion && <span style={{ fontSize: "11px", color: "#d1cdc4" }}>policyengine-uk v{modelVersion}</span>}
+              </div>
+            )}
           </div>
         </div>
       </div>
