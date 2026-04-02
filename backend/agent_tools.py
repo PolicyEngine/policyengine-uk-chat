@@ -363,6 +363,31 @@ def compute(operation: str, data: List[float], data2: Optional[List[float]] = No
 
 
 
+def _run_generator(code: str) -> Dict[str, Any]:
+    """Execute a Python generator snippet that returns a dict of tool kwargs.
+
+    The code must define a `generate()` function that returns a dict.
+    Only safe builtins + math are available — no file/network/import access.
+    """
+    import math
+    import builtins as _builtins
+    safe_names = (
+        "range", "len", "int", "float", "str", "bool", "list", "dict",
+        "tuple", "set", "zip", "enumerate", "map", "filter", "sorted",
+        "reversed", "min", "max", "sum", "abs", "round", "True", "False",
+        "None", "isinstance", "ValueError", "TypeError", "append",
+    )
+    safe_builtins = {k: getattr(_builtins, k) for k in safe_names if hasattr(_builtins, k)}
+    allowed_globals: Dict[str, Any] = {"__builtins__": safe_builtins, "math": math, "json": json}
+    exec(code, allowed_globals)
+    if "generate" not in allowed_globals:
+        raise ValueError("Generator code must define a `generate()` function")
+    result = allowed_globals["generate"]()
+    if not isinstance(result, dict):
+        raise ValueError(f"generate() must return a dict, got {type(result).__name__}")
+    return result
+
+
 def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"[TOOLS] Executing {tool_name}")
     tools = {
@@ -376,6 +401,11 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name not in tools:
         return {"error": f"Unknown tool: {tool_name}"}
     try:
+        # If input contains a generator, execute it to produce the real kwargs
+        if "generator" in tool_input:
+            logger.info(f"[TOOLS] Running generator for {tool_name}")
+            tool_input = _run_generator(tool_input["generator"])
+            logger.info(f"[TOOLS] Generator produced keys: {list(tool_input.keys())}")
         result = tools[tool_name](**tool_input)
         logger.info(f"[TOOLS] {tool_name} completed")
         return result
@@ -395,17 +425,17 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "calculate_household",
-        "description": "Calculate tax and benefit outcomes for one or more custom household situations, comparing baseline vs reform. Every output appears as baseline_<var> and reform_<var>. Batch multiple scenarios in ONE call.",
+        "description": "Calculate tax and benefit outcomes for one or more custom household situations, comparing baseline vs reform. Every output appears as baseline_<var> and reform_<var>. Batch multiple scenarios in ONE call. For many households (>3), use the 'generator' field instead of writing out arrays by hand.",
         "input_schema": {
             "type": "object",
             "properties": {
+                "generator": {"type": "string", "description": "Python code defining a generate() function that returns a dict with keys: person, benunit, household, and optionally year and reform. Use this instead of writing large arrays by hand. Example: 'def generate():\\n    persons, benunits, households = [], [], []\\n    for i in range(20):\\n        income = 10000 + i * 5000\\n        persons.append({\"person_id\": i, \"benunit_id\": i, \"household_id\": i, \"age\": 35, \"employment_income\": income})\\n        benunits.append({\"benunit_id\": i, \"household_id\": i})\\n        households.append({\"household_id\": i})\\n    return {\"person\": persons, \"benunit\": benunits, \"household\": households, \"year\": 2025}'"},
                 "person": {"type": "array", "items": {"type": "object", "properties": {"person_id": {"type": "integer"}, "benunit_id": {"type": "integer"}, "household_id": {"type": "integer"}, "age": {"type": "integer"}, "employment_income": {"type": "number"}, "self_employment_income": {"type": "number"}, "private_pension_income": {"type": "number"}, "state_pension": {"type": "number"}, "savings_interest": {"type": "number"}, "is_in_scotland": {"type": "boolean"}}, "required": ["person_id", "benunit_id", "household_id", "age"]}},
                 "benunit": {"type": "array", "items": {"type": "object", "properties": {"benunit_id": {"type": "integer"}, "household_id": {"type": "integer"}, "rent_monthly": {"type": "number"}, "is_lone_parent": {"type": "boolean"}}, "required": ["benunit_id", "household_id"]}},
                 "household": {"type": "array", "items": {"type": "object", "properties": {"household_id": {"type": "integer"}, "region": {"type": "string"}, "rent_annual": {"type": "number"}, "council_tax_annual": {"type": "number"}}, "required": ["household_id"]}},
                 "year": {"type": "integer", "default": 2023},
                 "reform": {"type": "object", "description": "Optional policy reform dict. Example: {\"income_tax\": {\"personal_allowance\": 15000}}"},
             },
-            "required": ["person", "benunit", "household"],
         },
     },
     {
