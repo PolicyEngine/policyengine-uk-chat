@@ -15,7 +15,8 @@ import routes.conversations as conversations
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-HOSTNAMES = os.environ.get("HOSTNAMES", "http://localhost:3000,http://frontend:3000")
+_hostnames_env = os.environ.get("HOSTNAMES", "")
+HOSTNAMES = _hostnames_env.split(",") if _hostnames_env else ["*"]
 
 
 class NaNSafeJSONResponse(JSONResponse):
@@ -41,7 +42,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=HOSTNAMES.split(","),
+    allow_origins=HOSTNAMES,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

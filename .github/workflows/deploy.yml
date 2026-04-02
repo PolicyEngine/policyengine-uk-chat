@@ -1,0 +1,49 @@
+name: Deploy to Modal
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: modal-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Modal
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Modal
+        run: pip install modal
+
+      - name: Sync secrets to Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          POLICYENGINE_UK_DATA_TOKEN: ${{ secrets.POLICYENGINE_UK_DATA_TOKEN }}
+          DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}
+        run: |
+          modal secret create policyengine-uk-chat-secrets \
+            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            ANTHROPIC_MODEL="claude-sonnet-4-6" \
+            POLICYENGINE_UK_DATA_TOKEN="$POLICYENGINE_UK_DATA_TOKEN" \
+            DATABASE_URL="$DATABASE_URL" \
+            --force
+
+      - name: Deploy to Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal deploy modal_app.py
