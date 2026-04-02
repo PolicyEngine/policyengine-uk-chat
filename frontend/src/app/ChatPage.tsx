@@ -2,7 +2,8 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
-import { IconCheck, IconAlertCircle, IconX, IconTrash, IconChevronDown } from "@tabler/icons-react";
+import { IconCheck, IconAlertCircle, IconX, IconTrash, IconChevronDown, IconUser, IconLogout } from "@tabler/icons-react";
+import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -117,6 +118,7 @@ async function apiRequest<T>(method: string, endpoint: string, params?: Record<s
 }
 
 export default function ChatPage() {
+  const { user, loading: authLoading, signIn, signUp, signOut } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
@@ -126,6 +128,12 @@ export default function ChatPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
+  const [showAuth, setShowAuth] = useState(false);
+  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sessionId = useRef<string | null>(null);
@@ -136,10 +144,14 @@ export default function ChatPage() {
 
   useEffect(() => {
     inputRef.current?.focus();
-    apiRequest<ConversationSummary[]>("GET", "conversations")
-      .then(setConversations)
-      .catch(() => {});
-  }, []);
+    if (!authLoading && user) {
+      apiRequest<ConversationSummary[]>("GET", "conversations", { user_id: user.id })
+        .then(setConversations)
+        .catch(() => {});
+    } else if (!authLoading && !user) {
+      setConversations([]);
+    }
+  }, [user, authLoading]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -195,14 +207,14 @@ export default function ChatPage() {
     });
 
     try {
-      const saved = await apiRequest<ConversationDetail>("POST", "conversations", undefined, { session_id: sid, title, messages: apiMessages });
+      const saved = await apiRequest<ConversationDetail>("POST", "conversations", undefined, { session_id: sid, title, messages: apiMessages, user_id: user?.id });
       setActiveConversationId(saved.id);
       setConversations((prev) => {
         const filtered = prev.filter((c) => c.session_id !== sid);
         return [{ id: saved.id, session_id: sid, title, created_at: saved.created_at, updated_at: saved.updated_at }, ...filtered];
       });
     } catch (e) { console.error("Failed to save conversation", e); }
-  }, []);
+  }, [user]);
 
   const startNewChat = () => {
     setMessages([]);
@@ -218,7 +230,7 @@ export default function ChatPage() {
     const userMessage: Message = { role: "user", content: input };
     const allMessages = [...messages, userMessage];
     setMessages((prev) => [...prev, userMessage]);
-    if (messages.length === 0) setHistoryOpen(true);
+    if (messages.length === 0 && user) setHistoryOpen(true);
     setInput("");
     setIsStreaming(true);
     setIsWaiting(true);
@@ -497,6 +509,18 @@ export default function ChatPage() {
                 New chat
               </button>
             )}
+            {user ? (
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "13px", color: "#6b7280" }}>{user.email}</span>
+                <button onClick={signOut} title="Sign out" style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", display: "flex", padding: "4px" }}>
+                  <IconLogout size={16} />
+                </button>
+              </div>
+            ) : (
+              <button onClick={() => { setShowAuth(true); setAuthError(null); }} style={{ fontSize: "13px", color: "#6b7280", cursor: "pointer", padding: "5px 12px", border: "1px solid #e5e7eb", background: "transparent", fontFamily: "inherit", display: "flex", alignItems: "center", gap: "6px" }}>
+                <IconUser size={14} /> Sign in
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -504,7 +528,7 @@ export default function ChatPage() {
       {/* Body */}
       <div style={{ display: "flex", maxWidth: "1200px", margin: "0 auto", padding: "0 40px", gap: "0" }}>
         {/* Sidebar */}
-        {(!hasMessages || historyOpen) && (
+        {user && (!hasMessages || historyOpen) && (
           <div style={{ width: "280px", flexShrink: 0, borderRight: "1px solid #e5e7eb", paddingRight: "24px", paddingTop: "32px", position: "sticky", top: 0, height: "calc(100vh - 57px)", overflowY: "auto", alignSelf: "flex-start" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
               <div style={{ fontSize: "11px", color: "#9e9a90", letterSpacing: "0.05em", textTransform: "uppercase", fontWeight: 500 }}>Previous chats</div>
@@ -543,7 +567,7 @@ export default function ChatPage() {
         <div style={{ flex: 1, paddingLeft: "40px", paddingTop: "32px", maxWidth: "840px", minWidth: 0, minHeight: hasMessages ? "auto" : "calc(100vh - 120px)", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center" }}>
           {hasMessages && (
             <div style={{ marginBottom: "8px", display: "flex", alignItems: "center", gap: "8px" }}>
-              {!historyOpen && (
+              {user && !historyOpen && (
                 <button onClick={() => setHistoryOpen(true)} style={{ fontSize: "12px", color: "#9e9a90", background: "none", border: "none", cursor: "pointer", padding: "0", fontFamily: "inherit" }}>
                   ← History
                 </button>
@@ -611,6 +635,40 @@ export default function ChatPage() {
           </div>
         </div>
       </div>
+
+      {/* Auth modal */}
+      {showAuth && (
+        <div onClick={() => setShowAuth(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", padding: "32px", width: "360px", maxWidth: "90vw" }}>
+            <h2 style={{ margin: "0 0 20px", fontSize: "18px", fontWeight: 600, color: "#1c1a17" }}>
+              {authMode === "signin" ? "Sign in" : "Create account"}
+            </h2>
+            {authError && <div style={{ padding: "8px 12px", background: "#fef2f2", color: "#b91c1c", fontSize: "13px", marginBottom: "16px" }}>{authError}</div>}
+            <form onSubmit={async (e) => {
+              e.preventDefault();
+              setAuthSubmitting(true);
+              setAuthError(null);
+              const { error } = authMode === "signin" ? await signIn(authEmail, authPassword) : await signUp(authEmail, authPassword);
+              setAuthSubmitting(false);
+              if (error) setAuthError(error);
+              else { setShowAuth(false); setAuthEmail(""); setAuthPassword(""); }
+            }}>
+              <input type="email" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} required style={{ width: "100%", padding: "10px 12px", fontSize: "14px", border: "1px solid #e5e7eb", marginBottom: "10px", fontFamily: "inherit", boxSizing: "border-box" }} />
+              <input type="password" placeholder="Password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} required minLength={6} style={{ width: "100%", padding: "10px 12px", fontSize: "14px", border: "1px solid #e5e7eb", marginBottom: "16px", fontFamily: "inherit", boxSizing: "border-box" }} />
+              <button type="submit" disabled={authSubmitting} style={{ width: "100%", padding: "10px", fontSize: "14px", background: "#228be6", color: "#fff", border: "none", cursor: authSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: authSubmitting ? 0.7 : 1 }}>
+                {authSubmitting ? "..." : authMode === "signin" ? "Sign in" : "Create account"}
+              </button>
+            </form>
+            <div style={{ marginTop: "16px", textAlign: "center", fontSize: "13px", color: "#6b7280" }}>
+              {authMode === "signin" ? (
+                <>No account? <button onClick={() => { setAuthMode("signup"); setAuthError(null); }} style={{ color: "#228be6", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px" }}>Create one</button></>
+              ) : (
+                <>Have an account? <button onClick={() => { setAuthMode("signin"); setAuthError(null); }} style={{ color: "#228be6", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px" }}>Sign in</button></>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

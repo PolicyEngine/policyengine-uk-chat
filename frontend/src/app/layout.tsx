@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import "@mantine/core/styles.css";
-import { MantineProvider } from "@mantine/core";
+import Providers from "./Providers";
 
 export const metadata: Metadata = {
   title: "UK Policy Assistant",
@@ -12,7 +12,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en">
       <head />
       <body style={{ margin: 0, fontFamily: "system-ui, sans-serif", background: "#fafaf9" }}>
-        <MantineProvider defaultColorScheme="light">{children}</MantineProvider>
+        <Providers>{children}</Providers>
       </body>
     </html>
   );
