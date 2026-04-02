@@ -20,7 +20,8 @@ export function BarChart({ spec, width = 540, height = 340 }: BarChartProps) {
 
   const categories = spec.data.map((d) => String(d[spec.x.field]));
   const maxLabelLen = Math.max(...categories.map((c) => c.length));
-  const isHorizontal = spec.orientation === "horizontal" || (spec.orientation !== "vertical" && (maxLabelLen > 12 || categories.length > 6));
+  const allNumeric = categories.every((c) => /^-?\d+(\.\d+)?$/.test(c.trim()));
+  const isHorizontal = spec.orientation === "horizontal" || (spec.orientation !== "vertical" && !allNumeric && (maxLabelLen > 12 || categories.length > 6));
   const isStacked = spec.arrangement === "stacked";
 
   const leftMargin = isHorizontal ? Math.min(Math.max(maxLabelLen * 7, 80), 200) : CHART_MARGINS.left;

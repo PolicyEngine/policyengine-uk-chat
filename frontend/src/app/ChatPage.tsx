@@ -128,6 +128,7 @@ export default function ChatPage() {
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
+  const [loadingConversationId, setLoadingConversationId] = useState<number | null>(null);
   const [showAuth, setShowAuth] = useState(false);
   const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
   const [authEmail, setAuthEmail] = useState("");
@@ -167,6 +168,7 @@ export default function ChatPage() {
   }, [messages]);
 
   const loadConversation = async (conv: ConversationSummary) => {
+    setLoadingConversationId(conv.id);
     try {
       const data = await apiRequest<ConversationDetail>("GET", `conversations/${conv.id}`);
       const loaded: Message[] = data.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content, isComplete: true, events: m.events }));
@@ -177,6 +179,7 @@ export default function ChatPage() {
       setHistoryOpen(true);
       setCollapsedWorking(collapsed);
     } catch (e) { console.error("Failed to load conversation", e); }
+    finally { setLoadingConversationId(null); }
   };
 
   const deleteConversation = async (e: React.MouseEvent, id: number) => {
@@ -254,16 +257,48 @@ export default function ChatPage() {
 
     let events: StreamEvent[] = [];
     let currentText = "";
+    let displayedText = "";
+    let drainTimer: ReturnType<typeof setInterval> | null = null;
     const toolsMap = new Map<string, ToolData>();
 
     const updateMessage = () => {
       setMessages((prev) => {
         const newMsgs = [...prev];
         const lastIdx = newMsgs.length - 1;
-        if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { role: "assistant", content: currentText, events: [...events] };
-        else newMsgs.push({ role: "assistant", content: currentText, events: [...events] });
+        if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { role: "assistant", content: displayedText, events: [...events] };
+        else newMsgs.push({ role: "assistant", content: displayedText, events: [...events] });
         return newMsgs;
       });
+    };
+
+    const startDrain = () => {
+      if (drainTimer) return;
+      drainTimer = setInterval(() => {
+        if (displayedText.length >= currentText.length) {
+          if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
+          return;
+        }
+        const remaining = currentText.slice(displayedText.length);
+        const match = remaining.match(/^(\s*\S+|\s+)/);
+        const chunk = match ? match[0] : remaining[0];
+        displayedText += chunk;
+        // Rebuild displayed events: split displayedText across text events
+        let charBudget = displayedText.length;
+        const displayEvents: StreamEvent[] = events.map((e) => {
+          if (e.type !== "text") return e;
+          if (charBudget <= 0) return { ...e, content: "" };
+          const shown = e.content.slice(0, charBudget);
+          charBudget -= e.content.length;
+          return { ...e, content: shown };
+        }).filter((e) => e.type !== "text" || (e as { content: string }).content.length > 0);
+        setMessages((prev) => {
+          const newMsgs = [...prev];
+          const lastIdx = newMsgs.length - 1;
+          if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { role: "assistant", content: displayedText, events: [...displayEvents] };
+          else newMsgs.push({ role: "assistant", content: displayedText, events: [...displayEvents] });
+          return newMsgs;
+        });
+      }, 20);
     };
 
     try {
@@ -298,9 +333,12 @@ export default function ChatPage() {
               if (lastEvent?.type === "text") lastEvent.content += data.content;
               else events.push({ type: "text", content: data.content });
               currentText += data.content;
-              updateMessage();
+              startDrain();
             } else if (data.type === "tool_start") {
               setIsWaiting(false);
+              // Flush any pending text before showing tool
+              if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
+              displayedText = currentText;
               const toolData: ToolData = { tool_name: data.tool_name, tool_id: data.tool_id, status: "pending" };
               toolsMap.set(data.tool_id, toolData);
               events.push({ type: "tool", data: toolData });
@@ -317,6 +355,10 @@ export default function ChatPage() {
               setIsWaiting(true);
             } else if (data.type === "done") {
               setIsWaiting(false);
+              // Flush remaining text
+              if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
+              displayedText = currentText;
+              updateMessage();
               if (data.session_id) sessionId.current = data.session_id;
               const hasTools = events.some((e) => e.type === "tool");
               if (hasTools) {
@@ -339,6 +381,8 @@ export default function ChatPage() {
               if (lastEvent?.type === "text") lastEvent.content += "\n\n" + errorText;
               else events.push({ type: "text", content: errorText });
               currentText += errorText;
+              if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
+              displayedText = currentText;
               updateMessage();
             }
           } catch {}
@@ -347,6 +391,7 @@ export default function ChatPage() {
     } catch (error) {
       setMessages((prev) => [...prev, { role: "assistant", content: `Something went wrong: ${error instanceof Error ? error.message : "Unknown error"}` }]);
     } finally {
+      if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
       setIsStreaming(false);
       setIsWaiting(false);
       setTimeout(() => inputRef.current?.focus(), 0);
@@ -508,11 +553,6 @@ export default function ChatPage() {
           <img src="/policyengine-logo.svg" alt="PolicyEngine" style={{ height: "24px" }} />
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
             {hasMessages && (
-              <button onClick={() => { navigator.clipboard.writeText(debugLog.current.join("\n")); }} style={{ fontSize: "12px", color: "#9ca3af", cursor: "pointer", padding: "4px 10px", border: "1px solid #e5e7eb", background: "transparent", fontFamily: "inherit" }}>
-                Copy debug
-              </button>
-            )}
-            {hasMessages && (
               <button onClick={startNewChat} style={{ fontSize: "13px", color: "#228be6", cursor: "pointer", padding: "5px 12px", border: "1px solid #228be6", background: "transparent", fontFamily: "inherit" }}>
                 New chat
               </button>
@@ -555,7 +595,10 @@ export default function ChatPage() {
                       onMouseLeave={(e) => { if (activeConversationId !== conv.id) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                     >
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: "14px", color: "#1c1a17", lineHeight: 1.45 }}>{conv.title}</div>
+                        <div style={{ fontSize: "14px", color: "#1c1a17", lineHeight: 1.45, display: "flex", alignItems: "center", gap: "6px" }}>
+                          {conv.title}
+                          {loadingConversationId === conv.id && <Loader size={10} color="#228be6" />}
+                        </div>
                         <div style={{ fontSize: "12px", color: "#9e9a90", marginTop: "4px" }}>{formatRelativeTime(conv.updated_at)}</div>
                       </div>
                       <button onClick={(e) => deleteConversation(e, conv.id)} style={{ flexShrink: 0, background: "none", border: "none", color: "#d1d5db", cursor: "pointer", display: "flex", padding: "2px" }}
@@ -593,7 +636,7 @@ export default function ChatPage() {
                       <div style={{ color: "#1c1a17", fontSize: "16px", lineHeight: 1.65, whiteSpace: "pre-wrap", fontWeight: 500 }}>{msg.content}</div>
                     </div>
                   ) : (
-                    <div style={{ display: "flex", gap: "12px", paddingLeft: "18px" }}>
+                    <div style={{ display: "flex", gap: "12px" }}>
                       <div style={{ color: "#b5b1a9", fontWeight: 400, flexShrink: 0, fontSize: "16px" }}>~</div>
                       <div className={!msg.isComplete ? "streaming-text" : undefined} style={{ color: "#3a3835", fontSize: "16px", lineHeight: 1.75, minWidth: 0 }}>
                         {renderAssistantMessage(msg, idx)}
