@@ -103,7 +103,7 @@ def save_conversation(request: SaveConversationRequest):
 
     return ConversationDetail(
         id=row.id, session_id=row.session_id, title=row.title,
-        messages=json.loads(row.messages),
+        messages=json.loads(row.messages) if isinstance(row.messages, str) else row.messages,
         created_at=row.created_at.isoformat(), updated_at=row.updated_at.isoformat(),
     )
 
@@ -136,7 +136,7 @@ def get_conversation(conversation_id: int):
         raise HTTPException(status_code=404, detail="Conversation not found")
     return ConversationDetail(
         id=row.id, session_id=row.session_id, title=row.title,
-        messages=json.loads(row.messages),
+        messages=json.loads(row.messages) if isinstance(row.messages, str) else row.messages,
         created_at=row.created_at.isoformat(), updated_at=row.updated_at.isoformat(),
     )
 
