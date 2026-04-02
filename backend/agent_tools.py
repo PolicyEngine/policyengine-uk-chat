@@ -163,12 +163,25 @@ def calculate_household(
         return {"error": str(e)}
 
 
+def _patch_frs_flag(sim):
+    """Patch --clean-frs-base to --data for policyengine-uk-compiled 0.3.5 compat.
+
+    The 0.3.5 binary renamed --clean-frs-base to --data but the Python
+    interface still emits the old flag. Remove once upstream PR #3 is released.
+    """
+    original = sim._build_cmd
+    def patched(policy=None, extra_args=None):
+        cmd = original(policy, extra_args)
+        return ["--data" if arg == "--clean-frs-base" else arg for arg in cmd]
+    sim._build_cmd = patched
+
 
 def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     try:
         from policyengine_uk_compiled import Simulation
         policy = _build_compiled_policy(reform)
         sim = Simulation(year=year)
+        _patch_frs_flag(sim)
         result = sim.run(policy=policy)
         return {
             "fiscal_year": result.fiscal_year,
@@ -202,6 +215,7 @@ def analyse_microdata(
 
         policy = _build_compiled_policy(reform)
         sim = Simulation(year=year)
+        _patch_frs_flag(sim)
         microdata = sim.run_microdata(policy=policy)
 
         entity_map = {"persons": microdata.persons, "benunits": microdata.benunits, "households": microdata.households}
