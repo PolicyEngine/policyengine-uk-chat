@@ -31,8 +31,8 @@ image = (
         "pandas",
         "httpx",
     )
-    .add_local_dir("backend", remote_path="/app/backend")
     .run_function(_preload_engine)
+    .add_local_dir("backend", remote_path="/app/backend", copy=True)
 )
 
 chat_secrets = modal.Secret.from_name("policyengine-uk-chat-secrets")
