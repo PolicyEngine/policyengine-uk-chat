@@ -17,7 +17,7 @@ def _preload_engine():
 
 
 image = (
-    modal.Image.debian_slim(python_version="3.11")
+    modal.Image.debian_slim(python_version="3.13")
     .apt_install("libpq-dev", "gcc")
     .pip_install(
         "fastapi",
