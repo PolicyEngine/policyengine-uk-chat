@@ -332,12 +332,6 @@ def compute(operation: str, data: List[float], data2: Optional[List[float]] = No
         return {"error": str(e)}
 
 
-def wait_seconds(seconds: int) -> Dict[str, Any]:
-    import time
-    wait_time = min(seconds, 60)
-    time.sleep(wait_time)
-    return {"status": "done", "waited_seconds": wait_time}
-
 
 def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"[TOOLS] Executing {tool_name}")
@@ -348,7 +342,6 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         "analyse_microdata": analyse_microdata,
         "generate_chart": generate_chart,
         "compute": compute,
-        "wait_seconds": wait_seconds,
     }
     if tool_name not in tools:
         return {"error": f"Unknown tool: {tool_name}"}
@@ -449,15 +442,6 @@ TOOL_DEFINITIONS = [
                 "data2": {"type": "array", "items": {"type": "number"}},
             },
             "required": ["operation", "data"],
-        },
-    },
-    {
-        "name": "wait_seconds",
-        "description": "Wait for a specified number of seconds (max 60).",
-        "input_schema": {
-            "type": "object",
-            "properties": {"seconds": {"type": "integer"}},
-            "required": ["seconds"],
         },
     },
 ]

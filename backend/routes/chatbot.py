@@ -88,8 +88,6 @@ Use calculate_household in a SINGLE batched call with ~20 persons at income step
 
 - compute: Use for ANY mathematical operations. NEVER calculate these yourself.
 - generate_chart: ALWAYS call this when you have data worth visualising. Include the returned chart_markdown in your response.
-- wait_seconds: Wait between status checks.
-
 IMPORTANT - Batching: When comparing multiple income levels, include ALL in a SINGLE calculate_household call.
 
 Formatting guidelines:
