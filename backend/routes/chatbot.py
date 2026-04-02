@@ -40,6 +40,7 @@ When presenting results:
 - Charts MUST use ONLY data fields from tool results
 - If a user asks for data that doesn't exist in the tool results, say "this data is not available"
 - Round or estimate NOTHING — use exact values from tool results
+- CRITICAL: program_breakdown_changes returns {baseline, reform, change} for each program. ALWAYS use the "change" field for impact reporting. NEVER subtract baseline/reform values yourself — use the pre-computed "change" field.
 
 === SIMULATION TOOLS ===
 

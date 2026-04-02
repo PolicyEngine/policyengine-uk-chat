@@ -193,15 +193,25 @@ def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = 
                 cmd.append("--persons-only")
                 return cmd
             sim._build_cmd = _add_persons_only
-        result = sim.run(policy=policy)
+        # Always run baseline to compute program-level changes
+        baseline_result = sim.run()
+        reform_result = sim.run(policy=policy) if policy else baseline_result
+
+        baseline_breakdown = baseline_result.program_breakdown.model_dump()
+        reform_breakdown = reform_result.program_breakdown.model_dump()
+        program_changes = {
+            k: {"baseline": baseline_breakdown[k], "reform": reform_breakdown[k], "change": reform_breakdown[k] - baseline_breakdown[k]}
+            for k in baseline_breakdown
+        }
+
         return {
-            "fiscal_year": result.fiscal_year,
-            "budgetary_impact": result.budgetary_impact.model_dump(),
-            "program_breakdown": result.program_breakdown.model_dump(),
-            "decile_impacts": [d.model_dump() for d in result.decile_impacts],
-            "winners_losers": result.winners_losers.model_dump(),
-            "caseloads": result.caseloads.model_dump(),
-            "avg_hbai_net_income": result.avg_hbai_net_income,
+            "fiscal_year": reform_result.fiscal_year,
+            "budgetary_impact": reform_result.budgetary_impact.model_dump(),
+            "program_breakdown_changes": program_changes,
+            "decile_impacts": [d.model_dump() for d in reform_result.decile_impacts],
+            "winners_losers": reform_result.winners_losers.model_dump(),
+            "caseloads": reform_result.caseloads.model_dump(),
+            "avg_hbai_net_income": reform_result.avg_hbai_net_income,
         }
     except FileNotFoundError as e:
         return {"error": f"{dataset.upper()} microdata not available", "detail": str(e), "hint": "Ensure POLICYENGINE_UK_DATA_TOKEN is set."}
