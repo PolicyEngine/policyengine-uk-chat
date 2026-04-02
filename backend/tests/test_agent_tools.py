@@ -10,7 +10,6 @@ from agent_tools import (
     calculate_household,
     compute,
     generate_chart,
-    wait_seconds,
     execute_tool,
     _build_compiled_policy,
 )
@@ -267,24 +266,6 @@ class TestGenerateChart:
 
 
 # ---------------------------------------------------------------------------
-# wait_seconds
-# ---------------------------------------------------------------------------
-
-class TestWaitSeconds:
-    def test_waits(self):
-        import time
-        start = time.time()
-        result = wait_seconds(1)
-        elapsed = time.time() - start
-        assert result["status"] == "done"
-        assert elapsed >= 0.9
-
-    def test_caps_at_60(self):
-        result = wait_seconds(999)
-        assert result["waited_seconds"] == 60
-
-
-# ---------------------------------------------------------------------------
 # _build_compiled_policy
 # ---------------------------------------------------------------------------
 
@@ -320,10 +301,6 @@ class TestExecuteTool:
     def test_dispatches_compute(self):
         result = execute_tool("compute", {"operation": "sum", "data": [1, 2, 3]})
         assert result["result"] == 6
-
-    def test_dispatches_wait_seconds(self):
-        result = execute_tool("wait_seconds", {"seconds": 1})
-        assert result["status"] == "done"
 
     def test_dispatches_generate_chart(self):
         result = execute_tool("generate_chart", {

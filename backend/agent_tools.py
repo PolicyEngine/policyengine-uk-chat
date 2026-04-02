@@ -206,7 +206,7 @@ def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = 
             "decile_impacts": [d.model_dump() for d in reform_result.decile_impacts],
             "winners_losers": reform_result.winners_losers.model_dump(),
             "caseloads": reform_result.caseloads.model_dump(),
-            "avg_hbai_net_income": reform_result.avg_hbai_net_income,
+            "hbai_incomes": reform_result.hbai_incomes.model_dump(),
         }
     except FileNotFoundError as e:
         return {"error": f"{dataset.upper()} microdata not available", "detail": str(e), "hint": "Ensure POLICYENGINE_UK_DATA_TOKEN is set."}
