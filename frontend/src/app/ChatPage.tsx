@@ -171,15 +171,18 @@ export default function ChatPage() {
     setLoadingConversationId(conv.id);
     try {
       const data = await apiRequest<ConversationDetail>("GET", `conversations/${conv.id}`);
-      const loaded: Message[] = data.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content, isComplete: true, events: m.events }));
+      if (!data?.messages?.length) { console.error("No messages in conversation", data); return; }
+      const loaded: Message[] = data.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content || "", isComplete: true, events: m.events }));
       const collapsed = new Set(loaded.map((m, i) => (m.role === "assistant" && m.events?.some((e) => e.type === "tool") ? i : -1)).filter((i) => i >= 0));
-      setMessages(loaded);
       sessionId.current = data.session_id;
       setActiveConversationId(data.id);
-      setHistoryOpen(true);
       setCollapsedWorking(collapsed);
-    } catch (e) { console.error("Failed to load conversation", e); }
-    finally { setLoadingConversationId(null); }
+      setMessages(loaded);
+      setHistoryOpen(true);
+    } catch (e) {
+      console.error("Failed to load conversation", e);
+      setMessages([{ role: "assistant", content: `Failed to load conversation: ${e instanceof Error ? e.message : "Unknown error"}` }]);
+    } finally { setLoadingConversationId(null); }
   };
 
   const deleteConversation = async (e: React.MouseEvent, id: number) => {
