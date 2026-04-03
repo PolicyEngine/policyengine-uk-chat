@@ -130,6 +130,14 @@ Chart types:
 - "bar": For categorical comparisons, decile impacts. Never plot more than 3 series on a bar chart. Use arrangement: "stacked" for stacked bars.
 - "scatter": For showing relationships between two variables. Each series has xField, yField, and optional sizeField for bubble size (minRadius/maxRadius control dot range). Good for showing population distributions or correlations.
 
+AXIS FORMATS: Use y_format/x_format to control axis labels:
+- "currency": £1.2bn, £45.3k, £500
+- "percent": value is already a percentage number (e.g. 29.8 → "29.8%"). Use this for poverty rates and any rate already expressed as a percentage.
+- "percent_decimal": value is a decimal fraction (e.g. 0.298 → "29.8%"). Use this for rates expressed as decimals.
+- "compact": 1.2bn, 45.3k
+- "number": plain number
+IMPORTANT: Poverty rates from run_economy_simulation are already percentages (e.g. 29.8 means 29.8%), so use "percent" NOT "percent_decimal".
+
 CHART SOURCE: Always include a "source" field on every chart spec. For FRS simulations use "Family Resources Survey via PolicyEngine UK". For SPI simulations use "Survey of Personal Incomes via PolicyEngine UK". For household-level calculations use "PolicyEngine UK microsimulation".
 
 CRITICAL - CHART TITLES: Titles must be active and self-standing — describe the key finding.
