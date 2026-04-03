@@ -59,10 +59,9 @@ Default year: 2025 (current fiscal year). Always use the current fiscal year unl
 
 Output includes:
 - hbai_incomes: mean/median equivalised net income (BHC and AHC)
-- baseline_poverty: poverty headcounts under current law — relative and absolute, BHC and AHC, for children/working-age/pensioners (as weighted population counts)
-- reform_poverty: same headcounts under the reform
-
-Poverty rates: To compute a poverty RATE, divide the headcount by the total population of that group (use analyse_microdata to count children, working-age adults, or pensioners). The poverty line is 60% of median equivalised income.
+- baseline_poverty: poverty rates (%) under current law — relative (60% of median) and absolute (60% of 2010/11 median, CPI-uprated), BHC and AHC, for children/working-age/pensioners
+- reform_poverty: same rates under the reform
+These are already percentage rates (e.g. 28.5 means 28.5%), not headcounts.
 
 Datasets:
 - "frs" (default): Family Resources Survey — full tax-benefit model with 20,000+ households. Best for most analyses.
