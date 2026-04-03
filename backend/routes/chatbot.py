@@ -54,12 +54,20 @@ Calculates tax/benefit outcomes for one or more specific households. Both baseli
 Batch multiple scenarios in ONE call. Default year: 2025.
 
 **run_economy_simulation(year, reform, dataset)**
-Runs over the full UK population. Returns budgetary impact, per-program breakdown, decile impacts, winners/losers, caseloads.
+Runs over the full UK population. Returns budgetary impact, per-program breakdown, decile impacts, winners/losers, caseloads, HBAI incomes, and poverty headcounts.
 Default year: 2025 (current fiscal year). Always use the current fiscal year unless the user explicitly asks for a historical analysis.
+
+Output includes:
+- hbai_incomes: mean/median equivalised net income (BHC and AHC)
+- baseline_poverty: poverty headcounts under current law — relative and absolute, BHC and AHC, for children/working-age/pensioners (as weighted population counts)
+- reform_poverty: same headcounts under the reform
+
+Poverty rates: To compute a poverty RATE, divide the headcount by the total population of that group (use analyse_microdata to count children, working-age adults, or pensioners). The poverty line is 60% of median equivalised income.
+
 Datasets:
 - "frs" (default): Family Resources Survey — full tax-benefit model with 20,000+ households. Best for most analyses.
 - "spi": Survey of Personal Incomes — HMRC administrative data, person-level only (income tax and NI, no benefits). Much better sample of high earners. Use when the user asks about SPI or wants high-income analysis.
-When using SPI, the model runs with --persons-only (no household/benefit calculations). Decile impacts and benefit-related outputs may not be available.
+When using SPI, the model runs with --persons-only (no household/benefit calculations). Poverty and HBAI fields will be zeroed.
 
 **analyse_microdata(entity, operation, year, reform, filters, columns, n)**
 Runs the same simulation as run_economy_simulation but gives you access to the underlying microdata.
