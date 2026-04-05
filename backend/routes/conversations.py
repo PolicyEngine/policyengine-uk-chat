@@ -66,7 +66,23 @@ class ConversationDetail(ConversationSummary):
 
 def ensure_table():
     try:
-        SQLModel.metadata.create_all(get_engine())
+        engine = get_engine()
+        SQLModel.metadata.create_all(engine)
+        # Add columns that may not exist yet on older databases
+        from sqlalchemy import text
+        with engine.connect() as conn:
+            for col, col_type in [("share_token", "TEXT"), ("user_email", "TEXT")]:
+                try:
+                    conn.execute(text(f"ALTER TABLE chat_conversations ADD COLUMN {col} {col_type}"))
+                    conn.commit()
+                    logger.info(f"Added column {col} to chat_conversations")
+                except Exception:
+                    conn.rollback()  # Column already exists
+            try:
+                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chat_conversations_share_token ON chat_conversations (share_token)"))
+                conn.commit()
+            except Exception:
+                conn.rollback()
         logger.info("Conversations table ensured successfully")
     except Exception as e:
         logger.error(f"Could not ensure conversations table: {e}")

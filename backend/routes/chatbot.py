@@ -273,7 +273,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
         try:
             conversation = deduplicated.copy()
             iteration = 0
-            max_iterations = 30
+            max_iterations = 60
             total_input_tokens = 0
             total_output_tokens = 0
             recent_tool_calls: List[str] = []
