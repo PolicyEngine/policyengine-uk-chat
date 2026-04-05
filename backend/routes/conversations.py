@@ -5,6 +5,7 @@ Conversation history — save and retrieve past chat sessions.
 import json
 import logging
 import os
+import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
@@ -24,6 +25,8 @@ class ChatConversation(SQLModel, table=True):
     title: str
     messages: str  # JSON string
     user_id: Optional[str] = None
+    user_email: Optional[str] = None
+    share_token: Optional[str] = Field(default=None, index=True)
     created_at: datetime
     updated_at: datetime
 
@@ -46,6 +49,7 @@ class SaveConversationRequest(BaseModel):
     title: str
     messages: list
     user_id: str | None = None
+    user_email: str | None = None
 
 
 class ConversationSummary(BaseModel):
@@ -84,6 +88,7 @@ def save_conversation(request: SaveConversationRequest):
             existing.messages = json.dumps(request.messages)
             existing.updated_at = now
             existing.user_id = request.user_id
+            existing.user_email = request.user_email
             session.add(existing)
             session.commit()
             session.refresh(existing)
@@ -94,6 +99,7 @@ def save_conversation(request: SaveConversationRequest):
                 title=request.title,
                 messages=json.dumps(request.messages),
                 user_id=request.user_id,
+                user_email=request.user_email,
                 created_at=now,
                 updated_at=now,
             )
@@ -138,6 +144,47 @@ def get_conversation(conversation_id: int):
         id=row.id, session_id=row.session_id, title=row.title,
         messages=json.loads(row.messages) if isinstance(row.messages, str) else row.messages,
         created_at=row.created_at.isoformat(), updated_at=row.updated_at.isoformat(),
+    )
+
+
+class SharedConversationDetail(BaseModel):
+    title: str
+    messages: list
+    author: str | None = None
+    created_at: str
+
+
+@router.post("/{conversation_id}/share")
+def share_conversation(conversation_id: int, user_id: str | None = None):
+    engine = get_engine()
+    with Session(engine) as session:
+        row = session.get(ChatConversation, conversation_id)
+        if not row:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+        if row.user_id and row.user_id != user_id:
+            raise HTTPException(status_code=403, detail="Not your conversation")
+        if not row.share_token:
+            row.share_token = str(uuid.uuid4())
+            session.add(row)
+            session.commit()
+            session.refresh(row)
+    return {"share_token": row.share_token}
+
+
+@router.get("/shared/{share_token}", response_model=SharedConversationDetail)
+def get_shared_conversation(share_token: str):
+    engine = get_engine()
+    with Session(engine) as session:
+        row = session.exec(
+            select(ChatConversation).where(ChatConversation.share_token == share_token)
+        ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="Shared conversation not found")
+    return SharedConversationDetail(
+        title=row.title,
+        messages=json.loads(row.messages) if isinstance(row.messages, str) else row.messages,
+        author=row.user_email,
+        created_at=row.created_at.isoformat(),
     )
 
 

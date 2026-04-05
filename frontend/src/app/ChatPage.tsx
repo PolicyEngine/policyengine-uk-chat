@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import { getSupabase } from "@/utils/supabase";
 import ReactMarkdown from "react-markdown";
@@ -231,6 +231,19 @@ export default function ChatPage() {
     }
   };
 
+  const [copiedShareId, setCopiedShareId] = useState<number | null>(null);
+
+  const shareConversation = async (e: React.MouseEvent, id: number) => {
+    e.stopPropagation();
+    try {
+      const { share_token } = await apiRequest<{ share_token: string }>("POST", `conversations/${id}/share`, user?.id ? { user_id: user.id } : undefined);
+      const url = `${window.location.origin}/s/${share_token}`;
+      await navigator.clipboard.writeText(url);
+      setCopiedShareId(id);
+      setTimeout(() => setCopiedShareId(null), 2000);
+    } catch (e) { console.error("Failed to share", e); }
+  };
+
   const deleteConversation = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
     try {
@@ -266,7 +279,7 @@ export default function ChatPage() {
     });
 
     try {
-      const saved = await apiRequest<ConversationDetail>("POST", "conversations", undefined, { session_id: sid, title, messages: apiMessages, user_id: user?.id });
+      const saved = await apiRequest<ConversationDetail>("POST", "conversations", undefined, { session_id: sid, title, messages: apiMessages, user_id: user?.id, user_email: user?.email });
       setActiveConversationId(saved.id);
       setConversations((prev) => {
         const filtered = prev.filter((c) => c.session_id !== sid);
@@ -722,12 +735,20 @@ export default function ChatPage() {
                         <div style={{ fontSize: "14px", color: "#1c1a17", lineHeight: 1.45 }}>{conv.title}</div>
                         <div style={{ fontSize: "12px", color: "#9e9a90", marginTop: "4px" }}>{formatRelativeTime(conv.updated_at)}</div>
                       </div>
-                      <button onClick={(e) => deleteConversation(e, conv.id)} style={{ flexShrink: 0, background: "none", border: "none", color: "#d1d5db", cursor: "pointer", display: "flex", padding: "2px" }}
-                        onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#b91c1c"; }}
-                        onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#d1d5db"; }}
-                      >
-                        <IconTrash size={12} />
-                      </button>
+                      <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
+                        <button onClick={(e) => shareConversation(e, conv.id)} title={copiedShareId === conv.id ? "Link copied" : "Share"} style={{ background: "none", border: "none", color: copiedShareId === conv.id ? THEME.primary : "#d1d5db", cursor: "pointer", display: "flex", padding: "2px" }}
+                          onMouseEnter={(e) => { if (copiedShareId !== conv.id) (e.currentTarget as HTMLElement).style.color = THEME.primary; }}
+                          onMouseLeave={(e) => { if (copiedShareId !== conv.id) (e.currentTarget as HTMLElement).style.color = "#d1d5db"; }}
+                        >
+                          <IconShare size={12} />
+                        </button>
+                        <button onClick={(e) => deleteConversation(e, conv.id)} title="Delete" style={{ background: "none", border: "none", color: "#d1d5db", cursor: "pointer", display: "flex", padding: "2px" }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#b91c1c"; }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#d1d5db"; }}
+                        >
+                          <IconTrash size={12} />
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -753,7 +774,7 @@ export default function ChatPage() {
                 <div key={idx} style={{ marginBottom: "18px" }}>
                   {msg.role === "user" ? (
                     <div style={{ display: "flex", gap: "14px", padding: "14px 0", borderBottom: "1px solid #e5e7eb" }}>
-                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", fontWeight: 500, color: THEME.primary, background: THEME.primaryLight, width: "24px", height: "24px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>&gt;</div>
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", fontWeight: 500, color: "#fff", background: THEME.primary, width: "24px", height: "24px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>&gt;</div>
                       <div style={{ color: "#1c1a17", fontSize: "15px", lineHeight: 1.6, whiteSpace: "pre-wrap", fontWeight: 500, letterSpacing: "-0.01em" }}>{msg.content}</div>
                     </div>
                   ) : (
@@ -781,7 +802,8 @@ export default function ChatPage() {
 .streaming-text > div:last-child > :last-child { animation: blurIn 400ms both; }
 .streaming-text > div:last-child > :last-child > :last-child { animation: blurIn 400ms both; }
 @keyframes highlightSweep { from{background-size:0% 100%}to{background-size:100% 100%} }
-.highlight-mark { background: linear-gradient(to right, rgba(44,122,123,0.12), rgba(44,122,123,0.12)); background-size: 0% 100%; background-repeat: no-repeat; background-position: left; animation: highlightSweep 0.6s cubic-bezier(0.16,1,0.3,1) 0.15s forwards; }`}</style>
+.highlight-mark { background: linear-gradient(to right, rgba(44,122,123,0.12), rgba(44,122,123,0.12)); background-size: 0% 100%; background-repeat: no-repeat; background-position: left; animation: highlightSweep 0.6s cubic-bezier(0.16,1,0.3,1) 0.15s forwards; }
+table .highlight-mark { animation: none; background: none; padding: 0; margin: 0; }`}</style>
                   </div>
                 </div>
               )}
