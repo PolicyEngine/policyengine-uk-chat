@@ -145,6 +145,7 @@ export default function ChatPage() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sessionId = useRef<string | null>(null);
   const debugLog = useRef<string[]>([]);
+  const abortRef = useRef<AbortController | null>(null);
 
   const [modelVersion, setModelVersion] = useState<string | null>(null);
   const [balance, setBalance] = useState<{ balance_gbp: number; free_tier_remaining_gbp: number; total_available_gbp: number } | null>(null);
@@ -363,6 +364,9 @@ export default function ChatPage() {
       }, 20);
     };
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     try {
       // Hit the backend directly for SSE to avoid Next.js proxy buffering
       const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001";
@@ -370,6 +374,7 @@ export default function ChatPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null }),
+        signal: controller.signal,
       });
       if (response.status === 402) {
         const err = await response.json().catch(() => ({ error: "No credit remaining" }));
@@ -403,10 +408,13 @@ export default function ChatPage() {
               currentText += data.content;
               startDrain();
             } else if (data.type === "thinking_done") {
-              // Retroactively mark recent text events (before any tool events) as thinking
+              // Retroactively mark recent unmarked text events as thinking
+              // Walk backwards, skipping tool events, until we hit already-marked text
               for (let i = events.length - 1; i >= 0; i--) {
-                if (events[i].type === "tool") break;
-                if (events[i].type === "text") (events[i] as { type: "text"; content: string; thinking?: boolean }).thinking = true;
+                const e = events[i];
+                if (e.type === "text" && e.thinking) break; // hit previously marked text, stop
+                if (e.type === "text") (e as { type: "text"; content: string; thinking?: boolean }).thinking = true;
+                // skip tool events (don't break)
               }
               updateMessage();
             } else if (data.type === "tool_start") {
@@ -475,14 +483,30 @@ export default function ChatPage() {
         }
       }
     } catch (error) {
-      setMessages((prev) => [...prev, { role: "assistant", content: `Something went wrong: ${error instanceof Error ? error.message : "Unknown error"}` }]);
+      if (error instanceof DOMException && error.name === "AbortError") {
+        // User stopped the stream — flush what we have
+        if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
+        displayedText = currentText;
+        updateMessage();
+        setMessages((prev) => {
+          const newMsgs = [...prev];
+          const lastIdx = newMsgs.length - 1;
+          if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true };
+          return newMsgs;
+        });
+      } else {
+        setMessages((prev) => [...prev, { role: "assistant", content: `Something went wrong: ${error instanceof Error ? error.message : "Unknown error"}` }]);
+      }
     } finally {
+      abortRef.current = null;
       if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
       setIsStreaming(false);
       setIsWaiting(false);
       setTimeout(() => inputRef.current?.focus(), 0);
     }
   };
+
+  const stopStreaming = () => { abortRef.current?.abort(); };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -835,6 +859,13 @@ table .highlight-mark { animation: none; background: none; padding: 0; margin: 0
 
           {/* Input */}
           <div>
+            {isStreaming && (
+              <div style={{ display: "flex", justifyContent: "center", marginBottom: "12px" }}>
+                <button onClick={stopStreaming} style={{ fontSize: "12px", color: THEME.muted, cursor: "pointer", padding: "5px 14px", border: `1px solid ${THEME.border}`, background: "#fff", fontFamily: "inherit", display: "flex", alignItems: "center", gap: "6px" }}>
+                  <IconX size={12} /> Stop
+                </button>
+              </div>
+            )}
             <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
               <div style={{ color: isStreaming ? "#d1d5db" : THEME.primary, fontWeight: 500, fontSize: "16px", lineHeight: 1.65 }}>&gt;</div>
               <div style={{ flex: 1, position: "relative" }}>
