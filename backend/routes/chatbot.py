@@ -11,7 +11,7 @@ from typing import Any, Dict, List
 import httpx
 
 from fastapi import APIRouter, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from pydantic_ai import Agent
 from pydantic_ai.models.anthropic import AnthropicModel
@@ -179,15 +179,20 @@ def _get_sync_anthropic_client():
 
 
 def _tool_defs_for_anthropic():
-    """Convert our TOOL_DEFINITIONS to Anthropic SDK format."""
-    return [
-        {
+    """Convert our TOOL_DEFINITIONS to Anthropic SDK format.
+    Mark the last tool with cache_control so the system prompt + all tools
+    are cached across requests (prompt caching)."""
+    defs = []
+    for i, t in enumerate(TOOL_DEFINITIONS):
+        d = {
             "name": t["name"],
             "description": t["description"],
             "input_schema": t["input_schema"],
         }
-        for t in TOOL_DEFINITIONS
-    ]
+        if i == len(TOOL_DEFINITIONS) - 1:
+            d["cache_control"] = {"type": "ephemeral"}
+        defs.append(d)
+    return defs
 
 
 # ---------------------------------------------------------------------------
@@ -202,6 +207,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     session_id: str | None = None
+    user_id: str | None = None
 
 
 class TitleRequest(BaseModel):
@@ -240,6 +246,17 @@ def generate_title(request: TitleRequest):
 
 @router.post("/message")
 async def chat_message(request: ChatRequest, http_request: Request):
+    # Check billing balance if user is authenticated
+    user_id = request.user_id
+    if user_id:
+        try:
+            from routes.billing import check_balance
+            has_credit, _ = check_balance(user_id)
+            if not has_credit:
+                return JSONResponse(status_code=402, content={"error": "No credit remaining. Please top up to continue."})
+        except RuntimeError:
+            pass  # Supabase not configured — skip billing check
+
     session_id = request.session_id or str(uuid.uuid4())
 
     messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
@@ -283,7 +300,11 @@ async def chat_message(request: ChatRequest, http_request: Request):
                         async with client.messages.stream(
                             model=model,
                             max_tokens=16000,
-                            system=SYSTEM_PROMPT,
+                            system=[{
+                                "type": "text",
+                                "text": SYSTEM_PROMPT,
+                                "cache_control": {"type": "ephemeral"},
+                            }],
                             tools=tools,
                             messages=conversation,
                         ) as stream:
@@ -308,6 +329,10 @@ async def chat_message(request: ChatRequest, http_request: Request):
                                     usage = getattr(event.message, "usage", None)
                                     if usage:
                                         total_input_tokens += getattr(usage, "input_tokens", 0)
+                                        cache_read = getattr(usage, "cache_read_input_tokens", 0)
+                                        cache_create = getattr(usage, "cache_creation_input_tokens", 0)
+                                        if cache_read or cache_create:
+                                            logger.info(f"[CHAT] Cache: {cache_read} read, {cache_create} creation tokens")
 
                                 elif event_type == "RawMessageDeltaEvent":
                                     usage = getattr(event, "usage", None)
@@ -331,6 +356,12 @@ async def chat_message(request: ChatRequest, http_request: Request):
                         await asyncio.sleep(1)
 
                 if not tool_uses:
+                    # Record token usage for billing
+                    try:
+                        from routes.billing import record_usage
+                        record_usage(user_id, session_id, total_input_tokens, total_output_tokens)
+                    except Exception as e:
+                        logger.warning(f"[CHAT] Failed to record usage: {e}")
                     yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens}})}\n\n"
                     break
 
@@ -391,6 +422,11 @@ async def chat_message(request: ChatRequest, http_request: Request):
                 conversation.append({"role": "user", "content": tool_results})
 
             if iteration >= max_iterations:
+                try:
+                    from routes.billing import record_usage
+                    record_usage(user_id, session_id, total_input_tokens, total_output_tokens)
+                except Exception as e:
+                    logger.warning(f"[CHAT] Failed to record usage: {e}")
                 yield f"data: {json.dumps({'type': 'chunk', 'content': '\\n\\n*[Reached maximum iterations]*'})}\n\n"
                 yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens}})}\n\n"
 

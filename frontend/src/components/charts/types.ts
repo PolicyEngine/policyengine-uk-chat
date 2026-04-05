@@ -110,7 +110,7 @@ export interface TooltipData {
 }
 
 export const CHART_COLORS = {
-  series: ["#228be6", "#16a34a", "#d97706", "#9333ea", "#ef4444", "#0891b2", "#f97316", "#6366f1"],
+  series: ["#2C7A7B", "#16a34a", "#d97706", "#9333ea", "#ef4444", "#0891b2", "#f97316", "#6366f1"],
   positive: "#16a34a",
   negative: "#dc2626",
   neutral: "#9e9a90",

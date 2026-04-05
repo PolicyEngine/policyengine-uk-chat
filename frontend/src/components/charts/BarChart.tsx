@@ -92,9 +92,21 @@ export function BarChart({ spec, width = 540, height = 340 }: BarChartProps) {
 
       const bg = g.append("g").attr("clip-path", `url(#${clipId})`);
       if (isStacked) {
-        stackedData.forEach((layer, i) => { bg.selectAll(`.bar-${i}`).data(layer).join("rect").attr("class", `bar-${i}`).attr("y", (d) => catScale(String(d.data[spec.x.field])) || 0).attr("x", (d) => valScale(Math.min(d[0], d[1]))).attr("height", catScale.bandwidth()).attr("width", (d) => Math.abs(valScale(d[1]) - valScale(d[0]))).attr("fill", getSeriesColor(i, spec.series[i]?.color)); });
+        stackedData.forEach((layer, i) => {
+          const color = getSeriesColor(i, spec.series[i]?.color);
+          // Wash fill
+          bg.selectAll(`.bar-${i}`).data(layer).join("rect").attr("class", `bar-${i}`).attr("y", (d) => catScale(String(d.data[spec.x.field])) || 0).attr("x", (d) => valScale(Math.min(d[0], d[1]))).attr("height", catScale.bandwidth()).attr("width", (d) => Math.abs(valScale(d[1]) - valScale(d[0]))).attr("fill", color).attr("opacity", 0.15);
+          // Left accent
+          bg.selectAll(`.bar-accent-${i}`).data(layer).join("rect").attr("class", `bar-accent-${i}`).attr("y", (d) => catScale(String(d.data[spec.x.field])) || 0).attr("x", (d) => valScale(Math.min(d[0], d[1]))).attr("height", catScale.bandwidth()).attr("width", 3).attr("fill", color);
+        });
       } else {
-        spec.series.forEach((s, i) => { bg.selectAll(`.bar-${i}`).data(spec.data).join("rect").attr("class", `bar-${i}`).attr("y", (d) => (catScale(String(d[spec.x.field])) || 0) + (groupScale(s.field) || 0)).attr("x", (d) => { const v = Number(d[s.field]); return v >= 0 ? valScale(0) : valScale(v); }).attr("height", groupScale.bandwidth()).attr("width", (d) => Math.abs(valScale(Number(d[s.field])) - valScale(0))).attr("fill", getSeriesColor(i, s.color)); });
+        spec.series.forEach((s, i) => {
+          const color = getSeriesColor(i, s.color);
+          // Wash fill
+          bg.selectAll(`.bar-${i}`).data(spec.data).join("rect").attr("class", `bar-${i}`).attr("y", (d) => (catScale(String(d[spec.x.field])) || 0) + (groupScale(s.field) || 0)).attr("x", (d) => { const v = Number(d[s.field]); return v >= 0 ? valScale(0) : valScale(v); }).attr("height", groupScale.bandwidth()).attr("width", (d) => Math.abs(valScale(Number(d[s.field])) - valScale(0))).attr("fill", color).attr("opacity", 0.15);
+          // Left accent
+          bg.selectAll(`.bar-accent-${i}`).data(spec.data).join("rect").attr("class", `bar-accent-${i}`).attr("y", (d) => (catScale(String(d[spec.x.field])) || 0) + (groupScale(s.field) || 0)).attr("x", (d) => { const v = Number(d[s.field]); return v >= 0 ? valScale(0) : valScale(v); }).attr("height", groupScale.bandwidth()).attr("width", 3).attr("fill", color);
+        });
       }
     } else {
       const catScale = d3.scaleBand().domain(categories).range([0, innerWidth]).padding(0.3);
@@ -115,9 +127,21 @@ export function BarChart({ spec, width = 540, height = 340 }: BarChartProps) {
 
       const bg = g.append("g").attr("clip-path", `url(#${clipId})`);
       if (isStacked) {
-        stackedData.forEach((layer, i) => { bg.selectAll(`.bar-v-${i}`).data(layer).join("rect").attr("class", `bar-v-${i}`).attr("x", (d) => catScale(String(d.data[spec.x.field])) || 0).attr("y", (d) => valScale(d[1])).attr("width", catScale.bandwidth()).attr("height", (d) => valScale(d[0]) - valScale(d[1])).attr("fill", getSeriesColor(i, spec.series[i]?.color)); });
+        stackedData.forEach((layer, i) => {
+          const color = getSeriesColor(i, spec.series[i]?.color);
+          // Wash fill
+          bg.selectAll(`.bar-v-${i}`).data(layer).join("rect").attr("class", `bar-v-${i}`).attr("x", (d) => catScale(String(d.data[spec.x.field])) || 0).attr("y", (d) => valScale(d[1])).attr("width", catScale.bandwidth()).attr("height", (d) => valScale(d[0]) - valScale(d[1])).attr("fill", color).attr("opacity", 0.15);
+          // Bottom accent
+          bg.selectAll(`.bar-v-accent-${i}`).data(layer).join("rect").attr("class", `bar-v-accent-${i}`).attr("x", (d) => catScale(String(d.data[spec.x.field])) || 0).attr("y", (d) => valScale(d[0]) - 3).attr("width", catScale.bandwidth()).attr("height", 3).attr("fill", color);
+        });
       } else {
-        spec.series.forEach((s, i) => { bg.selectAll(`.bar-v-${i}`).data(spec.data).join("rect").attr("class", `bar-v-${i}`).attr("x", (d) => (catScale(String(d[spec.x.field])) || 0) + (groupScale(s.field) || 0)).attr("y", (d) => { const v = Number(d[s.field]); return v >= 0 ? valScale(v) : valScale(0); }).attr("width", groupScale.bandwidth()).attr("height", (d) => Math.abs(valScale(0) - valScale(Number(d[s.field])))).attr("fill", getSeriesColor(i, s.color)); });
+        spec.series.forEach((s, i) => {
+          const color = getSeriesColor(i, s.color);
+          // Wash fill
+          bg.selectAll(`.bar-v-${i}`).data(spec.data).join("rect").attr("class", `bar-v-${i}`).attr("x", (d) => (catScale(String(d[spec.x.field])) || 0) + (groupScale(s.field) || 0)).attr("y", (d) => { const v = Number(d[s.field]); return v >= 0 ? valScale(v) : valScale(0); }).attr("width", groupScale.bandwidth()).attr("height", (d) => Math.abs(valScale(0) - valScale(Number(d[s.field])))).attr("fill", color).attr("opacity", 0.15);
+          // Bottom accent (at zero line for positive, at bar bottom for negative)
+          bg.selectAll(`.bar-v-accent-${i}`).data(spec.data).join("rect").attr("class", `bar-v-accent-${i}`).attr("x", (d) => (catScale(String(d[spec.x.field])) || 0) + (groupScale(s.field) || 0)).attr("y", (d) => { const v = Number(d[s.field]); return v >= 0 ? valScale(0) - 3 : valScale(v) - 3; }).attr("width", groupScale.bandwidth()).attr("height", 3).attr("fill", color);
+        });
       }
     }
   }, [spec, innerWidth, innerHeight, margins, isHorizontal, isStacked, stackedData, valDomain, categories, clipId]);

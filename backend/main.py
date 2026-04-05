@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
+import routes.billing as billing
 import routes.chatbot as chatbot
 import routes.conversations as conversations
 
@@ -48,6 +49,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+app.include_router(billing.router)
 app.include_router(chatbot.router)
 app.include_router(conversations.router)
 
