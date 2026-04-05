@@ -3,6 +3,7 @@ export const THEME = {
   primaryLight: "#E6FFFA",
   primaryHover: "#285E61",
   primaryAlpha15: "rgba(44, 122, 123, 0.15)",
+  primaryGradient: "linear-gradient(135deg, #2C7A7B 0%, #319795 50%, #2a9d8f 100%)",
   highlightBg: "rgba(44, 122, 123, 0.12)",
 
   text: "#1c1a17",
