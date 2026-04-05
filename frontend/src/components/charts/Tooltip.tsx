@@ -14,16 +14,16 @@ export function Tooltip({ data, containerRef }: TooltipProps) {
   const flipX = data.x + tooltipWidth + 12 > containerRect.width;
 
   return (
-    <div style={{ position: "absolute", left: flipX ? data.x - tooltipWidth - 12 : data.x + 12, top: data.y - 8, background: "rgba(255,255,255,0.95)", border: "1px solid #e2e8f0", boxShadow: "0 2px 8px rgba(0,0,0,0.08)", padding: "6px 10px", pointerEvents: "none", zIndex: 100, minWidth: "140px", maxWidth: `${tooltipWidth}px`, fontFamily: CHART_TYPOGRAPHY.fontFamily }}>
-      {data.title && <div style={{ fontSize: 11, fontWeight: 600, color: "#1c1a17", marginBottom: "5px", borderBottom: "1px solid #e2e8f0", paddingBottom: "5px" }}>{data.title}</div>}
+    <div style={{ position: "absolute", left: flipX ? data.x - tooltipWidth - 12 : data.x + 12, top: data.y - 8, background: "#fff", boxShadow: "0 4px 20px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04)", padding: "10px 14px", pointerEvents: "none", zIndex: 100, minWidth: "140px", maxWidth: `${tooltipWidth}px`, fontFamily: CHART_TYPOGRAPHY.fontFamily }}>
+      {data.title && <div style={{ fontSize: 11, fontWeight: 500, color: "#9e9a90", letterSpacing: "0.03em", marginBottom: "6px" }}>{data.title}</div>}
       <div style={{ display: "flex", flexDirection: "column", gap: "3px" }}>
         {data.values.map((item, i) => (
-          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px" }}>
+          <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "20px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
               {item.color && <div style={{ width: "8px", height: "8px", background: item.color, flexShrink: 0 }} />}
               <span style={{ fontSize: 11, color: "#6b6860" }}>{item.label}</span>
             </div>
-            <span style={{ fontSize: 11, fontWeight: 600, color: "#1c1a17" }}>{item.value}</span>
+            <span style={{ fontSize: 11, fontWeight: 600, color: "#1c1a17", fontVariantNumeric: "tabular-nums" }}>{item.value}</span>
           </div>
         ))}
       </div>

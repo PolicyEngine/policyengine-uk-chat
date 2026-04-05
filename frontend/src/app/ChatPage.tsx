@@ -2,13 +2,15 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
-import { IconCheck, IconAlertCircle, IconX, IconTrash, IconChevronDown, IconUser, IconLogout } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
+import { getSupabase } from "@/utils/supabase";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Chart, extractChartSpecs, ChartSpec } from "@/components/charts";
+import { THEME } from "@/components/theme";
 
 const EXAMPLE_QUERIES = [
   "What's the current personal allowance?",
@@ -104,6 +106,7 @@ interface Message {
   content: string;
   events?: StreamEvent[];
   isComplete?: boolean;
+  cost_gbp?: number;
 }
 
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
@@ -127,7 +130,6 @@ export default function ChatPage() {
   const [input, setInput] = useState("");
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
-  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [collapsedWorking, setCollapsedWorking] = useState<Set<number>>(new Set());
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
@@ -145,14 +147,46 @@ export default function ChatPage() {
   const debugLog = useRef<string[]>([]);
 
   const [modelVersion, setModelVersion] = useState<string | null>(null);
+  const [balance, setBalance] = useState<{ balance_gbp: number; free_tier_remaining_gbp: number; total_available_gbp: number } | null>(null);
+  const [topUpLoading, setTopUpLoading] = useState(false);
   const hasMessages = messages.length > 0;
   const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, !hasMessages && !input);
+
+  const fetchBalance = useCallback(async () => {
+    if (!user) return;
+    const sb = getSupabase();
+    if (!sb) return;
+    const { data } = await sb.from("user_credits").select("*").eq("user_id", user.id).maybeSingle();
+    if (data) {
+      const FREE_TIER = 5.0;
+      const freeRemaining = Math.max(0, FREE_TIER - (data.free_tier_used_gbp || 0));
+      setBalance({ balance_gbp: data.balance_gbp || 0, free_tier_remaining_gbp: freeRemaining, total_available_gbp: (data.balance_gbp || 0) + freeRemaining });
+    } else {
+      setBalance({ balance_gbp: 0, free_tier_remaining_gbp: 5.0, total_available_gbp: 5.0 });
+    }
+  }, [user]);
+
+  const handleTopUp = async (amount: number = 5) => {
+    if (!user) return;
+    setTopUpLoading(true);
+    try {
+      const { url } = await apiRequest<{ url: string }>("POST", "billing/checkout", undefined, { user_id: user.id, amount_gbp: amount });
+      if (url) window.location.href = url;
+    } catch (e) { console.error("Checkout failed", e); }
+    finally { setTopUpLoading(false); }
+  };
 
   useEffect(() => {
     apiRequest<{ policyengine_uk_compiled: string }>("GET", "version")
       .then((v) => setModelVersion(v.policyengine_uk_compiled))
       .catch(() => {});
+    // Refresh balance after Stripe redirect
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("topup") === "success") {
+      window.history.replaceState({}, "", window.location.pathname);
+    }
   }, []);
+
+  useEffect(() => { fetchBalance(); }, [fetchBalance]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -322,8 +356,14 @@ export default function ChatPage() {
       const response = await fetch(`${backendBase}/chat/message`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current }),
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null }),
       });
+      if (response.status === 402) {
+        const err = await response.json().catch(() => ({ error: "No credit remaining" }));
+        setMessages((prev) => [...prev, { role: "assistant", content: err.error || "No credit remaining. Please top up to continue." }]);
+        setIsStreaming(false); setIsWaiting(false);
+        return;
+      }
       if (!response.ok) throw new Error("Request failed");
       const reader = response.body?.getReader();
       const decoder = new TextDecoder();
@@ -375,13 +415,23 @@ export default function ChatPage() {
               displayedText = currentText;
               updateMessage();
               if (data.session_id) sessionId.current = data.session_id;
+              // Compute message cost
+              const usage = data.usage;
+              const msgCost = usage ? (usage.input_tokens * 3.0 / 1_000_000 + usage.output_tokens * 15.0 / 1_000_000) * 0.79 : undefined;
               const hasTools = events.some((e) => e.type === "tool");
               if (hasTools) {
                 setMessages((prev) => {
                   const newMsgs = [...prev];
                   const lastIdx = newMsgs.length - 1;
-                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true };
+                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true, cost_gbp: msgCost };
                   setCollapsedWorking((c) => new Set(c).add(lastIdx));
+                  return newMsgs;
+                });
+              } else {
+                setMessages((prev) => {
+                  const newMsgs = [...prev];
+                  const lastIdx = newMsgs.length - 1;
+                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], cost_gbp: msgCost };
                   return newMsgs;
                 });
               }
@@ -389,6 +439,7 @@ export default function ChatPage() {
                 const finalMsgs = [...allMessages, { role: "assistant" as const, content: currentText, isComplete: true, events: [...events] }];
                 saveConversation(finalMsgs, data.session_id);
               }
+              fetchBalance();
               setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 100);
             } else if (data.type === "error") {
               const errorText = `Error: ${data.content || "Something went wrong"}`;
@@ -419,36 +470,27 @@ export default function ChatPage() {
 
   const autoResize = (el: HTMLTextAreaElement) => { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; };
 
-  const toggleTool = (toolId: string) => {
-    setExpandedTools((prev) => { const next = new Set(prev); if (next.has(toolId)) next.delete(toolId); else next.add(toolId); return next; });
+  const formatToolSummary = (summary: string): string => {
+    // If it looks like raw JSON, just show the tool completed
+    if (summary.startsWith("{") || summary.startsWith("[") || summary.startsWith("'")) return "done";
+    // Otherwise truncate to something readable
+    return summary.length > 50 ? summary.slice(0, 50) + "…" : summary;
   };
 
   const renderTool = (t: ToolData) => {
-    const isExpanded = expandedTools.has(t.tool_id);
+    const summary = t.result_summary ? formatToolSummary(t.result_summary) : null;
     return (
-      <div key={t.tool_id} style={{ margin: "4px 0" }}>
-        <div onClick={() => t.status !== "pending" && toggleTool(t.tool_id)} style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#9e9a90", fontSize: "14px", cursor: t.status !== "pending" ? "pointer" : "default", userSelect: "none", padding: "3px 0" }}>
-          {t.status === "pending" && <Loader size={11} color="#228be6" />}
-          {t.status === "success" && <IconCheck size={12} color="#228be6" />}
-          {t.status === "error" && <IconAlertCircle size={12} color="#b91c1c" />}
-          <span>{t.tool_name.replace(/_/g, " ")}</span>
-          {t.status !== "pending" && <IconChevronDown size={12} style={{ opacity: 0.4, transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 0.15s" }} />}
-        </div>
-        {isExpanded && (
-          <div style={{ marginTop: "6px", marginLeft: "18px", padding: "10px 12px", background: "#f8f9fa", border: "1px solid #e2e8f0", fontSize: "12px", lineHeight: 1.5, color: "#6b6860" }}>
-            {t.input && Object.keys(t.input).length > 0 && (
-              <div style={{ marginBottom: "8px" }}>
-                <div style={{ fontWeight: 600, marginBottom: "4px", color: "#1c1a17", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Input</div>
-                <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", fontSize: "11px" }}>{JSON.stringify(t.input, null, 2)}</pre>
-              </div>
-            )}
-            {t.result_summary && (
-              <div>
-                <div style={{ fontWeight: 600, marginBottom: "4px", color: "#1c1a17", fontSize: "11px", textTransform: "uppercase", letterSpacing: "0.04em" }}>Result</div>
-                <pre style={{ margin: 0, whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "200px", overflow: "auto", fontSize: "11px" }}>{t.result_summary}</pre>
-              </div>
-            )}
-          </div>
+      <div key={t.tool_id} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: "11px", color: THEME.muted, padding: "2px 0", margin: "2px 0" }}>
+        {t.status === "pending" && <Loader size={10} color={THEME.primary} />}
+        <span style={{ color: THEME.text3 }}>{t.tool_name}</span>
+        {summary && summary !== "done" && (
+          <>
+            <span style={{ color: THEME.border }}>/</span>
+            <span style={{ color: THEME.primary, fontWeight: 500 }}>{summary}</span>
+          </>
+        )}
+        {summary === "done" && (
+          <span style={{ color: THEME.muted }}>✓</span>
         )}
       </div>
     );
@@ -461,24 +503,28 @@ export default function ChatPage() {
       code({ className, children, ...props }: { className?: string; children?: React.ReactNode; [key: string]: unknown }) {
         const match = /language-(\w+)/.exec(className || "");
         const isInline = !match && !String(children).includes("\n");
-        if (!isInline && match) return <SyntaxHighlighter style={oneLight} language={match[1]} customStyle={{ margin: "12px 0", fontSize: "13px", background: "#f6f6f6", border: "none", borderRadius: 0 }}>{String(children).replace(/\n$/, "")}</SyntaxHighlighter>;
+        if (!isInline && match) return <SyntaxHighlighter style={oneDark} language={match[1]} customStyle={{ margin: "12px 0", fontSize: "12px", lineHeight: 1.7, background: "#1a1917", border: "none", borderRadius: 0, borderLeft: `3px solid ${THEME.primary}`, padding: "16px 18px" }}>{String(children).replace(/\n$/, "")}</SyntaxHighlighter>;
         if (isInline) return <code style={{ background: "#f0f0f0", padding: "2px 5px", fontSize: "13px" }}>{children}</code>;
-        return <pre style={{ display: "block", margin: "0 0 14px 0", lineHeight: 1.75, whiteSpace: "pre-wrap" }}><code>{children}</code></pre>;
+        return <pre style={{ display: "block", margin: "12px 0", lineHeight: 1.7, whiteSpace: "pre-wrap", background: "#1a1917", color: "#c9c5bc", padding: "16px 18px", borderLeft: `3px solid ${THEME.primary}`, fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" }}><code>{children}</code></pre>;
       },
       p: ({ children }: { children?: React.ReactNode }) => <p style={{ margin: "0 0 14px 0", lineHeight: 1.75 }}>{children}</p>,
-      strong: ({ children }: { children?: React.ReactNode }) => <strong style={{ fontWeight: 600, color: "#1c1a17" }}>{children}</strong>,
+      strong: ({ children }: { children?: React.ReactNode }) => <strong className="highlight-mark" style={{ fontWeight: 600, color: THEME.text, background: `linear-gradient(to right, ${THEME.highlightBg}, ${THEME.highlightBg})`, backgroundSize: "0% 100%", backgroundRepeat: "no-repeat", backgroundPosition: "left", padding: "1px 3px", margin: "0 -3px" }}>{children}</strong>,
       ul: ({ children }: { children?: React.ReactNode }) => <ul style={{ margin: "0 0 14px 0", paddingLeft: "22px", listStyleType: "disc" }}>{children}</ul>,
       ol: ({ children }: { children?: React.ReactNode }) => <ol style={{ margin: "0 0 14px 0", paddingLeft: "22px", listStyleType: "decimal" }}>{children}</ol>,
       li: ({ children }: { children?: React.ReactNode }) => <li style={{ marginBottom: "5px", lineHeight: 1.65, listStyleType: "inherit" }}>{children}</li>,
       h1: ({ children }: { children?: React.ReactNode }) => <h1 style={{ fontSize: "20px", fontWeight: 600, margin: "22px 0 10px", color: "#1c1a17" }}>{children}</h1>,
       h2: ({ children }: { children?: React.ReactNode }) => <h2 style={{ fontSize: "18px", fontWeight: 600, margin: "20px 0 8px", color: "#1c1a17" }}>{children}</h2>,
       h3: ({ children }: { children?: React.ReactNode }) => <h3 style={{ fontSize: "16px", fontWeight: 600, margin: "16px 0 6px", color: "#1c1a17" }}>{children}</h3>,
-      table: ({ children }: { children?: React.ReactNode }) => <table style={{ margin: "14px 0", borderCollapse: "collapse", fontSize: "15px", width: "100%" }}>{children}</table>,
-      thead: ({ children }: { children?: React.ReactNode }) => <thead style={{ background: "#f8f9fa" }}>{children}</thead>,
+      table: ({ children }: { children?: React.ReactNode }) => <table style={{ margin: "14px 0", borderCollapse: "collapse", fontSize: "14px", width: "100%" }}>{children}</table>,
+      thead: ({ children }: { children?: React.ReactNode }) => <thead>{children}</thead>,
       tbody: ({ children }: { children?: React.ReactNode }) => <tbody>{children}</tbody>,
-      tr: ({ children }: { children?: React.ReactNode }) => <tr style={{ borderBottom: "1px solid #e2e8f0" }}>{children}</tr>,
-      th: ({ children }: { children?: React.ReactNode }) => <th style={{ padding: "9px 14px", textAlign: "left", fontWeight: 600, color: "#1c1a17" }}>{children}</th>,
-      td: ({ children }: { children?: React.ReactNode }) => <td style={{ padding: "9px 14px", color: "#4b4843" }}>{children}</td>,
+      tr: ({ children, ...props }: { children?: React.ReactNode }) => {
+        const node = props as { node?: { position?: { start?: { line?: number } } } };
+        const rowIndex = node?.node?.position?.start?.line ?? 0;
+        return <tr style={{ borderBottom: "1px solid #f0f0ee", background: rowIndex % 2 === 0 ? "#f9f8f6" : "transparent" }}>{children}</tr>;
+      },
+      th: ({ children }: { children?: React.ReactNode }) => <th style={{ padding: "10px 14px", textAlign: "left", fontFamily: "'Newsreader', Georgia, serif", fontSize: "13px", fontWeight: 400, fontStyle: "italic", color: "#9e9a90", borderBottom: "2px solid #1c1a17" }}>{children}</th>,
+      td: ({ children }: { children?: React.ReactNode }) => <td style={{ padding: "9px 14px", color: "#3a3835", fontSize: "14px" }}>{children}</td>,
       del: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
     };
 
@@ -506,7 +552,7 @@ export default function ChatPage() {
             if (!segment.content?.trim()) return null;
             return <ReactMarkdown key={idx} remarkPlugins={[[remarkGfm, { singleTilde: false }]]} components={markdownComponents as never}>{segment.content}</ReactMarkdown>;
           }
-          if (segment.type === "loading") return <div key={idx} style={{ margin: "16px 0", padding: "40px", background: "#f9fafb", border: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", color: "#9ca3af", fontSize: "13px" }}><Loader size={14} color="#228be6" /><span>Generating chart…</span></div>;
+          if (segment.type === "loading") return <div key={idx} style={{ margin: "16px 0", padding: "40px", background: "#f9fafb", border: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", color: "#9ca3af", fontSize: "13px" }}><Loader size={14} color={THEME.primary} /><span>Generating chart…</span></div>;
           if (segment.type === "chart" && segment.chartIdx !== undefined) {
             const chart = charts[segment.chartIdx];
             if (chart) return <div key={idx} style={{ margin: "16px 0" }}><Chart spec={chart} width={680} height={400} /></div>;
@@ -529,15 +575,24 @@ export default function ChatPage() {
       const finalEvents = msg.events.slice(lastToolIdx + 1);
       const toggleWorking = () => setCollapsedWorking((prev) => { const next = new Set(prev); if (next.has(msgIdx)) next.delete(msgIdx); else next.add(msgIdx); return next; });
 
+      // Deduplicate tool calls for collapsed summary: group by name with counts
+      const toolEvents = workingEvents.filter((e): e is { type: "tool"; data: ToolData } => e.type === "tool");
+      const toolCounts = new Map<string, number>();
+      toolEvents.forEach((e) => toolCounts.set(e.data.tool_name, (toolCounts.get(e.data.tool_name) || 0) + 1));
+
       return (
         <>
-          <div onClick={toggleWorking} style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#9e9a90", fontSize: "14px", cursor: "pointer", userSelect: "none", marginBottom: isWorkingCollapsed ? "18px" : "12px", padding: "3px 0" }}>
-            <IconChevronDown size={14} style={{ opacity: 0.5, transform: isWorkingCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s" }} />
-            <span>{isWorkingCollapsed ? "Show working" : "Hide working"}</span>
-            <span style={{ opacity: 0.5 }}>· {workingEvents.filter((e) => e.type === "tool").length} tool calls</span>
+          <div onClick={toggleWorking} style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: THEME.muted, fontSize: "12px", cursor: "pointer", userSelect: "none", marginBottom: "12px", padding: "3px 0" }}>
+            <IconChevronDown size={12} style={{ opacity: 0.5, transform: isWorkingCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s" }} />
+            <span style={{ color: THEME.text3 }}>{isWorkingCollapsed ? "Show working" : "Hide working"}</span>
+            {isWorkingCollapsed && (
+              <span style={{ color: THEME.muted, fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: "11px" }}>
+                · {Array.from(toolCounts.entries()).map(([name, count]) => count > 1 ? `${name} ×${count}` : name).join(", ")}
+              </span>
+            )}
           </div>
           {!isWorkingCollapsed && (
-            <div style={{ marginBottom: "16px", paddingLeft: "4px", borderLeft: "2px solid #e2e8f0" }}>
+            <div style={{ marginBottom: "16px", paddingLeft: "4px", borderLeft: `2px solid ${THEME.border}` }}>
               <div style={{ paddingLeft: "14px" }}>
                 {workingEvents.map((event, idx) =>
                   event.type === "text"
@@ -547,8 +602,8 @@ export default function ChatPage() {
               </div>
             </div>
           )}
-          {finalEvents.map((event, idx) =>
-            event.type === "text" ? <div key={idx}>{renderMarkdown(event.content)}</div> : renderTool(event.data)
+          {finalEvents.filter((e) => e.type === "text").map((event, idx) =>
+            <div key={idx}>{renderMarkdown((event as { type: "text"; content: string }).content)}</div>
           )}
         </>
       );
@@ -569,12 +624,22 @@ export default function ChatPage() {
           <img src="/policyengine-logo.svg" alt="PolicyEngine" style={{ height: "24px" }} />
           <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
             {hasMessages && (
-              <button onClick={startNewChat} style={{ fontSize: "13px", color: "#228be6", cursor: "pointer", padding: "5px 12px", border: "1px solid #228be6", background: "transparent", fontFamily: "inherit" }}>
+              <button onClick={startNewChat} style={{ fontSize: "13px", color: THEME.primary, cursor: "pointer", padding: "5px 12px", border: `1px solid ${THEME.primary}`, background: "transparent", fontFamily: "inherit" }}>
                 New chat
               </button>
             )}
             {user ? (
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                {balance && (
+                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                    <span style={{ fontSize: "12px", color: balance.total_available_gbp > 0.5 ? "#6b7280" : "#b91c1c", fontVariantNumeric: "tabular-nums" }}>
+                      {balance.total_available_gbp <= 0 ? "No credit" : `£${balance.total_available_gbp.toFixed(2)}`}
+                    </span>
+                    <button onClick={() => handleTopUp(5)} disabled={topUpLoading} style={{ fontSize: "11px", color: THEME.primary, cursor: "pointer", padding: "3px 8px", border: `1px solid ${THEME.primary}`, background: "transparent", fontFamily: "inherit" }}>
+                      {topUpLoading ? "..." : "Top up"}
+                    </button>
+                  </div>
+                )}
                 <span style={{ fontSize: "13px", color: "#6b7280" }}>{user.email}</span>
                 <button onClick={signOut} title="Sign out" style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", display: "flex", padding: "4px" }}>
                   <IconLogout size={16} />
@@ -606,7 +671,7 @@ export default function ChatPage() {
               ? <div style={{ fontSize: "12px", color: "#9ca3af", fontStyle: "italic" }}>No previous chats</div>
               : <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                   {conversations.map((conv) => (
-                    <div key={conv.id} onClick={() => loadConversation(conv)} style={{ padding: "10px 12px", cursor: "pointer", background: activeConversationId === conv.id ? "#f0f9ff" : "transparent", borderLeft: activeConversationId === conv.id ? "2px solid #228be6" : "2px solid transparent", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}
+                    <div key={conv.id} onClick={() => loadConversation(conv)} style={{ padding: "10px 12px", cursor: "pointer", background: activeConversationId === conv.id ? THEME.primaryLight : "transparent", borderLeft: activeConversationId === conv.id ? `2px solid ${THEME.primary}` : "2px solid transparent", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}
                       onMouseEnter={(e) => { if (activeConversationId !== conv.id) (e.currentTarget as HTMLElement).style.background = "#f9fafb"; }}
                       onMouseLeave={(e) => { if (activeConversationId !== conv.id) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                     >
@@ -644,31 +709,36 @@ export default function ChatPage() {
               {messages.map((msg, idx) => (
                 <div key={idx} style={{ marginBottom: "18px" }}>
                   {msg.role === "user" ? (
-                    <div style={{ display: "flex", gap: "12px", background: "#f1f5f9", padding: "16px 18px", marginLeft: "-18px", marginRight: "-18px", borderLeft: "3px solid #228be6" }}>
-                      <div style={{ color: "#228be6", fontWeight: 600, flexShrink: 0, fontSize: "16px" }}>&gt;</div>
-                      <div style={{ color: "#1c1a17", fontSize: "16px", lineHeight: 1.65, whiteSpace: "pre-wrap", fontWeight: 500 }}>{msg.content}</div>
+                    <div style={{ display: "flex", gap: "14px", padding: "14px 0", borderBottom: "1px solid #e5e7eb" }}>
+                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", fontWeight: 500, color: THEME.primary, background: THEME.primaryLight, width: "24px", height: "24px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>&gt;</div>
+                      <div style={{ color: "#1c1a17", fontSize: "15px", lineHeight: 1.6, whiteSpace: "pre-wrap", fontWeight: 500, letterSpacing: "-0.01em" }}>{msg.content}</div>
                     </div>
                   ) : (
-                    <div style={{ display: "flex", gap: "12px" }}>
-                      <div style={{ color: "#b5b1a9", fontWeight: 400, flexShrink: 0, fontSize: "16px" }}>~</div>
-                      <div className={!msg.isComplete ? "streaming-text" : undefined} style={{ color: "#3a3835", fontSize: "16px", lineHeight: 1.75, minWidth: 0 }}>
+                    <div style={{ padding: "18px 0 14px" }}>
+                      <div className={!msg.isComplete ? "streaming-text" : undefined} style={{ fontFamily: "'Source Serif 4', Georgia, serif", color: "#3a3835", fontSize: "15.5px", lineHeight: 1.8, minWidth: 0 }}>
                         {renderAssistantMessage(msg, idx)}
                       </div>
+                      {msg.cost_gbp !== undefined && (
+                        <div style={{ fontSize: "11px", color: "#d1cdc4", marginTop: "4px", fontVariantNumeric: "tabular-nums" }}>
+                          {msg.cost_gbp < 0.01 ? `${(msg.cost_gbp * 100).toFixed(2)}p` : `£${msg.cost_gbp.toFixed(3)}`}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
               ))}
               {isWaiting && (
-                <div style={{ display: "flex", gap: "10px", paddingLeft: "14px", marginBottom: "18px" }}>
-                  <div style={{ color: "#9ca3af", fontWeight: 400, flexShrink: 0, fontSize: "14px" }}>~</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "4px", paddingTop: "4px" }}>
-                    <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#9ca3af", animation: "thinking-dot 1.2s ease-in-out 0s infinite" }} />
-                    <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#9ca3af", animation: "thinking-dot 1.2s ease-in-out 0.2s infinite" }} />
-                    <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "#9ca3af", animation: "thinking-dot 1.2s ease-in-out 0.4s infinite" }} />
+                <div style={{ padding: "18px 0 14px", marginBottom: "18px" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                    <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#9e9a90", animation: "thinking-dot 1.2s ease-in-out 0s infinite" }} />
+                    <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#9e9a90", animation: "thinking-dot 1.2s ease-in-out 0.2s infinite" }} />
+                    <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#9e9a90", animation: "thinking-dot 1.2s ease-in-out 0.4s infinite" }} />
                     <style>{`@keyframes thinking-dot { 0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)} }
 @keyframes blurIn { from{opacity:0;filter:blur(3px)}to{opacity:1;filter:blur(0)} }
 .streaming-text > div:last-child > :last-child { animation: blurIn 400ms both; }
-.streaming-text > div:last-child > :last-child > :last-child { animation: blurIn 400ms both; }`}</style>
+.streaming-text > div:last-child > :last-child > :last-child { animation: blurIn 400ms both; }
+@keyframes highlightSweep { from{background-size:0% 100%}to{background-size:100% 100%} }
+.highlight-mark { animation: highlightSweep 0.6s cubic-bezier(0.16,1,0.3,1) 0.15s both; }`}</style>
                   </div>
                 </div>
               )}
@@ -678,7 +748,7 @@ export default function ChatPage() {
           {/* Input */}
           <div>
             <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
-              <div style={{ color: isStreaming ? "#d1d5db" : "#228be6", fontWeight: 500, fontSize: "16px", lineHeight: 1.65 }}>&gt;</div>
+              <div style={{ color: isStreaming ? "#d1d5db" : THEME.primary, fontWeight: 500, fontSize: "16px", lineHeight: 1.65 }}>&gt;</div>
               <div style={{ flex: 1, position: "relative" }}>
                 {!input && !hasMessages && (
                   <div style={{ position: "absolute", top: 0, left: 0, fontSize: "16px", lineHeight: 1.65, color: "#b5b1a9", pointerEvents: "none", fontStyle: "italic" }}>
@@ -727,15 +797,15 @@ export default function ChatPage() {
             }}>
               <input type="email" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} required style={{ width: "100%", padding: "10px 12px", fontSize: "14px", border: "1px solid #e5e7eb", marginBottom: "10px", fontFamily: "inherit", boxSizing: "border-box" }} />
               <input type="password" placeholder="Password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} required minLength={6} style={{ width: "100%", padding: "10px 12px", fontSize: "14px", border: "1px solid #e5e7eb", marginBottom: "16px", fontFamily: "inherit", boxSizing: "border-box" }} />
-              <button type="submit" disabled={authSubmitting} style={{ width: "100%", padding: "10px", fontSize: "14px", background: "#228be6", color: "#fff", border: "none", cursor: authSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: authSubmitting ? 0.7 : 1 }}>
+              <button type="submit" disabled={authSubmitting} style={{ width: "100%", padding: "10px", fontSize: "14px", background: THEME.primary, color: "#fff", border: "none", cursor: authSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: authSubmitting ? 0.7 : 1 }}>
                 {authSubmitting ? "..." : authMode === "signin" ? "Sign in" : "Create account"}
               </button>
             </form>
             <div style={{ marginTop: "16px", textAlign: "center", fontSize: "13px", color: "#6b7280" }}>
               {authMode === "signin" ? (
-                <>No account? <button onClick={() => { setAuthMode("signup"); setAuthError(null); }} style={{ color: "#228be6", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px" }}>Create one</button></>
+                <>No account? <button onClick={() => { setAuthMode("signup"); setAuthError(null); }} style={{ color: THEME.primary, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px" }}>Create one</button></>
               ) : (
-                <>Have an account? <button onClick={() => { setAuthMode("signin"); setAuthError(null); }} style={{ color: "#228be6", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px" }}>Sign in</button></>
+                <>Have an account? <button onClick={() => { setAuthMode("signin"); setAuthError(null); }} style={{ color: THEME.primary, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px" }}>Sign in</button></>
               )}
             </div>
           </div>

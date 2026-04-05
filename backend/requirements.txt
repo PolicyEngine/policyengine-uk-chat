@@ -8,3 +8,5 @@ policyengine-uk-compiled>=0.6.1
 policyengine_uk
 pandas
 httpx
+supabase
+stripe
