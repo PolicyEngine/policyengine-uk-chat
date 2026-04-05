@@ -199,7 +199,7 @@ def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = 
             for k in baseline_breakdown
         }
 
-        dataset_labels = {"frs": "Family Resources Survey", "spi": "Survey of Personal Incomes"}
+        dataset_labels = {"frs": "Family Resources Survey", "efrs": "Enhanced FRS", "spi": "Survey of Personal Incomes", "lcfs": "Living Costs and Food Survey", "was": "Wealth and Assets Survey"}
         return {
             "fiscal_year": reform_result.fiscal_year,
             "dataset": dataset_labels.get(dataset, dataset),
@@ -314,7 +314,7 @@ def analyse_microdata(
         else:
             return {"error": f"Unknown operation '{operation}'. Use: mean, sum, count, sample, describe"}
 
-        dataset_labels = {"frs": "Family Resources Survey", "spi": "Survey of Personal Incomes"}
+        dataset_labels = {"frs": "Family Resources Survey", "efrs": "Enhanced FRS", "spi": "Survey of Personal Incomes", "lcfs": "Living Costs and Food Survey", "was": "Wealth and Assets Survey"}
         return {"entity": entity, "operation": operation, "year": year, "dataset": dataset_labels.get(dataset, dataset), "reform_applied": reform is not None, "filters_applied": filters_applied, "row_count": row_count, "weighted_count": weighted_count, "result": result, "available_columns": all_cols}
     except Exception as e:
         logger.error(f"Error in analyse_microdata: {e}")
@@ -506,13 +506,13 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "run_economy_simulation",
-        "description": "Run an economy-wide UK microsimulation. Returns budgetary impact, program breakdown, decile impacts, winners/losers, and caseloads. Default dataset is FRS (full household survey). Use 'spi' for the Survey of Personal Incomes (income tax/NI only, no benefits — better for high-income analysis).",
+        "description": "Run an economy-wide UK microsimulation. Returns budgetary impact, program breakdown, decile impacts, winners/losers, and caseloads.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "year": {"type": "integer", "description": "Fiscal year. Default: 2025 (current FY).", "default": 2025},
                 "reform": {"type": "object", "description": "Optional policy reform. Top-level keys: income_tax, national_insurance, universal_credit, child_benefit, state_pension, pension_credit, benefit_cap, housing_benefit, tax_credits, scottish_child_payment."},
-                "dataset": {"type": "string", "enum": ["frs", "spi"], "description": "Dataset to use. 'frs' (default): Family Resources Survey — full tax-benefit model with households. 'spi': Survey of Personal Incomes — person-level only (income tax and NI), better sample of high earners.", "default": "frs"},
+                "dataset": {"type": "string", "enum": ["frs", "efrs", "spi", "lcfs", "was"], "description": "Dataset. 'frs' (default): Family Resources Survey, ~20k households. 'efrs': Enhanced FRS with imputed wealth and consumption. 'spi': Survey of Personal Incomes, person-level only (tax/NI, no benefits). 'lcfs': Living Costs and Food Survey, ~4k households with consumption data. 'was': Wealth and Assets Survey with wealth/savings data.", "default": "frs"},
             },
         },
     },
@@ -529,7 +529,7 @@ TOOL_DEFINITIONS = [
                 "filters": {"type": "object", "description": "Filter rows. Keys are column names. Values: exact, list, range {min/max}, or comparison {gt/lt/gte/lte/ne}. E.g. {\"net_income_change\": {\"lt\": 0}}"},
                 "columns": {"type": "array", "items": {"type": "string"}},
                 "n": {"type": "integer", "default": 5},
-                "dataset": {"type": "string", "enum": ["frs", "spi"], "description": "Dataset. 'frs' (default) or 'spi' (person-level only, entity must be 'persons').", "default": "frs"},
+                "dataset": {"type": "string", "enum": ["frs", "efrs", "spi", "lcfs", "was"], "description": "Dataset. 'frs' (default), 'efrs' (enhanced FRS with wealth/consumption), 'spi' (person-level only, entity must be 'persons'), 'lcfs' (with consumption), 'was' (with wealth).", "default": "frs"},
             },
             "required": ["entity", "operation"],
         },
