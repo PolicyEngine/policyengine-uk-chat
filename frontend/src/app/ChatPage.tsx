@@ -508,7 +508,7 @@ export default function ChatPage() {
         return <pre style={{ display: "block", margin: "12px 0", lineHeight: 1.7, whiteSpace: "pre-wrap", background: "#1a1917", color: "#c9c5bc", padding: "16px 18px", borderLeft: `3px solid ${THEME.primary}`, fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" }}><code>{children}</code></pre>;
       },
       p: ({ children }: { children?: React.ReactNode }) => <p style={{ margin: "0 0 14px 0", lineHeight: 1.75 }}>{children}</p>,
-      strong: ({ children }: { children?: React.ReactNode }) => <strong className="highlight-mark" style={{ fontWeight: 600, color: THEME.text, background: `linear-gradient(to right, ${THEME.highlightBg}, ${THEME.highlightBg})`, backgroundSize: "0% 100%", backgroundRepeat: "no-repeat", backgroundPosition: "left", padding: "1px 3px", margin: "0 -3px" }}>{children}</strong>,
+      strong: ({ children }: { children?: React.ReactNode }) => <strong className="highlight-mark" style={{ fontWeight: 600, color: THEME.text, padding: "1px 3px", margin: "0 -3px" }}>{children}</strong>,
       ul: ({ children }: { children?: React.ReactNode }) => <ul style={{ margin: "0 0 14px 0", paddingLeft: "22px", listStyleType: "disc" }}>{children}</ul>,
       ol: ({ children }: { children?: React.ReactNode }) => <ol style={{ margin: "0 0 14px 0", paddingLeft: "22px", listStyleType: "decimal" }}>{children}</ol>,
       li: ({ children }: { children?: React.ReactNode }) => <li style={{ marginBottom: "5px", lineHeight: 1.65, listStyleType: "inherit" }}>{children}</li>,
@@ -781,7 +781,7 @@ export default function ChatPage() {
 .streaming-text > div:last-child > :last-child { animation: blurIn 400ms both; }
 .streaming-text > div:last-child > :last-child > :last-child { animation: blurIn 400ms both; }
 @keyframes highlightSweep { from{background-size:0% 100%}to{background-size:100% 100%} }
-.highlight-mark { animation: highlightSweep 0.6s cubic-bezier(0.16,1,0.3,1) 0.15s both; }`}</style>
+.highlight-mark { background: linear-gradient(to right, rgba(44,122,123,0.12), rgba(44,122,123,0.12)); background-size: 0% 100%; background-repeat: no-repeat; background-position: left; animation: highlightSweep 0.6s cubic-bezier(0.16,1,0.3,1) 0.15s forwards; }`}</style>
                   </div>
                 </div>
               )}
