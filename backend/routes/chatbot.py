@@ -408,19 +408,25 @@ async def chat_message(request: ChatRequest, http_request: Request):
                     result_summary = result_str[:5000] + "..." if len(result_str) > 5000 else result_str
                     yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tu['name'], 'tool_id': tu['id'], 'status': 'success', 'result_summary': result_summary})}\n\n"
 
-                # Add tool results
+                # Add tool results (truncate aggressively to avoid context blowup)
+                MAX_RESULT_CHARS = 15000
                 tool_results = []
                 for tu in tool_uses:
                     result_json = json.dumps(completed_tools[tu["id"]])
-                    if len(result_json) > 30000:
+                    if len(result_json) > MAX_RESULT_CHARS:
                         from agent_tools import explore_tabular_data
                         tool_result = completed_tools[tu["id"]]
-                        data_key = next((k for k in ["impacts", "standards", "results", "data", "items"] if k in tool_result and isinstance(tool_result[k], list)), None)
+                        # Try to find and summarise large arrays
+                        data_key = next((k for k in tool_result if isinstance(tool_result.get(k), list) and len(tool_result[k]) > 5), None)
                         if data_key:
                             data_array = tool_result[data_key]
                             exploration = explore_tabular_data(data_array)
-                            processed = {"note": f"Large result ({len(data_array)} rows) - showing first 50 rows with column metadata", "exploration": exploration, data_key: data_array[:50], "total": tool_result.get("total", len(data_array))}
+                            remaining = {k: v for k, v in tool_result.items() if k != data_key}
+                            processed = {**remaining, "note": f"Large '{data_key}' array ({len(data_array)} rows) - showing first 20 with column metadata", "exploration": exploration, data_key: data_array[:20]}
                             result_json = json.dumps(processed)
+                        # Hard cap: if still too large, truncate the JSON string
+                        if len(result_json) > MAX_RESULT_CHARS:
+                            result_json = result_json[:MAX_RESULT_CHARS] + '..."}'
                     tool_results.append({"type": "tool_result", "tool_use_id": tu["id"], "content": result_json})
 
                 conversation.append({"role": "user", "content": tool_results})

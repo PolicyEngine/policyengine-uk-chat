@@ -199,8 +199,10 @@ def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = 
             for k in baseline_breakdown
         }
 
+        dataset_labels = {"frs": "Family Resources Survey", "spi": "Survey of Personal Incomes"}
         return {
             "fiscal_year": reform_result.fiscal_year,
+            "dataset": dataset_labels.get(dataset, dataset),
             "budgetary_impact": reform_result.budgetary_impact.model_dump(),
             "program_breakdown_changes": program_changes,
             "decile_impacts": [d.model_dump() for d in reform_result.decile_impacts],
@@ -312,7 +314,8 @@ def analyse_microdata(
         else:
             return {"error": f"Unknown operation '{operation}'. Use: mean, sum, count, sample, describe"}
 
-        return {"entity": entity, "operation": operation, "year": year, "reform_applied": reform is not None, "filters_applied": filters_applied, "row_count": row_count, "weighted_count": weighted_count, "result": result, "available_columns": all_cols}
+        dataset_labels = {"frs": "Family Resources Survey", "spi": "Survey of Personal Incomes"}
+        return {"entity": entity, "operation": operation, "year": year, "dataset": dataset_labels.get(dataset, dataset), "reform_applied": reform is not None, "filters_applied": filters_applied, "row_count": row_count, "weighted_count": weighted_count, "result": result, "available_columns": all_cols}
     except Exception as e:
         logger.error(f"Error in analyse_microdata: {e}")
         import traceback; logger.error(traceback.format_exc())
