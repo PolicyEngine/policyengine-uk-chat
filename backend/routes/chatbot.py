@@ -64,9 +64,12 @@ Output includes:
 These are already percentage rates (e.g. 28.5 means 28.5%), not headcounts.
 
 Datasets:
-- "frs" (default): Family Resources Survey — full tax-benefit model with 20,000+ households. Best for most analyses.
-- "spi": Survey of Personal Incomes — HMRC administrative data, person-level only (income tax and NI, no benefits). Much better sample of high earners. Use when the user asks about SPI or wants high-income analysis.
-When using SPI, the model runs with --persons-only (no household/benefit calculations). Poverty and HBAI fields will be zeroed.
+- "frs" (default): Family Resources Survey — ~20k households, full tax-benefit model. Best for most analyses.
+- "efrs": Enhanced FRS — FRS with imputed wealth (from WAS) and consumption (from LCFS). Use for analyses involving wealth or living costs.
+- "spi": Survey of Personal Incomes — HMRC administrative data, person-level only (income tax and NI, no benefits). Much better sample of high earners. When using SPI, the model runs with --persons-only (no household/benefit calculations). Poverty and HBAI fields will be zeroed.
+- "lcfs": Living Costs and Food Survey — ~4k households with detailed consumption/expenditure data. Use for VAT or consumption analysis.
+- "was": Wealth and Assets Survey — household survey with wealth, savings, and asset data.
+Always tell the user which dataset you are using (e.g. "Using the Family Resources Survey…").
 
 **analyse_microdata(entity, operation, year, reform, filters, columns, n)**
 Runs the same simulation as run_economy_simulation but gives you access to the underlying microdata.
@@ -138,7 +141,7 @@ AXIS FORMATS: Use y_format/x_format to control axis labels:
 - "number": plain number
 IMPORTANT: Poverty rates from run_economy_simulation are already percentages (e.g. 29.8 means 29.8%), so use "percent" NOT "percent_decimal".
 
-CHART SOURCE: Always include a "source" field on every chart spec. For FRS simulations use "Family Resources Survey via PolicyEngine UK". For SPI simulations use "Survey of Personal Incomes via PolicyEngine UK". For household-level calculations use "PolicyEngine UK microsimulation".
+CHART SOURCE: Always include a "source" field on every chart spec. Use "{dataset name} via PolicyEngine UK" where the dataset name matches the simulation (e.g. "Family Resources Survey via PolicyEngine UK", "Enhanced FRS via PolicyEngine UK", "Survey of Personal Incomes via PolicyEngine UK"). For household-level calculations use "PolicyEngine UK microsimulation".
 
 CRITICAL - CHART TITLES: Titles must be active and self-standing — describe the key finding.
 - Bad: "Average income gain by decile" — just labels the data.
