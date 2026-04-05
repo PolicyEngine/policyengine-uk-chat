@@ -626,11 +626,39 @@ export default function ChatPage() {
       );
     }
 
-    // Streaming (not yet complete): show working text in italic
-    return msg.events.map((event, idx) =>
-      event.type === "text"
-        ? <div key={idx} style={hasTools && idx <= lastToolIdx ? { fontStyle: "italic", opacity: 0.6, fontSize: "13px", margin: "6px 0" } : { margin: "6px 0" }}>{renderMarkdown(event.content)}</div>
-        : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
+    // Streaming (not yet complete): mirror the finished layout
+    const workingEvents = hasTools ? msg.events.slice(0, lastToolIdx + 1) : [];
+    const streamFinalEvents = hasTools ? msg.events.slice(lastToolIdx + 1) : msg.events;
+    const streamSummary = hasTools ? getWorkingSummary(workingEvents) : "";
+    const toggleWorking = () => setCollapsedWorking((prev) => { const next = new Set(prev); if (next.has(msgIdx)) next.delete(msgIdx); else next.add(msgIdx); return next; });
+
+    return (
+      <>
+        {hasTools && (
+          <>
+            <div onClick={toggleWorking} style={{ display: "flex", alignItems: "baseline", gap: "6px", color: THEME.muted, fontSize: "12px", cursor: "pointer", userSelect: "none", margin: "6px 0", padding: "2px 0" }}>
+              <IconChevronDown size={12} style={{ opacity: 0.5, transform: isWorkingCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", flexShrink: 0, position: "relative", top: "1px" }} />
+              <span style={{ color: THEME.text3, fontStyle: "italic" }}>{streamSummary || "Working\u2026"}</span>
+            </div>
+            {!isWorkingCollapsed && (
+              <div style={{ margin: "8px 0 16px", paddingLeft: "4px", borderLeft: `2px solid ${THEME.border}` }}>
+                <div style={{ paddingLeft: "14px" }}>
+                  {workingEvents.map((event, idx) =>
+                    event.type === "text"
+                      ? <div key={idx} style={{ fontStyle: "italic", opacity: 0.6, fontSize: "13px", margin: "6px 0" }}>{renderMarkdown(event.content)}</div>
+                      : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
+                  )}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+        {streamFinalEvents.map((event, idx) =>
+          event.type === "text"
+            ? <div key={idx} style={{ margin: "6px 0" }}>{renderMarkdown(event.content)}</div>
+            : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
+        )}
+      </>
     );
   };
 
