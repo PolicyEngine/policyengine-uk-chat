@@ -99,7 +99,7 @@ interface ToolData {
   result_summary?: string;
 }
 
-type StreamEvent = { type: "text"; content: string } | { type: "tool"; data: ToolData };
+type StreamEvent = { type: "text"; content: string; thinking?: boolean } | { type: "tool"; data: ToolData };
 
 interface Message {
   role: "user" | "assistant";
@@ -398,10 +398,17 @@ export default function ChatPage() {
             if (data.type === "chunk") {
               setIsWaiting(false);
               const lastEvent = events[events.length - 1];
-              if (lastEvent?.type === "text") lastEvent.content += data.content;
+              if (lastEvent?.type === "text" && !lastEvent.thinking) lastEvent.content += data.content;
               else events.push({ type: "text", content: data.content });
               currentText += data.content;
               startDrain();
+            } else if (data.type === "thinking_done") {
+              // Retroactively mark recent text events (before any tool events) as thinking
+              for (let i = events.length - 1; i >= 0; i--) {
+                if (events[i].type === "tool") break;
+                if (events[i].type === "text") (events[i] as { type: "text"; content: string; thinking?: boolean }).thinking = true;
+              }
+              updateMessage();
             } else if (data.type === "tool_start") {
               setIsWaiting(false);
               // Flush any pending text before showing tool
@@ -603,8 +610,19 @@ export default function ChatPage() {
     const isWorkingCollapsed = collapsedWorking.has(msgIdx);
 
     if (msg.isComplete && hasTools) {
-      const workingEvents = msg.events.slice(0, lastToolIdx + 1);
-      const rawFinalEvents = msg.events.slice(lastToolIdx + 1);
+      // Split events: tools + thinking text → working; rest → final output
+      const workingEvents: StreamEvent[] = [];
+      const rawFinalEvents: StreamEvent[] = [];
+      for (const event of msg.events) {
+        if (event.type === "tool" || (event.type === "text" && event.thinking)) workingEvents.push(event);
+        else rawFinalEvents.push(event);
+      }
+      // If no thinking flags (old data), fall back to position-based split
+      if (workingEvents.length === 0) {
+        workingEvents.push(...msg.events.slice(0, lastToolIdx + 1));
+        rawFinalEvents.length = 0;
+        rawFinalEvents.push(...msg.events.slice(lastToolIdx + 1));
+      }
       const toggleWorking = () => setCollapsedWorking((prev) => { const next = new Set(prev); if (next.has(msgIdx)) next.delete(msgIdx); else next.add(msgIdx); return next; });
 
       // Filter CoT transitional text from the start of final events
@@ -639,15 +657,20 @@ export default function ChatPage() {
       );
     }
 
-    // Streaming (not yet complete): mirror the finished layout
-    const workingEvents = hasTools ? msg.events.slice(0, lastToolIdx + 1) : [];
-    const streamFinalEvents = hasTools ? msg.events.slice(lastToolIdx + 1) : msg.events;
-    const streamSummary = hasTools ? getWorkingSummary(workingEvents) : "";
+    // Streaming (not yet complete): split into working (tools + thinking text) vs output
+    const workingEvents: StreamEvent[] = [];
+    const streamFinalEvents: StreamEvent[] = [];
+    for (const event of msg.events) {
+      if (event.type === "tool" || (event.type === "text" && event.thinking)) workingEvents.push(event);
+      else streamFinalEvents.push(event);
+    }
+    const hasWorking = workingEvents.length > 0;
+    const streamSummary = hasWorking ? getWorkingSummary(workingEvents) : "";
     const toggleWorking = () => setCollapsedWorking((prev) => { const next = new Set(prev); if (next.has(msgIdx)) next.delete(msgIdx); else next.add(msgIdx); return next; });
 
     return (
       <>
-        {hasTools && (
+        {hasWorking && (
           <>
             <div onClick={toggleWorking} style={{ display: "flex", alignItems: "baseline", gap: "6px", color: THEME.muted, fontSize: "12px", cursor: "pointer", userSelect: "none", margin: "6px 0", padding: "2px 0" }}>
               <IconChevronDown size={12} style={{ opacity: 0.5, transform: isWorkingCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", flexShrink: 0, position: "relative", top: "1px" }} />
