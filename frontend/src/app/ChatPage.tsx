@@ -509,7 +509,7 @@ export default function ChatPage() {
     );
   };
 
-  const renderMarkdown = (content: string) => {
+  const renderMarkdown = (content: string, animate = true) => {
     const { charts, cleanContent } = extractChartSpecs(content);
 
     const markdownComponents = {
@@ -521,7 +521,7 @@ export default function ChatPage() {
         return <pre style={{ display: "block", margin: "12px 0", lineHeight: 1.7, whiteSpace: "pre-wrap", background: "#1a1917", color: "#c9c5bc", padding: "16px 18px", borderLeft: `3px solid ${THEME.primary}`, fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" }}><code>{children}</code></pre>;
       },
       p: ({ children }: { children?: React.ReactNode }) => <p style={{ margin: "0 0 14px 0", lineHeight: 1.75 }}>{children}</p>,
-      strong: ({ children }: { children?: React.ReactNode }) => <strong className="highlight-mark" style={{ fontWeight: 600, color: THEME.text, padding: "1px 3px", margin: "0 -3px" }}>{children}</strong>,
+      strong: ({ children }: { children?: React.ReactNode }) => <strong className={animate ? "highlight-mark" : undefined} style={{ fontWeight: 600, color: THEME.text, padding: "1px 3px", margin: "0 -3px" }}>{children}</strong>,
       ul: ({ children }: { children?: React.ReactNode }) => <ul style={{ margin: "0 0 14px 0", paddingLeft: "22px", listStyleType: "disc" }}>{children}</ul>,
       ol: ({ children }: { children?: React.ReactNode }) => <ol style={{ margin: "0 0 14px 0", paddingLeft: "22px", listStyleType: "decimal" }}>{children}</ol>,
       li: ({ children }: { children?: React.ReactNode }) => <li style={{ marginBottom: "5px", lineHeight: 1.65, listStyleType: "inherit" }}>{children}</li>,
@@ -596,7 +596,7 @@ export default function ChatPage() {
   };
 
   const renderAssistantMessage = (msg: Message, msgIdx: number) => {
-    if (!msg.events?.length) return renderMarkdown(msg.content);
+    if (!msg.events?.length) return renderMarkdown(msg.content, msg.isComplete);
 
     const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
     const hasTools = lastToolIdx >= 0;
@@ -626,7 +626,7 @@ export default function ChatPage() {
               <div style={{ paddingLeft: "14px" }}>
                 {workingEvents.map((event, idx) =>
                   event.type === "text"
-                    ? <div key={idx} style={{ fontStyle: "italic", opacity: 0.6, fontSize: "13px", margin: "6px 0" }}>{renderMarkdown(event.content)}</div>
+                    ? <div key={idx} style={{ fontStyle: "italic", opacity: 0.6, fontSize: "13px", margin: "6px 0" }}>{renderMarkdown(event.content, false)}</div>
                     : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
                 )}
               </div>
@@ -658,7 +658,7 @@ export default function ChatPage() {
                 <div style={{ paddingLeft: "14px" }}>
                   {workingEvents.map((event, idx) =>
                     event.type === "text"
-                      ? <div key={idx} style={{ fontStyle: "italic", opacity: 0.6, fontSize: "13px", margin: "6px 0" }}>{renderMarkdown(event.content)}</div>
+                      ? <div key={idx} style={{ fontStyle: "italic", opacity: 0.6, fontSize: "13px", margin: "6px 0" }}>{renderMarkdown(event.content, false)}</div>
                       : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
                   )}
                 </div>
@@ -668,7 +668,7 @@ export default function ChatPage() {
         )}
         {streamFinalEvents.map((event, idx) =>
           event.type === "text"
-            ? <div key={idx} style={{ margin: "6px 0" }}>{renderMarkdown(event.content)}</div>
+            ? <div key={idx} style={{ margin: "6px 0" }}>{renderMarkdown(event.content, false)}</div>
             : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
         )}
       </>
