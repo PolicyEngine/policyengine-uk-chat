@@ -358,10 +358,8 @@ def run_python(code: str) -> Dict[str, Any]:
 
     The code should assign its final result to a variable called `result`.
     Only safe builtins, math, and numpy are available — no file/network/import access.
-    Execution is time-limited to 30 seconds.
     """
     import math
-    import signal
     import builtins as _builtins
 
     safe_names = (
@@ -392,22 +390,10 @@ def run_python(code: str) -> Dict[str, Any]:
         allowed_globals["np"] = np
         allowed_globals["numpy"] = np
 
-    # Time-limit execution to 30 seconds
-    def timeout_handler(signum, frame):
-        raise TimeoutError("Code execution timed out (30s limit)")
-
-    old_handler = signal.signal(signal.SIGALRM, timeout_handler)
-    signal.alarm(30)
-
     try:
         exec(code, allowed_globals)
-    except TimeoutError as e:
-        return {"error": str(e)}
     except Exception as e:
         return {"error": f"{type(e).__name__}: {e}"}
-    finally:
-        signal.alarm(0)
-        signal.signal(signal.SIGALRM, old_handler)
 
     result = allowed_globals.get("result", None)
 
