@@ -131,6 +131,7 @@ export default function ChatPage() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
   const [collapsedWorking, setCollapsedWorking] = useState<Set<number>>(new Set());
+  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
@@ -408,15 +409,7 @@ export default function ChatPage() {
               currentText += data.content;
               startDrain();
             } else if (data.type === "thinking_done") {
-              // Retroactively mark recent unmarked text events as thinking
-              // Walk backwards, skipping tool events, until we hit already-marked text
-              for (let i = events.length - 1; i >= 0; i--) {
-                const e = events[i];
-                if (e.type === "text" && e.thinking) break; // hit previously marked text, stop
-                if (e.type === "text") (e as { type: "text"; content: string; thinking?: boolean }).thinking = true;
-                // skip tool events (don't break)
-              }
-              updateMessage();
+              // No-op: position-based split handles CoT placement
             } else if (data.type === "tool_start") {
               setIsWaiting(false);
               // Flush any pending text before showing tool
@@ -521,20 +514,43 @@ export default function ChatPage() {
     return summary.length > 50 ? summary.slice(0, 50) + "…" : summary;
   };
 
+  const toggleTool = (toolId: string) => {
+    setExpandedTools((prev) => { const next = new Set(prev); if (next.has(toolId)) next.delete(toolId); else next.add(toolId); return next; });
+  };
+
   const renderTool = (t: ToolData) => {
-    const summary = t.result_summary ? formatToolSummary(t.result_summary) : null;
+    const isExpanded = expandedTools.has(t.tool_id);
+    const hasDetails = t.input || t.result_summary;
     return (
-      <div key={t.tool_id} style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: "11px", color: THEME.muted, padding: "2px 0", margin: "2px 0" }}>
-        {t.status === "pending" && <Loader size={10} color={THEME.primary} />}
-        <span style={{ color: THEME.text3 }}>{t.tool_name}</span>
-        {summary && summary !== "done" && (
-          <>
-            <span style={{ color: THEME.border }}>/</span>
-            <span style={{ color: THEME.primary, fontWeight: 500 }}>{summary}</span>
-          </>
-        )}
-        {summary === "done" && (
-          <span style={{ color: THEME.muted }}>✓</span>
+      <div key={t.tool_id} style={{ margin: "2px 0" }}>
+        <div
+          onClick={hasDetails ? () => toggleTool(t.tool_id) : undefined}
+          style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: "11px", color: THEME.muted, padding: "2px 0", cursor: hasDetails ? "pointer" : "default" }}
+        >
+          {t.status === "pending" && <Loader size={10} color={THEME.primary} />}
+          {hasDetails && <IconChevronDown size={10} style={{ opacity: 0.4, transform: isExpanded ? "none" : "rotate(-90deg)", transition: "transform 0.15s" }} />}
+          <span style={{ color: THEME.text3 }}>{t.tool_name}</span>
+          {t.status !== "pending" && <span style={{ color: THEME.muted }}>✓</span>}
+        </div>
+        {isExpanded && hasDetails && (
+          <div style={{ marginLeft: "18px", marginTop: "4px", fontSize: "11px", fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
+            {t.input && (
+              <div style={{ marginBottom: "6px" }}>
+                <div style={{ color: THEME.muted, marginBottom: "2px" }}>input</div>
+                <pre style={{ margin: 0, padding: "8px 10px", background: "#f5f4f2", color: THEME.text2, whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "200px", overflow: "auto", borderLeft: `2px solid ${THEME.border}` }}>
+                  {JSON.stringify(t.input, null, 2)}
+                </pre>
+              </div>
+            )}
+            {t.result_summary && (
+              <div>
+                <div style={{ color: THEME.muted, marginBottom: "2px" }}>output</div>
+                <pre style={{ margin: 0, padding: "8px 10px", background: "#f5f4f2", color: THEME.text2, whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "200px", overflow: "auto", borderLeft: `2px solid ${THEME.primary}` }}>
+                  {t.result_summary.length > 2000 ? t.result_summary.slice(0, 2000) + "…" : t.result_summary}
+                </pre>
+              </div>
+            )}
+          </div>
         )}
       </div>
     );
@@ -629,76 +645,30 @@ export default function ChatPage() {
   const renderAssistantMessage = (msg: Message, msgIdx: number) => {
     if (!msg.events?.length) return renderMarkdown(msg.content, msg.isComplete);
 
+    // Position-based split: everything up to and including the last tool = working,
+    // everything after = final output. Simple, deterministic, no flags needed.
     const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
     const hasTools = lastToolIdx >= 0;
     const isWorkingCollapsed = collapsedWorking.has(msgIdx);
 
-    if (msg.isComplete && hasTools) {
-      // Split events: tools + thinking text → working; rest → final output
-      const workingEvents: StreamEvent[] = [];
-      const rawFinalEvents: StreamEvent[] = [];
-      for (const event of msg.events) {
-        if (event.type === "tool" || (event.type === "text" && event.thinking)) workingEvents.push(event);
-        else rawFinalEvents.push(event);
-      }
-      // If no thinking flags (old data), fall back to position-based split
-      if (workingEvents.length === 0) {
-        workingEvents.push(...msg.events.slice(0, lastToolIdx + 1));
-        rawFinalEvents.length = 0;
-        rawFinalEvents.push(...msg.events.slice(lastToolIdx + 1));
-      }
-      const toggleWorking = () => setCollapsedWorking((prev) => { const next = new Set(prev); if (next.has(msgIdx)) next.delete(msgIdx); else next.add(msgIdx); return next; });
+    const workingEvents = hasTools ? msg.events.slice(0, lastToolIdx + 1) : [];
+    const rawFinalEvents = hasTools ? msg.events.slice(lastToolIdx + 1) : msg.events;
 
-      // Filter CoT transitional text from the start of final events
-      const finalEvents = rawFinalEvents.filter((e) => {
-        if (e.type !== "text") return false;
-        return !isTransitionalText(e.content);
-      });
+    // Filter transitional CoT text from final events (only for completed messages)
+    const finalEvents = msg.isComplete
+      ? rawFinalEvents.filter((e) => e.type === "text" && !isTransitionalText(e.content))
+      : rawFinalEvents;
 
-      const summary = getWorkingSummary(workingEvents);
-
-      return (
-        <>
-          <div onClick={toggleWorking} style={{ display: "flex", alignItems: "baseline", gap: "6px", color: THEME.muted, fontSize: "12px", cursor: "pointer", userSelect: "none", margin: "6px 0", padding: "2px 0" }}>
-            <IconChevronDown size={12} style={{ opacity: 0.5, transform: isWorkingCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", flexShrink: 0, position: "relative", top: "1px" }} />
-            <span style={{ color: THEME.text3, fontStyle: "italic" }}>{summary}</span>
-          </div>
-          {!isWorkingCollapsed && (
-            <div style={{ margin: "8px 0 16px", paddingLeft: "4px", borderLeft: `2px solid ${THEME.border}` }}>
-              <div style={{ paddingLeft: "14px" }}>
-                {workingEvents.map((event, idx) =>
-                  event.type === "text"
-                    ? <div key={idx} style={{ fontStyle: "italic", opacity: 0.6, fontSize: "13px", margin: "6px 0" }}>{renderMarkdown(event.content, false)}</div>
-                    : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
-                )}
-              </div>
-            </div>
-          )}
-          {finalEvents.map((event, idx) =>
-            <div key={idx}>{renderMarkdown((event as { type: "text"; content: string }).content)}</div>
-          )}
-        </>
-      );
-    }
-
-    // Streaming (not yet complete): split into working (tools + thinking text) vs output
-    const workingEvents: StreamEvent[] = [];
-    const streamFinalEvents: StreamEvent[] = [];
-    for (const event of msg.events) {
-      if (event.type === "tool" || (event.type === "text" && event.thinking)) workingEvents.push(event);
-      else streamFinalEvents.push(event);
-    }
-    const hasWorking = workingEvents.length > 0;
-    const streamSummary = hasWorking ? getWorkingSummary(workingEvents) : "";
     const toggleWorking = () => setCollapsedWorking((prev) => { const next = new Set(prev); if (next.has(msgIdx)) next.delete(msgIdx); else next.add(msgIdx); return next; });
+    const summary = hasTools ? getWorkingSummary(workingEvents) : "";
 
     return (
       <>
-        {hasWorking && (
+        {hasTools && (
           <>
             <div onClick={toggleWorking} style={{ display: "flex", alignItems: "baseline", gap: "6px", color: THEME.muted, fontSize: "12px", cursor: "pointer", userSelect: "none", margin: "6px 0", padding: "2px 0" }}>
               <IconChevronDown size={12} style={{ opacity: 0.5, transform: isWorkingCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", flexShrink: 0, position: "relative", top: "1px" }} />
-              <span style={{ color: THEME.text3, fontStyle: "italic" }}>{streamSummary || "Working\u2026"}</span>
+              <span style={{ color: THEME.text3, fontStyle: "italic" }}>{summary || "Working\u2026"}</span>
             </div>
             {!isWorkingCollapsed && (
               <div style={{ margin: "8px 0 16px", paddingLeft: "4px", borderLeft: `2px solid ${THEME.border}` }}>
@@ -713,9 +683,9 @@ export default function ChatPage() {
             )}
           </>
         )}
-        {streamFinalEvents.map((event, idx) =>
+        {finalEvents.map((event, idx) =>
           event.type === "text"
-            ? <div key={idx} style={{ margin: "6px 0" }}>{renderMarkdown(event.content, false)}</div>
+            ? <div key={idx} style={{ margin: "6px 0" }}>{renderMarkdown(event.content, !msg.isComplete ? false : true)}</div>
             : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
         )}
       </>
