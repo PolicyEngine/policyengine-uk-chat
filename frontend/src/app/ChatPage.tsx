@@ -563,6 +563,25 @@ export default function ChatPage() {
     );
   };
 
+  /** Extract a short summary from working text for the collapsed header. */
+  const getWorkingSummary = (events: StreamEvent[]): string => {
+    const texts = events.filter((e): e is { type: "text"; content: string } => e.type === "text").map((e) => e.content);
+    const allText = texts.join(" ").replace(/\s+/g, " ").trim();
+    if (!allText) return "Worked through the problem";
+    // Take the first sentence or first ~60 chars
+    const firstSentence = allText.match(/^[^.!?]+[.!?]/)?.[0];
+    const summary = firstSentence && firstSentence.length <= 80 ? firstSentence : allText.slice(0, 60) + "…";
+    return summary;
+  };
+
+  /** Check if a text event is transitional CoT that shouldn't appear in final output. */
+  const isTransitionalText = (text: string): boolean => {
+    const trimmed = text.trim();
+    if (!trimmed || trimmed.length > 200) return false;
+    // Short sentences starting with transitional phrases
+    return /^(let me|now I|I'll|I need to|I can|I should|I want to|good\.|great\.|ok\b|alright|perfect|right|so |now let|let's)/i.test(trimmed);
+  };
+
   const renderAssistantMessage = (msg: Message, msgIdx: number) => {
     if (!msg.events?.length) return renderMarkdown(msg.content);
 
@@ -572,45 +591,46 @@ export default function ChatPage() {
 
     if (msg.isComplete && hasTools) {
       const workingEvents = msg.events.slice(0, lastToolIdx + 1);
-      const finalEvents = msg.events.slice(lastToolIdx + 1);
+      const rawFinalEvents = msg.events.slice(lastToolIdx + 1);
       const toggleWorking = () => setCollapsedWorking((prev) => { const next = new Set(prev); if (next.has(msgIdx)) next.delete(msgIdx); else next.add(msgIdx); return next; });
 
-      // Deduplicate tool calls for collapsed summary: group by name with counts
-      const toolEvents = workingEvents.filter((e): e is { type: "tool"; data: ToolData } => e.type === "tool");
-      const toolCounts = new Map<string, number>();
-      toolEvents.forEach((e) => toolCounts.set(e.data.tool_name, (toolCounts.get(e.data.tool_name) || 0) + 1));
+      // Filter CoT transitional text from the start of final events
+      const finalEvents = rawFinalEvents.filter((e) => {
+        if (e.type !== "text") return false;
+        return !isTransitionalText(e.content);
+      });
+
+      const summary = getWorkingSummary(workingEvents);
 
       return (
         <>
-          <div onClick={toggleWorking} style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: THEME.muted, fontSize: "12px", cursor: "pointer", userSelect: "none", marginBottom: "12px", padding: "3px 0" }}>
-            <IconChevronDown size={12} style={{ opacity: 0.5, transform: isWorkingCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s" }} />
-            <span style={{ color: THEME.text3 }}>{isWorkingCollapsed ? "Show working" : "Hide working"}</span>
-            {isWorkingCollapsed && (
-              <span style={{ color: THEME.muted, fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: "11px" }}>
-                · {Array.from(toolCounts.entries()).map(([name, count]) => count > 1 ? `${name} ×${count}` : name).join(", ")}
-              </span>
-            )}
+          <div onClick={toggleWorking} style={{ display: "flex", alignItems: "baseline", gap: "6px", color: THEME.muted, fontSize: "12px", cursor: "pointer", userSelect: "none", margin: "6px 0", padding: "2px 0" }}>
+            <IconChevronDown size={12} style={{ opacity: 0.5, transform: isWorkingCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", flexShrink: 0, position: "relative", top: "1px" }} />
+            <span style={{ color: THEME.text3, fontStyle: "italic" }}>{summary}</span>
           </div>
           {!isWorkingCollapsed && (
-            <div style={{ marginBottom: "16px", paddingLeft: "4px", borderLeft: `2px solid ${THEME.border}` }}>
+            <div style={{ margin: "8px 0 16px", paddingLeft: "4px", borderLeft: `2px solid ${THEME.border}` }}>
               <div style={{ paddingLeft: "14px" }}>
                 {workingEvents.map((event, idx) =>
                   event.type === "text"
-                    ? <div key={idx} style={{ opacity: 0.6, fontSize: "13px" }}>{renderMarkdown(event.content)}</div>
-                    : renderTool(event.data)
+                    ? <div key={idx} style={{ fontStyle: "italic", opacity: 0.6, fontSize: "13px", margin: "6px 0" }}>{renderMarkdown(event.content)}</div>
+                    : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
                 )}
               </div>
             </div>
           )}
-          {finalEvents.filter((e) => e.type === "text").map((event, idx) =>
+          {finalEvents.map((event, idx) =>
             <div key={idx}>{renderMarkdown((event as { type: "text"; content: string }).content)}</div>
           )}
         </>
       );
     }
 
+    // Streaming (not yet complete): show working text in italic
     return msg.events.map((event, idx) =>
-      event.type === "text" ? <div key={idx}>{renderMarkdown(event.content)}</div> : renderTool(event.data)
+      event.type === "text"
+        ? <div key={idx} style={hasTools && idx <= lastToolIdx ? { fontStyle: "italic", opacity: 0.6, fontSize: "13px", margin: "6px 0" } : { margin: "6px 0" }}>{renderMarkdown(event.content)}</div>
+        : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
     );
   };
 
