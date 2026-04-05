@@ -518,6 +518,61 @@ export default function ChatPage() {
     setExpandedTools((prev) => { const next = new Set(prev); if (next.has(toolId)) next.delete(toolId); else next.add(toolId); return next; });
   };
 
+  const renderToolDetails = (t: ToolData) => {
+    const isPython = t.tool_name === "run_python";
+    const codeStyle = { margin: 0, padding: "8px 10px", background: "#1a1917", color: "#c9c5bc", whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const, maxHeight: "300px", overflow: "auto" as const, fontSize: "11px", lineHeight: 1.7, fontFamily: "'JetBrains Mono', monospace" };
+
+    // For run_python: show code as Python, parse result from summary
+    if (isPython) {
+      const code = (t.input as Record<string, string>)?.code || "";
+      let output = "";
+      if (t.result_summary) {
+        try {
+          const parsed = JSON.parse(t.result_summary);
+          const parts: string[] = [];
+          if (parsed.output) parts.push(parsed.output);
+          if (parsed.result !== undefined && parsed.result !== null) parts.push(`result = ${JSON.stringify(parsed.result, null, 2)}`);
+          if (parsed.error) parts.push(`Error: ${parsed.error}`);
+          output = parts.join("\n") || t.result_summary;
+        } catch { output = t.result_summary; }
+      }
+      return (
+        <div style={{ marginLeft: "18px", marginTop: "4px" }}>
+          {code && (
+            <div style={{ marginBottom: "6px" }}>
+              <pre style={{ ...codeStyle, borderLeft: `2px solid ${THEME.border}` }}>{code}</pre>
+            </div>
+          )}
+          {output && (
+            <div>
+              <pre style={{ ...codeStyle, borderLeft: `2px solid ${THEME.primary}` }}>{output.length > 2000 ? output.slice(0, 2000) + "…" : output}</pre>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    // For other tools: show JSON input/output
+    const inputStr = t.input ? JSON.stringify(t.input, null, 2) : "";
+    const outputStr = t.result_summary || "";
+    return (
+      <div style={{ marginLeft: "18px", marginTop: "4px" }}>
+        {inputStr && (
+          <div style={{ marginBottom: "6px" }}>
+            <div style={{ color: THEME.muted, fontSize: "10px", marginBottom: "2px", fontFamily: "'JetBrains Mono', monospace" }}>input</div>
+            <pre style={{ ...codeStyle, background: "#f5f4f2", color: THEME.text2, borderLeft: `2px solid ${THEME.border}` }}>{inputStr.length > 2000 ? inputStr.slice(0, 2000) + "…" : inputStr}</pre>
+          </div>
+        )}
+        {outputStr && (
+          <div>
+            <div style={{ color: THEME.muted, fontSize: "10px", marginBottom: "2px", fontFamily: "'JetBrains Mono', monospace" }}>output</div>
+            <pre style={{ ...codeStyle, background: "#f5f4f2", color: THEME.text2, borderLeft: `2px solid ${THEME.primary}` }}>{outputStr.length > 2000 ? outputStr.slice(0, 2000) + "…" : outputStr}</pre>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderTool = (t: ToolData) => {
     const isExpanded = expandedTools.has(t.tool_id);
     const hasDetails = t.input || t.result_summary;
@@ -532,26 +587,7 @@ export default function ChatPage() {
           <span style={{ color: THEME.text3 }}>{t.tool_name}</span>
           {t.status !== "pending" && <span style={{ color: THEME.muted }}>✓</span>}
         </div>
-        {isExpanded && hasDetails && (
-          <div style={{ marginLeft: "18px", marginTop: "4px", fontSize: "11px", fontFamily: "'JetBrains Mono', monospace", lineHeight: 1.6 }}>
-            {t.input && (
-              <div style={{ marginBottom: "6px" }}>
-                <div style={{ color: THEME.muted, marginBottom: "2px" }}>input</div>
-                <pre style={{ margin: 0, padding: "8px 10px", background: "#f5f4f2", color: THEME.text2, whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "200px", overflow: "auto", borderLeft: `2px solid ${THEME.border}` }}>
-                  {JSON.stringify(t.input, null, 2)}
-                </pre>
-              </div>
-            )}
-            {t.result_summary && (
-              <div>
-                <div style={{ color: THEME.muted, marginBottom: "2px" }}>output</div>
-                <pre style={{ margin: 0, padding: "8px 10px", background: "#f5f4f2", color: THEME.text2, whiteSpace: "pre-wrap", wordBreak: "break-word", maxHeight: "200px", overflow: "auto", borderLeft: `2px solid ${THEME.primary}` }}>
-                  {t.result_summary.length > 2000 ? t.result_summary.slice(0, 2000) + "…" : t.result_summary}
-                </pre>
-              </div>
-            )}
-          </div>
-        )}
+        {isExpanded && hasDetails && renderToolDetails(t)}
       </div>
     );
   };
@@ -645,19 +681,29 @@ export default function ChatPage() {
   const renderAssistantMessage = (msg: Message, msgIdx: number) => {
     if (!msg.events?.length) return renderMarkdown(msg.content, msg.isComplete);
 
-    // Position-based split: everything up to and including the last tool = working,
-    // everything after = final output. Simple, deterministic, no flags needed.
     const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
     const hasTools = lastToolIdx >= 0;
     const isWorkingCollapsed = collapsedWorking.has(msgIdx);
 
-    const workingEvents = hasTools ? msg.events.slice(0, lastToolIdx + 1) : [];
-    const rawFinalEvents = hasTools ? msg.events.slice(lastToolIdx + 1) : msg.events;
+    // During streaming: if tools exist, ALL events go into the working section
+    // so text doesn't jump between output→working when new tool calls arrive.
+    // On completion: position-based split — everything up to last tool = working,
+    // everything after = final output.
+    let workingEvents: StreamEvent[];
+    let finalEvents: StreamEvent[];
 
-    // Filter transitional CoT text from final events (only for completed messages)
-    const finalEvents = msg.isComplete
-      ? rawFinalEvents.filter((e) => e.type === "text" && !isTransitionalText(e.content))
-      : rawFinalEvents;
+    if (msg.isComplete && hasTools) {
+      workingEvents = msg.events.slice(0, lastToolIdx + 1);
+      const rawFinal = msg.events.slice(lastToolIdx + 1);
+      finalEvents = rawFinal.filter((e) => e.type === "text" && !isTransitionalText(e.content));
+    } else if (!msg.isComplete && hasTools) {
+      // Streaming with tools: everything in working, nothing in output yet
+      workingEvents = [...msg.events];
+      finalEvents = [];
+    } else {
+      workingEvents = [];
+      finalEvents = [...msg.events];
+    }
 
     const toggleWorking = () => setCollapsedWorking((prev) => { const next = new Set(prev); if (next.has(msgIdx)) next.delete(msgIdx); else next.add(msgIdx); return next; });
     const summary = hasTools ? getWorkingSummary(workingEvents) : "";
@@ -685,7 +731,7 @@ export default function ChatPage() {
         )}
         {finalEvents.map((event, idx) =>
           event.type === "text"
-            ? <div key={idx} style={{ margin: "6px 0" }}>{renderMarkdown(event.content, !msg.isComplete ? false : true)}</div>
+            ? <div key={idx} style={{ margin: "6px 0" }}>{renderMarkdown(event.content, msg.isComplete)}</div>
             : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
         )}
       </>
