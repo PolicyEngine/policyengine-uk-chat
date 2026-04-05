@@ -99,11 +99,11 @@ HOUSEHOLD INPUT FORMAT:
 - BENEFIT CLAIMING: All "would claim" flags (UC, CB, HB, PC, CTC, WTC, IS, ESA, JSA) default to TRUE. Benefits will be computed for eligible households automatically. You do NOT need to set any would_claim flags.
 
 MARGINAL TAX RATE ANALYSIS:
-Use calculate_household in a SINGLE batched call with ~20 persons at income steps, then use compute(operation="marginal_rate", ...) to derive MTR.
+Use calculate_household in a SINGLE batched call with ~20 persons at income steps, then use run_python to derive MTR from the results.
 
 === UTILITY TOOLS ===
 
-- compute: Use for ANY mathematical operations. NEVER calculate these yourself.
+- run_python: Execute Python code for ANY maths, data processing, or analysis. numpy is available as `np`. Assign the final answer to `result`. ALWAYS use this instead of doing arithmetic in your head — even for simple calculations. This prevents reasoning errors and produces correct results in one step.
 - generate_chart: ALWAYS call this when you have data worth visualising. Include the returned chart_markdown in your response.
 IMPORTANT - Batching: When comparing multiple income levels, include ALL in a SINGLE calculate_household call.
 
@@ -354,6 +354,10 @@ async def chat_message(request: ChatRequest, http_request: Request):
                         tool_uses = []
                         assistant_content = ""
                         await asyncio.sleep(1)
+
+                # If this iteration produced text + tool calls, the text was "thinking"
+                if tool_uses and assistant_content.strip():
+                    yield f"data: {json.dumps({'type': 'thinking_done'})}\n\n"
 
                 if not tool_uses:
                     # Record token usage for billing

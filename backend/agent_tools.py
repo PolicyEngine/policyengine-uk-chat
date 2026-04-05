@@ -353,45 +353,90 @@ def generate_chart(
         return {"error": str(e)}
 
 
-def compute(operation: str, data: List[float], data2: Optional[List[float]] = None) -> Dict[str, Any]:
+def run_python(code: str) -> Dict[str, Any]:
+    """Execute Python code in a sandboxed environment with math/numpy available.
+
+    The code should assign its final result to a variable called `result`.
+    Only safe builtins, math, and numpy are available — no file/network/import access.
+    Execution is time-limited to 30 seconds.
+    """
+    import math
+    import signal
+    import builtins as _builtins
+
+    safe_names = (
+        "range", "len", "int", "float", "str", "bool", "list", "dict",
+        "tuple", "set", "zip", "enumerate", "map", "filter", "sorted",
+        "reversed", "min", "max", "sum", "abs", "round", "True", "False",
+        "None", "isinstance", "ValueError", "TypeError", "print",
+        "any", "all", "pow", "divmod", "complex",
+    )
+    safe_builtins = {k: getattr(_builtins, k) for k in safe_names if hasattr(_builtins, k)}
+
     try:
-        if not data:
-            return {"error": "Empty data array"}
-        if operation == "diff":
-            result = [data[i+1] - data[i] for i in range(len(data)-1)]
-        elif operation == "pct_change":
-            result = [((data[i+1]-data[i])/data[i]*100) if data[i] != 0 else 0 for i in range(len(data)-1)]
-        elif operation == "cumsum":
-            total = 0; result = []
-            for x in data: total += x; result.append(total)
-        elif operation == "mean":
-            result = sum(data)/len(data)
-        elif operation == "sum":
-            result = sum(data)
-        elif operation == "min":
-            result = min(data)
-        elif operation == "max":
-            result = max(data)
-        elif operation in ("divide", "multiply", "subtract", "add", "marginal_rate"):
-            if not data2 or len(data) != len(data2):
-                return {"error": f"data2 required and must match data length for {operation}"}
-            if operation == "divide":
-                result = [a/b if b != 0 else 0 for a, b in zip(data, data2)]
-            elif operation == "multiply":
-                result = [a*b for a, b in zip(data, data2)]
-            elif operation == "subtract":
-                result = [a-b for a, b in zip(data, data2)]
-            elif operation == "add":
-                result = [a+b for a, b in zip(data, data2)]
-            elif operation == "marginal_rate":
-                if len(data) < 2:
-                    return {"error": "Need at least 2 data points for marginal_rate"}
-                result = [(data[i+1]-data[i])/(data2[i+1]-data2[i])*100 if (data2[i+1]-data2[i]) != 0 else 0 for i in range(len(data)-1)]
-        else:
-            return {"error": f"Unknown operation: {operation}"}
-        return {"result": result}
-    except Exception as e:
+        import numpy as np
+    except ImportError:
+        np = None
+
+    output_lines: List[str] = []
+    def safe_print(*args, **kwargs):
+        output_lines.append(" ".join(str(a) for a in args))
+
+    safe_builtins["print"] = safe_print
+
+    allowed_globals: Dict[str, Any] = {
+        "__builtins__": safe_builtins,
+        "math": math,
+    }
+    if np is not None:
+        allowed_globals["np"] = np
+        allowed_globals["numpy"] = np
+
+    # Time-limit execution to 30 seconds
+    def timeout_handler(signum, frame):
+        raise TimeoutError("Code execution timed out (30s limit)")
+
+    old_handler = signal.signal(signal.SIGALRM, timeout_handler)
+    signal.alarm(30)
+
+    try:
+        exec(code, allowed_globals)
+    except TimeoutError as e:
         return {"error": str(e)}
+    except Exception as e:
+        return {"error": f"{type(e).__name__}: {e}"}
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+
+    result = allowed_globals.get("result", None)
+
+    # Convert numpy types to JSON-safe Python types
+    def to_json_safe(obj):
+        if np is not None:
+            if isinstance(obj, np.ndarray):
+                return obj.tolist()
+            if isinstance(obj, (np.integer,)):
+                return int(obj)
+            if isinstance(obj, (np.floating,)):
+                return float(obj)
+            if isinstance(obj, (np.bool_,)):
+                return bool(obj)
+        if isinstance(obj, dict):
+            return {k: to_json_safe(v) for k, v in obj.items()}
+        if isinstance(obj, (list, tuple)):
+            return [to_json_safe(v) for v in obj]
+        return obj
+
+    response: Dict[str, Any] = {}
+    if result is not None:
+        response["result"] = to_json_safe(result)
+    if output_lines:
+        response["output"] = "\n".join(output_lines)
+    if not response:
+        response["result"] = None
+        response["note"] = "No 'result' variable was set and nothing was printed."
+    return response
 
 
 
@@ -428,7 +473,7 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         "run_economy_simulation": run_economy_simulation,
         "analyse_microdata": analyse_microdata,
         "generate_chart": generate_chart,
-        "compute": compute,
+        "run_python": run_python,
     }
     if tool_name not in tools:
         return {"error": f"Unknown tool: {tool_name}"}
@@ -526,16 +571,14 @@ TOOL_DEFINITIONS = [
         },
     },
     {
-        "name": "compute",
-        "description": "Perform mathematical operations on arrays of numbers. Always use this for arithmetic rather than computing values yourself.",
+        "name": "run_python",
+        "description": "Execute Python code for data processing, maths, and analysis. ALWAYS use this instead of doing arithmetic in your head — even for simple calculations. numpy is available as `np`. Assign the final answer to a variable called `result`. You can also use `print()` for intermediate output. No file or network access. 30-second time limit.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "operation": {"type": "string", "enum": ["diff", "pct_change", "cumsum", "mean", "sum", "min", "max", "divide", "multiply", "subtract", "add", "marginal_rate"]},
-                "data": {"type": "array", "items": {"type": "number"}},
-                "data2": {"type": "array", "items": {"type": "number"}},
+                "code": {"type": "string", "description": "Python code to execute. Must assign final answer to `result`. numpy available as `np`. Example: 'import numpy as np\\ncpi = np.array([100, 102, 105])\\nresult = list(np.diff(cpi) / cpi[:-1] * 100)'"},
             },
-            "required": ["operation", "data"],
+            "required": ["code"],
         },
     },
 ]
