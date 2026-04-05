@@ -651,14 +651,9 @@ export default function ChatPage() {
             {user ? (
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 {balance && (
-                  <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                    <span style={{ fontSize: "12px", color: balance.total_available_gbp > 0.5 ? "#6b7280" : "#b91c1c", fontVariantNumeric: "tabular-nums" }}>
-                      {balance.total_available_gbp <= 0 ? "No credit" : `£${balance.total_available_gbp.toFixed(2)}`}
-                    </span>
-                    <button onClick={() => handleTopUp(5)} disabled={topUpLoading} style={{ fontSize: "11px", color: THEME.primary, cursor: "pointer", padding: "3px 8px", border: `1px solid ${THEME.primary}`, background: "transparent", fontFamily: "inherit" }}>
-                      {topUpLoading ? "..." : "Top up"}
-                    </button>
-                  </div>
+                  <span style={{ fontSize: "12px", color: balance.total_available_gbp > 0.5 ? "#6b7280" : "#b91c1c", fontVariantNumeric: "tabular-nums" }}>
+                    {balance.total_available_gbp <= 0 ? "No credit" : `£${balance.total_available_gbp.toFixed(2)}`}
+                  </span>
                 )}
                 <span style={{ fontSize: "13px", color: "#6b7280" }}>{user.email}</span>
                 <button onClick={signOut} title="Sign out" style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", display: "flex", padding: "4px" }}>
@@ -817,7 +812,7 @@ export default function ChatPage() {
             }}>
               <input type="email" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} required style={{ width: "100%", padding: "10px 12px", fontSize: "14px", border: "1px solid #e5e7eb", marginBottom: "10px", fontFamily: "inherit", boxSizing: "border-box" }} />
               <input type="password" placeholder="Password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} required minLength={6} style={{ width: "100%", padding: "10px 12px", fontSize: "14px", border: "1px solid #e5e7eb", marginBottom: "16px", fontFamily: "inherit", boxSizing: "border-box" }} />
-              <button type="submit" disabled={authSubmitting} style={{ width: "100%", padding: "10px", fontSize: "14px", background: THEME.primary, color: "#fff", border: "none", cursor: authSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: authSubmitting ? 0.7 : 1 }}>
+              <button type="submit" disabled={authSubmitting} style={{ width: "100%", padding: "10px", fontSize: "14px", background: THEME.primaryGradient, color: "#fff", border: "none", cursor: authSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: authSubmitting ? 0.7 : 1 }}>
                 {authSubmitting ? "..." : authMode === "signin" ? "Sign in" : "Create account"}
               </button>
             </form>
