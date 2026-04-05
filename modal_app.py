@@ -30,6 +30,9 @@ image = (
         "policyengine_uk>=2.75.0",
         "pandas",
         "httpx",
+        "supabase",
+        "stripe",
+        "python-dateutil",
     )
     .run_function(_preload_engine)
     .add_local_dir("backend", remote_path="/app/backend", copy=True)
