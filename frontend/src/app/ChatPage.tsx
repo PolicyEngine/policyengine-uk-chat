@@ -110,7 +110,8 @@ interface Message {
 }
 
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
-  const url = new URL(`/api/proxy/${endpoint}`, window.location.origin);
+  const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001";
+  const url = new URL(`${backendBase}/${endpoint}`);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
   const options: RequestInit = { method, headers: { "Content-Type": "application/json" } };
   if (body && ["POST", "PUT", "PATCH"].includes(method)) options.body = JSON.stringify(body);

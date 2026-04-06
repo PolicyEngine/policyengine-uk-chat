@@ -114,7 +114,8 @@ export default function SharedConversationPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch(`/api/proxy/conversations/shared/${token}`)
+    const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001";
+    fetch(`${backendBase}/conversations/shared/${token}`)
       .then((res) => {
         if (!res.ok) throw new Error(res.status === 404 ? "Conversation not found" : "Failed to load");
         return res.json();
