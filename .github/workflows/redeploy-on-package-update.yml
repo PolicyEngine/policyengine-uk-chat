@@ -2,13 +2,15 @@ name: Redeploy on policyengine-uk-compiled update
 
 on:
   schedule:
-    - cron: '0 6 * * *'  # daily at 6am UTC — picks up any new policyengine-uk-compiled release
+    - cron: '0 6 * * *'  # daily at 6am UTC
   workflow_dispatch:
 
 jobs:
-  redeploy:
-    name: Redeploy to Modal
+  update-and-deploy:
+    name: Poll PyPI and redeploy if new version
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
 
@@ -17,27 +19,54 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install Modal
-        run: pip install modal
-
-      - name: Sync secrets to Modal
-        env:
-          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          POLICYENGINE_UK_DATA_TOKEN: ${{ secrets.POLICYENGINE_UK_DATA_TOKEN }}
-          DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}
+      - name: Poll PyPI and update modal_app.py
+        id: update
         run: |
-          modal secret create policyengine-uk-chat-secrets \
-            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-            ANTHROPIC_MODEL="claude-sonnet-4-6" \
-            POLICYENGINE_UK_DATA_TOKEN="$POLICYENGINE_UK_DATA_TOKEN" \
-            DATABASE_URL="$DATABASE_URL" \
-            HOSTNAMES="https://policyengine-uk-chat.vercel.app,https://policyengine-uk-chat-bmxyy36r1-policy-engine.vercel.app" \
-            --force
+          pip install requests packaging --quiet
+          python - <<'EOF'
+          import re, sys, time, os
+          import requests
+          from packaging.version import Version
 
-      - name: Deploy to Modal
-        env:
-          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-        run: modal deploy modal_app.py
+          content = open("modal_app.py").read()
+          m = re.search(r'policyengine-uk-compiled>=([0-9]+\.[0-9]+\.[0-9]+)', content)
+          current = Version(m.group(1)) if m else Version("0")
+          print(f"Current pinned: {current}")
+
+          # Poll PyPI for up to 10 minutes
+          latest = current
+          deadline = time.time() + 600
+          while time.time() < deadline:
+              r = requests.get("https://pypi.org/pypi/policyengine-uk-compiled/json", timeout=10)
+              latest = Version(r.json()["info"]["version"])
+              print(f"PyPI latest: {latest}")
+              if latest > current:
+                  break
+              time.sleep(30)
+
+          if latest <= current:
+              print("No new version found within timeout.")
+              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+                  f.write("should_deploy=false\n")
+              sys.exit(0)
+
+          new_content = re.sub(
+              r'policyengine-uk-compiled>=[0-9]+\.[0-9]+\.[0-9]+',
+              f'policyengine-uk-compiled>={latest}',
+              content,
+          )
+          open("modal_app.py", "w").write(new_content)
+          print(f"Updated modal_app.py to >={latest}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+              f.write(f"new_version={latest}\n")
+              f.write("should_deploy=true\n")
+          EOF
+
+      - name: Commit updated modal_app.py
+        if: steps.update.outputs.should_deploy == 'true'
+        uses: EndBug/add-and-commit@v9
+        with:
+          add: modal_app.py
+          message: "chore: bump policyengine-uk-compiled to ${{ steps.update.outputs.new_version }}"
+          author_name: policyengine-bot
+          author_email: bot@policyengine.org
