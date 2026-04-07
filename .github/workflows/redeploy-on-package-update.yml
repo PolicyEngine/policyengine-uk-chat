@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
 
@@ -23,7 +24,7 @@ jobs:
         id: update
         run: |
           pip install requests packaging --quiet
-          python - <<'EOF'
+          python - <<'PYEOF'
           import re, sys, time, os
           import requests
           from packaging.version import Version
@@ -60,7 +61,7 @@ jobs:
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"new_version={latest}\n")
               f.write("should_deploy=true\n")
-          EOF
+          PYEOF
 
       - name: Commit updated modal_app.py
         if: steps.update.outputs.should_deploy == 'true'
@@ -70,3 +71,9 @@ jobs:
           message: "chore: bump policyengine-uk-compiled to ${{ steps.update.outputs.new_version }}"
           author_name: policyengine[bot]
           author_email: policyengine[bot]@users.noreply.github.com
+
+      - name: Trigger Modal deploy
+        if: steps.update.outputs.should_deploy == 'true'
+        run: gh workflow run deploy.yml
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
