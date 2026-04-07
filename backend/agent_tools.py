@@ -45,6 +45,7 @@ def _build_compiled_policy(reform: Optional[Dict[str, Any]]):
         Parameters, IncomeTaxParams, NationalInsuranceParams, UniversalCreditParams,
         ChildBenefitParams, StatePensionParams, PensionCreditParams, BenefitCapParams,
         HousingBenefitParams, TaxCreditsParams, ScottishChildPaymentParams,
+        StampDutyParams, StampDutyBand, CapitalGainsTaxParams, WealthTaxParams,
     )
     param_cls_map = {
         "income_tax": IncomeTaxParams,
@@ -57,6 +58,9 @@ def _build_compiled_policy(reform: Optional[Dict[str, Any]]):
         "housing_benefit": HousingBenefitParams,
         "tax_credits": TaxCreditsParams,
         "scottish_child_payment": ScottishChildPaymentParams,
+        "stamp_duty": StampDutyParams,
+        "capital_gains_tax": CapitalGainsTaxParams,
+        "wealth_tax": WealthTaxParams,
     }
     kwargs = {}
     for program, fields in reform.items():
@@ -65,6 +69,9 @@ def _build_compiled_policy(reform: Optional[Dict[str, Any]]):
         if not isinstance(fields, dict):
             raise ValueError(f"Reform program '{program}' must be a dict, got {type(fields).__name__}")
         cls = param_cls_map[program]
+        # stamp_duty bands is a list of dicts — convert to StampDutyBand objects
+        if cls is StampDutyParams and "bands" in fields and fields["bands"] is not None:
+            fields = {**fields, "bands": [StampDutyBand(**b) if isinstance(b, dict) else b for b in fields["bands"]]}
         valid_fields = set(cls.model_fields)
         unknown = {k for k in fields if k not in valid_fields and fields[k] is not None}
         if unknown:
