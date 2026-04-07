@@ -1,0 +1,43 @@
+name: Redeploy on policyengine-uk-compiled update
+
+on:
+  schedule:
+    - cron: '0 6 * * *'  # daily at 6am UTC — picks up any new policyengine-uk-compiled release
+  workflow_dispatch:
+
+jobs:
+  redeploy:
+    name: Redeploy to Modal
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Modal
+        run: pip install modal
+
+      - name: Sync secrets to Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          POLICYENGINE_UK_DATA_TOKEN: ${{ secrets.POLICYENGINE_UK_DATA_TOKEN }}
+          DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}
+        run: |
+          modal secret create policyengine-uk-chat-secrets \
+            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            ANTHROPIC_MODEL="claude-sonnet-4-6" \
+            POLICYENGINE_UK_DATA_TOKEN="$POLICYENGINE_UK_DATA_TOKEN" \
+            DATABASE_URL="$DATABASE_URL" \
+            HOSTNAMES="https://policyengine-uk-chat.vercel.app,https://policyengine-uk-chat-bmxyy36r1-policy-engine.vercel.app" \
+            --force
+
+      - name: Deploy to Modal
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal deploy modal_app.py
