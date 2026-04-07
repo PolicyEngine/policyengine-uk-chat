@@ -68,5 +68,5 @@ jobs:
         with:
           add: modal_app.py
           message: "chore: bump policyengine-uk-compiled to ${{ steps.update.outputs.new_version }}"
-          author_name: policyengine-bot
-          author_email: bot@policyengine.org
+          author_name: policyengine[bot]
+          author_email: policyengine[bot]@users.noreply.github.com
