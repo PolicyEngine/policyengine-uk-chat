@@ -1,7 +1,6 @@
 "use client";
 
 import { useRef, useEffect, useState, useCallback } from "react";
-import { useInView } from "./useInView";
 import * as d3 from "d3";
 import { LineChartSpec, TooltipData, CHART_COLORS, CHART_TYPOGRAPHY } from "./types";
 import { formatValue, getSeriesColor, getDashArray, CHART_MARGINS, getNiceDomain } from "./utils";
@@ -14,7 +13,7 @@ interface LineChartProps {
 }
 
 export function LineChart({ spec, width = 540, height = 340 }: LineChartProps) {
-  const [containerRef, inView] = useInView(0.15);
+  const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
 
@@ -107,23 +106,6 @@ export function LineChart({ spec, width = 540, height = 340 }: LineChartProps) {
     g.append("line").attr("class", "hover-line").attr("y1", 0).attr("y2", innerHeight).attr("stroke", CHART_COLORS.axis).attr("stroke-width", 1).attr("stroke-dasharray", "3,3").attr("opacity", 0);
     spec.series.forEach((s, i) => { g.append("circle").attr("class", `hover-dot-${i}`).attr("r", 4).attr("fill", "white").attr("stroke", getSeriesColor(i, s.color)).attr("stroke-width", 2).attr("opacity", 0); });
   }, [spec, innerWidth, innerHeight, margins, isXCategorical, xScalePoint, xScaleLinear, yScale, getX]);
-
-  useEffect(() => {
-    if (!inView) return;
-    requestAnimationFrame(() => {
-      const svg = d3.select(svgRef.current);
-      spec.series.forEach((s, i) => {
-        const path = svg.select<SVGPathElement>(`.line-path-${i}`);
-        if (path.empty() || getDashArray(s.lineStyle) !== "none") return;
-        const node = path.node();
-        if (!node) return;
-        const totalLength = node.getTotalLength();
-        if (totalLength <= 0) return;
-        path.attr("stroke-dasharray", `${totalLength} ${totalLength}`).attr("stroke-dashoffset", totalLength)
-          .transition().duration(1000).delay(i * 150).ease(d3.easeCubicInOut).attr("stroke-dashoffset", 0);
-      });
-    });
-  }, [inView]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const svg = d3.select(svgRef.current);

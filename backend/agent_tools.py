@@ -384,6 +384,8 @@ def generate_chart(
     chart_type: str, title: str, data: List[Dict[str, Any]], x_field: str, y_fields: List[str],
     x_label: Optional[str] = None, y_label: Optional[str] = None,
     x_format: Optional[str] = None, y_format: Optional[str] = None,
+    x_min: Optional[float] = None, x_max: Optional[float] = None,
+    y_min: Optional[float] = None, y_max: Optional[float] = None,
     series_labels: Optional[List[str]] = None, series_styles: Optional[List[str]] = None,
     series_curves: Optional[List[str]] = None, subtitle: Optional[str] = None,
     source: Optional[str] = None, arrangement: Optional[str] = None, area_fill: Optional[bool] = None,
@@ -404,6 +406,10 @@ def generate_chart(
         }
         if x_format: spec["x"]["format"] = x_format
         if y_format: spec["y"]["format"] = y_format
+        if x_min is not None: spec["x"]["min"] = x_min
+        if x_max is not None: spec["x"]["max"] = x_max
+        if y_min is not None: spec["y"]["min"] = y_min
+        if y_max is not None: spec["y"]["max"] = y_max
         if subtitle: spec["subtitle"] = subtitle
         if source: spec["source"] = source
         if arrangement and chart_type == "bar": spec["arrangement"] = arrangement
@@ -606,7 +612,7 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "generate_chart",
-        "description": "Generate an interactive chart from data. Use 'step' curve for policy rates/thresholds; 'linear' for simulated income/tax. Title must be an active finding, not a generic label.",
+        "description": "Generate an interactive chart from data. Use 'step' curve for policy rates/thresholds; 'linear' for simulated income/tax. Title must be an active finding, not a generic label. ALWAYS set explicit x.min/x.max and y.min/y.max appropriate to your data — never leave axis ranges unset (d3 defaults to nonsensical ranges like 0–2500 for year axes).",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -619,6 +625,10 @@ TOOL_DEFINITIONS = [
                 "y_label": {"type": "string"},
                 "x_format": {"type": "string", "enum": ["currency", "percent", "percent_decimal", "number", "compact", "year"]},
                 "y_format": {"type": "string", "enum": ["currency", "percent", "percent_decimal", "number", "compact", "year"]},
+                "x_min": {"type": "number", "description": "Explicit x-axis minimum. Always set for time-series (set to first year in data) and income axes (set to 0)."},
+                "x_max": {"type": "number", "description": "Explicit x-axis maximum. Always set to last year in data or highest income value."},
+                "y_min": {"type": "number", "description": "Explicit y-axis minimum. Default to 0 unless the data is naturally bounded above zero with small variation."},
+                "y_max": {"type": "number", "description": "Explicit y-axis maximum. Set slightly above the highest data value."},
                 "series_labels": {"type": "array", "items": {"type": "string"}},
                 "series_styles": {"type": "array", "items": {"type": "string", "enum": ["solid", "dashed", "dotted"]}},
                 "series_curves": {"type": "array", "items": {"type": "string", "enum": ["step", "linear", "smooth"]}},
