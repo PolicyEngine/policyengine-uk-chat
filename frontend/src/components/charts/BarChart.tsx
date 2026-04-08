@@ -37,7 +37,11 @@ export function BarChart({ spec, width = 540, height = 340 }: BarChartProps) {
     const all = spec.series.flatMap((s) => spec.data.map((d) => Number(d[s.field])));
     valMax = d3.max(all) || 0; valMin = d3.min(all) || 0;
   }
-  const valDomain = getNiceDomain([valMin, valMax], spec.y.min, spec.y.max, 0.1);
+  // Bar charts must always include 0 in the value domain so bars render from the baseline.
+  // Only override if the spec explicitly sets y.min/y.max.
+  const valDomainMin = spec.y.min ?? (valMin >= 0 ? 0 : valMin);
+  const valDomainMax = spec.y.max ?? (valMax <= 0 ? 0 : valMax);
+  const valDomain = getNiceDomain([valDomainMin, valDomainMax], spec.y.min, spec.y.max, 0.1);
 
   let stackedData: d3.Series<Record<string, unknown>, string>[] = [];
   if (isStacked) {
