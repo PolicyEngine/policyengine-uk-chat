@@ -534,7 +534,9 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     try:
         # Compile structural_reform code into a StructuralReform object
         if "structural_reform" in tool_input:
-            tool_input = {**tool_input, "structural": _build_structural_reform(tool_input.pop("structural_reform"))}
+            tool_input = dict(tool_input)
+            structural_code = tool_input.pop("structural_reform")
+            tool_input["structural"] = _build_structural_reform(structural_code)
         # If input contains a generator, execute it to produce the real kwargs
         if "generator" in tool_input:
             logger.info(f"[TOOLS] Running generator for {tool_name}")
