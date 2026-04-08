@@ -3,11 +3,70 @@ Agent tools for the microsim chatbot.
 Wraps compiled PolicyEngine UK simulations and utility operations.
 """
 
+import hashlib
 import json
 import logging
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Microdata cache
+# ---------------------------------------------------------------------------
+_microdata_cache: Dict[tuple, Any] = {}
+_MAX_CACHE = 4
+
+
+def _hash_reform(reform: Optional[Dict[str, Any]]) -> str:
+    if not reform:
+        return "none"
+    return hashlib.md5(json.dumps(reform, sort_keys=True).encode()).hexdigest()
+
+
+def _get_cached_microdata(year: int, reform: Optional[Dict[str, Any]], dataset: str, structural=None):
+    """Return cached MicrodataResult. Structural reforms always run fresh."""
+    if structural is not None:
+        policy = _build_compiled_policy(reform)
+        sim = _build_simulation(year, dataset)
+        return sim.run_microdata(policy=policy, structural=structural)
+    key = (year, _hash_reform(reform), dataset)
+    if key not in _microdata_cache:
+        policy = _build_compiled_policy(reform)
+        sim = _build_simulation(year, dataset)
+        _microdata_cache[key] = sim.run_microdata(policy=policy)
+        if len(_microdata_cache) > _MAX_CACHE:
+            del _microdata_cache[next(iter(_microdata_cache))]
+    return _microdata_cache[key]
+
+
+def _build_structural_reform(code: str):
+    """Compile user-supplied Python code into a StructuralReform."""
+    from policyengine_uk_compiled import StructuralReform
+    import pandas as _pd
+    import numpy as _np
+    import math as _math
+    safe_builtins = {k: __builtins__[k] for k in (
+        "range", "len", "int", "float", "str", "bool", "list", "dict",
+        "tuple", "set", "enumerate", "zip", "map", "filter", "sorted",
+        "min", "max", "sum", "abs", "round", "print", "isinstance", "type",
+        "None", "True", "False",
+    ) if k in ((__builtins__ if isinstance(__builtins__, dict) else vars(__builtins__)))}
+    ns: dict = {"pd": _pd, "np": _np, "math": _math, "__builtins__": safe_builtins}
+    exec(compile(code, "<structural_reform>", "exec"), ns)
+    pre_fn = ns.get("pre")
+    post_fn = ns.get("post")
+    if pre_fn is None and post_fn is None:
+        raise ValueError("structural_reform code must define at least a pre() or post() function")
+    return StructuralReform(pre=pre_fn, post=post_fn)
+
+
+def get_capabilities() -> Dict[str, Any]:
+    try:
+        from policyengine_uk_compiled import capabilities
+        return capabilities()
+    except Exception as e:
+        logger.error(f"Error getting capabilities: {e}")
+        return {"error": str(e)}
 
 
 def explore_tabular_data(data: List[Dict[str, Any]], max_unique_values: int = 20) -> Dict[str, Any]:
@@ -191,13 +250,20 @@ def _build_simulation(year: int, dataset: str = "frs"):
     return sim
 
 
-def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = None, dataset: str = "frs") -> Dict[str, Any]:
+def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = None, dataset: str = "efrs", structural=None) -> Dict[str, Any]:
     try:
         policy = _build_compiled_policy(reform)
-        sim = _build_simulation(year, dataset)
-        # Always run baseline to compute program-level changes
-        baseline_result = sim.run()
-        reform_result = sim.run(policy=policy) if policy else baseline_result
+
+        if structural is not None:
+            from policyengine_uk_compiled.structural import aggregate_microdata
+            baseline_md = _get_cached_microdata(year, None, dataset)
+            reform_md = _get_cached_microdata(year, reform, dataset, structural=structural)
+            baseline_result = aggregate_microdata(baseline_md.persons, baseline_md.benunits, baseline_md.households, year)
+            reform_result = aggregate_microdata(reform_md.persons, reform_md.benunits, reform_md.households, year)
+        else:
+            sim = _build_simulation(year, dataset)
+            baseline_result = sim.run()
+            reform_result = sim.run(policy=policy) if policy else baseline_result
 
         baseline_breakdown = baseline_result.program_breakdown.model_dump()
         reform_breakdown = reform_result.program_breakdown.model_dump()
@@ -234,15 +300,15 @@ def analyse_microdata(
     reform: Optional[Dict[str, Any]] = None,
     filters: Optional[Dict[str, Any]] = None,
     columns: Optional[List[str]] = None,
+    group_by: Optional[List[str]] = None,
     n: int = 5,
-    dataset: str = "frs",
+    dataset: str = "efrs",
+    structural=None,
 ) -> Dict[str, Any]:
     try:
         import pandas as pd
 
-        policy = _build_compiled_policy(reform)
-        sim = _build_simulation(year, dataset)
-        microdata = sim.run_microdata(policy=policy)
+        microdata = _get_cached_microdata(year, reform, dataset, structural=structural)
 
         entity_map = {"persons": microdata.persons, "benunits": microdata.benunits, "households": microdata.households}
         if entity not in entity_map:
@@ -464,6 +530,7 @@ def _run_generator(code: str) -> Dict[str, Any]:
 def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"[TOOLS] Executing {tool_name}")
     tools = {
+        "get_capabilities": get_capabilities,
         "get_baseline_parameters": get_baseline_parameters,
         "calculate_household": calculate_household,
         "run_economy_simulation": run_economy_simulation,
@@ -474,6 +541,9 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name not in tools:
         return {"error": f"Unknown tool: {tool_name}"}
     try:
+        # Compile structural_reform code into a StructuralReform object
+        if "structural_reform" in tool_input:
+            tool_input = {**tool_input, "structural": _build_structural_reform(tool_input.pop("structural_reform"))}
         # If input contains a generator, execute it to produce the real kwargs
         if "generator" in tool_input:
             logger.info(f"[TOOLS] Running generator for {tool_name}")
@@ -488,6 +558,11 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
 
 
 TOOL_DEFINITIONS = [
+    {
+        "name": "get_capabilities",
+        "description": "Returns a structured description of the engine's capabilities: available datasets, locally cached years per dataset, programmes modelled, available microdata columns, and key notes. The response is pre-populated at the start of every conversation, but you can call this again if needed.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
     {
         "name": "get_baseline_parameters",
         "description": "Get the full set of current-law policy parameter values for a given fiscal year. Call this BEFORE constructing a reform to see available field names and current values.",
@@ -519,24 +594,27 @@ TOOL_DEFINITIONS = [
             "properties": {
                 "year": {"type": "integer", "description": "Fiscal year. Default: 2025 (current FY).", "default": 2025},
                 "reform": {"type": "object", "description": "Optional policy reform. Top-level keys: income_tax, national_insurance, universal_credit, child_benefit, state_pension, pension_credit, benefit_cap, housing_benefit, tax_credits, scottish_child_payment."},
-                "dataset": {"type": "string", "enum": ["frs", "efrs", "spi", "lcfs", "was"], "description": "Dataset. 'frs' (default): Family Resources Survey, ~20k households. 'efrs': Enhanced FRS with imputed wealth and consumption. 'spi': Survey of Personal Incomes, person-level only (tax/NI, no benefits). 'lcfs': Living Costs and Food Survey, ~4k households with consumption data. 'was': Wealth and Assets Survey with wealth/savings data.", "default": "frs"},
+                "dataset": {"type": "string", "enum": ["efrs", "frs", "spi", "lcfs", "was"], "description": "Dataset. 'efrs' (default, gold standard): Enhanced FRS with wealth and consumption. 'frs': Family Resources Survey, use for pre-2023 years or cross-checking. 'spi': Survey of Personal Incomes, person-level only (tax/NI, no benefits), best for high earners. 'lcfs': consumption/VAT analysis. 'was': wealth/asset analysis.", "default": "efrs"},
+                "structural_reform": {"type": "string", "description": "Python code defining pre(year, persons, benunits, households) and/or post(year, persons, benunits, households) hooks. Both return (persons, benunits, households). pandas (pd) and numpy (np) available. Use for reforms that can't be expressed as parameter changes (e.g. UBI, new benefits, structural population changes)."},
             },
         },
     },
     {
         "name": "analyse_microdata",
-        "description": "Run an economy-wide simulation and analyse the resulting person/benunit/household microdata. Automatically computes change columns (net_income_change, income_tax_change, total_benefits_change). Use to answer: 'Who loses?', 'Average age of losers?', 'Show me an example household that benefits'.",
+        "description": "Run an economy-wide simulation and analyse the resulting person/benunit/household microdata. Automatically computes change columns (net_income_change, income_tax_change, total_benefits_change). Results are cached — repeated calls with the same year/reform/dataset are instant. Use to answer: 'Who loses?', 'Average age of losers?', 'Show me an example household that benefits'.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "entity": {"type": "string", "enum": ["persons", "benunits", "households"]},
-                "operation": {"type": "string", "enum": ["mean", "sum", "count", "sample", "describe"]},
+                "operation": {"type": "string", "enum": ["mean", "sum", "count", "sample", "describe", "crosstab"], "description": "Aggregation. Use 'crosstab' with group_by=[row, col] for pivot tables."},
                 "year": {"type": "integer", "default": 2025},
                 "reform": {"type": "object"},
                 "filters": {"type": "object", "description": "Filter rows. Keys are column names. Values: exact, list, range {min/max}, or comparison {gt/lt/gte/lte/ne}. E.g. {\"net_income_change\": {\"lt\": 0}}"},
                 "columns": {"type": "array", "items": {"type": "string"}},
+                "group_by": {"type": "array", "items": {"type": "string"}, "description": "Group results by these columns (works with sum/mean/count/crosstab)."},
                 "n": {"type": "integer", "default": 5},
-                "dataset": {"type": "string", "enum": ["frs", "efrs", "spi", "lcfs", "was"], "description": "Dataset. 'frs' (default), 'efrs' (enhanced FRS with wealth/consumption), 'spi' (person-level only, entity must be 'persons'), 'lcfs' (with consumption), 'was' (with wealth).", "default": "frs"},
+                "dataset": {"type": "string", "enum": ["efrs", "frs", "spi", "lcfs", "was"], "description": "Dataset. 'efrs' (default, gold standard). 'frs' for pre-2023 or cross-checking. 'spi' (entity must be 'persons'). 'lcfs' for consumption. 'was' for wealth.", "default": "efrs"},
+                "structural_reform": {"type": "string", "description": "Same as run_economy_simulation. Pass the same string to guarantee both tools use the same microdata run."},
             },
             "required": ["entity", "operation"],
         },

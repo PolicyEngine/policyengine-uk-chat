@@ -60,9 +60,11 @@ Returns all current-law parameter values. Call this first when you need to know 
 Calculates tax/benefit outcomes for one or more specific households. Both baseline and reform are computed in one call — every output variable appears as baseline_<var> and reform_<var>.
 Batch multiple scenarios in ONE call. Default year: 2025.
 
-**run_economy_simulation(year, reform, dataset)**
+**run_economy_simulation(year, reform, dataset, structural_reform)**
 Runs over the full UK population. Returns budgetary impact, per-program breakdown, decile impacts, winners/losers, caseloads, HBAI incomes, and poverty headcounts.
-Default year: 2025 (current fiscal year). Always use the current fiscal year unless the user explicitly asks for a historical analysis.
+Default year: 2025. Use the year the user asks about — historical years back to 1994 are fully supported.
+
+HISTORICAL AND TREND ANALYSIS — fully supported. FRS data exists for every year 1994–2026 (check get_capabilities for exact years per dataset). To show trends, call the tool once per year and collate results. NEVER refuse a multi-year question — always attempt it by looping over years.
 
 Output includes:
 - hbai_incomes: mean/median equivalised net income (BHC and AHC)
@@ -70,15 +72,11 @@ Output includes:
 - reform_poverty: same rates under the reform
 These are already percentage rates (e.g. 28.5 means 28.5%), not headcounts.
 
-Datasets:
-- "frs" (default): Family Resources Survey — ~20k households, full tax-benefit model. Best for most analyses.
-- "efrs": Enhanced FRS — FRS with imputed wealth (from WAS) and consumption (from LCFS). Use for analyses involving wealth or living costs.
-- "spi": Survey of Personal Incomes — HMRC administrative data, person-level only (income tax and NI, no benefits). Much better sample of high earners. When using SPI, the model runs with --persons-only (no household/benefit calculations). Poverty and HBAI fields will be zeroed.
-- "lcfs": Living Costs and Food Survey — ~4k households with detailed consumption/expenditure data. Use for VAT or consumption analysis.
-- "was": Wealth and Assets Survey — household survey with wealth, savings, and asset data.
-Always tell the user which dataset you are using (e.g. "Using the Family Resources Survey…").
+DATASET SELECTION — get_capabilities (pre-loaded at conversation start) has the full list with available years. Default rule: use "efrs" unless (a) the year is before 2023 → use "frs"; (b) question is specifically about high earners/income tax only → use "spi"; (c) primarily about wealth → use "was"; (d) about consumption taxes → use "lcfs". Always tell the user which dataset you're using and briefly why.
 
-**analyse_microdata(entity, operation, year, reform, filters, columns, n)**
+STRUCTURAL REFORMS — use structural_reform when the change can't be expressed as a parameter value. Define pre(year, persons, benunits, households) to mutate inputs before simulation, and/or post(year, persons, benunits, households) to mutate outputs. Both return (persons, benunits, households). pandas (pd) and numpy (np) available. Pass the same structural_reform string to analyse_microdata to guarantee consistency.
+
+**analyse_microdata(entity, operation, year, reform, filters, columns, group_by, n, dataset, structural_reform)**
 Runs the same simulation as run_economy_simulation but gives you access to the underlying microdata.
 - entity="persons": age, gender, employment_income, income_tax, NI
 - entity="households": net_income_change, region
@@ -281,7 +279,20 @@ async def chat_message(request: ChatRequest, http_request: Request):
 
     async def generate_stream():
         try:
-            conversation = deduplicated.copy()
+            from agent_tools import get_capabilities
+            import json as _json
+            _caps = get_capabilities()
+            _caps_id = "caps_0"
+            conversation = [
+                {
+                    "role": "assistant",
+                    "content": [{"type": "tool_use", "id": _caps_id, "name": "get_capabilities", "input": {}}],
+                },
+                {
+                    "role": "user",
+                    "content": [{"type": "tool_result", "tool_use_id": _caps_id, "content": _json.dumps(_caps)}],
+                },
+            ] + deduplicated.copy()
             iteration = 0
             max_iterations = 60
             total_input_tokens = 0
