@@ -183,6 +183,15 @@ def _build_compiled_policy(reform: Optional[Dict[str, Any]]):
     return Parameters(**kwargs) if kwargs else None
 
 
+def get_capabilities() -> Dict[str, Any]:
+    try:
+        from policyengine_uk_compiled import capabilities
+        return capabilities()
+    except Exception as e:
+        logger.error(f"Error getting capabilities: {e}")
+        return {"error": str(e)}
+
+
 def get_baseline_parameters(year: int = 2025) -> Dict[str, Any]:
     try:
         from policyengine_uk_compiled import Simulation
@@ -645,6 +654,7 @@ def _build_structural_reform(code: str):
 def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"[TOOLS] Executing {tool_name}")
     tools = {
+        "get_capabilities": get_capabilities,
         "get_baseline_parameters": get_baseline_parameters,
         "calculate_household": calculate_household,
         "run_economy_simulation": run_economy_simulation,
@@ -673,6 +683,11 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
 
 
 TOOL_DEFINITIONS = [
+    {
+        "name": "get_capabilities",
+        "description": "Returns a structured description of the engine's capabilities: available datasets, locally cached years per dataset, programmes modelled, available microdata columns, and important notes. Call this at the start of any conversation to ground your understanding of what is and isn't possible.",
+        "input_schema": {"type": "object", "properties": {}},
+    },
     {
         "name": "get_baseline_parameters",
         "description": "Get the full set of current-law policy parameter values for a given fiscal year. Call this BEFORE constructing a reform to see available field names and current values.",

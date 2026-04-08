@@ -55,7 +55,9 @@ Batch multiple scenarios in ONE call. Default year: 2025.
 
 **run_economy_simulation(year, reform, dataset, structural_reform)**
 Runs over the full UK population. Returns budgetary impact, per-program breakdown, decile impacts, winners/losers, caseloads, HBAI incomes, and poverty headcounts.
-Default year: 2025 (current fiscal year). Always use the current fiscal year unless the user explicitly asks for a historical analysis.
+Default year: 2025 (current fiscal year).
+
+HISTORICAL AND TREND ANALYSIS — fully supported. Check get_capabilities for exact available years per dataset (FRS goes back to 1994). To show trends, call the tool once per year and collate results. NEVER refuse a multi-year question on the grounds that only one year is available — always attempt it by looping over years.
 
 Output includes:
 - hbai_incomes: mean/median equivalised net income (BHC and AHC)
@@ -63,16 +65,7 @@ Output includes:
 - reform_poverty: same rates under the reform
 These are already percentage rates (e.g. 28.5 means 28.5%), not headcounts.
 
-DATASET SELECTION — choose deliberately, not by default:
-
-- "efrs" (gold standard for distributional analysis): Enhanced FRS — merges FRS household microdata with WAS wealth data and LCFS expenditure data. Best overall dataset for income distribution, poverty, and most policy reforms. Use this as the default for any analysis where wealth or consumption matters, or where you want the most representative distributional picture. Available from 2023.
-- "frs" (workhorse): Family Resources Survey — ~20,000 households, full tax-benefit model. Use when EFRS is unavailable for the requested year, or to cross-check EFRS estimates. The FRS alone is the right choice for historical years (1994–2022) where EFRS doesn't exist.
-- "spi": Survey of Personal Incomes — HMRC administrative data, person-level only (income tax and NI, no benefits, no households). Far better coverage of very high earners (top 1–5%). Use when the analysis is specifically about high-income taxpayers, top-rate income tax, or when the user asks about SPI. Poverty and HBAI fields will be zeroed.
-- "was": Wealth and Assets Survey — the authoritative source for wealth distribution. Use for wealth tax analysis, inheritance, savings, or any question primarily about assets rather than income.
-- "lcfs": Living Costs and Food Survey — expenditure/consumption data. Use for VAT, duties, or consumption-based tax analysis.
-
-Default rule: use "efrs" unless (a) the year is before 2023 → use "frs"; (b) the question is specifically about high earners/income tax only → use "spi"; (c) the question is primarily about wealth → use "was"; (d) the question is about consumption taxes → use "lcfs".
-Always tell the user which dataset you're using and briefly why.
+DATASET SELECTION — get_capabilities (pre-called at conversation start) tells you which datasets and years are available. Default rule: use "efrs" unless (a) the year is before 2023 → use "frs"; (b) the question is specifically about high earners/income tax only → use "spi"; (c) the question is primarily about wealth → use "was"; (d) the question is about consumption taxes → use "lcfs". Always tell the user which dataset you're using and briefly why.
 
 STRUCTURAL REFORMS — use structural_reform when the change can't be expressed as a parameter value:
 - A pre() hook mutates the input data before the engine runs (e.g. add a new income column, change household composition, set eligibility flags)
@@ -286,7 +279,36 @@ async def chat_message(request: ChatRequest, http_request: Request):
 
     async def generate_stream():
         try:
-            conversation = deduplicated.copy()
+            from agent_tools import get_capabilities
+            import json as _json
+            _caps = get_capabilities()
+            # Prepend a synthetic tool-call exchange so the model always has
+            # up-to-date capabilities in context without a live round-trip.
+            _caps_tool_use_id = "caps_0"
+            _capabilities_prefix = [
+                {
+                    "role": "assistant",
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": _caps_tool_use_id,
+                            "name": "get_capabilities",
+                            "input": {},
+                        }
+                    ],
+                },
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "tool_result",
+                            "tool_use_id": _caps_tool_use_id,
+                            "content": _json.dumps(_caps),
+                        }
+                    ],
+                },
+            ]
+            conversation = _capabilities_prefix + deduplicated.copy()
             iteration = 0
             max_iterations = 30
             total_input_tokens = 0
