@@ -593,7 +593,7 @@ export default function ChatPage() {
     );
   };
 
-  const renderMarkdown = (content: string, animate = true) => {
+  const renderMarkdown = (content: string) => {
     const { charts, cleanContent } = extractChartSpecs(content);
 
     const markdownComponents = {
@@ -605,7 +605,7 @@ export default function ChatPage() {
         return <pre style={{ display: "block", margin: "12px 0", lineHeight: 1.7, whiteSpace: "pre-wrap", background: "#1a1917", color: "#c9c5bc", padding: "16px 18px", borderLeft: `3px solid ${THEME.primary}`, fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" }}><code>{children}</code></pre>;
       },
       p: ({ children }: { children?: React.ReactNode }) => <p style={{ margin: "0 0 14px 0", lineHeight: 1.75 }}>{children}</p>,
-      strong: ({ children }: { children?: React.ReactNode }) => <strong className={animate ? "highlight-mark" : undefined} style={{ fontWeight: 600, color: THEME.text, padding: "1px 3px", margin: "0 -3px" }}>{children}</strong>,
+      strong: ({ children }: { children?: React.ReactNode }) => <strong style={{ fontWeight: 600, color: THEME.text }}>{children}</strong>,
       ul: ({ children }: { children?: React.ReactNode }) => <ul style={{ margin: "0 0 14px 0", paddingLeft: "22px", listStyleType: "disc" }}>{children}</ul>,
       ol: ({ children }: { children?: React.ReactNode }) => <ol style={{ margin: "0 0 14px 0", paddingLeft: "22px", listStyleType: "decimal" }}>{children}</ol>,
       li: ({ children }: { children?: React.ReactNode }) => <li style={{ marginBottom: "5px", lineHeight: 1.65, listStyleType: "inherit" }}>{children}</li>,
@@ -660,16 +660,8 @@ export default function ChatPage() {
     );
   };
 
-  /** Extract a short summary from working text for the collapsed header. */
-  const getWorkingSummary = (events: StreamEvent[]): string => {
-    const texts = events.filter((e): e is { type: "text"; content: string } => e.type === "text").map((e) => e.content);
-    const allText = texts.join(" ").replace(/\s+/g, " ").trim();
-    if (!allText) return "Worked through the problem";
-    // Take the first sentence or first ~60 chars
-    const firstSentence = allText.match(/^[^.!?]+[.!?]/)?.[0];
-    const summary = firstSentence && firstSentence.length <= 80 ? firstSentence : allText.slice(0, 60) + "…";
-    return summary;
-  };
+  /** Return a fixed label for the collapsed working section. */
+  const getWorkingSummary = (_events: StreamEvent[]): string => "Worked through the problem";
 
   /** Check if a text event is transitional CoT that shouldn't appear in final output. */
   const isTransitionalText = (text: string): boolean => {
@@ -680,7 +672,7 @@ export default function ChatPage() {
   };
 
   const renderAssistantMessage = (msg: Message, msgIdx: number) => {
-    if (!msg.events?.length) return renderMarkdown(msg.content, msg.isComplete);
+    if (!msg.events?.length) return renderMarkdown(msg.content);
 
     const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
     const hasTools = lastToolIdx >= 0;
@@ -722,7 +714,7 @@ export default function ChatPage() {
                 <div style={{ paddingLeft: "14px" }}>
                   {workingEvents.map((event, idx) =>
                     event.type === "text"
-                      ? <div key={idx} style={{ fontStyle: "italic", opacity: 0.6, fontSize: "13px", margin: "6px 0" }}>{renderMarkdown(event.content, false)}</div>
+                      ? <div key={idx} style={{ fontStyle: "italic", opacity: 0.6, fontSize: "13px", margin: "6px 0" }}>{renderMarkdown(event.content)}</div>
                       : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
                   )}
                 </div>
@@ -732,7 +724,7 @@ export default function ChatPage() {
         )}
         {finalEvents.map((event, idx) =>
           event.type === "text"
-            ? <div key={idx} style={{ margin: "6px 0" }}>{renderMarkdown(event.content, msg.isComplete)}</div>
+            ? <div key={idx} style={{ margin: "6px 0" }}>{renderMarkdown(event.content)}</div>
             : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
         )}
       </>
@@ -865,9 +857,7 @@ export default function ChatPage() {
 @keyframes blurIn { from{opacity:0;filter:blur(3px)}to{opacity:1;filter:blur(0)} }
 .streaming-text > div:last-child > :last-child { animation: blurIn 400ms both; }
 .streaming-text > div:last-child > :last-child > :last-child { animation: blurIn 400ms both; }
-@keyframes highlightSweep { from{background-size:0% 100%}to{background-size:100% 100%} }
-.highlight-mark { background: linear-gradient(to right, rgba(44,122,123,0.12), rgba(44,122,123,0.12)); background-size: 0% 100%; background-repeat: no-repeat; background-position: left; animation: highlightSweep 0.6s cubic-bezier(0.16,1,0.3,1) 0.15s forwards; }
-table .highlight-mark { animation: none; background: none; padding: 0; margin: 0; }`}</style>
+`}</style>
                   </div>
                 </div>
               )}
