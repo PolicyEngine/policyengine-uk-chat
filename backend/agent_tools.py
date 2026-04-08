@@ -3,11 +3,121 @@ Agent tools for the microsim chatbot.
 Wraps compiled PolicyEngine UK simulations and utility operations.
 """
 
+import hashlib
 import json
 import logging
 from typing import Any, Dict, List, Optional
 
+import numpy as np
+
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Simulation result caching
+# ---------------------------------------------------------------------------
+_microdata_cache: Dict[tuple, Any] = {}
+_MAX_CACHE = 4
+
+
+def _hash_reform(reform: Optional[Dict[str, Any]]) -> str:
+    if not reform:
+        return "none"
+    return hashlib.md5(json.dumps(reform, sort_keys=True).encode()).hexdigest()
+
+
+def _get_cached_microdata(year: int, reform: Optional[Dict[str, Any]], dataset: str, structural=None):
+    """Return cached MicrodataResult, running the simulation only on cache miss.
+
+    Structural reforms are never cached (their hooks may be stateful or vary
+    by year), so they always trigger a fresh run.
+    """
+    if structural is not None:
+        policy = _build_compiled_policy(reform)
+        sim = _build_simulation(year, dataset)
+        return sim.run_microdata(policy=policy, structural=structural)
+
+    key = (year, _hash_reform(reform), dataset)
+    if key not in _microdata_cache:
+        policy = _build_compiled_policy(reform)
+        sim = _build_simulation(year, dataset)
+        _microdata_cache[key] = sim.run_microdata(policy=policy)
+        if len(_microdata_cache) > _MAX_CACHE:
+            oldest = next(iter(_microdata_cache))
+            del _microdata_cache[oldest]
+    return _microdata_cache[key]
+
+
+# ---------------------------------------------------------------------------
+# Derived columns (added to DataFrames after simulation)
+# ---------------------------------------------------------------------------
+
+def _add_derived_columns(df, entity: str, microdata):
+    """Add useful derived columns to a microdata DataFrame in-place."""
+    import pandas as pd
+
+    # --- income_decile (weighted, 1-10) ---
+    def _weighted_decile(values, weights):
+        order = np.argsort(values)
+        cum_wt = np.cumsum(weights[order])
+        total_wt = cum_wt[-1] if len(cum_wt) > 0 else 1.0
+        boundaries = np.searchsorted(cum_wt, np.linspace(total_wt / 10, total_wt, 10), side="right")
+        labels = np.empty(len(values), dtype=int)
+        prev = 0
+        for d in range(10):
+            end = boundaries[d] if d < 9 else len(values)
+            labels[order[prev:end]] = d + 1
+            prev = end
+        return labels
+
+    if entity == "persons" and "baseline_total_income" in df.columns and "weight" in df.columns:
+        df["income_decile"] = _weighted_decile(
+            df["baseline_total_income"].values.astype(float),
+            df["weight"].values.astype(float),
+        )
+    elif entity == "households" and "baseline_gross_income" in df.columns and "weight" in df.columns:
+        df["income_decile"] = _weighted_decile(
+            df["baseline_gross_income"].values.astype(float),
+            df["weight"].values.astype(float),
+        )
+
+    # --- household_income_decile (persons only) ---
+    # Maps each person to their household's income decile, useful for
+    # "break down household heads by household income decile"
+    if entity == "persons" and "household_id" in df.columns:
+        hh_df = microdata.households.copy()
+        if "baseline_gross_income" in hh_df.columns and "weight" in hh_df.columns:
+            hh_df["household_income_decile"] = _weighted_decile(
+                hh_df["baseline_gross_income"].values.astype(float),
+                hh_df["weight"].values.astype(float),
+            )
+            df = df.merge(hh_df[["household_id", "household_income_decile"]], on="household_id", how="left")
+
+    # --- main_income_source (persons only) ---
+    if entity == "persons":
+        sources = {}
+        if "employment_income" in df.columns:
+            sources["Employment"] = df["employment_income"].values.astype(float)
+        if "self_employment_income" in df.columns:
+            sources["Self-employment"] = df["self_employment_income"].values.astype(float)
+        pension_cols = [c for c in ["state_pension", "private_pension_income"] if c in df.columns]
+        if pension_cols:
+            sources["Pensions"] = sum(df[c].values.astype(float) for c in pension_cols)
+        benefit_cols = [c for c in ["universal_credit", "child_benefit", "housing_benefit",
+                                     "income_support", "pension_credit", "child_tax_credit",
+                                     "working_tax_credit"] if c in df.columns]
+        if benefit_cols:
+            sources["Benefits"] = sum(df[c].values.astype(float) for c in benefit_cols)
+
+        if sources:
+            source_names = list(sources.keys())
+            source_matrix = np.column_stack([sources[k] for k in source_names])
+            max_idx = np.argmax(source_matrix, axis=1)
+            all_zero = source_matrix.max(axis=1) == 0
+            labels = np.array([source_names[i] for i in max_idx], dtype=object)
+            labels[all_zero] = "Other"
+            df["main_income_source"] = labels
+
+    return df
 
 
 def explore_tabular_data(data: List[Dict[str, Any]], max_unique_values: int = 20) -> Dict[str, Any]:
@@ -184,16 +294,26 @@ def _build_simulation(year: int, dataset: str = "frs"):
     return sim
 
 
-def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = None, dataset: str = "frs") -> Dict[str, Any]:
+def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = None, dataset: str = "frs", structural=None) -> Dict[str, Any]:
     try:
         policy = _build_compiled_policy(reform)
-        sim = _build_simulation(year, dataset)
-        # Always run baseline to compute program-level changes
-        baseline_result = sim.run()
-        reform_result = sim.run(policy=policy) if policy else baseline_result
+
+        if structural is not None:
+            # Structural reform path: derive aggregates from the same microdata
+            # that analyse_microdata will use, so both tools are consistent.
+            # HBAI/poverty fields are not available from microdata and are zeroed.
+            from policyengine_uk_compiled.structural import aggregate_microdata
+            baseline_md = _get_cached_microdata(year, None, dataset)
+            reform_md   = _get_cached_microdata(year, reform, dataset, structural=structural)
+            baseline_result = aggregate_microdata(baseline_md.persons, baseline_md.benunits, baseline_md.households, year)
+            reform_result   = aggregate_microdata(reform_md.persons,   reform_md.benunits,   reform_md.households,   year)
+        else:
+            sim = _build_simulation(year, dataset)
+            baseline_result = sim.run()
+            reform_result   = sim.run(policy=policy) if policy else baseline_result
 
         baseline_breakdown = baseline_result.program_breakdown.model_dump()
-        reform_breakdown = reform_result.program_breakdown.model_dump()
+        reform_breakdown   = reform_result.program_breakdown.model_dump()
         program_changes = {
             k: {"baseline": baseline_breakdown[k], "reform": reform_breakdown[k], "change": reform_breakdown[k] - baseline_breakdown[k]}
             for k in baseline_breakdown
@@ -225,15 +345,15 @@ def analyse_microdata(
     reform: Optional[Dict[str, Any]] = None,
     filters: Optional[Dict[str, Any]] = None,
     columns: Optional[List[str]] = None,
+    group_by: Optional[List[str]] = None,
     n: int = 5,
     dataset: str = "frs",
+    structural=None,
 ) -> Dict[str, Any]:
     try:
         import pandas as pd
 
-        policy = _build_compiled_policy(reform)
-        sim = _build_simulation(year, dataset)
-        microdata = sim.run_microdata(policy=policy)
+        microdata = _get_cached_microdata(year, reform, dataset, structural=structural)
 
         entity_map = {"persons": microdata.persons, "benunits": microdata.benunits, "households": microdata.households}
         if entity not in entity_map:
@@ -254,6 +374,9 @@ def analyse_microdata(
         for change_col, base_col, ref_col in change_pairs.get(entity, []):
             if base_col in df.columns and ref_col in df.columns:
                 df[f"{change_col}_change"] = df[ref_col] - df[base_col]
+
+        # Add derived columns (income_decile, main_income_source, etc.)
+        df = _add_derived_columns(df, entity, microdata)
 
         filters_applied = {}
         if filters:
@@ -292,6 +415,70 @@ def analyse_microdata(
                 value_cols = ["region", "baseline_net_income", "reform_net_income", "net_income_change", "baseline_total_tax", "reform_total_tax", "baseline_total_benefits", "reform_total_benefits"]
             value_cols = [c for c in value_cols if c in df.columns]
 
+        # --- Grouped operations ---
+        if group_by:
+            missing_gb = [c for c in group_by if c not in df.columns]
+            if missing_gb:
+                return {"error": f"group_by columns not found: {missing_gb}. Available: {all_cols}"}
+            numeric_cols = [c for c in value_cols if pd.api.types.is_numeric_dtype(df[c]) and c != "weight"]
+
+            if operation == "sum":
+                groups = []
+                for group_vals, gdf in df.groupby(group_by, sort=True):
+                    row = dict(zip(group_by, group_vals)) if isinstance(group_vals, tuple) else {group_by[0]: group_vals}
+                    row["weighted_population"] = int(gdf["weight"].sum())
+                    for c in numeric_cols:
+                        row[c] = float((gdf[c] * gdf["weight"]).sum())
+                    groups.append(row)
+                result = groups
+
+            elif operation == "mean":
+                groups = []
+                for group_vals, gdf in df.groupby(group_by, sort=True):
+                    row = dict(zip(group_by, group_vals)) if isinstance(group_vals, tuple) else {group_by[0]: group_vals}
+                    row["weighted_population"] = int(gdf["weight"].sum())
+                    wt_sum = gdf["weight"].sum()
+                    for c in numeric_cols:
+                        row[c] = float((gdf[c] * gdf["weight"]).sum() / wt_sum) if wt_sum > 0 else 0.0
+                    groups.append(row)
+                result = groups
+
+            elif operation == "count":
+                groups = []
+                for group_vals, gdf in df.groupby(group_by, sort=True):
+                    row = dict(zip(group_by, group_vals)) if isinstance(group_vals, tuple) else {group_by[0]: group_vals}
+                    row["row_count"] = len(gdf)
+                    row["weighted_population"] = int(gdf["weight"].sum())
+                    groups.append(row)
+                result = groups
+
+            elif operation == "crosstab":
+                # Pivot: group_by[0] = rows, group_by[1] = columns (if present)
+                # Returns [{row_key: ..., col_val_1: agg, col_val_2: agg, ...}]
+                if len(group_by) < 2:
+                    return {"error": "crosstab requires at least 2 group_by columns (row and column dimensions)"}
+                row_dim, col_dim = group_by[0], group_by[1]
+                agg_col = numeric_cols[0] if numeric_cols else "weight"
+                ct = pd.crosstab(
+                    df[row_dim], df[col_dim],
+                    values=df[agg_col] * df["weight"] if agg_col != "weight" else df["weight"],
+                    aggfunc="sum"
+                ).fillna(0)
+                groups = []
+                for row_val in ct.index:
+                    row = {row_dim: row_val if not isinstance(row_val, (np.integer, np.floating)) else int(row_val)}
+                    for col_val in ct.columns:
+                        col_label = str(col_val)
+                        row[col_label] = float(ct.loc[row_val, col_val])
+                    groups.append(row)
+                result = groups
+
+            else:
+                return {"error": f"Operation '{operation}' does not support group_by. Use: sum, mean, count, crosstab"}
+
+            return {"entity": entity, "operation": operation, "group_by": group_by, "year": year, "reform_applied": reform is not None, "filters_applied": filters_applied, "row_count": row_count, "weighted_count": weighted_count, "result": result, "available_columns": all_cols}
+
+        # --- Ungrouped operations (original behaviour) ---
         if operation == "sample":
             actual_n = min(n, 20, row_count)
             sample_df = df[value_cols].sample(n=actual_n, random_state=42) if row_count >= actual_n else df[value_cols]
@@ -310,7 +497,7 @@ def analyse_microdata(
             for c in [c for c in value_cols if not pd.api.types.is_numeric_dtype(df[c])]:
                 result[c] = {str(k): int(v) for k, v in df[c].value_counts().head(10).items()}
         else:
-            return {"error": f"Unknown operation '{operation}'. Use: mean, sum, count, sample, describe"}
+            return {"error": f"Unknown operation '{operation}'. Use: mean, sum, count, sample, describe, crosstab (with group_by)"}
 
         return {"entity": entity, "operation": operation, "year": year, "reform_applied": reform is not None, "filters_applied": filters_applied, "row_count": row_count, "weighted_count": weighted_count, "result": result, "available_columns": all_cols}
     except Exception as e:
@@ -420,6 +607,41 @@ def _run_generator(code: str) -> Dict[str, Any]:
     return result
 
 
+def _build_structural_reform(code: str):
+    """Compile a structural_reform code snippet into a StructuralReform.
+
+    The code may define `pre(year, persons, benunits, households)` and/or
+    `post(year, persons, benunits, households)`, both returning
+    `(persons, benunits, households)`.  pandas and numpy are available.
+    """
+    import math
+    import builtins as _builtins
+    import pandas as pd
+    import numpy as np
+
+    safe_names = (
+        "range", "len", "int", "float", "str", "bool", "list", "dict",
+        "tuple", "set", "zip", "enumerate", "map", "filter", "sorted",
+        "reversed", "min", "max", "sum", "abs", "round", "True", "False",
+        "None", "isinstance", "ValueError", "TypeError", "print",
+    )
+    safe_builtins = {k: getattr(_builtins, k) for k in safe_names if hasattr(_builtins, k)}
+    allowed_globals: Dict[str, Any] = {
+        "__builtins__": safe_builtins,
+        "math": math, "json": json,
+        "pd": pd, "np": np,
+    }
+    exec(code, allowed_globals)
+
+    pre_fn = allowed_globals.get("pre")
+    post_fn = allowed_globals.get("post")
+    if pre_fn is None and post_fn is None:
+        raise ValueError("structural_reform code must define at least one of: pre(), post()")
+
+    from policyengine_uk_compiled import StructuralReform
+    return StructuralReform(pre=pre_fn, post=post_fn)
+
+
 def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"[TOOLS] Executing {tool_name}")
     tools = {
@@ -438,6 +660,10 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
             logger.info(f"[TOOLS] Running generator for {tool_name}")
             tool_input = _run_generator(tool_input["generator"])
             logger.info(f"[TOOLS] Generator produced keys: {list(tool_input.keys())}")
+        # Compile structural_reform code string into a StructuralReform object
+        if "structural_reform" in tool_input:
+            logger.info(f"[TOOLS] Compiling structural_reform for {tool_name}")
+            tool_input = {**tool_input, "structural": _build_structural_reform(tool_input.pop("structural_reform"))}
         result = tools[tool_name](**tool_input)
         logger.info(f"[TOOLS] {tool_name} completed")
         return result
@@ -477,25 +703,28 @@ TOOL_DEFINITIONS = [
             "type": "object",
             "properties": {
                 "year": {"type": "integer", "description": "Fiscal year. Default: 2025 (current FY).", "default": 2025},
-                "reform": {"type": "object", "description": "Optional policy reform. Top-level keys: income_tax, national_insurance, universal_credit, child_benefit, state_pension, pension_credit, benefit_cap, housing_benefit, tax_credits, scottish_child_payment."},
+                "reform": {"type": "object", "description": "Optional parametric reform. Top-level keys: income_tax, national_insurance, universal_credit, child_benefit, state_pension, pension_credit, benefit_cap, housing_benefit, tax_credits, scottish_child_payment."},
                 "dataset": {"type": "string", "enum": ["frs", "spi"], "description": "Dataset to use. 'frs' (default): Family Resources Survey — full tax-benefit model with households. 'spi': Survey of Personal Incomes — person-level only (income tax and NI), better sample of high earners.", "default": "frs"},
+                "structural_reform": {"type": "string", "description": "Python code defining structural reform hooks. May define pre(year, persons, benunits, households) to mutate input data before simulation, and/or post(year, persons, benunits, households) to mutate output columns after simulation. Both return (persons, benunits, households). pandas (pd) and numpy (np) are available. When present, results are derived from microdata and are consistent with any simultaneous analyse_microdata call using the same structural_reform. HBAI and poverty fields will be zeroed. Example: 'def post(year, persons, benunits, households):\\n    households[\"reform_net_income\"] += 1000\\n    households[\"reform_total_benefits\"] += 1000\\n    return persons, benunits, households'"},
             },
         },
     },
     {
         "name": "analyse_microdata",
-        "description": "Run an economy-wide simulation and analyse the resulting person/benunit/household microdata. Automatically computes change columns (net_income_change, income_tax_change, total_benefits_change). Use to answer: 'Who loses?', 'Average age of losers?', 'Show me an example household that benefits'.",
+        "description": "Run an economy-wide simulation and analyse the resulting person/benunit/household microdata. Automatically computes change columns (net_income_change, income_tax_change, total_benefits_change) and derived columns: income_decile (1-10, weighted), household_income_decile (persons only, 1-10, based on household gross income), main_income_source (persons only: Employment/Self-employment/Pensions/Benefits/Other). Use group_by with sum/mean/count/crosstab for distributional breakdowns (e.g. by decile, by income source). Results are cached — repeated calls with the same year/reform/dataset are instant.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "entity": {"type": "string", "enum": ["persons", "benunits", "households"]},
-                "operation": {"type": "string", "enum": ["mean", "sum", "count", "sample", "describe"]},
+                "operation": {"type": "string", "enum": ["mean", "sum", "count", "sample", "describe", "crosstab"], "description": "Aggregation operation. Use 'crosstab' with group_by=[row_dim, col_dim] to pivot data (e.g. group_by=['income_decile', 'main_income_source'] to get a decile-by-source breakdown)."},
                 "year": {"type": "integer", "default": 2025},
                 "reform": {"type": "object"},
                 "filters": {"type": "object", "description": "Filter rows. Keys are column names. Values: exact, list, range {min/max}, or comparison {gt/lt/gte/lte/ne}. E.g. {\"net_income_change\": {\"lt\": 0}}"},
-                "columns": {"type": "array", "items": {"type": "string"}},
+                "columns": {"type": "array", "items": {"type": "string"}, "description": "Columns to aggregate. For crosstab, the first numeric column is used as the value."},
+                "group_by": {"type": "array", "items": {"type": "string"}, "description": "Group results by these columns. Works with sum, mean, count, crosstab. For crosstab, provide exactly 2 columns [row_dim, col_dim]. Available derived columns: income_decile (1-10), household_income_decile (persons only, 1-10), main_income_source (persons only)."},
                 "n": {"type": "integer", "default": 5},
                 "dataset": {"type": "string", "enum": ["frs", "spi"], "description": "Dataset. 'frs' (default) or 'spi' (person-level only, entity must be 'persons').", "default": "frs"},
+                "structural_reform": {"type": "string", "description": "Python code defining structural reform hooks (same as run_economy_simulation). When used alongside run_economy_simulation with the same structural_reform, both tools read from the same underlying microdata run."},
             },
             "required": ["entity", "operation"],
         },

@@ -53,7 +53,7 @@ Returns all current-law parameter values. Call this first when you need to know 
 Calculates tax/benefit outcomes for one or more specific households. Both baseline and reform are computed in one call — every output variable appears as baseline_<var> and reform_<var>.
 Batch multiple scenarios in ONE call. Default year: 2025.
 
-**run_economy_simulation(year, reform, dataset)**
+**run_economy_simulation(year, reform, dataset, structural_reform)**
 Runs over the full UK population. Returns budgetary impact, per-program breakdown, decile impacts, winners/losers, caseloads, HBAI incomes, and poverty headcounts.
 Default year: 2025 (current fiscal year). Always use the current fiscal year unless the user explicitly asks for a historical analysis.
 
@@ -68,16 +68,42 @@ Datasets:
 - "spi": Survey of Personal Incomes — HMRC administrative data, person-level only (income tax and NI, no benefits). Much better sample of high earners. Use when the user asks about SPI or wants high-income analysis.
 When using SPI, the model runs with --persons-only (no household/benefit calculations). Poverty and HBAI fields will be zeroed.
 
-**analyse_microdata(entity, operation, year, reform, filters, columns, n)**
-Runs the same simulation as run_economy_simulation but gives you access to the underlying microdata.
+STRUCTURAL REFORMS — use structural_reform when the change can't be expressed as a parameter value:
+- A pre() hook mutates the input data before the engine runs (e.g. add a new income column, change household composition, set eligibility flags)
+- A post() hook mutates the output microdata after the engine runs (e.g. add a new benefit, apply a tax on a non-standard base, impose a cap)
+- Both hooks take (year, persons, benunits, households) and return the same triple; pandas (pd) and numpy (np) are available
+- When structural_reform is present, HBAI and poverty fields are zeroed (microdata does not carry those columns)
+- Using the same structural_reform string in run_economy_simulation and analyse_microdata guarantees both use the same underlying microdata run
+
+Example — add a £50/week UBI to every adult:
+```
+def post(year, persons, benunits, households):
+    ubi_annual = 50 * 52
+    adult_counts = persons[persons["age"] >= 18].groupby("household_id").size()
+    households["reform_net_income"] += households["household_id"].map(adult_counts).fillna(0) * ubi_annual
+    households["reform_total_benefits"] += households["household_id"].map(adult_counts).fillna(0) * ubi_annual
+    return persons, benunits, households
+```
+
+**analyse_microdata(entity, operation, year, reform, filters, columns, group_by, n, structural_reform)**
+Runs the same simulation as run_economy_simulation but gives you access to the underlying microdata. Results are CACHED — repeated calls with the same year/reform/dataset are instant. Pass the same structural_reform string as run_economy_simulation to guarantee consistency.
 - entity="persons": age, gender, employment_income, income_tax, NI
 - entity="households": net_income_change, region
 - entity="benunits": benefit changes per family unit
 - Change columns computed automatically: net_income_change, income_tax_change, total_benefits_change, employee_ni_change
+- DERIVED COLUMNS computed automatically:
+  - income_decile (1-10): weighted population decile based on total income (persons) or gross income (households)
+  - household_income_decile (persons only, 1-10): the income decile of the person's household (based on household gross income). Use this when breaking down persons (e.g. household heads) by household income decile.
+  - main_income_source (persons only): "Employment", "Self-employment", "Pensions", "Benefits", or "Other" — whichever source is highest for each person
 - operation="sample" → return example rows
-- operation="mean" → weighted average
+- operation="mean" → weighted average (supports group_by)
+- operation="sum" → weighted sum (supports group_by)
 - operation="describe" → min/mean/max breakdown
-- operation="count" → number and weighted population of matching records
+- operation="count" → number and weighted population of matching records (supports group_by)
+- operation="crosstab" → pivot table. Requires group_by with exactly 2 columns [row_dim, col_dim]. Returns one row per row_dim value with col_dim values as fields.
+- group_by: list of columns to group by. Use with sum/mean/count/crosstab. Example: group_by=["income_decile"] for decile breakdown.
+- DISTRIBUTIONAL ANALYSIS: For "breakdown by decile" or "by income source" questions, use group_by with the derived columns.
+  Example: To break down households by main income source and decile, use entity="persons", operation="crosstab", group_by=["income_decile", "main_income_source"], columns=["weight"], filters={"is_household_head": true}
 - filters: filter by any column. Examples: {"net_income_change": {"lt": 0}} for losers
 - FILTER DIRECTION: think carefully about which direction change columns move under your reform.
   If you get 0 rows, flip the filter direction.
