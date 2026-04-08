@@ -294,7 +294,7 @@ def _build_simulation(year: int, dataset: str = "frs"):
     return sim
 
 
-def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = None, dataset: str = "frs", structural=None) -> Dict[str, Any]:
+def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = None, dataset: str = "efrs", structural=None) -> Dict[str, Any]:
     try:
         policy = _build_compiled_policy(reform)
 
@@ -347,7 +347,7 @@ def analyse_microdata(
     columns: Optional[List[str]] = None,
     group_by: Optional[List[str]] = None,
     n: int = 5,
-    dataset: str = "frs",
+    dataset: str = "efrs",
     structural=None,
 ) -> Dict[str, Any]:
     try:
@@ -698,13 +698,13 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "run_economy_simulation",
-        "description": "Run an economy-wide UK microsimulation. Returns budgetary impact, program breakdown, decile impacts, winners/losers, and caseloads. Default dataset is FRS (full household survey). Use 'spi' for the Survey of Personal Incomes (income tax/NI only, no benefits — better for high-income analysis).",
+        "description": "Run an economy-wide UK microsimulation. Returns budgetary impact, program breakdown, decile impacts, winners/losers, and caseloads. Default dataset is EFRS (gold standard). Use 'frs' for pre-2023 years or cross-checking; 'spi' for high-earner/income-tax-only analysis; 'was' for wealth; 'lcfs' for consumption taxes.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "year": {"type": "integer", "description": "Fiscal year. Default: 2025 (current FY).", "default": 2025},
                 "reform": {"type": "object", "description": "Optional parametric reform. Top-level keys: income_tax, national_insurance, universal_credit, child_benefit, state_pension, pension_credit, benefit_cap, housing_benefit, tax_credits, scottish_child_payment."},
-                "dataset": {"type": "string", "enum": ["frs", "spi"], "description": "Dataset to use. 'frs' (default): Family Resources Survey — full tax-benefit model with households. 'spi': Survey of Personal Incomes — person-level only (income tax and NI), better sample of high earners.", "default": "frs"},
+                "dataset": {"type": "string", "enum": ["efrs", "frs", "spi", "was", "lcfs"], "description": "Dataset to use. 'efrs' (default): Enhanced FRS — gold standard for distributional analysis, merges FRS with WAS wealth and LCFS expenditure data, available from 2023. 'frs': Family Resources Survey — full tax-benefit model, use for historical years (pre-2023) or to cross-check efrs. 'spi': Survey of Personal Incomes — person-level only (income tax/NI, no benefits), best coverage of high earners. 'was': Wealth and Assets Survey — use for wealth tax or asset-based analysis. 'lcfs': Living Costs and Food Survey — use for consumption/VAT analysis.", "default": "efrs"},
                 "structural_reform": {"type": "string", "description": "Python code defining structural reform hooks. May define pre(year, persons, benunits, households) to mutate input data before simulation, and/or post(year, persons, benunits, households) to mutate output columns after simulation. Both return (persons, benunits, households). pandas (pd) and numpy (np) are available. When present, results are derived from microdata and are consistent with any simultaneous analyse_microdata call using the same structural_reform. HBAI and poverty fields will be zeroed. Example: 'def post(year, persons, benunits, households):\\n    households[\"reform_net_income\"] += 1000\\n    households[\"reform_total_benefits\"] += 1000\\n    return persons, benunits, households'"},
             },
         },
@@ -723,7 +723,7 @@ TOOL_DEFINITIONS = [
                 "columns": {"type": "array", "items": {"type": "string"}, "description": "Columns to aggregate. For crosstab, the first numeric column is used as the value."},
                 "group_by": {"type": "array", "items": {"type": "string"}, "description": "Group results by these columns. Works with sum, mean, count, crosstab. For crosstab, provide exactly 2 columns [row_dim, col_dim]. Available derived columns: income_decile (1-10), household_income_decile (persons only, 1-10), main_income_source (persons only)."},
                 "n": {"type": "integer", "default": 5},
-                "dataset": {"type": "string", "enum": ["frs", "spi"], "description": "Dataset. 'frs' (default) or 'spi' (person-level only, entity must be 'persons').", "default": "frs"},
+                "dataset": {"type": "string", "enum": ["efrs", "frs", "spi", "was", "lcfs"], "description": "Dataset. 'efrs' (default, gold standard). 'frs': use for pre-2023 years or cross-checking. 'spi': person-level only (entity must be 'persons'), best for high earners. 'was': wealth/asset analysis. 'lcfs': consumption/VAT analysis.", "default": "efrs"},
                 "structural_reform": {"type": "string", "description": "Python code defining structural reform hooks (same as run_economy_simulation). When used alongside run_economy_simulation with the same structural_reform, both tools read from the same underlying microdata run."},
             },
             "required": ["entity", "operation"],
