@@ -6,9 +6,41 @@ Wraps compiled PolicyEngine UK simulations and utility operations.
 import hashlib
 import json
 import logging
+from pathlib import Path
+import sys
 from typing import Any, Dict, List, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _ensure_compiled_package_importable() -> None:
+    """Make the local policyengine_uk_compiled package importable in dev setups."""
+    try:
+        import policyengine_uk_compiled  # noqa: F401
+        return
+    except ModuleNotFoundError:
+        pass
+
+    repo_parent = Path(__file__).resolve().parents[2]
+    candidates = [
+        repo_parent / "policyengine-uk-rust" / "interfaces" / "python",
+        repo_parent / "policyengine-uk-rust-codex-debug-issue" / "interfaces" / "python",
+    ]
+    for candidate in candidates:
+        if candidate.is_dir():
+            candidate_str = str(candidate)
+            if candidate_str not in sys.path:
+                sys.path.insert(0, candidate_str)
+            try:
+                import policyengine_uk_compiled  # noqa: F401
+                return
+            except ModuleNotFoundError:
+                continue
+
+    raise ModuleNotFoundError(
+        "policyengine_uk_compiled is not importable. Install the package or make sure a local "
+        "policyengine-uk-rust checkout with interfaces/python is available."
+    )
 
 # ---------------------------------------------------------------------------
 # Microdata cache
@@ -41,6 +73,7 @@ def _get_cached_microdata(year: int, reform: Optional[Dict[str, Any]], dataset: 
 
 def get_capabilities() -> Dict[str, Any]:
     try:
+        _ensure_compiled_package_importable()
         from policyengine_uk_compiled import capabilities
         return capabilities()
     except Exception as e:
@@ -79,6 +112,7 @@ def explore_tabular_data(data: List[Dict[str, Any]], max_unique_values: int = 20
 def _build_compiled_policy(reform: Optional[Dict[str, Any]]):
     if not reform:
         return None
+    _ensure_compiled_package_importable()
     from policyengine_uk_compiled import (
         Parameters, IncomeTaxParams, NationalInsuranceParams, UniversalCreditParams,
         ChildBenefitParams, StatePensionParams, PensionCreditParams, BenefitCapParams,
@@ -120,6 +154,7 @@ def _build_compiled_policy(reform: Optional[Dict[str, Any]]):
 
 def get_baseline_parameters(year: int = 2025) -> Dict[str, Any]:
     try:
+        _ensure_compiled_package_importable()
         from policyengine_uk_compiled import Simulation
         sim = Simulation(year=year)
         return {"year": year, "parameters": sim.get_baseline_params()}
@@ -208,6 +243,7 @@ def calculate_household(
         return {"error": str(e)}
 def _build_simulation(year: int, dataset: str = "frs"):
     """Build a Simulation with the right data source and CLI flags."""
+    _ensure_compiled_package_importable()
     from policyengine_uk_compiled import Simulation
     return Simulation(year=year, dataset=dataset)
 
@@ -267,6 +303,7 @@ def _build_structural_reform(structural_reform: Optional[Dict[str, Any]]):
     if unknown:
         raise ValueError(f"Unknown structural_reform field(s): {sorted(unknown)}. Valid: ['pre', 'post']")
 
+    _ensure_compiled_package_importable()
     from policyengine_uk_compiled import StructuralReform
 
     pre = structural_reform.get("pre")
@@ -490,13 +527,27 @@ def generate_chart(
 
 
 def run_python(code: str) -> Dict[str, Any]:
-    """Execute Python code in a sandboxed environment with math/numpy available.
+    """Execute Python code with the PolicyEngine UK compiled interface preloaded.
 
     The code should assign its final result to a variable called `result`.
-    Only safe builtins, math, and numpy are available — no file/network/import access.
+    The environment includes the official Python wrapper so runs are easy to
+    reproduce outside the chat app.
     """
     import math
     import builtins as _builtins
+    _ensure_compiled_package_importable()
+    import pandas as pd
+    import policyengine_uk_compiled as pe
+
+    from policyengine_uk_compiled import (
+        Simulation,
+        StructuralReform,
+        Parameters,
+        aggregate_microdata,
+        combine_microdata,
+        capabilities,
+        ensure_dataset,
+    )
 
     safe_names = (
         "range", "len", "int", "float", "str", "bool", "list", "dict",
@@ -521,6 +572,16 @@ def run_python(code: str) -> Dict[str, Any]:
     allowed_globals: Dict[str, Any] = {
         "__builtins__": safe_builtins,
         "math": math,
+        "json": json,
+        "pd": pd,
+        "pe": pe,
+        "Simulation": Simulation,
+        "StructuralReform": StructuralReform,
+        "Parameters": Parameters,
+        "aggregate_microdata": aggregate_microdata,
+        "combine_microdata": combine_microdata,
+        "capabilities": capabilities,
+        "ensure_dataset": ensure_dataset,
     }
     if np is not None:
         allowed_globals["np"] = np
@@ -590,12 +651,6 @@ def _run_generator(code: str) -> Dict[str, Any]:
 def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"[TOOLS] Executing {tool_name}")
     tools = {
-        "get_capabilities": get_capabilities,
-        "get_baseline_parameters": get_baseline_parameters,
-        "calculate_household": calculate_household,
-        "run_economy_simulation": run_economy_simulation,
-        "analyse_microdata": analyse_microdata,
-        "generate_chart": generate_chart,
         "run_python": run_python,
     }
     if tool_name not in tools:
@@ -616,108 +671,12 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
 
 TOOL_DEFINITIONS = [
     {
-        "name": "get_capabilities",
-        "description": "Returns a structured description of the engine's capabilities: available datasets, locally cached years per dataset, programmes modelled, available microdata columns, and key notes.",
-        "input_schema": {"type": "object", "properties": {}},
-    },
-    {
-        "name": "get_baseline_parameters",
-        "description": "Get the full set of current-law policy parameter values for a given fiscal year. Call this BEFORE constructing a reform to see available field names and current values.",
-        "input_schema": {
-            "type": "object",
-            "properties": {"year": {"type": "integer", "description": "Fiscal year (e.g. 2025 = 2025/26). Default: 2025.", "default": 2025}},
-        },
-    },
-    {
-        "name": "calculate_household",
-        "description": "Calculate tax and benefit outcomes for one or more custom household situations, comparing baseline vs reform. Every output appears as baseline_<var> and reform_<var>. Batch multiple scenarios in ONE call. For many households (>3), use the 'generator' field instead of writing out arrays by hand.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "generator": {"type": "string", "description": "Python code defining a generate() function that returns a dict with keys: person, benunit, household, and optionally year and reform. Use this instead of writing large arrays by hand. Example: 'def generate():\\n    persons, benunits, households = [], [], []\\n    for i in range(20):\\n        income = 10000 + i * 5000\\n        persons.append({\"person_id\": i, \"benunit_id\": i, \"household_id\": i, \"age\": 35, \"employment_income\": income})\\n        benunits.append({\"benunit_id\": i, \"household_id\": i})\\n        households.append({\"household_id\": i})\\n    return {\"person\": persons, \"benunit\": benunits, \"household\": households, \"year\": 2025}'"},
-                "person": {"type": "array", "items": {"type": "object", "properties": {"person_id": {"type": "integer"}, "benunit_id": {"type": "integer"}, "household_id": {"type": "integer"}, "age": {"type": "integer"}, "employment_income": {"type": "number"}, "self_employment_income": {"type": "number"}, "private_pension_income": {"type": "number"}, "state_pension": {"type": "number"}, "savings_interest": {"type": "number"}, "is_in_scotland": {"type": "boolean"}}, "required": ["person_id", "benunit_id", "household_id", "age"]}},
-                "benunit": {"type": "array", "items": {"type": "object", "properties": {"benunit_id": {"type": "integer"}, "household_id": {"type": "integer"}, "rent_monthly": {"type": "number"}, "is_lone_parent": {"type": "boolean"}}, "required": ["benunit_id", "household_id"]}},
-                "household": {"type": "array", "items": {"type": "object", "properties": {"household_id": {"type": "integer"}, "region": {"type": "string"}, "rent_annual": {"type": "number"}, "council_tax_annual": {"type": "number"}}, "required": ["household_id"]}},
-                "year": {"type": "integer", "default": 2025},
-                "reform": {"type": "object", "description": "Optional policy reform dict. Example: {\"income_tax\": {\"personal_allowance\": 15000}}"},
-            },
-        },
-    },
-    {
-        "name": "run_economy_simulation",
-        "description": "Run an economy-wide UK microsimulation. Returns budgetary impact, program breakdown, decile impacts, winners/losers, caseloads, and HBAI incomes. Supports both parametric reforms and structural reforms via Python pre/post hooks.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "year": {"type": "integer", "description": "Fiscal year. Default: 2025 (current FY).", "default": 2025},
-                "reform": {"type": "object", "description": "Optional policy reform. Top-level keys: income_tax, national_insurance, universal_credit, child_benefit, state_pension, pension_credit, benefit_cap, housing_benefit, tax_credits, scottish_child_payment."},
-                "structural_reform": {
-                    "type": "object",
-                    "description": "Optional structural reform using Python hooks. Fields: pre and/or post. Each must be a string defining hook(year, persons, benunits, households) and returning (persons, benunits, households). Use pre to change inputs before simulation; use post to alter output microdata after simulation."
-                },
-                "dataset": {"type": "string", "enum": ["frs", "efrs", "spi", "lcfs", "was"], "description": "Dataset. 'frs' (default): Family Resources Survey, ~20k households. 'efrs': Enhanced FRS with imputed wealth and consumption. 'spi': Survey of Personal Incomes, person-level only (tax/NI, no benefits). 'lcfs': Living Costs and Food Survey, ~4k households with consumption data. 'was': Wealth and Assets Survey with wealth/savings data.", "default": "frs"},
-            },
-        },
-    },
-    {
-        "name": "analyse_microdata",
-        "description": "Run an economy-wide simulation and analyse the resulting person/benunit/household microdata. Supports structural reforms as well as parametric reforms. Automatically computes change columns (net_income_change, income_tax_change, total_benefits_change). Use this for custom analysis beyond headline outputs.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "entity": {"type": "string", "enum": ["persons", "benunits", "households"]},
-                "operation": {"type": "string", "enum": ["mean", "sum", "count", "sample", "describe", "crosstab"], "description": "Aggregation. Use 'crosstab' with group_by=[row, col] for pivot tables."},
-                "year": {"type": "integer", "default": 2025},
-                "reform": {"type": "object"},
-                "structural_reform": {
-                    "type": "object",
-                    "description": "Optional structural reform using Python hooks. Fields: pre and/or post. Each must be a string defining hook(year, persons, benunits, households) and returning (persons, benunits, households)."
-                },
-                "filters": {"type": "object", "description": "Filter rows. Keys are column names. Values: exact, list, range {min/max}, or comparison {gt/lt/gte/lte/ne}. E.g. {\"net_income_change\": {\"lt\": 0}}"},
-                "columns": {"type": "array", "items": {"type": "string"}},
-                "group_by": {"type": "array", "items": {"type": "string"}, "description": "Group results by these columns (works with sum/mean/count/crosstab)."},
-                "n": {"type": "integer", "default": 5},
-                "dataset": {"type": "string", "enum": ["frs", "efrs", "spi", "lcfs", "was"], "description": "Dataset. 'frs' (default): Family Resources Survey. 'efrs': Enhanced FRS with imputed wealth and consumption. 'spi': Survey of Personal Incomes (entity must be 'persons'). 'lcfs': Living Costs and Food Survey. 'was': Wealth and Assets Survey.", "default": "frs"},
-            },
-            "required": ["entity", "operation"],
-        },
-    },
-    {
-        "name": "generate_chart",
-        "description": "Generate an interactive chart from data. Use 'step' curve for policy rates/thresholds; 'linear' for simulated income/tax. Title must be an active finding, not a generic label. ALWAYS set explicit x.min/x.max and y.min/y.max appropriate to your data — never leave axis ranges unset (d3 defaults to nonsensical ranges like 0–2500 for year axes).",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "chart_type": {"type": "string", "enum": ["line", "bar", "area"]},
-                "title": {"type": "string"},
-                "data": {"type": "array", "items": {"type": "object"}},
-                "x_field": {"type": "string"},
-                "y_fields": {"type": "array", "items": {"type": "string"}},
-                "x_label": {"type": "string"},
-                "y_label": {"type": "string"},
-                "x_format": {"type": "string", "enum": ["currency", "percent", "percent_decimal", "number", "compact", "year"]},
-                "y_format": {"type": "string", "enum": ["currency", "percent", "percent_decimal", "number", "compact", "year"]},
-                "x_min": {"type": "number", "description": "Explicit x-axis minimum. Always set for time-series (set to first year in data) and income axes (set to 0)."},
-                "x_max": {"type": "number", "description": "Explicit x-axis maximum. Always set to last year in data or highest income value."},
-                "y_min": {"type": "number", "description": "Explicit y-axis minimum. Default to 0 unless the data is naturally bounded above zero with small variation."},
-                "y_max": {"type": "number", "description": "Explicit y-axis maximum. Set slightly above the highest data value."},
-                "series_labels": {"type": "array", "items": {"type": "string"}},
-                "series_styles": {"type": "array", "items": {"type": "string", "enum": ["solid", "dashed", "dotted"]}},
-                "series_curves": {"type": "array", "items": {"type": "string", "enum": ["step", "linear", "smooth"]}},
-                "source": {"type": "string"},
-                "arrangement": {"type": "string", "enum": ["grouped", "stacked"]},
-                "area_fill": {"type": "boolean"},
-            },
-            "required": ["chart_type", "title", "data", "x_field", "y_fields"],
-        },
-    },
-    {
         "name": "run_python",
-        "description": "Execute Python code for data processing, maths, and analysis. ALWAYS use this instead of doing arithmetic in your head — even for simple calculations. numpy is available as `np`. Assign the final answer to a variable called `result`. You can also use `print()` for intermediate output. No file or network access. 30-second time limit.",
+        "description": "Execute reproducible Python code using the official PolicyEngine UK compiled interface. The environment preloads `policyengine_uk_compiled` as `pe`, plus `Simulation`, `Parameters`, `StructuralReform`, `aggregate_microdata`, `combine_microdata`, `capabilities`, `ensure_dataset`, `pd`, `np`, `json`, and `math`. Assign the final answer to `result` and use `print()` for intermediate output.",
         "input_schema": {
             "type": "object",
             "properties": {
-                "code": {"type": "string", "description": "Python code to execute. Must assign final answer to `result`. numpy available as `np`. Example: 'import numpy as np\\ncpi = np.array([100, 102, 105])\\nresult = list(np.diff(cpi) / cpi[:-1] * 100)'"},
+                "code": {"type": "string", "description": "Python code to execute. Must assign the final answer to `result`. Use the preloaded PolicyEngine interface directly, for example: `sim = Simulation(year=2025)` or `policy = Parameters.model_validate({...})`."},
             },
             "required": ["code"],
         },
