@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -44,6 +44,14 @@ interface ConversationSummary {
 
 interface ConversationDetail extends ConversationSummary {
   messages: Array<{ role: string; content: string; events?: StreamEvent[] }>;
+}
+
+interface ReportConversationResponse {
+  share_token: string;
+  share_url: string | null;
+  issue_title: string;
+  issue_body: string;
+  issue_url: string;
 }
 
 function formatRelativeTime(isoString: string): string {
@@ -150,6 +158,10 @@ export default function ChatPage() {
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState<string | null>(null);
   const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [reportOpen, setReportOpen] = useState(false);
+  const [reportNote, setReportNote] = useState("");
+  const [reportError, setReportError] = useState<string | null>(null);
+  const [reportSubmitting, setReportSubmitting] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sessionId = useRef<string | null>(null);
@@ -255,9 +267,9 @@ export default function ChatPage() {
     } catch (e) { console.error(e); }
   };
 
-  const saveConversation = useCallback(async (msgs: Message[], sid: string) => {
+  const saveConversation = useCallback(async (msgs: Message[], sid: string): Promise<ConversationDetail | null> => {
     const firstUserMsg = msgs.find((m) => m.role === "user");
-    if (!firstUserMsg) return;
+    if (!firstUserMsg) return null;
     const firstAssistantMsg = msgs.find((m) => m.role === "assistant");
     const firstAssistantContent = (() => {
       if (!firstAssistantMsg?.isComplete || !firstAssistantMsg.events?.length) return firstAssistantMsg?.content;
@@ -283,12 +295,45 @@ export default function ChatPage() {
     try {
       const saved = await apiRequest<ConversationDetail>("POST", "conversations", undefined, { session_id: sid, title, messages: apiMessages, user_id: user?.id, user_email: user?.email });
       setActiveConversationId(saved.id);
+      conversationCache.current.set(saved.id, saved);
       setConversations((prev) => {
         const filtered = prev.filter((c) => c.session_id !== sid);
         return [{ id: saved.id, session_id: sid, title, created_at: saved.created_at, updated_at: saved.updated_at }, ...filtered];
       });
+      return saved;
     } catch (e) { console.error("Failed to save conversation", e); }
+    return null;
   }, [user]);
+
+  const ensureConversationForReport = useCallback(async (): Promise<number | null> => {
+    if (activeConversationId) return activeConversationId;
+    if (!messages.length) return null;
+    const sid = sessionId.current || crypto.randomUUID();
+    sessionId.current = sid;
+    const saved = await saveConversation(messages.map((m) => ({ ...m, isComplete: m.isComplete ?? true })), sid);
+    return saved?.id ?? null;
+  }, [activeConversationId, messages, saveConversation]);
+
+  const submitReport = useCallback(async () => {
+    setReportSubmitting(true);
+    setReportError(null);
+    try {
+      const conversationId = await ensureConversationForReport();
+      if (!conversationId) throw new Error("Could not save this thread for reporting.");
+      const data = await apiRequest<ReportConversationResponse>("POST", `conversations/${conversationId}/report`, undefined, {
+        user_id: user?.id,
+        note: reportNote.trim() || null,
+        app_url: window.location.origin,
+      });
+      window.open(data.issue_url, "_blank", "noopener,noreferrer");
+      setReportOpen(false);
+      setReportNote("");
+    } catch (e) {
+      setReportError(e instanceof Error ? e.message : "Failed to prepare issue");
+    } finally {
+      setReportSubmitting(false);
+    }
+  }, [ensureConversationForReport, reportNote, user]);
 
   const startNewChat = () => {
     setMessages([]);
@@ -819,6 +864,15 @@ export default function ChatPage() {
                   ← History
                 </button>
               )}
+              <button
+                onClick={() => { setReportError(null); setReportOpen(true); }}
+                disabled={isStreaming}
+                style={{ fontSize: "12px", color: isStreaming ? "#d1d5db" : "#9e9a90", background: "none", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", padding: "0", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                title="Report this thread"
+              >
+                <IconBug size={12} />
+                Report issue
+              </button>
             </div>
           )}
 
@@ -931,6 +985,44 @@ export default function ChatPage() {
               ) : (
                 <>Have an account? <button onClick={() => { setAuthMode("signin"); setAuthError(null); }} style={{ color: THEME.primary, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px" }}>Sign in</button></>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {reportOpen && (
+        <div onClick={() => !reportSubmitting && setReportOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", padding: "28px", width: "520px", maxWidth: "92vw", border: `1px solid ${THEME.border}` }}>
+            <h2 style={{ margin: "0 0 10px", fontSize: "18px", fontWeight: 600, color: THEME.text }}>Report this thread</h2>
+            <p style={{ margin: "0 0 14px", fontSize: "14px", lineHeight: 1.6, color: THEME.text3 }}>
+              This will open a prefilled GitHub issue with a link to the shared thread and the most relevant parts of the conversation so we can debug it later.
+            </p>
+            <textarea
+              value={reportNote}
+              onChange={(e) => setReportNote(e.target.value)}
+              placeholder="What looks off? For example: the budget impact seems too high, the answer ignored Scotland, or the explanation contradicts the chart."
+              rows={5}
+              style={{ width: "100%", padding: "12px", fontSize: "14px", border: `1px solid ${THEME.border}`, fontFamily: "inherit", boxSizing: "border-box", resize: "vertical", color: THEME.text, lineHeight: 1.5 }}
+            />
+            {reportError && (
+              <div style={{ marginTop: "10px", fontSize: "13px", color: "#b91c1c" }}>{reportError}</div>
+            )}
+            <div style={{ marginTop: "16px", display: "flex", justifyContent: "flex-end", gap: "10px" }}>
+              <button
+                onClick={() => setReportOpen(false)}
+                disabled={reportSubmitting}
+                style={{ fontSize: "13px", padding: "8px 12px", border: `1px solid ${THEME.border}`, background: "#fff", color: THEME.text3, cursor: reportSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit" }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={submitReport}
+                disabled={reportSubmitting}
+                style={{ fontSize: "13px", padding: "8px 12px", border: "none", background: THEME.primaryGradient, color: "#fff", cursor: reportSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "6px", opacity: reportSubmitting ? 0.7 : 1 }}
+              >
+                {reportSubmitting ? <Loader size={12} color="#fff" /> : <IconBug size={13} />}
+                Open GitHub issue
+              </button>
             </div>
           </div>
         </div>
