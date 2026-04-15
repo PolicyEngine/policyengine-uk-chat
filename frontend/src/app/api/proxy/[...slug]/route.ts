@@ -20,7 +20,7 @@ function getBackendUrl(): string {
   const gitRef = process.env.VERCEL_GIT_COMMIT_REF;
   if (vercelEnv === "preview" && gitRef) {
     const branchSlug = slugifyBranchName(gitRef);
-    return `https://policyengine--policyengine-uk-chat-beta-${branchSlug}-web.modal.run`;
+    return `https://policyengine--peukchat-${branchSlug}-web.modal.run`;
   }
 
   return "http://localhost:8080";
