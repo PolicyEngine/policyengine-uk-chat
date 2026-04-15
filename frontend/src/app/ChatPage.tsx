@@ -4,7 +4,6 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
 import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
-import { getSupabase } from "@/utils/supabase";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
@@ -109,6 +108,14 @@ interface Message {
   cost_gbp?: number;
 }
 
+interface BalanceSummary {
+  balance_gbp: number;
+  free_tier_used_gbp: number;
+  free_tier_remaining_gbp: number;
+  spent_this_month_gbp: number;
+  total_available_gbp: number;
+}
+
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
   const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001";
   const url = new URL(`${backendBase}/${endpoint}`);
@@ -150,23 +157,15 @@ export default function ChatPage() {
   const abortRef = useRef<AbortController | null>(null);
 
   const [modelVersion, setModelVersion] = useState<string | null>(null);
-  const [balance, setBalance] = useState<{ balance_gbp: number; free_tier_remaining_gbp: number; total_available_gbp: number } | null>(null);
+  const [balance, setBalance] = useState<BalanceSummary | null>(null);
   const [topUpLoading, setTopUpLoading] = useState(false);
   const hasMessages = messages.length > 0;
   const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, !hasMessages && !input);
 
   const fetchBalance = useCallback(async () => {
     if (!user) return;
-    const sb = getSupabase();
-    if (!sb) return;
-    const { data } = await sb.from("user_credits").select("*").eq("user_id", user.id).maybeSingle();
-    if (data) {
-      const FREE_TIER = 5.0;
-      const freeRemaining = Math.max(0, FREE_TIER - (data.free_tier_used_gbp || 0));
-      setBalance({ balance_gbp: data.balance_gbp || 0, free_tier_remaining_gbp: freeRemaining, total_available_gbp: (data.balance_gbp || 0) + freeRemaining });
-    } else {
-      setBalance({ balance_gbp: 0, free_tier_remaining_gbp: 5.0, total_available_gbp: 5.0 });
-    }
+    const data = await apiRequest<BalanceSummary>("GET", "billing/balance", { user_id: user.id });
+    setBalance(data);
   }, [user]);
 
   const handleTopUp = async (amount: number = 5) => {
@@ -437,9 +436,7 @@ export default function ChatPage() {
               displayedText = currentText;
               updateMessage();
               if (data.session_id) sessionId.current = data.session_id;
-              // Compute message cost
-              const usage = data.usage;
-              const msgCost = usage ? (usage.input_tokens * 3.0 / 1_000_000 + usage.output_tokens * 15.0 / 1_000_000) * 0.79 : undefined;
+              const msgCost = typeof data.cost_gbp === "number" ? data.cost_gbp : undefined;
               const hasTools = events.some((e) => e.type === "tool");
               if (hasTools) {
                 setMessages((prev) => {
@@ -461,7 +458,8 @@ export default function ChatPage() {
                 const finalMsgs = [...allMessages, { role: "assistant" as const, content: currentText, isComplete: true, events: [...events] }];
                 saveConversation(finalMsgs, data.session_id);
               }
-              fetchBalance();
+              if (data.balance) setBalance(data.balance);
+              else fetchBalance();
               setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 100);
             } else if (data.type === "error") {
               const errorText = `Error: ${data.content || "Something went wrong"}`;
@@ -749,7 +747,7 @@ export default function ChatPage() {
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 {balance && (
                   <span style={{ fontSize: "12px", color: balance.total_available_gbp > 0.5 ? "#6b7280" : "#b91c1c", fontVariantNumeric: "tabular-nums" }}>
-                    {balance.total_available_gbp <= 0 ? "No credit" : `£${balance.total_available_gbp.toFixed(2)}`}
+                    {balance.total_available_gbp <= 0 ? "No credit" : `£${balance.total_available_gbp.toFixed(3)} remaining`}
                   </span>
                 )}
                 <span style={{ fontSize: "13px", color: "#6b7280" }}>{user.email}</span>
