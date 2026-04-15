@@ -39,27 +39,6 @@ def _get_cached_microdata(year: int, reform: Optional[Dict[str, Any]], dataset: 
     return _microdata_cache[key]
 
 
-def _build_structural_reform(code: str):
-    """Compile user-supplied Python code into a StructuralReform."""
-    from policyengine_uk_compiled import StructuralReform
-    import pandas as _pd
-    import numpy as _np
-    import math as _math
-    safe_builtins = {k: __builtins__[k] for k in (
-        "range", "len", "int", "float", "str", "bool", "list", "dict",
-        "tuple", "set", "enumerate", "zip", "map", "filter", "sorted",
-        "min", "max", "sum", "abs", "round", "print", "isinstance", "type",
-        "None", "True", "False",
-    ) if k in ((__builtins__ if isinstance(__builtins__, dict) else vars(__builtins__)))}
-    ns: dict = {"pd": _pd, "np": _np, "math": _math, "__builtins__": safe_builtins}
-    exec(compile(code, "<structural_reform>", "exec"), ns)
-    pre_fn = ns.get("pre")
-    post_fn = ns.get("post")
-    if pre_fn is None and post_fn is None:
-        raise ValueError("structural_reform code must define at least a pre() or post() function")
-    return StructuralReform(pre=pre_fn, post=post_fn)
-
-
 def get_capabilities() -> Dict[str, Any]:
     try:
         from policyengine_uk_compiled import capabilities
@@ -227,27 +206,106 @@ def calculate_household(
         logger.error(f"Error in calculate_household: {e}")
         import traceback; logger.error(traceback.format_exc())
         return {"error": str(e)}
-
-
 def _build_simulation(year: int, dataset: str = "frs"):
     """Build a Simulation with the right data source and CLI flags."""
     from policyengine_uk_compiled import Simulation
     return Simulation(year=year, dataset=dataset)
 
 
-def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = None, dataset: str = "efrs", structural=None) -> Dict[str, Any]:
+def _compile_structural_hook(code: str):
+    """Compile a structural hook from code defining `hook(...)`.
+
+    The hook signature must be:
+        hook(year, persons, benunits, households) -> (persons, benunits, households)
+    """
+    import math
+    import builtins as _builtins
+
+    safe_names = (
+        "range", "len", "int", "float", "str", "bool", "list", "dict",
+        "tuple", "set", "zip", "enumerate", "map", "filter", "sorted",
+        "reversed", "min", "max", "sum", "abs", "round", "True", "False",
+        "None", "isinstance", "ValueError", "TypeError", "print",
+        "any", "all", "pow", "divmod",
+    )
+    safe_builtins = {k: getattr(_builtins, k) for k in safe_names if hasattr(_builtins, k)}
+
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
+
+    try:
+        import pandas as pd
+    except ImportError as e:
+        raise ImportError("pandas is required for structural reform hooks") from e
+
+    allowed_globals: Dict[str, Any] = {
+        "__builtins__": safe_builtins,
+        "math": math,
+        "json": json,
+        "pd": pd,
+    }
+    if np is not None:
+        allowed_globals["np"] = np
+        allowed_globals["numpy"] = np
+
+    exec(code, allowed_globals)
+    hook = allowed_globals.get("hook")
+    if hook is None or not callable(hook):
+        raise ValueError("Structural hook code must define a callable `hook(year, persons, benunits, households)`")
+    return hook
+
+
+def _build_structural_reform(structural_reform: Optional[Dict[str, Any]]):
+    if not structural_reform:
+        return None
+    if not isinstance(structural_reform, dict):
+        raise ValueError(f"structural_reform must be a dict, got {type(structural_reform).__name__}")
+
+    unknown = set(structural_reform) - {"pre", "post"}
+    if unknown:
+        raise ValueError(f"Unknown structural_reform field(s): {sorted(unknown)}. Valid: ['pre', 'post']")
+
+    from policyengine_uk_compiled import StructuralReform
+
+    pre = structural_reform.get("pre")
+    post = structural_reform.get("post")
+    if pre is not None and not isinstance(pre, str):
+        raise ValueError("structural_reform.pre must be a string of Python code defining hook(...)")
+    if post is not None and not isinstance(post, str):
+        raise ValueError("structural_reform.post must be a string of Python code defining hook(...)")
+
+    return StructuralReform(
+        pre=_compile_structural_hook(pre) if pre else None,
+        post=_compile_structural_hook(post) if post else None,
+    )
+
+
+def run_economy_simulation(
+    year: int = 2025,
+    reform: Optional[Dict[str, Any]] = None,
+    dataset: str = "frs",
+    structural_reform: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     try:
         policy = _build_compiled_policy(reform)
-
+        structural = _build_structural_reform(structural_reform)
+        sim = _build_simulation(year, dataset)
+        # Always run baseline to compute program-level changes
+        baseline_result = sim.run()
         if structural is not None:
-            from policyengine_uk_compiled.structural import aggregate_microdata
-            baseline_md = _get_cached_microdata(year, None, dataset)
-            reform_md = _get_cached_microdata(year, reform, dataset, structural=structural)
-            baseline_result = aggregate_microdata(baseline_md.persons, baseline_md.benunits, baseline_md.households, year)
-            reform_result = aggregate_microdata(reform_md.persons, reform_md.benunits, reform_md.households, year)
+            from policyengine_uk_compiled import aggregate_microdata, combine_microdata
+            baseline_microdata = sim.run_microdata()
+            reform_microdata = sim.run_microdata(policy=policy, structural=structural)
+            combined_microdata = combine_microdata(baseline_microdata, reform_microdata)
+            reform_result = aggregate_microdata(
+                combined_microdata.persons,
+                combined_microdata.benunits,
+                combined_microdata.households,
+                year,
+            )
         else:
-            sim = _build_simulation(year, dataset)
-            baseline_result = sim.run()
             reform_result = sim.run(policy=policy) if policy else baseline_result
 
         baseline_breakdown = baseline_result.program_breakdown.model_dump()
@@ -266,9 +324,11 @@ def run_economy_simulation(year: int = 2025, reform: Optional[Dict[str, Any]] = 
             "decile_impacts": [d.model_dump() for d in reform_result.decile_impacts],
             "winners_losers": reform_result.winners_losers.model_dump(),
             "caseloads": reform_result.caseloads.model_dump(),
-            "hbai_incomes": reform_result.hbai_incomes.model_dump(),
+            "baseline_hbai_incomes": baseline_result.baseline_hbai_incomes.model_dump(),
+            "reform_hbai_incomes": reform_result.reform_hbai_incomes.model_dump(),
             "baseline_poverty": baseline_result.baseline_poverty.model_dump(),
             "reform_poverty": reform_result.reform_poverty.model_dump(),
+            "structural_reform_applied": structural is not None,
         }
     except FileNotFoundError as e:
         return {"error": f"{dataset.upper()} microdata not available", "detail": str(e), "hint": "Ensure POLICYENGINE_UK_DATA_TOKEN is set."}
@@ -283,17 +343,26 @@ def analyse_microdata(
     operation: str,
     year: int = 2025,
     reform: Optional[Dict[str, Any]] = None,
+    structural_reform: Optional[Dict[str, Any]] = None,
     filters: Optional[Dict[str, Any]] = None,
     columns: Optional[List[str]] = None,
     group_by: Optional[List[str]] = None,
     n: int = 5,
-    dataset: str = "efrs",
-    structural=None,
+    dataset: str = "frs",
 ) -> Dict[str, Any]:
     try:
         import pandas as pd
 
-        microdata = _get_cached_microdata(year, reform, dataset, structural=structural)
+        policy = _build_compiled_policy(reform)
+        structural = _build_structural_reform(structural_reform)
+        if structural is not None:
+            from policyengine_uk_compiled import combine_microdata
+            sim = _build_simulation(year, dataset)
+            baseline_microdata = sim.run_microdata()
+            reform_microdata = sim.run_microdata(policy=policy, structural=structural)
+            microdata = combine_microdata(baseline_microdata, reform_microdata)
+        else:
+            microdata = _get_cached_microdata(year, reform, dataset)
 
         entity_map = {"persons": microdata.persons, "benunits": microdata.benunits, "households": microdata.households}
         if entity not in entity_map:
@@ -373,7 +442,7 @@ def analyse_microdata(
             return {"error": f"Unknown operation '{operation}'. Use: mean, sum, count, sample, describe"}
 
         dataset_labels = {"frs": "Family Resources Survey", "efrs": "Enhanced FRS", "spi": "Survey of Personal Incomes", "lcfs": "Living Costs and Food Survey", "was": "Wealth and Assets Survey"}
-        return {"entity": entity, "operation": operation, "year": year, "dataset": dataset_labels.get(dataset, dataset), "reform_applied": reform is not None, "filters_applied": filters_applied, "row_count": row_count, "weighted_count": weighted_count, "result": result, "available_columns": all_cols}
+        return {"entity": entity, "operation": operation, "year": year, "dataset": dataset_labels.get(dataset, dataset), "reform_applied": reform is not None, "structural_reform_applied": structural is not None, "filters_applied": filters_applied, "row_count": row_count, "weighted_count": weighted_count, "result": result, "available_columns": all_cols}
     except Exception as e:
         logger.error(f"Error in analyse_microdata: {e}")
         import traceback; logger.error(traceback.format_exc())
@@ -532,11 +601,6 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name not in tools:
         return {"error": f"Unknown tool: {tool_name}"}
     try:
-        # Compile structural_reform code into a StructuralReform object
-        if "structural_reform" in tool_input:
-            tool_input = dict(tool_input)
-            structural_code = tool_input.pop("structural_reform")
-            tool_input["structural"] = _build_structural_reform(structural_code)
         # If input contains a generator, execute it to produce the real kwargs
         if "generator" in tool_input:
             logger.info(f"[TOOLS] Running generator for {tool_name}")
@@ -581,20 +645,23 @@ TOOL_DEFINITIONS = [
     },
     {
         "name": "run_economy_simulation",
-        "description": "Run an economy-wide UK microsimulation. Returns budgetary impact, program breakdown, decile impacts, winners/losers, and caseloads.",
+        "description": "Run an economy-wide UK microsimulation. Returns budgetary impact, program breakdown, decile impacts, winners/losers, caseloads, and HBAI incomes. Supports both parametric reforms and structural reforms via Python pre/post hooks.",
         "input_schema": {
             "type": "object",
             "properties": {
                 "year": {"type": "integer", "description": "Fiscal year. Default: 2025 (current FY).", "default": 2025},
                 "reform": {"type": "object", "description": "Optional policy reform. Top-level keys: income_tax, national_insurance, universal_credit, child_benefit, state_pension, pension_credit, benefit_cap, housing_benefit, tax_credits, scottish_child_payment."},
-                "dataset": {"type": "string", "enum": ["efrs", "frs", "spi", "lcfs", "was"], "description": "Dataset. 'efrs' (default, gold standard): Enhanced FRS with wealth and consumption. 'frs': Family Resources Survey, use for pre-2023 years or cross-checking. 'spi': Survey of Personal Incomes, person-level only (tax/NI, no benefits), best for high earners. 'lcfs': consumption/VAT analysis. 'was': wealth/asset analysis.", "default": "efrs"},
-                "structural_reform": {"type": "string", "description": "Python code defining pre(year, persons, benunits, households) and/or post(year, persons, benunits, households) hooks. Both return (persons, benunits, households). pandas (pd) and numpy (np) available. Use for reforms that can't be expressed as parameter changes (e.g. UBI, new benefits, structural population changes)."},
+                "structural_reform": {
+                    "type": "object",
+                    "description": "Optional structural reform using Python hooks. Fields: pre and/or post. Each must be a string defining hook(year, persons, benunits, households) and returning (persons, benunits, households). Use pre to change inputs before simulation; use post to alter output microdata after simulation."
+                },
+                "dataset": {"type": "string", "enum": ["frs", "efrs", "spi", "lcfs", "was"], "description": "Dataset. 'frs' (default): Family Resources Survey, ~20k households. 'efrs': Enhanced FRS with imputed wealth and consumption. 'spi': Survey of Personal Incomes, person-level only (tax/NI, no benefits). 'lcfs': Living Costs and Food Survey, ~4k households with consumption data. 'was': Wealth and Assets Survey with wealth/savings data.", "default": "frs"},
             },
         },
     },
     {
         "name": "analyse_microdata",
-        "description": "Run an economy-wide simulation and analyse the resulting person/benunit/household microdata. Automatically computes change columns (net_income_change, income_tax_change, total_benefits_change). Results are cached — repeated calls with the same year/reform/dataset are instant. Use to answer: 'Who loses?', 'Average age of losers?', 'Show me an example household that benefits'.",
+        "description": "Run an economy-wide simulation and analyse the resulting person/benunit/household microdata. Supports structural reforms as well as parametric reforms. Automatically computes change columns (net_income_change, income_tax_change, total_benefits_change). Use this for custom analysis beyond headline outputs.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -602,12 +669,15 @@ TOOL_DEFINITIONS = [
                 "operation": {"type": "string", "enum": ["mean", "sum", "count", "sample", "describe", "crosstab"], "description": "Aggregation. Use 'crosstab' with group_by=[row, col] for pivot tables."},
                 "year": {"type": "integer", "default": 2025},
                 "reform": {"type": "object"},
+                "structural_reform": {
+                    "type": "object",
+                    "description": "Optional structural reform using Python hooks. Fields: pre and/or post. Each must be a string defining hook(year, persons, benunits, households) and returning (persons, benunits, households)."
+                },
                 "filters": {"type": "object", "description": "Filter rows. Keys are column names. Values: exact, list, range {min/max}, or comparison {gt/lt/gte/lte/ne}. E.g. {\"net_income_change\": {\"lt\": 0}}"},
                 "columns": {"type": "array", "items": {"type": "string"}},
                 "group_by": {"type": "array", "items": {"type": "string"}, "description": "Group results by these columns (works with sum/mean/count/crosstab)."},
                 "n": {"type": "integer", "default": 5},
-                "dataset": {"type": "string", "enum": ["efrs", "frs", "spi", "lcfs", "was"], "description": "Dataset. 'efrs' (default, gold standard). 'frs' for pre-2023 or cross-checking. 'spi' (entity must be 'persons'). 'lcfs' for consumption. 'was' for wealth.", "default": "efrs"},
-                "structural_reform": {"type": "string", "description": "Same as run_economy_simulation. Pass the same string to guarantee both tools use the same microdata run."},
+                "dataset": {"type": "string", "enum": ["frs", "efrs", "spi", "lcfs", "was"], "description": "Dataset. 'frs' (default): Family Resources Survey. 'efrs': Enhanced FRS with imputed wealth and consumption. 'spi': Survey of Personal Incomes (entity must be 'persons'). 'lcfs': Living Costs and Food Survey. 'was': Wealth and Assets Survey.", "default": "frs"},
             },
             "required": ["entity", "operation"],
         },
