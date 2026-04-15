@@ -8,6 +8,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Chart, extractChartSpecs } from "@/components/charts";
 import { THEME } from "@/components/theme";
+import { getBackendEndpoint } from "@/utils/backend";
 
 interface SharedConversation {
   title: string;
@@ -114,8 +115,7 @@ export default function SharedConversationPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001";
-    fetch(`${backendBase}/conversations/shared/${token}`)
+    fetch(getBackendEndpoint(`conversations/shared/${token}`))
       .then((res) => {
         if (!res.ok) throw new Error(res.status === 404 ? "Conversation not found" : "Failed to load");
         return res.json();

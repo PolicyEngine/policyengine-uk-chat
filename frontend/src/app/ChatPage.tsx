@@ -10,6 +10,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Chart, extractChartSpecs, ChartSpec } from "@/components/charts";
 import { THEME } from "@/components/theme";
+import { getBackendEndpoint } from "@/utils/backend";
 
 const EXAMPLE_QUERIES = [
   "What's the current personal allowance?",
@@ -125,8 +126,7 @@ interface BalanceSummary {
 }
 
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
-  const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001";
-  const url = new URL(`${backendBase}/${endpoint}`);
+  const url = new URL(getBackendEndpoint(endpoint), window.location.origin);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
   const options: RequestInit = { method, headers: { "Content-Type": "application/json" } };
   if (body && ["POST", "PUT", "PATCH"].includes(method)) options.body = JSON.stringify(body);
@@ -415,9 +415,7 @@ export default function ChatPage() {
     abortRef.current = controller;
 
     try {
-      // Hit the backend directly for SSE to avoid Next.js proxy buffering
-      const backendBase = process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:8001";
-      const response = await fetch(`${backendBase}/chat/message`, {
+      const response = await fetch(getBackendEndpoint("chat/message"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null }),

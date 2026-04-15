@@ -34,13 +34,25 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           POLICYENGINE_UK_DATA_TOKEN: ${{ secrets.POLICYENGINE_UK_DATA_TOKEN }}
           DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
         run: |
           modal secret create policyengine-uk-chat-secrets \
             ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-            ANTHROPIC_MODEL="claude-sonnet-4-6" \
+            ANTHROPIC_FAST_MODEL="claude-haiku-4-5" \
+            ANTHROPIC_COMPLEX_MODEL="claude-sonnet-4-6" \
+            ANTHROPIC_TITLE_MODEL="claude-haiku-4-5" \
+            ANTHROPIC_DEFAULT_MODEL="claude-haiku-4-5" \
             POLICYENGINE_UK_DATA_TOKEN="$POLICYENGINE_UK_DATA_TOKEN" \
             DATABASE_URL="$DATABASE_URL" \
+            SUPABASE_URL="$SUPABASE_URL" \
+            SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
+            STRIPE_SECRET_KEY="$STRIPE_SECRET_KEY" \
+            STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
             HOSTNAMES="https://policyengine-uk-chat.vercel.app,https://policyengine-uk-chat-bmxyy36r1-policy-engine.vercel.app" \
+            PUBLIC_BASE_URL="https://policyengine-uk-chat.vercel.app" \
             --force
 
       - name: Deploy to Modal

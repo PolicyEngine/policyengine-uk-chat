@@ -3,9 +3,15 @@ Modal deployment for policyengine-uk-chat.
 Deploys the FastAPI backend as a Modal ASGI app.
 """
 
+import os
+
 import modal
 
-app = modal.App("policyengine-uk-chat")
+
+APP_NAME = os.environ.get("POLICYENGINE_UK_CHAT_MODAL_APP_NAME", "policyengine-uk-chat")
+SECRET_NAME = os.environ.get("POLICYENGINE_UK_CHAT_MODAL_SECRET_NAME", "policyengine-uk-chat-secrets")
+
+app = modal.App(APP_NAME)
 
 
 def _preload_engine():
@@ -38,7 +44,7 @@ image = (
     .add_local_dir("backend", remote_path="/app/backend", copy=True)
 )
 
-chat_secrets = modal.Secret.from_name("policyengine-uk-chat-secrets")
+chat_secrets = modal.Secret.from_name(SECRET_NAME)
 
 
 @app.function(

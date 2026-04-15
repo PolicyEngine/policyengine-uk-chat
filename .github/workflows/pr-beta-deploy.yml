@@ -1,0 +1,295 @@
+name: Deploy PR beta preview
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+      - closed
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-beta-preview-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+env:
+  MODAL_APP_NAME: policyengine-uk-chat-beta-pr-${{ github.event.pull_request.number }}
+  MODAL_SECRET_NAME: policyengine-uk-chat-secrets-beta-pr-${{ github.event.pull_request.number }}
+  PREVIEW_COMMENT_MARKER: "<!-- pr-beta-preview -->"
+
+jobs:
+  deploy:
+    name: Deploy beta preview
+    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deploy CLIs
+        run: |
+          pip install modal
+          npm install --global vercel@latest
+
+      - name: Seed Modal secret for preview deploy
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          POLICYENGINE_UK_DATA_TOKEN: ${{ secrets.POLICYENGINE_UK_DATA_TOKEN }}
+          DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+        run: |
+          modal secret create "$MODAL_SECRET_NAME" \
+            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            ANTHROPIC_FAST_MODEL="claude-haiku-4-5" \
+            ANTHROPIC_COMPLEX_MODEL="claude-sonnet-4-6" \
+            ANTHROPIC_TITLE_MODEL="claude-haiku-4-5" \
+            ANTHROPIC_DEFAULT_MODEL="claude-haiku-4-5" \
+            POLICYENGINE_UK_DATA_TOKEN="$POLICYENGINE_UK_DATA_TOKEN" \
+            DATABASE_URL="$DATABASE_URL" \
+            SUPABASE_URL="$SUPABASE_URL" \
+            SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
+            STRIPE_SECRET_KEY="$STRIPE_SECRET_KEY" \
+            STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
+            HOSTNAMES="https://policyengine-uk-chat.vercel.app" \
+            PUBLIC_BASE_URL="https://policyengine-uk-chat.vercel.app" \
+            --force
+
+      - name: Deploy backend preview to Modal
+        id: modal_deploy
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          set -euo pipefail
+          log_file="$(mktemp)"
+          POLICYENGINE_UK_CHAT_MODAL_APP_NAME="$MODAL_APP_NAME" \
+          POLICYENGINE_UK_CHAT_MODAL_SECRET_NAME="$MODAL_SECRET_NAME" \
+          modal deploy modal_app.py --name "$MODAL_APP_NAME" 2>&1 | tee "$log_file"
+
+          modal_url="$(python - "$log_file" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text()
+          text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+          matches = re.findall(r"https://[^\s\"')]*modal\.run[^\s\"')]*", text)
+          print(matches[-1] if matches else "")
+          PY
+          )"
+
+          if [ -z "$modal_url" ]; then
+            echo "Could not determine Modal preview URL from deploy output." >&2
+            exit 1
+          fi
+
+          echo "modal_url=$modal_url" >> "$GITHUB_OUTPUT"
+
+      - name: Pull Vercel preview settings
+        working-directory: frontend
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: vercel pull --yes --environment=preview --git-branch="${GITHUB_HEAD_REF}" --token="$VERCEL_TOKEN"
+
+      - name: Deploy frontend preview to Vercel
+        id: vercel_deploy
+        working-directory: frontend
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          BACKEND_URL: ${{ steps.modal_deploy.outputs.modal_url }}
+        run: |
+          set -euo pipefail
+          log_file="$(mktemp)"
+          vercel deploy --yes --token="$VERCEL_TOKEN" --env BACKEND_URL="$BACKEND_URL" 2>&1 | tee "$log_file"
+
+          frontend_url="$(python - "$log_file" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          text = pathlib.Path(sys.argv[1]).read_text()
+          text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
+          matches = re.findall(r"https://[^\s\"')]*vercel\.app", text)
+          print(matches[-1] if matches else "")
+          PY
+          )"
+
+          if [ -z "$frontend_url" ]; then
+            echo "Could not determine Vercel preview URL from deploy output." >&2
+            exit 1
+          fi
+
+          echo "frontend_url=$frontend_url" >> "$GITHUB_OUTPUT"
+
+      - name: Update Modal secret with preview frontend URL
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          POLICYENGINE_UK_DATA_TOKEN: ${{ secrets.POLICYENGINE_UK_DATA_TOKEN }}
+          DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
+          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
+          FRONTEND_URL: ${{ steps.vercel_deploy.outputs.frontend_url }}
+        run: |
+          modal secret create "$MODAL_SECRET_NAME" \
+            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
+            ANTHROPIC_FAST_MODEL="claude-haiku-4-5" \
+            ANTHROPIC_COMPLEX_MODEL="claude-sonnet-4-6" \
+            ANTHROPIC_TITLE_MODEL="claude-haiku-4-5" \
+            ANTHROPIC_DEFAULT_MODEL="claude-haiku-4-5" \
+            POLICYENGINE_UK_DATA_TOKEN="$POLICYENGINE_UK_DATA_TOKEN" \
+            DATABASE_URL="$DATABASE_URL" \
+            SUPABASE_URL="$SUPABASE_URL" \
+            SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
+            STRIPE_SECRET_KEY="$STRIPE_SECRET_KEY" \
+            STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
+            HOSTNAMES="$FRONTEND_URL" \
+            PUBLIC_BASE_URL="$FRONTEND_URL" \
+            --force
+
+      - name: Refresh backend preview with preview frontend URL
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          POLICYENGINE_UK_CHAT_MODAL_APP_NAME="$MODAL_APP_NAME" \
+          POLICYENGINE_UK_CHAT_MODAL_SECRET_NAME="$MODAL_SECRET_NAME" \
+          modal deploy modal_app.py --name "$MODAL_APP_NAME"
+
+      - name: Add deploy summary
+        run: |
+          {
+            echo "## Beta preview"
+            echo
+            echo "- Frontend: ${{ steps.vercel_deploy.outputs.frontend_url }}"
+            echo "- Backend: ${{ steps.modal_deploy.outputs.modal_url }}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Comment preview URLs on PR
+        uses: actions/github-script@v7
+        env:
+          FRONTEND_URL: ${{ steps.vercel_deploy.outputs.frontend_url }}
+          BACKEND_URL: ${{ steps.modal_deploy.outputs.modal_url }}
+          PREVIEW_COMMENT_MARKER: ${{ env.PREVIEW_COMMENT_MARKER }}
+        with:
+          script: |
+            const marker = process.env.PREVIEW_COMMENT_MARKER;
+            const body = [
+              marker,
+              "Beta preview is ready.",
+              "",
+              `- Frontend: [open preview](${process.env.FRONTEND_URL})`,
+              `- Backend: [open backend](${process.env.BACKEND_URL})`,
+            ].join("\n");
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find((comment) =>
+              comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number,
+                body,
+              });
+            }
+
+  cleanup:
+    name: Clean up beta preview
+    if: github.event.action == 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install Modal
+        run: pip install modal
+
+      - name: Stop Modal preview app and delete preview secret
+        env:
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: |
+          modal app stop "$MODAL_APP_NAME" || true
+          modal secret delete "$MODAL_SECRET_NAME" --yes --allow-missing
+
+      - name: Update PR comment after cleanup
+        uses: actions/github-script@v7
+        env:
+          PREVIEW_COMMENT_MARKER: ${{ env.PREVIEW_COMMENT_MARKER }}
+        with:
+          script: |
+            const marker = process.env.PREVIEW_COMMENT_MARKER;
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find((comment) =>
+              comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body: [
+                  marker,
+                  "Beta preview has been cleaned up because this PR was closed.",
+                ].join("\n"),
+              });
+            }
