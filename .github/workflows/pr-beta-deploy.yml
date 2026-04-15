@@ -19,8 +19,6 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  MODAL_APP_NAME: policyengine-uk-chat-beta-pr-${{ github.event.pull_request.number }}
-  MODAL_SECRET_NAME: policyengine-uk-chat-secrets-beta-pr-${{ github.event.pull_request.number }}
   PREVIEW_COMMENT_MARKER: "<!-- pr-beta-preview -->"
 
 jobs:
@@ -38,18 +36,34 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
-      - name: Install deploy CLIs
+      - name: Compute preview names
+        id: names
+        env:
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
         run: |
-          pip install modal
-          npm install --global vercel@latest
+          branch_slug="$(python - <<'PY'
+          import os
+          import re
+
+          value = os.environ["BRANCH_NAME"].lower()
+          value = re.sub(r"[^a-z0-9]+", "-", value)
+          value = re.sub(r"^-+|-+$", "", value)
+          value = re.sub(r"-{2,}", "-", value)
+          print(value)
+          PY
+          )"
+          echo "branch_slug=$branch_slug" >> "$GITHUB_OUTPUT"
+          echo "modal_app_name=policyengine-uk-chat-beta-$branch_slug" >> "$GITHUB_OUTPUT"
+          echo "modal_secret_name=policyengine-uk-chat-secrets-beta-$branch_slug" >> "$GITHUB_OUTPUT"
+          echo "frontend_url=https://policyengine-uk-chat-git-$branch_slug-policy-engine.vercel.app" >> "$GITHUB_OUTPUT"
+
+      - name: Install Modal
+        run: pip install modal
 
       - name: Seed Modal secret for preview deploy
         env:
+          MODAL_APP_NAME: ${{ steps.names.outputs.modal_app_name }}
+          MODAL_SECRET_NAME: ${{ steps.names.outputs.modal_secret_name }}
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -79,6 +93,8 @@ jobs:
       - name: Deploy backend preview to Modal
         id: modal_deploy
         env:
+          MODAL_APP_NAME: ${{ steps.names.outputs.modal_app_name }}
+          MODAL_SECRET_NAME: ${{ steps.names.outputs.modal_secret_name }}
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
@@ -107,48 +123,9 @@ jobs:
 
           echo "modal_url=$modal_url" >> "$GITHUB_OUTPUT"
 
-      - name: Pull Vercel preview settings
-        working-directory: frontend
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-        run: vercel pull --yes --environment=preview --git-branch="${GITHUB_HEAD_REF}" --token="$VERCEL_TOKEN"
-
-      - name: Deploy frontend preview to Vercel
-        id: vercel_deploy
-        working-directory: frontend
-        env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          BACKEND_URL: ${{ steps.modal_deploy.outputs.modal_url }}
-        run: |
-          set -euo pipefail
-          log_file="$(mktemp)"
-          vercel deploy --yes --token="$VERCEL_TOKEN" --env BACKEND_URL="$BACKEND_URL" 2>&1 | tee "$log_file"
-
-          frontend_url="$(python - "$log_file" <<'PY'
-          import pathlib
-          import re
-          import sys
-
-          text = pathlib.Path(sys.argv[1]).read_text()
-          text = re.sub(r"\x1b\[[0-9;]*[A-Za-z]", "", text)
-          matches = re.findall(r"https://[^\s\"')]*vercel\.app", text)
-          print(matches[-1] if matches else "")
-          PY
-          )"
-
-          if [ -z "$frontend_url" ]; then
-            echo "Could not determine Vercel preview URL from deploy output." >&2
-            exit 1
-          fi
-
-          echo "frontend_url=$frontend_url" >> "$GITHUB_OUTPUT"
-
       - name: Update Modal secret with preview frontend URL
         env:
+          MODAL_SECRET_NAME: ${{ steps.names.outputs.modal_secret_name }}
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -158,7 +135,7 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
-          FRONTEND_URL: ${{ steps.vercel_deploy.outputs.frontend_url }}
+          FRONTEND_URL: ${{ steps.names.outputs.frontend_url }}
         run: |
           modal secret create "$MODAL_SECRET_NAME" \
             ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
@@ -178,6 +155,8 @@ jobs:
 
       - name: Refresh backend preview with preview frontend URL
         env:
+          MODAL_APP_NAME: ${{ steps.names.outputs.modal_app_name }}
+          MODAL_SECRET_NAME: ${{ steps.names.outputs.modal_secret_name }}
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
@@ -190,14 +169,14 @@ jobs:
           {
             echo "## Beta preview"
             echo
-            echo "- Frontend: ${{ steps.vercel_deploy.outputs.frontend_url }}"
+            echo "- Frontend: ${{ steps.names.outputs.frontend_url }}"
             echo "- Backend: ${{ steps.modal_deploy.outputs.modal_url }}"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Comment preview URLs on PR
         uses: actions/github-script@v7
         env:
-          FRONTEND_URL: ${{ steps.vercel_deploy.outputs.frontend_url }}
+          FRONTEND_URL: ${{ steps.names.outputs.frontend_url }}
           BACKEND_URL: ${{ steps.modal_deploy.outputs.modal_url }}
           PREVIEW_COMMENT_MARKER: ${{ env.PREVIEW_COMMENT_MARKER }}
         with:
@@ -254,8 +233,29 @@ jobs:
       - name: Install Modal
         run: pip install modal
 
+      - name: Compute preview names
+        id: names
+        env:
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref }}
+        run: |
+          branch_slug="$(python - <<'PY'
+          import os
+          import re
+
+          value = os.environ["BRANCH_NAME"].lower()
+          value = re.sub(r"[^a-z0-9]+", "-", value)
+          value = re.sub(r"^-+|-+$", "", value)
+          value = re.sub(r"-{2,}", "-", value)
+          print(value)
+          PY
+          )"
+          echo "modal_app_name=policyengine-uk-chat-beta-$branch_slug" >> "$GITHUB_OUTPUT"
+          echo "modal_secret_name=policyengine-uk-chat-secrets-beta-$branch_slug" >> "$GITHUB_OUTPUT"
+
       - name: Stop Modal preview app and delete preview secret
         env:
+          MODAL_APP_NAME: ${{ steps.names.outputs.modal_app_name }}
+          MODAL_SECRET_NAME: ${{ steps.names.outputs.modal_secret_name }}
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: |
