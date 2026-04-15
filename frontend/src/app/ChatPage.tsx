@@ -148,6 +148,7 @@ export default function ChatPage() {
   const [isWaiting, setIsWaiting] = useState(false);
   const [collapsedWorking, setCollapsedWorking] = useState<Set<number>>(new Set());
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
+  const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
@@ -562,9 +563,20 @@ export default function ChatPage() {
     setExpandedTools((prev) => { const next = new Set(prev); if (next.has(toolId)) next.delete(toolId); else next.add(toolId); return next; });
   };
 
+  const copySnippet = async (snippetId: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedSnippetId(snippetId);
+      setTimeout(() => setCopiedSnippetId((current) => current === snippetId ? null : current), 2000);
+    } catch (error) {
+      console.error("Failed to copy snippet", error);
+    }
+  };
+
   const renderToolDetails = (t: ToolData) => {
     const isPython = t.tool_name === "run_python";
     const codeStyle = { margin: 0, padding: "8px 10px", background: "#1a1917", color: "#c9c5bc", whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const, maxHeight: "300px", overflow: "auto" as const, fontSize: "11px", lineHeight: 1.7, fontFamily: "'JetBrains Mono', monospace" };
+    const copyButtonStyle = { fontSize: "10px", color: THEME.primary, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "'JetBrains Mono', monospace" } as const;
 
     // For run_python: show code as Python, parse result from summary
     if (isPython) {
@@ -584,11 +596,23 @@ export default function ChatPage() {
         <div style={{ marginLeft: "18px", marginTop: "4px" }}>
           {code && (
             <div style={{ marginBottom: "6px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                <div style={{ color: THEME.muted, fontSize: "10px", fontFamily: "'JetBrains Mono', monospace" }}>python</div>
+                <button onClick={() => copySnippet(`${t.tool_id}-code`, code)} style={copyButtonStyle}>
+                  {copiedSnippetId === `${t.tool_id}-code` ? "copied" : "copy code"}
+                </button>
+              </div>
               <pre style={{ ...codeStyle, borderLeft: `2px solid ${THEME.border}` }}>{code}</pre>
             </div>
           )}
           {output && (
             <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
+                <div style={{ color: THEME.muted, fontSize: "10px", fontFamily: "'JetBrains Mono', monospace" }}>output</div>
+                <button onClick={() => copySnippet(`${t.tool_id}-output`, output)} style={copyButtonStyle}>
+                  {copiedSnippetId === `${t.tool_id}-output` ? "copied" : "copy output"}
+                </button>
+              </div>
               <pre style={{ ...codeStyle, borderLeft: `2px solid ${THEME.primary}` }}>{output.length > 2000 ? output.slice(0, 2000) + "…" : output}</pre>
             </div>
           )}
@@ -603,13 +627,23 @@ export default function ChatPage() {
       <div style={{ marginLeft: "18px", marginTop: "4px" }}>
         {inputStr && (
           <div style={{ marginBottom: "6px" }}>
-            <div style={{ color: THEME.muted, fontSize: "10px", marginBottom: "2px", fontFamily: "'JetBrains Mono', monospace" }}>input</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
+              <div style={{ color: THEME.muted, fontSize: "10px", fontFamily: "'JetBrains Mono', monospace" }}>input</div>
+              <button onClick={() => copySnippet(`${t.tool_id}-input`, inputStr)} style={copyButtonStyle}>
+                {copiedSnippetId === `${t.tool_id}-input` ? "copied" : "copy input"}
+              </button>
+            </div>
             <pre style={{ ...codeStyle, background: "#f5f4f2", color: THEME.text2, borderLeft: `2px solid ${THEME.border}` }}>{inputStr.length > 2000 ? inputStr.slice(0, 2000) + "…" : inputStr}</pre>
           </div>
         )}
         {outputStr && (
           <div>
-            <div style={{ color: THEME.muted, fontSize: "10px", marginBottom: "2px", fontFamily: "'JetBrains Mono', monospace" }}>output</div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
+              <div style={{ color: THEME.muted, fontSize: "10px", fontFamily: "'JetBrains Mono', monospace" }}>output</div>
+              <button onClick={() => copySnippet(`${t.tool_id}-output`, outputStr)} style={copyButtonStyle}>
+                {copiedSnippetId === `${t.tool_id}-output` ? "copied" : "copy output"}
+              </button>
+            </div>
             <pre style={{ ...codeStyle, background: "#f5f4f2", color: THEME.text2, borderLeft: `2px solid ${THEME.primary}` }}>{outputStr.length > 2000 ? outputStr.slice(0, 2000) + "…" : outputStr}</pre>
           </div>
         )}
@@ -628,7 +662,7 @@ export default function ChatPage() {
         >
           {t.status === "pending" && <Loader size={10} color={THEME.primary} />}
           {hasDetails && <IconChevronDown size={10} style={{ opacity: 0.4, transform: isExpanded ? "none" : "rotate(-90deg)", transition: "transform 0.15s" }} />}
-          <span style={{ color: THEME.text3 }}>{t.tool_name}</span>
+          <span style={{ color: THEME.text3 }}>{t.tool_name === "run_python" ? "python" : t.tool_name}</span>
           {t.status !== "pending" && <span style={{ color: THEME.muted }}>✓</span>}
         </div>
         {isExpanded && hasDetails && renderToolDetails(t)}
