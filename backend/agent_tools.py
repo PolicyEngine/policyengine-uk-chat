@@ -617,7 +617,7 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
 TOOL_DEFINITIONS = [
     {
         "name": "get_capabilities",
-        "description": "Returns a structured description of the engine's capabilities: available datasets, locally cached years per dataset, programmes modelled, available microdata columns, and key notes. The response is pre-populated at the start of every conversation, but you can call this again if needed.",
+        "description": "Returns a structured description of the engine's capabilities: available datasets, locally cached years per dataset, programmes modelled, available microdata columns, and key notes.",
         "input_schema": {"type": "object", "properties": {}},
     },
     {

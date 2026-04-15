@@ -6,8 +6,7 @@ import logging
 import os
 from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
-
-import stripe
+from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from supabase import create_client, Client
@@ -23,8 +22,23 @@ router = APIRouter(prefix="/billing", tags=["billing"])
 MARKUP_RATE = float(os.environ.get("BILLING_MARKUP_RATE", "0.0"))
 FREE_TIER_GBP = float(os.environ.get("BILLING_FREE_TIER_GBP", "5.0"))
 USD_TO_GBP = float(os.environ.get("BILLING_USD_TO_GBP", "0.79"))
-INPUT_COST_PER_M_USD = 3.0   # Claude Sonnet 4
-OUTPUT_COST_PER_M_USD = 15.0
+
+MODEL_PRICING_USD_PER_MTOK = {
+    "claude-haiku-4-5": {
+        "input": 1.0,
+        "output": 5.0,
+        "cache_write_5m": 1.25,
+        "cache_read": 0.10,
+    },
+    "claude-sonnet-4-6": {
+        "input": 3.0,
+        "output": 15.0,
+        "cache_write_5m": 3.75,
+        "cache_read": 0.30,
+    },
+}
+
+DEFAULT_BILLING_MODEL = os.environ.get("ANTHROPIC_DEFAULT_MODEL", "claude-haiku-4-5")
 
 # ---------------------------------------------------------------------------
 # Supabase client (service role — bypasses RLS)
@@ -48,8 +62,30 @@ def get_supabase() -> Client:
 # Cost calculation
 # ---------------------------------------------------------------------------
 
-def calculate_cost_gbp(input_tokens: int, output_tokens: int) -> float:
-    cost_usd = input_tokens * INPUT_COST_PER_M_USD / 1_000_000 + output_tokens * OUTPUT_COST_PER_M_USD / 1_000_000
+def _normalise_model_name(model: str | None) -> str:
+    return (model or DEFAULT_BILLING_MODEL).strip()
+
+
+def _pricing_for_model(model: str | None) -> dict[str, float]:
+    model_name = _normalise_model_name(model)
+    return MODEL_PRICING_USD_PER_MTOK.get(model_name, MODEL_PRICING_USD_PER_MTOK[DEFAULT_BILLING_MODEL])
+
+
+def calculate_cost_gbp(
+    *,
+    model: str | None,
+    input_tokens: int,
+    output_tokens: int,
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
+) -> float:
+    pricing = _pricing_for_model(model)
+    cost_usd = (
+        input_tokens * pricing["input"] / 1_000_000
+        + output_tokens * pricing["output"] / 1_000_000
+        + cache_creation_input_tokens * pricing["cache_write_5m"] / 1_000_000
+        + cache_read_input_tokens * pricing["cache_read"] / 1_000_000
+    )
     return cost_usd * USD_TO_GBP * (1 + MARKUP_RATE)
 
 
@@ -100,9 +136,37 @@ def check_balance(user_id: str) -> tuple[bool, dict]:
     return (free_remaining + balance) > 0, credits
 
 
-def record_usage(user_id: str | None, session_id: str, input_tokens: int, output_tokens: int):
+def get_balance_summary(user_id: str) -> dict[str, float]:
+    credits = get_or_create_credits(user_id)
+    free_remaining = max(0, FREE_TIER_GBP - float(credits["free_tier_used_gbp"]))
+    balance = float(credits["balance_gbp"])
+    return {
+        "balance_gbp": balance,
+        "free_tier_used_gbp": float(credits["free_tier_used_gbp"]),
+        "free_tier_remaining_gbp": free_remaining,
+        "spent_this_month_gbp": float(credits["free_tier_used_gbp"]),
+        "total_available_gbp": balance + free_remaining,
+    }
+
+
+def record_usage(
+    *,
+    user_id: str | None,
+    session_id: str,
+    model: str | None,
+    input_tokens: int,
+    output_tokens: int,
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
+) -> dict[str, Any]:
     """Record token usage and deduct cost from user credits."""
-    cost = calculate_cost_gbp(input_tokens, output_tokens)
+    cost = calculate_cost_gbp(
+        model=model,
+        input_tokens=input_tokens,
+        output_tokens=output_tokens,
+        cache_creation_input_tokens=cache_creation_input_tokens,
+        cache_read_input_tokens=cache_read_input_tokens,
+    )
     sb = get_supabase()
 
     # Insert usage row
@@ -110,15 +174,22 @@ def record_usage(user_id: str | None, session_id: str, input_tokens: int, output
         sb.table("token_usage").insert({
             "user_id": user_id,
             "session_id": session_id,
+            "model": _normalise_model_name(model),
             "input_tokens": input_tokens,
             "output_tokens": output_tokens,
+            "cache_creation_input_tokens": cache_creation_input_tokens,
+            "cache_read_input_tokens": cache_read_input_tokens,
             "cost_gbp": cost,
         }).execute()
     except Exception as e:
         logger.warning(f"Could not insert token_usage for {user_id}: {e}")
 
     if not user_id:
-        return cost
+        return {
+            "cost_gbp": cost,
+            "model": _normalise_model_name(model),
+            "balance": None,
+        }
 
     # Deduct from free tier first, then balance
     credits = get_or_create_credits(user_id)
@@ -136,7 +207,11 @@ def record_usage(user_id: str | None, session_id: str, input_tokens: int, output
             "balance_gbp": max(0, float(credits["balance_gbp"]) - overflow),
         }).eq("user_id", user_id).execute()
 
-    return cost
+    return {
+        "cost_gbp": cost,
+        "model": _normalise_model_name(model),
+        "balance": get_balance_summary(user_id),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -145,13 +220,7 @@ def record_usage(user_id: str | None, session_id: str, input_tokens: int, output
 
 @router.get("/balance")
 def get_balance(user_id: str):
-    credits = get_or_create_credits(user_id)
-    free_remaining = max(0, FREE_TIER_GBP - float(credits["free_tier_used_gbp"]))
-    return {
-        "balance_gbp": float(credits["balance_gbp"]),
-        "free_tier_remaining_gbp": free_remaining,
-        "total_available_gbp": float(credits["balance_gbp"]) + free_remaining,
-    }
+    return get_balance_summary(user_id)
 
 
 @router.get("/usage")
@@ -168,6 +237,8 @@ class CheckoutRequest(BaseModel):
 
 @router.post("/checkout")
 def create_checkout(request: CheckoutRequest):
+    import stripe
+
     stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
@@ -195,6 +266,8 @@ def create_checkout(request: CheckoutRequest):
 
 @router.post("/webhook")
 async def stripe_webhook(request: Request):
+    import stripe
+
     payload = await request.body()
     sig = request.headers.get("stripe-signature", "")
     webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")

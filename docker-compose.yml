@@ -38,7 +38,9 @@ services:
       - DB_USERNAME=${DB_USERNAME:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
-      - ANTHROPIC_MODEL=claude-sonnet-4-6
+      - ANTHROPIC_FAST_MODEL=claude-haiku-4-5
+      - ANTHROPIC_COMPLEX_MODEL=claude-sonnet-4-6
+      - ANTHROPIC_TITLE_MODEL=claude-haiku-4-5
       - POLICYENGINE_UK_DATA_TOKEN=${POLICYENGINE_UK_DATA_TOKEN}
       - PYTHONUNBUFFERED=1
       - SUPABASE_URL=${SUPABASE_URL}
