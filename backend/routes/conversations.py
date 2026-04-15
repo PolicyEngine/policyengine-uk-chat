@@ -208,6 +208,22 @@ def _summarise_message(message: dict, limit: int = 400) -> str:
         summary += "\n\nTools used: " + ", ".join(tool_names[:8])
         if len(tool_names) > 8:
             summary += ", ..."
+    tool_sections = []
+    for event in events:
+        if not isinstance(event, dict) or event.get("type") != "tool":
+            continue
+        data = event.get("data") or {}
+        tool_name = str(data.get("tool_name") or "unknown_tool")
+        tool_section = [f"#### Tool `{tool_name}`"]
+        if data.get("input") is not None:
+            tool_input = _trim_text(json.dumps(data["input"], indent=2, ensure_ascii=False), 2000)
+            tool_section.extend(["Input:", "```json", tool_input, "```"])
+        if data.get("result_summary"):
+            tool_output = _trim_text(str(data["result_summary"]), 3000)
+            tool_section.extend(["Output:", "```json", tool_output, "```"])
+        tool_sections.append("\n".join(tool_section))
+    if tool_sections:
+        summary += "\n\n" + "\n\n".join(tool_sections)
     return summary
 
 

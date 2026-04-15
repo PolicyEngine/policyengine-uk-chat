@@ -99,6 +99,37 @@ class TestConversations:
         r = client.get("/conversations")
         assert r.status_code == 200
 
+    def test_report_includes_tool_inputs_and_outputs(self):
+        messages = [
+            {"role": "user", "content": "how much does child benefit cost"},
+            {
+                "role": "assistant",
+                "content": "I'll find out.",
+                "events": [
+                    {
+                        "type": "tool",
+                        "data": {
+                            "tool_name": "run_python",
+                            "tool_id": "tool-1",
+                            "status": "success",
+                            "input": {"code": "result = 1 + 1"},
+                            "result_summary": "{\"result\": 2, \"output\": \"done\"}",
+                        },
+                    }
+                ],
+            },
+        ]
+        save_r = self._save(session_id="report-test-1", messages=messages, user_id="user-1")
+        conv_id = save_r.json()["id"]
+        report_r = client.post(
+            f"/conversations/{conv_id}/report",
+            json={"user_id": "user-1", "app_url": "https://example.com"},
+        )
+        assert report_r.status_code == 200
+        issue_body = report_r.json()["issue_body"]
+        assert "result = 1 + 1" in issue_body
+        assert "\"result\": 2" in issue_body
+
 
 # ---------------------------------------------------------------------------
 # Title generation

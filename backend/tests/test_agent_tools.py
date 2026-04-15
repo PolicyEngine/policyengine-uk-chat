@@ -12,6 +12,8 @@ from agent_tools import (
     generate_chart,
     execute_tool,
     _build_compiled_policy,
+    _json_safe,
+    run_python,
 )
 
 
@@ -258,6 +260,25 @@ class TestGenerateChart:
         result = generate_chart("line", "T", data, "x", ["y"])
         assert result["chart_markdown"].startswith("```chart\n")
         assert result["chart_markdown"].endswith("\n```")
+
+
+class DummyModelDump:
+    def model_dump(self):
+        return {"child_benefit": 123}
+
+
+class TestRunPython:
+    def test_supports_basic_introspection(self):
+        result = run_python("value = {'a': 1}\nresult = {'type': type(value).__name__, 'dir_has_keys': 'keys' in dir(value)}")
+        assert result["result"] == {"type": "dict", "dir_has_keys": True}
+
+    def test_supports_safe_imports(self):
+        result = run_python("import json\nresult = json.loads('{\"ok\": true}')")
+        assert result["result"] == {"ok": True}
+
+    def test_serialises_simulation_like_objects(self):
+        serialised = _json_safe({"result": DummyModelDump()})
+        assert serialised == {"result": {"child_benefit": 123}}
 
     def test_with_formats(self):
         data = [{"income": i * 10000, "tax": i * 2000} for i in range(10)]
