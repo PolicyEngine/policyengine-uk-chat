@@ -207,6 +207,11 @@ If a user asks for a chart and you have the data, ALWAYS call generate_chart."""
 import os
 import anthropic as anthropic_sdk
 
+DEFAULT_FAST_MODEL = os.environ.get("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5")
+DEFAULT_COMPLEX_MODEL = os.environ.get("ANTHROPIC_COMPLEX_MODEL", "claude-sonnet-4-6")
+TITLE_MODEL = os.environ.get("ANTHROPIC_TITLE_MODEL", DEFAULT_FAST_MODEL)
+FAST_MODEL_MAX_INPUT_TOKENS = int(os.environ.get("ANTHROPIC_FAST_MODEL_MAX_INPUT_TOKENS", "120000"))
+
 
 def _get_anthropic_client():
     api_key = os.environ.get("ANTHROPIC_API_KEY")
@@ -237,6 +242,18 @@ def _tool_defs_for_anthropic():
             d["cache_control"] = {"type": "ephemeral"}
         defs.append(d)
     return defs
+
+
+def _estimate_message_tokens(messages: List[dict]) -> int:
+    char_count = sum(len(str(block.get("content", ""))) for block in messages)
+    return char_count // 4
+
+
+def _select_chat_model(messages: List[dict]) -> str:
+    estimated_input_tokens = _estimate_message_tokens(messages) + len(SYSTEM_PROMPT) // 4
+    if estimated_input_tokens > FAST_MODEL_MAX_INPUT_TOKENS:
+        return DEFAULT_COMPLEX_MODEL
+    return DEFAULT_FAST_MODEL
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +287,7 @@ def generate_title(request: TitleRequest):
     if request.first_assistant_message:
         content += "\n\nAssistant: " + request.first_assistant_message[:500]
     response = client.messages.create(
-        model=os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5"),
+        model=TITLE_MODEL,
         max_tokens=32,
         system=(
             "You are titling conversations from a UK tax and benefit policy assistant. "
@@ -315,28 +332,17 @@ async def chat_message(request: ChatRequest, http_request: Request):
 
     async def generate_stream():
         try:
-            from agent_tools import get_capabilities
-            import json as _json
-            _caps = get_capabilities()
-            _caps_id = "caps_0"
-            conversation = [
-                {
-                    "role": "assistant",
-                    "content": [{"type": "tool_use", "id": _caps_id, "name": "get_capabilities", "input": {}}],
-                },
-                {
-                    "role": "user",
-                    "content": [{"type": "tool_result", "tool_use_id": _caps_id, "content": _json.dumps(_caps)}],
-                },
-            ] + deduplicated.copy()
+            conversation = deduplicated.copy()
             iteration = 0
             max_iterations = 60
             total_input_tokens = 0
             total_output_tokens = 0
+            total_cache_read_input_tokens = 0
+            total_cache_creation_input_tokens = 0
             recent_tool_calls: List[str] = []
 
             client = _get_anthropic_client()
-            model = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
+            model = _select_chat_model(conversation)
             tools = _tool_defs_for_anthropic()
 
             logger.info(f"[CHAT] Session {session_id}: {len(conversation)} messages")
@@ -388,6 +394,8 @@ async def chat_message(request: ChatRequest, http_request: Request):
                                         total_input_tokens += getattr(usage, "input_tokens", 0)
                                         cache_read = getattr(usage, "cache_read_input_tokens", 0)
                                         cache_create = getattr(usage, "cache_creation_input_tokens", 0)
+                                        total_cache_read_input_tokens += cache_read
+                                        total_cache_creation_input_tokens += cache_create
                                         if cache_read or cache_create:
                                             logger.info(f"[CHAT] Cache: {cache_read} read, {cache_create} creation tokens")
 
@@ -418,12 +426,21 @@ async def chat_message(request: ChatRequest, http_request: Request):
 
                 if not tool_uses:
                     # Record token usage for billing
+                    billing = None
                     try:
                         from routes.billing import record_usage
-                        record_usage(user_id, session_id, total_input_tokens, total_output_tokens)
+                        billing = record_usage(
+                            user_id=user_id,
+                            session_id=session_id,
+                            model=model,
+                            input_tokens=total_input_tokens,
+                            output_tokens=total_output_tokens,
+                            cache_creation_input_tokens=total_cache_creation_input_tokens,
+                            cache_read_input_tokens=total_cache_read_input_tokens,
+                        )
                     except Exception as e:
                         logger.warning(f"[CHAT] Failed to record usage: {e}")
-                    yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens}})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
                     break
 
                 # Detect infinite loops
@@ -489,13 +506,22 @@ async def chat_message(request: ChatRequest, http_request: Request):
                 conversation.append({"role": "user", "content": tool_results})
 
             if iteration >= max_iterations:
+                billing = None
                 try:
                     from routes.billing import record_usage
-                    record_usage(user_id, session_id, total_input_tokens, total_output_tokens)
+                    billing = record_usage(
+                        user_id=user_id,
+                        session_id=session_id,
+                        model=model,
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                        cache_creation_input_tokens=total_cache_creation_input_tokens,
+                        cache_read_input_tokens=total_cache_read_input_tokens,
+                    )
                 except Exception as e:
                     logger.warning(f"[CHAT] Failed to record usage: {e}")
                 yield f"data: {json.dumps({'type': 'chunk', 'content': '\\n\\n*[Reached maximum iterations]*'})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens}})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
 
         except Exception as e:
             import traceback
