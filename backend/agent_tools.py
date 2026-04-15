@@ -49,6 +49,58 @@ _microdata_cache: Dict[tuple, Any] = {}
 _MAX_CACHE = 4
 
 
+def _safe_import(name, globals=None, locals=None, fromlist=(), level=0):
+    allowed_roots = {"json", "math", "numpy", "pandas"}
+    root_name = name.split(".")[0]
+    if root_name not in allowed_roots:
+        raise ImportError(f"Import of '{name}' is not allowed")
+    return __import__(name, globals, locals, fromlist, level)
+
+
+def _json_safe(obj: Any) -> Any:
+    try:
+        import numpy as np
+    except ImportError:
+        np = None
+
+    try:
+        import pandas as pd
+    except ImportError:
+        pd = None
+
+    if obj is None or isinstance(obj, (str, int, float, bool)):
+        return obj
+    if np is not None:
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.bool_):
+            return bool(obj)
+    if pd is not None:
+        if isinstance(obj, pd.DataFrame):
+            return obj.to_dict(orient="records")
+        if isinstance(obj, pd.Series):
+            return obj.to_list()
+    if isinstance(obj, dict):
+        return {str(k): _json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple, set)):
+        return [_json_safe(v) for v in obj]
+    if hasattr(obj, "model_dump") and callable(obj.model_dump):
+        return _json_safe(obj.model_dump())
+    if hasattr(obj, "dict") and callable(obj.dict):
+        return _json_safe(obj.dict())
+    try:
+        import dataclasses
+        if dataclasses.is_dataclass(obj):
+            return _json_safe(dataclasses.asdict(obj))
+    except Exception:
+        pass
+    return str(obj)
+
+
 def _hash_reform(reform: Optional[Dict[str, Any]]) -> str:
     if not reform:
         return "none"
@@ -553,8 +605,9 @@ def run_python(code: str) -> Dict[str, Any]:
         "range", "len", "int", "float", "str", "bool", "list", "dict",
         "tuple", "set", "zip", "enumerate", "map", "filter", "sorted",
         "reversed", "min", "max", "sum", "abs", "round", "True", "False",
-        "None", "isinstance", "ValueError", "TypeError", "print",
-        "any", "all", "pow", "divmod", "complex",
+        "None", "isinstance", "ValueError", "TypeError", "Exception",
+        "print", "any", "all", "pow", "divmod", "complex", "type",
+        "dir", "hasattr", "getattr",
     )
     safe_builtins = {k: getattr(_builtins, k) for k in safe_names if hasattr(_builtins, k)}
 
@@ -568,6 +621,7 @@ def run_python(code: str) -> Dict[str, Any]:
         output_lines.append(" ".join(str(a) for a in args))
 
     safe_builtins["print"] = safe_print
+    safe_builtins["__import__"] = _safe_import
 
     allowed_globals: Dict[str, Any] = {
         "__builtins__": safe_builtins,
@@ -594,26 +648,9 @@ def run_python(code: str) -> Dict[str, Any]:
 
     result = allowed_globals.get("result", None)
 
-    # Convert numpy types to JSON-safe Python types
-    def to_json_safe(obj):
-        if np is not None:
-            if isinstance(obj, np.ndarray):
-                return obj.tolist()
-            if isinstance(obj, (np.integer,)):
-                return int(obj)
-            if isinstance(obj, (np.floating,)):
-                return float(obj)
-            if isinstance(obj, (np.bool_,)):
-                return bool(obj)
-        if isinstance(obj, dict):
-            return {k: to_json_safe(v) for k, v in obj.items()}
-        if isinstance(obj, (list, tuple)):
-            return [to_json_safe(v) for v in obj]
-        return obj
-
     response: Dict[str, Any] = {}
     if result is not None:
-        response["result"] = to_json_safe(result)
+        response["result"] = _json_safe(result)
     if output_lines:
         response["output"] = "\n".join(output_lines)
     if not response:

@@ -287,8 +287,7 @@ export default function ChatPage() {
 
     const apiMessages = msgs.map((m) => {
       if (m.role === "assistant" && m.isComplete && m.events?.length) {
-        const savedEvents = m.events.map((e) => e.type === "tool" ? { ...e, data: { ...e.data, result_summary: undefined } } : e);
-        return { role: m.role, content: m.content, events: savedEvents };
+        return { role: m.role, content: m.content, events: m.events };
       }
       return { role: m.role, content: m.content };
     });

@@ -153,6 +153,10 @@ def _tool_defs_for_anthropic():
     return defs
 
 
+def _serialise_tool_result(result: Any) -> str:
+    return json.dumps(result, ensure_ascii=False, default=str)
+
+
 def _estimate_message_tokens(messages: List[dict]) -> int:
     char_count = sum(len(str(block.get("content", ""))) for block in messages)
     return char_count // 4
@@ -387,7 +391,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
                     if await http_request.is_disconnected():
                         return
                     completed_tools[tu["id"]] = result
-                    result_str = str(result)
+                    result_str = _serialise_tool_result(result)
                     result_summary = result_str[:5000] + "..." if len(result_str) > 5000 else result_str
                     yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tu['name'], 'tool_id': tu['id'], 'status': 'success', 'result_summary': result_summary})}\n\n"
 
@@ -395,7 +399,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
                 MAX_RESULT_CHARS = 15000
                 tool_results = []
                 for tu in tool_uses:
-                    result_json = json.dumps(completed_tools[tu["id"]])
+                    result_json = _serialise_tool_result(completed_tools[tu["id"]])
                     if len(result_json) > MAX_RESULT_CHARS:
                         from agent_tools import explore_tabular_data
                         tool_result = completed_tools[tu["id"]]
@@ -406,7 +410,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
                             exploration = explore_tabular_data(data_array)
                             remaining = {k: v for k, v in tool_result.items() if k != data_key}
                             processed = {**remaining, "note": f"Large '{data_key}' array ({len(data_array)} rows) - showing first 20 with column metadata", "exploration": exploration, data_key: data_array[:20]}
-                            result_json = json.dumps(processed)
+                            result_json = _serialise_tool_result(processed)
                         # Hard cap: if still too large, truncate the JSON string
                         if len(result_json) > MAX_RESULT_CHARS:
                             result_json = result_json[:MAX_RESULT_CHARS] + '..."}'
