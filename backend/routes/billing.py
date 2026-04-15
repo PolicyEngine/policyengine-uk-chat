@@ -235,6 +235,13 @@ class CheckoutRequest(BaseModel):
     amount_gbp: float = 5.0
 
 
+def _get_public_base_url() -> str:
+    public_base_url = os.environ.get("PUBLIC_BASE_URL", "").strip()
+    if public_base_url:
+        return public_base_url.rstrip("/")
+    return os.environ.get("HOSTNAMES", "http://localhost:3006").split(",")[0].rstrip("/")
+
+
 @router.post("/checkout")
 def create_checkout(request: CheckoutRequest):
     import stripe
@@ -244,7 +251,7 @@ def create_checkout(request: CheckoutRequest):
         raise HTTPException(status_code=500, detail="Stripe not configured")
 
     amount_pence = int(request.amount_gbp * 100)
-    base_url = os.environ.get("HOSTNAMES", "http://localhost:3006").split(",")[0]
+    base_url = _get_public_base_url()
 
     session = stripe.checkout.Session.create(
         mode="payment",

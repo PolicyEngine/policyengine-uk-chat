@@ -3,6 +3,29 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
+function slugifyBranchName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+}
+
+function getBackendUrl(): string {
+  if (process.env.BACKEND_URL) {
+    return process.env.BACKEND_URL;
+  }
+
+  const vercelEnv = process.env.VERCEL_ENV;
+  const gitRef = process.env.VERCEL_GIT_COMMIT_REF;
+  if (vercelEnv === "preview" && gitRef) {
+    const branchSlug = slugifyBranchName(gitRef);
+    return `https://policyengine--peukchat-${branchSlug}-web.modal.run`;
+  }
+
+  return "http://localhost:8080";
+}
+
 export async function GET(request: NextRequest, { params }: { params: Promise<{ slug: string[] }> }) {
   return handleRequest(request, params, "GET");
 }
@@ -29,7 +52,7 @@ async function handleRequest(
     return NextResponse.json({ error: "Invalid endpoint path" }, { status: 400 });
   }
 
-  const backendUrl = process.env.BACKEND_URL || "http://localhost:8080";
+  const backendUrl = getBackendUrl();
   const url = new URL(`${backendUrl}/${slug.join("/")}`);
   request.nextUrl.searchParams.forEach((value, key) => url.searchParams.append(key, value));
 
