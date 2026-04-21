@@ -169,6 +169,23 @@ def _select_chat_model(messages: List[dict]) -> str:
     return DEFAULT_FAST_MODEL
 
 
+def _build_system_blocks(plan_mode: bool = False) -> List[dict]:
+    """System prompt + optional plan-mode directive.
+
+    The base prompt is marked cache_control so it's cached across requests.
+    The plan-mode directive is appended AFTER the cache breakpoint so
+    toggling plan mode does not invalidate the cached base prompt.
+    """
+    blocks: List[dict] = [{
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"},
+    }]
+    if plan_mode:
+        blocks.append({"type": "text", "text": PLAN_MODE_DIRECTIVE})
+    return blocks
+
+
 # ---------------------------------------------------------------------------
 # Models
 # ---------------------------------------------------------------------------
@@ -182,6 +199,17 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     session_id: str | None = None
     user_id: str | None = None
+    plan_mode: bool = False
+
+
+PLAN_MODE_DIRECTIVE = """
+PLAN MODE IS ACTIVE FOR THIS TURN:
+- Do NOT call any tools.
+- Identify 1–3 specific ambiguities in the user's question (e.g. which year, dataset, reform parameters, metric, comparison baseline, population subset).
+- Ask those 1–3 questions concisely as a numbered list. No preamble beyond one short lead-in sentence.
+- If the question is fully unambiguous, confirm your understanding in one sentence and offer to proceed — still do not call tools.
+- You will continue without plan mode on the next turn once the user replies.
+""".strip()
 
 
 class TitleRequest(BaseModel):
@@ -257,8 +285,13 @@ async def chat_message(request: ChatRequest, http_request: Request):
             client = _get_anthropic_client()
             model = _select_chat_model(conversation)
             tools = _tool_defs_for_anthropic()
+            plan_mode = request.plan_mode
+            system_blocks = _build_system_blocks(plan_mode=plan_mode)
 
-            logger.info(f"[CHAT] Session {session_id}: {len(conversation)} messages")
+            logger.info(
+                f"[CHAT] Session {session_id}: {len(conversation)} messages"
+                f"{' [PLAN MODE]' if plan_mode else ''}"
+            )
 
             while iteration < max_iterations:
                 if await http_request.is_disconnected():
@@ -276,11 +309,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
                         async with client.messages.stream(
                             model=model,
                             max_tokens=16000,
-                            system=[{
-                                "type": "text",
-                                "text": SYSTEM_PROMPT,
-                                "cache_control": {"type": "ephemeral"},
-                            }],
+                            system=system_blocks,
                             tools=tools,
                             messages=conversation,
                         ) as stream:
