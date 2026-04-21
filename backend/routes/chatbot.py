@@ -114,12 +114,21 @@ USER-FACING STYLE:
 # pydantic-ai's streaming API is used for text + tool call events.
 
 import os
+from pathlib import Path
 import anthropic as anthropic_sdk
 
 DEFAULT_FAST_MODEL = os.environ.get("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5")
 DEFAULT_COMPLEX_MODEL = os.environ.get("ANTHROPIC_COMPLEX_MODEL", "claude-sonnet-4-6")
 TITLE_MODEL = os.environ.get("ANTHROPIC_TITLE_MODEL", DEFAULT_FAST_MODEL)
 FAST_MODEL_MAX_INPUT_TOKENS = int(os.environ.get("ANTHROPIC_FAST_MODEL_MAX_INPUT_TOKENS", "120000"))
+
+_REFERENCE_PATH = Path(__file__).resolve().parent.parent / "reference.md"
+try:
+    REFERENCE_DOC = _REFERENCE_PATH.read_text()
+    logger.info(f"[CHAT] Loaded reference.md ({len(REFERENCE_DOC)} chars)")
+except FileNotFoundError:
+    REFERENCE_DOC = ""
+    logger.warning("[CHAT] reference.md not found — run scripts/build_reference.py")
 
 
 def _get_anthropic_client():
@@ -163,10 +172,30 @@ def _estimate_message_tokens(messages: List[dict]) -> int:
 
 
 def _select_chat_model(messages: List[dict]) -> str:
-    estimated_input_tokens = _estimate_message_tokens(messages) + len(SYSTEM_PROMPT) // 4
+    estimated_input_tokens = (
+        _estimate_message_tokens(messages)
+        + len(SYSTEM_PROMPT) // 4
+        + len(REFERENCE_DOC) // 4
+    )
     if estimated_input_tokens > FAST_MODEL_MAX_INPUT_TOKENS:
         return DEFAULT_COMPLEX_MODEL
     return DEFAULT_FAST_MODEL
+
+
+def _build_system_blocks() -> List[dict]:
+    """System prompt + (optional) live library reference, both cached."""
+    blocks: List[dict] = [{
+        "type": "text",
+        "text": SYSTEM_PROMPT,
+        "cache_control": {"type": "ephemeral"},
+    }]
+    if REFERENCE_DOC:
+        blocks.append({
+            "type": "text",
+            "text": REFERENCE_DOC,
+            "cache_control": {"type": "ephemeral"},
+        })
+    return blocks
 
 
 # ---------------------------------------------------------------------------
@@ -276,11 +305,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
                         async with client.messages.stream(
                             model=model,
                             max_tokens=16000,
-                            system=[{
-                                "type": "text",
-                                "text": SYSTEM_PROMPT,
-                                "cache_control": {"type": "ephemeral"},
-                            }],
+                            system=_build_system_blocks(),
                             tools=tools,
                             messages=conversation,
                         ) as stream:
