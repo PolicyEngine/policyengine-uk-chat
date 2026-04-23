@@ -10,7 +10,7 @@ from typing import Any, Dict, List
 
 import httpx
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 from pydantic_ai import Agent
@@ -18,6 +18,8 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.settings import ModelSettings
 
 from agent_tools import execute_tool, TOOL_DEFINITIONS
+from routes.auth import AuthenticatedUser, require_user
+from routes.billing import check_balance, record_usage
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +183,6 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     session_id: str | None = None
-    user_id: str | None = None
 
 
 class TitleRequest(BaseModel):
@@ -194,7 +195,10 @@ class TitleRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 @router.post("/title")
-def generate_title(request: TitleRequest):
+def generate_title(
+    request: TitleRequest,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
     client = _get_sync_anthropic_client()
     content = request.first_user_message
     if request.first_assistant_message:
@@ -219,17 +223,15 @@ def generate_title(request: TitleRequest):
 # ---------------------------------------------------------------------------
 
 @router.post("/message")
-async def chat_message(request: ChatRequest, http_request: Request):
-    # Check billing balance if user is authenticated
-    user_id = request.user_id
-    if user_id:
-        try:
-            from routes.billing import check_balance
-            has_credit, _ = check_balance(user_id)
-            if not has_credit:
-                return JSONResponse(status_code=402, content={"error": "No credit remaining. Please top up to continue."})
-        except RuntimeError:
-            pass  # Supabase not configured — skip billing check
+async def chat_message(
+    request: ChatRequest,
+    http_request: Request,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
+    user_id = current_user.id
+    has_credit, _ = check_balance(user_id)
+    if not has_credit:
+        return JSONResponse(status_code=402, content={"error": "No credit remaining. Please top up to continue."})
 
     session_id = request.session_id or str(uuid.uuid4())
 
@@ -341,7 +343,6 @@ async def chat_message(request: ChatRequest, http_request: Request):
                     # Record token usage for billing
                     billing = None
                     try:
-                        from routes.billing import record_usage
                         billing = record_usage(
                             user_id=user_id,
                             session_id=session_id,
@@ -421,7 +422,6 @@ async def chat_message(request: ChatRequest, http_request: Request):
             if iteration >= max_iterations:
                 billing = None
                 try:
-                    from routes.billing import record_usage
                     billing = record_usage(
                         user_id=user_id,
                         session_id=session_id,

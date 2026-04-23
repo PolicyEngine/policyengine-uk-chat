@@ -8,8 +8,28 @@ import json
 import pytest
 from fastapi.testclient import TestClient
 from main import app
+from routes.auth import AuthenticatedUser, require_user
+
+
+def _test_user():
+    return AuthenticatedUser(id="test-user", email="user@example.com")
+
+
+app.dependency_overrides[require_user] = _test_user
 
 client = TestClient(app)
+
+
+@pytest.fixture(autouse=True)
+def mock_billing(monkeypatch):
+    import routes.chatbot as chatbot
+
+    monkeypatch.setattr(chatbot, "check_balance", lambda user_id: (True, {}))
+    monkeypatch.setattr(
+        chatbot,
+        "record_usage",
+        lambda **kwargs: {"cost_gbp": 0.0, "balance": None},
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -28,12 +48,11 @@ class TestHealth:
 # ---------------------------------------------------------------------------
 
 class TestConversations:
-    def _save(self, session_id="test-session-1", title="Test", messages=None, user_id=None):
+    def _save(self, session_id="test-session-1", title="Test", messages=None):
         return client.post("/conversations", json={
             "session_id": session_id,
             "title": title,
             "messages": messages or [{"role": "user", "content": "hello"}],
-            "user_id": user_id,
         })
 
     def test_save_conversation(self):
@@ -45,8 +64,8 @@ class TestConversations:
         assert "id" in data
 
     def test_list_conversations(self):
-        self._save(session_id="list-test-1", user_id="user@example.com")
-        r = client.get("/conversations", params={"user_id": "user@example.com"})
+        self._save(session_id="list-test-1")
+        r = client.get("/conversations")
         assert r.status_code == 200
         assert isinstance(r.json(), list)
         session_ids = [c["session_id"] for c in r.json()]
@@ -94,10 +113,20 @@ class TestConversations:
         assert len(loaded) == 2
         assert loaded[1]["events"][0]["content"] == "hi there"
 
-    def test_list_without_user_id_returns_anonymous(self):
-        self._save(session_id="anon-test-1", user_id=None)
+    def test_list_returns_only_authenticated_user_conversations(self):
+        self._save(session_id="auth-list-test-1")
         r = client.get("/conversations")
         assert r.status_code == 200
+        session_ids = [c["session_id"] for c in r.json()]
+        assert "auth-list-test-1" in session_ids
+
+    def test_list_requires_authentication(self):
+        app.dependency_overrides.pop(require_user, None)
+        try:
+            r = client.get("/conversations")
+            assert r.status_code == 401
+        finally:
+            app.dependency_overrides[require_user] = _test_user
 
     def test_report_includes_tool_inputs_and_outputs(self):
         messages = [
@@ -119,11 +148,11 @@ class TestConversations:
                 ],
             },
         ]
-        save_r = self._save(session_id="report-test-1", messages=messages, user_id="user-1")
+        save_r = self._save(session_id="report-test-1", messages=messages)
         conv_id = save_r.json()["id"]
         report_r = client.post(
             f"/conversations/{conv_id}/report",
-            json={"user_id": "user-1", "app_url": "https://example.com"},
+            json={"app_url": "https://example.com"},
         )
         assert report_r.status_code == 200
         issue_body = report_r.json()["issue_body"]

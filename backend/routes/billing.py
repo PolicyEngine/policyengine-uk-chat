@@ -7,9 +7,11 @@ import os
 from datetime import datetime, timezone
 from dateutil.relativedelta import relativedelta
 from typing import Any
-from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
-from supabase import create_client, Client
+from fastapi import APIRouter, Depends, HTTPException, Request
+from pydantic import BaseModel, Field
+
+from routes.auth import AuthenticatedUser, require_user
+from routes.supabase_client import get_supabase
 
 logger = logging.getLogger(__name__)
 
@@ -39,24 +41,6 @@ MODEL_PRICING_USD_PER_MTOK = {
 }
 
 DEFAULT_BILLING_MODEL = os.environ.get("ANTHROPIC_DEFAULT_MODEL", "claude-haiku-4-5")
-
-# ---------------------------------------------------------------------------
-# Supabase client (service role — bypasses RLS)
-# ---------------------------------------------------------------------------
-
-_supabase: Client | None = None
-
-
-def get_supabase() -> Client:
-    global _supabase
-    if _supabase is None:
-        url = os.environ.get("SUPABASE_URL", "")
-        key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
-        if not url or not key:
-            raise RuntimeError("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set")
-        _supabase = create_client(url, key)
-    return _supabase
-
 
 # ---------------------------------------------------------------------------
 # Cost calculation
@@ -151,7 +135,7 @@ def get_balance_summary(user_id: str) -> dict[str, float]:
 
 def record_usage(
     *,
-    user_id: str | None,
+    user_id: str,
     session_id: str,
     model: str | None,
     input_tokens: int,
@@ -160,6 +144,9 @@ def record_usage(
     cache_read_input_tokens: int = 0,
 ) -> dict[str, Any]:
     """Record token usage and deduct cost from user credits."""
+    if not user_id:
+        raise ValueError("user_id is required to record billable usage")
+
     cost = calculate_cost_gbp(
         model=model,
         input_tokens=input_tokens,
@@ -183,13 +170,6 @@ def record_usage(
         }).execute()
     except Exception as e:
         logger.warning(f"Could not insert token_usage for {user_id}: {e}")
-
-    if not user_id:
-        return {
-            "cost_gbp": cost,
-            "model": _normalise_model_name(model),
-            "balance": None,
-        }
 
     # Deduct from free tier first, then balance
     credits = get_or_create_credits(user_id)
@@ -219,20 +199,23 @@ def record_usage(
 # ---------------------------------------------------------------------------
 
 @router.get("/balance")
-def get_balance(user_id: str):
-    return get_balance_summary(user_id)
+def get_balance(current_user: AuthenticatedUser = Depends(require_user)):
+    return get_balance_summary(current_user.id)
 
 
 @router.get("/usage")
-def get_usage(user_id: str, limit: int = 50):
+def get_usage(
+    limit: int = 50,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
     sb = get_supabase()
-    result = sb.table("token_usage").select("*").eq("user_id", user_id).order("created_at", desc=True).limit(limit).execute()
+    bounded_limit = max(1, min(limit, 100))
+    result = sb.table("token_usage").select("*").eq("user_id", current_user.id).order("created_at", desc=True).limit(bounded_limit).execute()
     return result.data
 
 
 class CheckoutRequest(BaseModel):
-    user_id: str
-    amount_gbp: float = 5.0
+    amount_gbp: float = Field(default=5.0, gt=0, le=500)
 
 
 def _get_public_base_url() -> str:
@@ -243,7 +226,10 @@ def _get_public_base_url() -> str:
 
 
 @router.post("/checkout")
-def create_checkout(request: CheckoutRequest):
+def create_checkout(
+    request: CheckoutRequest,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
     import stripe
 
     stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
@@ -264,7 +250,7 @@ def create_checkout(request: CheckoutRequest):
             },
             "quantity": 1,
         }],
-        metadata={"user_id": request.user_id, "amount_gbp": str(request.amount_gbp)},
+        metadata={"user_id": current_user.id, "amount_gbp": str(request.amount_gbp)},
         success_url=f"{base_url}?topup=success",
         cancel_url=f"{base_url}?topup=cancel",
     )

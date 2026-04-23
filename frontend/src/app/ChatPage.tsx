@@ -11,6 +11,7 @@ import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Chart, extractChartSpecs, ChartSpec } from "@/components/charts";
 import { THEME } from "@/components/theme";
 import { getBackendEndpoint } from "@/utils/backend";
+import { getSupabase } from "@/utils/supabase";
 
 const EXAMPLE_QUERIES = [
   "What's the current personal allowance?",
@@ -128,7 +129,7 @@ interface BalanceSummary {
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
   const url = new URL(getBackendEndpoint(endpoint), window.location.origin);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
-  const options: RequestInit = { method, headers: { "Content-Type": "application/json" } };
+  const options: RequestInit = { method, headers: { "Content-Type": "application/json", ...(await getAuthHeaders()) } };
   if (body && ["POST", "PUT", "PATCH"].includes(method)) options.body = JSON.stringify(body);
   const res = await fetch(url.toString(), options);
   if (!res.ok) {
@@ -138,6 +139,13 @@ async function apiRequest<T>(method: string, endpoint: string, params?: Record<s
   }
   if (res.status === 204) return undefined as T;
   return res.json();
+}
+
+async function getAuthHeaders(): Promise<Record<string, string>> {
+  const supabase = getSupabase();
+  if (!supabase) return {};
+  const { data: { session } } = await supabase.auth.getSession();
+  return session?.access_token ? { Authorization: `Bearer ${session.access_token}` } : {};
 }
 
 export default function ChatPage() {
@@ -177,7 +185,7 @@ export default function ChatPage() {
 
   const fetchBalance = useCallback(async () => {
     if (!user) return;
-    const data = await apiRequest<BalanceSummary>("GET", "billing/balance", { user_id: user.id });
+    const data = await apiRequest<BalanceSummary>("GET", "billing/balance");
     setBalance(data);
   }, [user]);
 
@@ -185,7 +193,7 @@ export default function ChatPage() {
     if (!user) return;
     setTopUpLoading(true);
     try {
-      const { url } = await apiRequest<{ url: string }>("POST", "billing/checkout", undefined, { user_id: user.id, amount_gbp: amount });
+      const { url } = await apiRequest<{ url: string }>("POST", "billing/checkout", undefined, { amount_gbp: amount });
       if (url) window.location.href = url;
     } catch (e) { console.error("Checkout failed", e); }
     finally { setTopUpLoading(false); }
@@ -206,7 +214,7 @@ export default function ChatPage() {
   useEffect(() => {
     inputRef.current?.focus();
     if (!authLoading && user) {
-      apiRequest<ConversationSummary[]>("GET", "conversations", { user_id: user.id })
+      apiRequest<ConversationSummary[]>("GET", "conversations")
         .then((convs) => {
           setConversations(convs);
           // Preload conversation details in background
@@ -251,7 +259,7 @@ export default function ChatPage() {
   const shareConversation = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
     try {
-      const { share_token } = await apiRequest<{ share_token: string }>("POST", `conversations/${id}/share`, user?.id ? { user_id: user.id } : undefined);
+      const { share_token } = await apiRequest<{ share_token: string }>("POST", `conversations/${id}/share`);
       const url = `${window.location.origin}/s/${share_token}`;
       await navigator.clipboard.writeText(url);
       setCopiedShareId(id);
@@ -293,7 +301,7 @@ export default function ChatPage() {
     });
 
     try {
-      const saved = await apiRequest<ConversationDetail>("POST", "conversations", undefined, { session_id: sid, title, messages: apiMessages, user_id: user?.id, user_email: user?.email });
+      const saved = await apiRequest<ConversationDetail>("POST", "conversations", undefined, { session_id: sid, title, messages: apiMessages });
       setActiveConversationId(saved.id);
       conversationCache.current.set(saved.id, saved);
       setConversations((prev) => {
@@ -321,7 +329,6 @@ export default function ChatPage() {
       const conversationId = await ensureConversationForReport();
       if (!conversationId) throw new Error("Could not save this thread for reporting.");
       const data = await apiRequest<ReportConversationResponse>("POST", `conversations/${conversationId}/report`, undefined, {
-        user_id: user?.id,
         note: reportNote.trim() || null,
         app_url: window.location.origin,
       });
@@ -346,6 +353,11 @@ export default function ChatPage() {
 
   const sendMessage = async () => {
     if (!input.trim() || isStreaming) return;
+    if (authLoading) return;
+    if (!user) {
+      setShowAuth(true);
+      return;
+    }
     const userMessage: Message = { role: "user", content: input };
     const allMessages = [...messages, userMessage];
     setMessages((prev) => [...prev, userMessage]);
@@ -416,8 +428,8 @@ export default function ChatPage() {
     try {
       const response = await fetch(getBackendEndpoint("chat/message"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null }),
+        headers: { "Content-Type": "application/json", ...(await getAuthHeaders()) },
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current }),
         signal: controller.signal,
       });
       if (response.status === 402) {
