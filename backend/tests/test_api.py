@@ -23,6 +23,16 @@ class TestHealth:
         assert r.json()["status"] == "ok"
 
 
+class TestChatBackends:
+    def test_lists_backends(self):
+        r = client.get("/chat/backends")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["default"] == "uk_compiled"
+        assert "uk_compiled" in data["backends"]
+        assert "uk_python" in data["backends"]
+
+
 # ---------------------------------------------------------------------------
 # Conversations CRUD
 # ---------------------------------------------------------------------------
