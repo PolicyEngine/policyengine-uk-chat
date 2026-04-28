@@ -10,9 +10,11 @@ import uuid
 from datetime import datetime, timezone
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlmodel import Field, Session, SQLModel, create_engine, select
+
+from routes.auth import AuthenticatedUser, require_user
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +51,6 @@ class SaveConversationRequest(BaseModel):
     session_id: str
     title: str
     messages: list
-    user_id: str | None = None
-    user_email: str | None = None
 
 
 class ConversationSummary(BaseModel):
@@ -91,7 +91,10 @@ def ensure_table():
 
 
 @router.post("", response_model=ConversationDetail)
-def save_conversation(request: SaveConversationRequest):
+def save_conversation(
+    request: SaveConversationRequest,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
     now = datetime.now(timezone.utc)
     engine = get_engine()
 
@@ -101,11 +104,13 @@ def save_conversation(request: SaveConversationRequest):
         ).first()
 
         if existing:
+            if existing.user_id and existing.user_id != current_user.id:
+                raise HTTPException(status_code=403, detail="Not your conversation")
             existing.title = request.title
             existing.messages = json.dumps(request.messages)
             existing.updated_at = now
-            existing.user_id = request.user_id
-            existing.user_email = request.user_email
+            existing.user_id = current_user.id
+            existing.user_email = current_user.email
             session.add(existing)
             session.commit()
             session.refresh(existing)
@@ -115,8 +120,8 @@ def save_conversation(request: SaveConversationRequest):
                 session_id=request.session_id,
                 title=request.title,
                 messages=json.dumps(request.messages),
-                user_id=request.user_id,
-                user_email=request.user_email,
+                user_id=current_user.id,
+                user_email=current_user.email,
                 created_at=now,
                 updated_at=now,
             )
@@ -132,14 +137,10 @@ def save_conversation(request: SaveConversationRequest):
 
 
 @router.get("")
-def list_conversations(user_id: str | None = None):
+def list_conversations(current_user: AuthenticatedUser = Depends(require_user)):
     engine = get_engine()
     with Session(engine) as session:
-        stmt = select(ChatConversation)
-        if user_id:
-            stmt = stmt.where(ChatConversation.user_id == user_id)
-        else:
-            stmt = stmt.where(ChatConversation.user_id == None)
+        stmt = select(ChatConversation).where(ChatConversation.user_id == current_user.id)
         stmt = stmt.order_by(ChatConversation.updated_at.desc()).limit(100)
         rows = session.exec(stmt).all()
     return [
@@ -150,13 +151,18 @@ def list_conversations(user_id: str | None = None):
     ]
 
 
-@router.get("/{conversation_id}", response_model=ConversationDetail)
-def get_conversation(conversation_id: int):
+@router.get("/{conversation_id:int}", response_model=ConversationDetail)
+def get_conversation(
+    conversation_id: int,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
     engine = get_engine()
     with Session(engine) as session:
         row = session.get(ChatConversation, conversation_id)
     if not row:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    if row.user_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your conversation")
     return ConversationDetail(
         id=row.id, session_id=row.session_id, title=row.title,
         messages=json.loads(row.messages) if isinstance(row.messages, str) else row.messages,
@@ -172,7 +178,6 @@ class SharedConversationDetail(BaseModel):
 
 
 class ReportConversationRequest(BaseModel):
-    user_id: str | None = None
     note: str | None = None
     app_url: str | None = None
 
@@ -265,14 +270,17 @@ def _build_issue_body(
     return "\n".join(lines).strip() + "\n"
 
 
-@router.post("/{conversation_id}/share")
-def share_conversation(conversation_id: int, user_id: str | None = None):
+@router.post("/{conversation_id:int}/share")
+def share_conversation(
+    conversation_id: int,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
     engine = get_engine()
     with Session(engine) as session:
         row = session.get(ChatConversation, conversation_id)
         if not row:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        if row.user_id and row.user_id != user_id:
+        if row.user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not your conversation")
         if not row.share_token:
             row.share_token = str(uuid.uuid4())
@@ -282,14 +290,18 @@ def share_conversation(conversation_id: int, user_id: str | None = None):
     return {"share_token": row.share_token}
 
 
-@router.post("/{conversation_id}/report", response_model=ReportConversationResponse)
-def report_conversation(conversation_id: int, request: ReportConversationRequest):
+@router.post("/{conversation_id:int}/report", response_model=ReportConversationResponse)
+def report_conversation(
+    conversation_id: int,
+    request: ReportConversationRequest,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
     engine = get_engine()
     with Session(engine) as session:
         row = session.get(ChatConversation, conversation_id)
         if not row:
             raise HTTPException(status_code=404, detail="Conversation not found")
-        if row.user_id and row.user_id != request.user_id:
+        if row.user_id != current_user.id:
             raise HTTPException(status_code=403, detail="Not your conversation")
         if not row.share_token:
             row.share_token = str(uuid.uuid4())
@@ -337,12 +349,17 @@ def get_shared_conversation(share_token: str):
     )
 
 
-@router.delete("/{conversation_id}", status_code=204)
-def delete_conversation(conversation_id: int):
+@router.delete("/{conversation_id:int}", status_code=204)
+def delete_conversation(
+    conversation_id: int,
+    current_user: AuthenticatedUser = Depends(require_user),
+):
     engine = get_engine()
     with Session(engine) as session:
         row = session.get(ChatConversation, conversation_id)
         if not row:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        if row.user_id != current_user.id:
+            raise HTTPException(status_code=403, detail="Not your conversation")
         session.delete(row)
         session.commit()
