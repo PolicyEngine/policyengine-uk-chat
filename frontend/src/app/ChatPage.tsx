@@ -135,6 +135,12 @@ interface ModelBackendsResponse {
   backends: Record<string, ModelBackendOption>;
 }
 
+function formatBackendLabel(backend: ModelBackendOption): string {
+  if (backend.id === "uk_compiled") return "Compiled";
+  if (backend.id === "uk_python") return "Python";
+  return backend.display_name;
+}
+
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
   const url = new URL(getBackendEndpoint(endpoint), window.location.origin);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -1011,29 +1017,38 @@ export default function ChatPage() {
               {!hasMessages ? <span>Press Enter to send · Shift+Enter for new line</span> : <span />}
               <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px", flexWrap: "wrap" }}>
                 {modelBackends.length > 1 && (
-                  <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#b5b1a9", fontSize: "11px" }}>
-                    <span>Model</span>
-                    <select
-                      value={selectedBackendId}
-                      onChange={(e) => handleBackendChange(e.target.value)}
-                      disabled={isStreaming}
-                      style={{
-                        maxWidth: "220px",
-                        color: isStreaming ? "#b5b1a9" : "#4b4740",
-                        background: "#fff",
-                        border: `1px solid ${THEME.border}`,
-                        padding: "3px 22px 3px 6px",
-                        fontSize: "11px",
-                        fontFamily: "inherit",
-                        cursor: isStreaming ? "not-allowed" : "pointer",
-                        opacity: isStreaming ? 0.65 : 1,
-                      }}
-                    >
-                      {modelBackends.map((backend) => (
-                        <option key={backend.id} value={backend.id}>{backend.display_name}</option>
-                      ))}
-                    </select>
-                  </label>
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#b5b1a9", fontSize: "11px" }}>
+                    <span style={{ color: "#d1cdc4" }}>Engine</span>
+                    <div style={{ display: "inline-flex", alignItems: "center", padding: "2px", border: `1px solid ${THEME.border}`, background: "#fbfaf8" }}>
+                      {modelBackends.map((backend) => {
+                        const selected = backend.id === selectedBackendId;
+                        return (
+                          <button
+                            key={backend.id}
+                            type="button"
+                            onClick={() => handleBackendChange(backend.id)}
+                            disabled={isStreaming || selected}
+                            title={backend.display_name}
+                            style={{
+                              border: "none",
+                              background: selected ? "#fff" : "transparent",
+                              color: selected ? THEME.primary : "#9e9a90",
+                              cursor: isStreaming || selected ? "default" : "pointer",
+                              fontFamily: "inherit",
+                              fontSize: "11px",
+                              fontWeight: selected ? 500 : 400,
+                              lineHeight: 1,
+                              padding: "5px 7px",
+                              boxShadow: selected ? "0 1px 2px rgba(28, 26, 23, 0.08)" : "none",
+                              opacity: isStreaming && !selected ? 0.5 : 1,
+                            }}
+                          >
+                            {formatBackendLabel(backend)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
                 {modelVersion && <span style={{ fontSize: "11px", color: "#d1cdc4" }}>policyengine-uk v{modelVersion}</span>}
               </div>
