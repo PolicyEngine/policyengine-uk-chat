@@ -23,6 +23,20 @@ class TestHealth:
         assert r.json()["status"] == "ok"
 
 
+class TestChatBackends:
+    def test_lists_backends(self):
+        r = client.get("/chat/backends")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["default"] == "uk_compiled"
+        assert "uk_compiled" in data["backends"]
+        assert "uk_python" in data["backends"]
+        assert data["backends"]["uk_compiled"]["package_label"] == "policyengine-uk-compiled"
+        assert data["backends"]["uk_python"]["package_label"] == "policyengine-uk"
+        assert "version" in data["backends"]["uk_compiled"]
+        assert "version" in data["backends"]["uk_python"]
+
+
 # ---------------------------------------------------------------------------
 # Conversations CRUD
 # ---------------------------------------------------------------------------
