@@ -5,7 +5,7 @@ psycopg2-binary
 anthropic
 pydantic-ai[anthropic]
 policyengine-uk-compiled>=0.20.0
-policyengine_uk
+policyengine_uk==2.88.0
 pandas
 httpx
 supabase
