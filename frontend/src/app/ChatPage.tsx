@@ -324,7 +324,9 @@ export default function ChatPage() {
         return [{ id: saved.id, session_id: sid, title, created_at: saved.created_at, updated_at: saved.updated_at }, ...filtered];
       });
       return saved;
-    } catch (e) { console.error("Failed to save conversation", e); }
+    } catch {
+      return null;
+    }
     return null;
   }, [user]);
 

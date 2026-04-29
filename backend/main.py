@@ -4,6 +4,7 @@ FastAPI entrypoint for the microsim public chatbot.
 
 import logging
 import os
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,6 +16,34 @@ import routes.conversations as conversations
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _load_env_file(path: Path) -> None:
+    if not path.exists():
+        return
+    try:
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("export "):
+                line = line[len("export "):].lstrip()
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            if not key or key in os.environ:
+                continue
+            value = value.strip()
+            if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
+                value = value[1:-1]
+            os.environ[key] = value
+    except OSError:
+        logger.warning("Could not read env file at %s", path)
+
+
+_repo_root = Path(__file__).resolve().parent.parent
+_load_env_file(_repo_root / ".env")
 
 _hostnames_env = os.environ.get("HOSTNAMES", "")
 HOSTNAMES = _hostnames_env.split(",") if _hostnames_env else ["*"]
