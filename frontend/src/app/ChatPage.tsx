@@ -125,6 +125,16 @@ interface BalanceSummary {
   total_available_gbp: number;
 }
 
+interface ModelBackendOption {
+  id: string;
+  display_name: string;
+}
+
+interface ModelBackendsResponse {
+  default: string;
+  backends: Record<string, ModelBackendOption>;
+}
+
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
   const url = new URL(getBackendEndpoint(endpoint), window.location.origin);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -170,6 +180,8 @@ export default function ChatPage() {
   const abortRef = useRef<AbortController | null>(null);
 
   const [modelVersion, setModelVersion] = useState<string | null>(null);
+  const [modelBackends, setModelBackends] = useState<ModelBackendOption[]>([]);
+  const [selectedBackendId, setSelectedBackendId] = useState("uk_compiled");
   const [balance, setBalance] = useState<BalanceSummary | null>(null);
   const [topUpLoading, setTopUpLoading] = useState(false);
   const hasMessages = messages.length > 0;
@@ -194,6 +206,17 @@ export default function ChatPage() {
   useEffect(() => {
     apiRequest<{ policyengine_uk_compiled: string }>("GET", "version")
       .then((v) => setModelVersion(v.policyengine_uk_compiled))
+      .catch(() => {});
+    apiRequest<ModelBackendsResponse>("GET", "chat/backends")
+      .then((data) => {
+        const options = Object.values(data.backends);
+        const stored = window.localStorage.getItem("policyengine-chat-backend");
+        const nextBackend = stored && options.some((backend) => backend.id === stored)
+          ? stored
+          : data.default;
+        setModelBackends(options);
+        setSelectedBackendId(nextBackend);
+      })
       .catch(() => {});
     // Refresh balance after Stripe redirect
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("topup") === "success") {
@@ -417,7 +440,7 @@ export default function ChatPage() {
       const response = await fetch(getBackendEndpoint("chat/message"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null }),
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, model_backend: selectedBackendId }),
         signal: controller.signal,
       });
       if (response.status === 402) {
@@ -542,6 +565,11 @@ export default function ChatPage() {
   };
 
   const stopStreaming = () => { abortRef.current?.abort(); };
+
+  const handleBackendChange = (backendId: string) => {
+    setSelectedBackendId(backendId);
+    window.localStorage.setItem("policyengine-chat-backend", backendId);
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -977,12 +1005,37 @@ export default function ChatPage() {
                 />
               </div>
             </div>
-            {!hasMessages && (
-              <div style={{ marginTop: "14px", color: "#b5b1a9", fontSize: "12px", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span>Press Enter to send · Shift+Enter for new line</span>
+            <div style={{ marginTop: "14px", color: "#b5b1a9", fontSize: "12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+              {!hasMessages ? <span>Press Enter to send · Shift+Enter for new line</span> : <span />}
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px", flexWrap: "wrap" }}>
+                {modelBackends.length > 1 && (
+                  <label style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#b5b1a9", fontSize: "11px" }}>
+                    <span>Model</span>
+                    <select
+                      value={selectedBackendId}
+                      onChange={(e) => handleBackendChange(e.target.value)}
+                      disabled={isStreaming}
+                      style={{
+                        maxWidth: "220px",
+                        color: isStreaming ? "#b5b1a9" : "#4b4740",
+                        background: "#fff",
+                        border: `1px solid ${THEME.border}`,
+                        padding: "3px 22px 3px 6px",
+                        fontSize: "11px",
+                        fontFamily: "inherit",
+                        cursor: isStreaming ? "not-allowed" : "pointer",
+                        opacity: isStreaming ? 0.65 : 1,
+                      }}
+                    >
+                      {modelBackends.map((backend) => (
+                        <option key={backend.id} value={backend.id}>{backend.display_name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 {modelVersion && <span style={{ fontSize: "11px", color: "#d1cdc4" }}>policyengine-uk v{modelVersion}</span>}
               </div>
-            )}
+            </div>
           </div>
         </div>
       </div>
