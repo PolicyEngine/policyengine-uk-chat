@@ -1020,7 +1020,7 @@ export default function ChatPage() {
             </div>
             <div style={{ marginTop: "14px", color: "#b5b1a9", fontSize: "12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
               {!hasMessages ? <span>Press Enter to send · Shift+Enter for new line</span> : <span />}
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
                 {modelBackends.length > 1 && (
                   <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#b5b1a9", fontSize: "11px" }}>
                     <span style={{ color: "#d1cdc4" }}>Engine</span>
@@ -1055,7 +1055,7 @@ export default function ChatPage() {
                     </div>
                   </div>
                 )}
-                {selectedBackendVersion && <span style={{ fontSize: "11px", color: "#d1cdc4" }}>{selectedBackendVersion}</span>}
+                {selectedBackendVersion && <span style={{ fontSize: "11px", color: "#d1cdc4", lineHeight: 1 }}>{selectedBackendVersion}</span>}
               </div>
             </div>
           </div>
