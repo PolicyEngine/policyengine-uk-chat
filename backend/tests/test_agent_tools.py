@@ -28,6 +28,10 @@ class TestModelBackends:
         backends = available_backends()
         assert "uk_compiled" in backends
         assert "uk_python" in backends
+        assert backends["uk_compiled"]["package_label"] == "policyengine-uk-compiled"
+        assert backends["uk_python"]["package_label"] == "policyengine-uk"
+        assert "version" in backends["uk_compiled"]
+        assert "version" in backends["uk_python"]
 
     def test_backend_tool_descriptions_are_backend_specific(self):
         compiled_tools = get_tool_definitions("uk_compiled")

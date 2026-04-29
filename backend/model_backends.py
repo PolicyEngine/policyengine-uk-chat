@@ -9,6 +9,7 @@ interface, prompt context, and tool documentation to vary by backend.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib.metadata import PackageNotFoundError, version
 import json
 import math
 from pathlib import Path
@@ -55,7 +56,15 @@ def _ensure_sibling_package_importable(
 class ModelBackend:
     id: str
     display_name: str
+    package_name: str
+    package_label: str
     import_roots: frozenset[str]
+
+    def package_version(self) -> str:
+        try:
+            return version(self.package_name)
+        except PackageNotFoundError:
+            return "unknown"
 
     def prompt_context(self) -> str:
         raise NotImplementedError
@@ -72,6 +81,8 @@ class UKCompiledBackend(ModelBackend):
         super().__init__(
             id="uk_compiled",
             display_name="PolicyEngine UK compiled Rust backend",
+            package_name="policyengine-uk-compiled",
+            package_label="policyengine-uk-compiled",
             import_roots=frozenset(
                 {"json", "math", "numpy", "pandas", "policyengine_uk_compiled"}
             ),
@@ -177,6 +188,8 @@ class UKPolicyEnginePythonBackend(ModelBackend):
         super().__init__(
             id="uk_python",
             display_name="PolicyEngine UK Python backend",
+            package_name="policyengine-uk",
+            package_label="policyengine-uk",
             import_roots=frozenset(
                 {
                     "json",
@@ -330,6 +343,8 @@ def available_backends() -> Dict[str, Dict[str, str]]:
         backend_id: {
             "id": backend.id,
             "display_name": backend.display_name,
+            "package_label": backend.package_label,
+            "version": backend.package_version(),
         }
         for backend_id, backend in _BACKENDS.items()
     }

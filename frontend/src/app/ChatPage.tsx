@@ -128,6 +128,8 @@ interface BalanceSummary {
 interface ModelBackendOption {
   id: string;
   display_name: string;
+  package_label: string;
+  version: string;
 }
 
 interface ModelBackendsResponse {
@@ -139,6 +141,11 @@ function formatBackendLabel(backend: ModelBackendOption): string {
   if (backend.id === "uk_compiled") return "Compiled";
   if (backend.id === "uk_python") return "Python";
   return backend.display_name;
+}
+
+function formatBackendVersion(backend: ModelBackendOption | undefined): string | null {
+  if (!backend?.package_label || !backend.version || backend.version === "unknown") return null;
+  return `${backend.package_label} v${backend.version}`;
 }
 
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
@@ -185,13 +192,14 @@ export default function ChatPage() {
   const debugLog = useRef<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
-  const [modelVersion, setModelVersion] = useState<string | null>(null);
   const [modelBackends, setModelBackends] = useState<ModelBackendOption[]>([]);
   const [selectedBackendId, setSelectedBackendId] = useState("uk_compiled");
   const [balance, setBalance] = useState<BalanceSummary | null>(null);
   const [topUpLoading, setTopUpLoading] = useState(false);
   const hasMessages = messages.length > 0;
   const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, !hasMessages && !input);
+  const selectedBackend = modelBackends.find((backend) => backend.id === selectedBackendId);
+  const selectedBackendVersion = formatBackendVersion(selectedBackend);
 
   const fetchBalance = useCallback(async () => {
     if (!user) return;
@@ -210,9 +218,6 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
-    apiRequest<{ policyengine_uk_compiled: string }>("GET", "version")
-      .then((v) => setModelVersion(v.policyengine_uk_compiled))
-      .catch(() => {});
     apiRequest<ModelBackendsResponse>("GET", "chat/backends")
       .then((data) => {
         const options = Object.values(data.backends);
@@ -1050,7 +1055,7 @@ export default function ChatPage() {
                     </div>
                   </div>
                 )}
-                {modelVersion && <span style={{ fontSize: "11px", color: "#d1cdc4" }}>policyengine-uk v{modelVersion}</span>}
+                {selectedBackendVersion && <span style={{ fontSize: "11px", color: "#d1cdc4" }}>{selectedBackendVersion}</span>}
               </div>
             </div>
           </div>

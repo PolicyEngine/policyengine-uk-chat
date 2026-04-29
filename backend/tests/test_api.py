@@ -31,6 +31,10 @@ class TestChatBackends:
         assert data["default"] == "uk_compiled"
         assert "uk_compiled" in data["backends"]
         assert "uk_python" in data["backends"]
+        assert data["backends"]["uk_compiled"]["package_label"] == "policyengine-uk-compiled"
+        assert data["backends"]["uk_python"]["package_label"] == "policyengine-uk"
+        assert "version" in data["backends"]["uk_compiled"]
+        assert "version" in data["backends"]["uk_python"]
 
 
 # ---------------------------------------------------------------------------
