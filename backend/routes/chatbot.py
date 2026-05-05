@@ -306,13 +306,20 @@ async def chat_message(request: ChatRequest, http_request: Request):
                 max_retries = 2
                 for attempt in range(max_retries + 1):
                     try:
-                        async with client.messages.stream(
-                            model=model,
-                            max_tokens=16000,
-                            system=system_blocks,
-                            tools=tools,
-                            messages=conversation,
-                        ) as stream:
+                        # Plan mode is enforced structurally: omit tools from the
+                        # request so the API cannot emit tool_use blocks. The
+                        # directive in system_blocks shapes the response; this
+                        # makes "no tool calls in plan mode" a code-level invariant
+                        # rather than a prompt-level promise.
+                        stream_kwargs: Dict[str, Any] = {
+                            "model": model,
+                            "max_tokens": 16000,
+                            "system": system_blocks,
+                            "messages": conversation,
+                        }
+                        if not plan_mode:
+                            stream_kwargs["tools"] = tools
+                        async with client.messages.stream(**stream_kwargs) as stream:
                             announced_tools: set = set()
 
                             async for event in stream:
@@ -350,6 +357,14 @@ async def chat_message(request: ChatRequest, http_request: Request):
                             final = await stream.get_final_message()
                             for block in final.content:
                                 if block.type == "tool_use":
+                                    if plan_mode:
+                                        # Defence-in-depth: tools weren't sent, so this
+                                        # path should be unreachable. If the API ever
+                                        # returns a tool_use anyway, drop it silently
+                                        # rather than executing — plan mode guarantees
+                                        # no tool execution.
+                                        logger.warning(f"[CHAT] Dropping unexpected tool_use in plan mode: {block.name}")
+                                        continue
                                     tool_input = block.input if isinstance(block.input, dict) else {}
                                     tool_uses.append({"id": block.id, "name": block.name, "input": tool_input})
                                     yield f"data: {json.dumps({'type': 'tool_use', 'tool_name': block.name, 'tool_id': block.id, 'tool_input': tool_input, 'status': 'pending'})}\n\n"
