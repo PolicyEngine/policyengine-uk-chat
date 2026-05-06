@@ -18,6 +18,7 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.settings import ModelSettings
 
 from agent_tools import execute_tool, TOOL_DEFINITIONS
+from rate_limit import limiter, chat_key_func, CHAT_USER_LIMIT, CHAT_IP_LIMIT
 
 logger = logging.getLogger(__name__)
 
@@ -244,6 +245,8 @@ def generate_title(request: TitleRequest):
 # ---------------------------------------------------------------------------
 
 @router.post("/message")
+@limiter.limit(CHAT_USER_LIMIT, key_func=chat_key_func)
+@limiter.limit(CHAT_IP_LIMIT)
 async def chat_message(request: ChatRequest, http_request: Request):
     # Check billing balance if user is authenticated
     user_id = request.user_id

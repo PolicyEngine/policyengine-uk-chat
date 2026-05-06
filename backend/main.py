@@ -5,13 +5,15 @@ FastAPI entrypoint for the microsim public chatbot.
 import logging
 import os
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
 import routes.billing as billing
 import routes.chatbot as chatbot
 import routes.conversations as conversations
+from rate_limit import limiter
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -40,6 +42,36 @@ app = FastAPI(
     version="1.0.0",
     default_response_class=NaNSafeJSONResponse,
 )
+
+app.state.limiter = limiter
+
+
+@app.exception_handler(RateLimitExceeded)
+async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    """Return 429 with a `Retry-After` header for the slowapi limiter.
+
+    slowapi's RateLimitExceeded carries a `limit` whose underlying object
+    knows the granularity. We pull the period in seconds when we can and
+    fall back to 60 — the safe default given our per-minute limits.
+    """
+    retry_after_seconds = 60
+    try:
+        granularity = getattr(exc.limit.limit, "GRANULARITY", None)
+        seconds = getattr(granularity, "seconds", None)
+        if isinstance(seconds, int) and seconds > 0:
+            retry_after_seconds = seconds
+    except AttributeError:
+        pass
+    return JSONResponse(
+        status_code=429,
+        content={
+            "error": "Too many requests",
+            "details": str(getattr(exc, "detail", "Rate limit exceeded")),
+            "retry_after_seconds": retry_after_seconds,
+        },
+        headers={"Retry-After": str(retry_after_seconds)},
+    )
+
 
 app.add_middleware(
     CORSMiddleware,

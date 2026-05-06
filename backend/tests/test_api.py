@@ -288,3 +288,58 @@ class TestPlanMode:
         assert req.plan_mode is True
         req2 = ChatRequest(messages=[{"role": "user", "content": "hi"}])
         assert req2.plan_mode is False
+
+
+# ---------------------------------------------------------------------------
+# Rate limiting
+# ---------------------------------------------------------------------------
+
+class TestRateLimitConfig:
+    """Unit checks on the rate-limit key function and configuration.
+
+    End-to-end limit triggering is not tested here — it requires precise
+    timing, fresh limiter state per test, and would couple to the in-memory
+    storage backend. The integration tests in conftest.py raise the limits
+    far above test workload so the limiter never fires during this suite.
+    """
+
+    def _request(self, headers=None, client_host="203.0.113.1"):
+        from starlette.requests import Request
+        scope = {
+            "type": "http",
+            "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()],
+            "client": (client_host, 12345),
+        }
+        return Request(scope)
+
+    def test_key_func_uses_user_id_header(self):
+        from rate_limit import chat_key_func
+        req = self._request(headers={"x-user-id": "abc-123"})
+        assert chat_key_func(req) == "user:abc-123"
+
+    def test_key_func_falls_back_to_ip(self):
+        from rate_limit import chat_key_func
+        req = self._request(client_host="198.51.100.7")
+        assert chat_key_func(req) == "ip:198.51.100.7"
+
+    def test_key_func_user_id_takes_precedence_over_ip(self):
+        from rate_limit import chat_key_func
+        req = self._request(headers={"x-user-id": "u1"}, client_host="198.51.100.7")
+        assert chat_key_func(req) == "user:u1"
+
+    def test_empty_user_id_header_falls_back_to_ip(self):
+        from rate_limit import chat_key_func
+        req = self._request(headers={"x-user-id": ""}, client_host="198.51.100.7")
+        assert chat_key_func(req) == "ip:198.51.100.7"
+
+    def test_limit_strings_compose_per_min_and_per_hour(self):
+        from rate_limit import CHAT_USER_LIMIT
+        assert "/minute" in CHAT_USER_LIMIT and "/hour" in CHAT_USER_LIMIT
+
+    def test_env_overrides_take_effect_at_import(self):
+        # conftest.py sets these to test values; verify rate_limit picked them up.
+        import os
+        from rate_limit import CHAT_PER_MIN, CHAT_PER_HOUR, CHAT_IP_PER_MIN
+        assert CHAT_PER_MIN == int(os.environ["RATE_LIMIT_CHAT_PER_MIN"])
+        assert CHAT_PER_HOUR == int(os.environ["RATE_LIMIT_CHAT_PER_HOUR"])
+        assert CHAT_IP_PER_MIN == int(os.environ["RATE_LIMIT_CHAT_IP_PER_MIN"])

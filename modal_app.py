@@ -38,6 +38,7 @@ image = (
         "httpx",
         "supabase",
         "stripe",
+        "slowapi",
         "python-dateutil",
     )
     .run_function(_preload_engine)

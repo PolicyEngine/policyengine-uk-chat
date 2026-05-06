@@ -416,15 +416,24 @@ export default function ChatPage() {
     abortRef.current = controller;
 
     try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (user?.id) headers["X-User-Id"] = user.id;
       const response = await fetch(getBackendEndpoint("chat/message"), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, plan_mode: planMode }),
         signal: controller.signal,
       });
       if (response.status === 402) {
         const err = await response.json().catch(() => ({ error: "No credit remaining" }));
         setMessages((prev) => [...prev, { role: "assistant", content: err.error || "No credit remaining. Please top up to continue." }]);
+        setIsStreaming(false); setIsWaiting(false);
+        return;
+      }
+      if (response.status === 429) {
+        const retryAfterHeader = response.headers.get("retry-after");
+        const seconds = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 60;
+        setMessages((prev) => [...prev, { role: "assistant", content: `You're sending messages a bit fast — please wait ~${seconds}s and try again.`, isComplete: true }]);
         setIsStreaming(false); setIsWaiting(false);
         return;
       }

@@ -10,3 +10,4 @@ pandas
 httpx
 supabase
 stripe
+slowapi
