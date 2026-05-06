@@ -249,3 +249,42 @@ class TestChatMessage:
         done = next(e for e in events if e["type"] == "done")
         assert "usage" in done
         assert done["usage"]["input_tokens"] > 0
+
+
+# ---------------------------------------------------------------------------
+# Plan mode contract
+# ---------------------------------------------------------------------------
+
+class TestPlanMode:
+    """Plan mode promises: no tools execute on the plan-mode turn.
+
+    Structural enforcement: when plan_mode=True the request to Anthropic
+    omits `tools` entirely, so tool_use blocks cannot be emitted. The
+    directive in the system blocks shapes the clarifying-question reply.
+    These are unit checks against the helper and request shape; they don't
+    hit Anthropic.
+    """
+
+    def test_directive_present_when_plan_mode_on(self):
+        from routes.chatbot import _build_system_blocks, PLAN_MODE_DIRECTIVE
+        blocks = _build_system_blocks(plan_mode=True)
+        assert any(PLAN_MODE_DIRECTIVE in b.get("text", "") for b in blocks)
+
+    def test_directive_absent_when_plan_mode_off(self):
+        from routes.chatbot import _build_system_blocks, PLAN_MODE_DIRECTIVE
+        blocks = _build_system_blocks(plan_mode=False)
+        assert not any(PLAN_MODE_DIRECTIVE in b.get("text", "") for b in blocks)
+
+    def test_base_prompt_cache_breakpoint_unchanged(self):
+        from routes.chatbot import _build_system_blocks
+        on = _build_system_blocks(plan_mode=True)
+        off = _build_system_blocks(plan_mode=False)
+        assert on[0] == off[0]
+        assert "cache_control" in on[0]
+
+    def test_request_accepts_plan_mode_field(self):
+        from routes.chatbot import ChatRequest
+        req = ChatRequest(messages=[{"role": "user", "content": "hi"}], plan_mode=True)
+        assert req.plan_mode is True
+        req2 = ChatRequest(messages=[{"role": "user", "content": "hi"}])
+        assert req2.plan_mode is False
