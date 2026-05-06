@@ -11,16 +11,31 @@ interface AuthState {
   signUp: (email: string, password: string) => Promise<{ error: string | null }>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  signInWithGoogle: () => Promise<{ error: string | null }>;
+  signInWithMagicLink: (email: string) => Promise<{ error: string | null }>;
+  resetPassword: (email: string) => Promise<{ error: string | null }>;
+  updatePassword: (password: string) => Promise<{ error: string | null }>;
 }
+
+const NOT_CONFIGURED = { error: "Auth not configured" } as const;
 
 const AuthContext = createContext<AuthState>({
   user: null,
   session: null,
   loading: false,
-  signUp: async () => ({ error: "Auth not configured" }),
-  signIn: async () => ({ error: "Auth not configured" }),
+  signUp: async () => NOT_CONFIGURED,
+  signIn: async () => NOT_CONFIGURED,
   signOut: async () => {},
+  signInWithGoogle: async () => NOT_CONFIGURED,
+  signInWithMagicLink: async () => NOT_CONFIGURED,
+  resetPassword: async () => NOT_CONFIGURED,
+  updatePassword: async () => NOT_CONFIGURED,
 });
+
+const originIfBrowser = (): string | undefined => {
+  if (typeof window === "undefined") return undefined;
+  return window.location.origin;
+};
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
@@ -50,14 +65,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string) => {
     const supabase = getSupabase();
-    if (!supabase) return { error: "Auth not configured" };
-    const { error } = await supabase.auth.signUp({ email, password });
+    if (!supabase) return NOT_CONFIGURED;
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo: originIfBrowser() },
+    });
     return { error: error?.message ?? null };
   };
 
   const signIn = async (email: string, password: string) => {
     const supabase = getSupabase();
-    if (!supabase) return { error: "Auth not configured" };
+    if (!supabase) return NOT_CONFIGURED;
     const { error } = await supabase.auth.signInWithPassword({ email, password });
     return { error: error?.message ?? null };
   };
@@ -66,8 +85,51 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     await getSupabase()?.auth.signOut();
   };
 
+  const signInWithGoogle = async () => {
+    const supabase = getSupabase();
+    if (!supabase) return NOT_CONFIGURED;
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: { redirectTo: originIfBrowser() },
+    });
+    // Note: signInWithOAuth navigates the page on success — code after this
+    // line generally doesn't run unless `error` is set.
+    return { error: error?.message ?? null };
+  };
+
+  const signInWithMagicLink = async (email: string) => {
+    const supabase = getSupabase();
+    if (!supabase) return NOT_CONFIGURED;
+    const { error } = await supabase.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: originIfBrowser() },
+    });
+    return { error: error?.message ?? null };
+  };
+
+  const resetPassword = async (email: string) => {
+    const supabase = getSupabase();
+    if (!supabase) return NOT_CONFIGURED;
+    const origin = originIfBrowser();
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: origin ? `${origin}/reset-password` : undefined,
+    });
+    return { error: error?.message ?? null };
+  };
+
+  const updatePassword = async (password: string) => {
+    const supabase = getSupabase();
+    if (!supabase) return NOT_CONFIGURED;
+    const { error } = await supabase.auth.updateUser({ password });
+    return { error: error?.message ?? null };
+  };
+
   return (
-    <AuthContext.Provider value={{ user, session, loading, signUp, signIn, signOut }}>
+    <AuthContext.Provider value={{
+      user, session, loading,
+      signUp, signIn, signOut,
+      signInWithGoogle, signInWithMagicLink, resetPassword, updatePassword,
+    }}>
       {children}
     </AuthContext.Provider>
   );
