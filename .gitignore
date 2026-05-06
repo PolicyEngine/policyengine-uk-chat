@@ -6,3 +6,8 @@ node_modules/
 .venv/
 *.egg-info/
 dist/
+
+# Generated at image build time by backend/scripts/build_reference.py.
+# Both backend/Dockerfile and modal_app.py regenerate this against the
+# installed policyengine-uk-compiled version, so it never lives in git.
+backend/reference.md

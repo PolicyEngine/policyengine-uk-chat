@@ -42,6 +42,10 @@ image = (
     )
     .run_function(_preload_engine)
     .add_local_dir("backend", remote_path="/app/backend", copy=True)
+    # Regenerate reference.md against the Modal-installed
+    # policyengine-uk-compiled version so the deployed backend always serves a
+    # fresh API reference. This mirrors the equivalent step in backend/Dockerfile.
+    .run_commands("cd /app/backend && python scripts/build_reference.py")
 )
 
 chat_secrets = modal.Secret.from_name(SECRET_NAME)
