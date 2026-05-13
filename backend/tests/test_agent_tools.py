@@ -11,10 +11,39 @@ from agent_tools import (
     compute,
     generate_chart,
     execute_tool,
+    get_tool_definitions,
     _build_compiled_policy,
     _json_safe,
     run_python,
 )
+from model_backends import available_backends, get_backend
+
+
+# ---------------------------------------------------------------------------
+# model backends
+# ---------------------------------------------------------------------------
+
+class TestModelBackends:
+    def test_available_backends_include_compiled_and_python(self):
+        backends = available_backends()
+        assert "uk_compiled" in backends
+        assert "uk_python" in backends
+        assert backends["uk_compiled"]["package_label"] == "policyengine-uk-compiled"
+        assert backends["uk_python"]["package_label"] == "policyengine-uk"
+        assert "version" in backends["uk_compiled"]
+        assert "version" in backends["uk_python"]
+
+    def test_backend_tool_descriptions_are_backend_specific(self):
+        compiled_tools = get_tool_definitions("uk_compiled")
+        python_tools = get_tool_definitions("uk_python")
+        assert compiled_tools[0]["name"] == "run_python"
+        assert python_tools[0]["name"] == "run_python"
+        assert "compiled" in compiled_tools[0]["description"]
+        assert "policyengine-uk" in python_tools[0]["description"]
+
+    def test_unknown_backend_rejected(self):
+        with pytest.raises(ValueError):
+            get_backend("not_a_backend")
 
 
 # ---------------------------------------------------------------------------

@@ -25,21 +25,7 @@ def _preload_engine():
 image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("libpq-dev", "gcc")
-    .pip_install(
-        "fastapi",
-        "uvicorn[standard]",
-        "sqlmodel",
-        "psycopg2-binary",
-        "anthropic",
-        "pydantic-ai[anthropic]",
-        "policyengine-uk-compiled>=0.20.0",
-        "policyengine_uk>=2.75.0",
-        "pandas",
-        "httpx",
-        "supabase",
-        "stripe",
-        "python-dateutil",
-    )
+    .pip_install_from_requirements("backend/requirements.txt")
     .run_function(_preload_engine)
     .add_local_dir("backend", remote_path="/app/backend", copy=True)
     # Regenerate reference.md against the Modal-installed

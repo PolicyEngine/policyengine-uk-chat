@@ -125,6 +125,29 @@ interface BalanceSummary {
   total_available_gbp: number;
 }
 
+interface ModelBackendOption {
+  id: string;
+  display_name: string;
+  package_label: string;
+  version: string;
+}
+
+interface ModelBackendsResponse {
+  default: string;
+  backends: Record<string, ModelBackendOption>;
+}
+
+function formatBackendLabel(backend: ModelBackendOption): string {
+  if (backend.id === "uk_compiled") return "Compiled";
+  if (backend.id === "uk_python") return "Python";
+  return backend.display_name;
+}
+
+function formatBackendVersion(backend: ModelBackendOption | undefined): string | null {
+  if (!backend?.package_label || !backend.version || backend.version === "unknown") return null;
+  return `${backend.package_label} v${backend.version}`;
+}
+
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
   const url = new URL(getBackendEndpoint(endpoint), window.location.origin);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -163,18 +186,21 @@ export default function ChatPage() {
   const [reportNote, setReportNote] = useState("");
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSubmitting, setReportSubmitting] = useState(false);
-  const [planMode, setPlanMode] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sessionId = useRef<string | null>(null);
   const debugLog = useRef<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
 
-  const [modelVersion, setModelVersion] = useState<string | null>(null);
+  const [modelBackends, setModelBackends] = useState<ModelBackendOption[]>([]);
+  const [selectedBackendId, setSelectedBackendId] = useState("uk_compiled");
   const [balance, setBalance] = useState<BalanceSummary | null>(null);
   const [topUpLoading, setTopUpLoading] = useState(false);
+  const [planMode, setPlanMode] = useState(false);
   const hasMessages = messages.length > 0;
   const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, !hasMessages && !input);
+  const selectedBackend = modelBackends.find((backend) => backend.id === selectedBackendId);
+  const selectedBackendVersion = formatBackendVersion(selectedBackend);
 
   const fetchBalance = useCallback(async () => {
     if (!user) return;
@@ -193,8 +219,16 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
-    apiRequest<{ policyengine_uk_compiled: string }>("GET", "version")
-      .then((v) => setModelVersion(v.policyengine_uk_compiled))
+    apiRequest<ModelBackendsResponse>("GET", "chat/backends")
+      .then((data) => {
+        const options = Object.values(data.backends);
+        const stored = window.localStorage.getItem("policyengine-chat-backend");
+        const nextBackend = stored && options.some((backend) => backend.id === stored)
+          ? stored
+          : data.default;
+        setModelBackends(options);
+        setSelectedBackendId(nextBackend);
+      })
       .catch(() => {});
     // Refresh balance after Stripe redirect
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("topup") === "success") {
@@ -302,7 +336,9 @@ export default function ChatPage() {
         return [{ id: saved.id, session_id: sid, title, created_at: saved.created_at, updated_at: saved.updated_at }, ...filtered];
       });
       return saved;
-    } catch (e) { console.error("Failed to save conversation", e); }
+    } catch {
+      return null;
+    }
     return null;
   }, [user]);
 
@@ -419,7 +455,13 @@ export default function ChatPage() {
       const response = await fetch(getBackendEndpoint("chat/message"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, plan_mode: planMode }),
+        body: JSON.stringify({
+          messages: apiMessages,
+          session_id: sessionId.current,
+          user_id: user?.id || null,
+          model_backend: selectedBackendId,
+          plan_mode: planMode,
+        }),
         signal: controller.signal,
       });
       if (response.status === 402) {
@@ -544,6 +586,11 @@ export default function ChatPage() {
   };
 
   const stopStreaming = () => { abortRef.current?.abort(); };
+
+  const handleBackendChange = (backendId: string) => {
+    setSelectedBackendId(backendId);
+    window.localStorage.setItem("policyengine-chat-backend", backendId);
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -979,36 +1026,72 @@ export default function ChatPage() {
                 />
               </div>
             </div>
-            <div style={{ marginTop: "14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => setPlanMode((v) => !v)}
-                disabled={isStreaming}
-                title={planMode
-                  ? "Plan mode on — the next message will get clarifying questions before the agent runs anything."
-                  : "Plan mode off — turn on to have the agent ask 1–3 clarifying questions before answering."}
-                style={{
-                  display: "flex", alignItems: "center", gap: "6px",
-                  padding: "4px 10px",
-                  background: planMode ? THEME.primary : "transparent",
-                  color: planMode ? "#fff" : "#6b7280",
-                  border: `1px solid ${planMode ? THEME.primary : "#e5e7eb"}`,
-                  fontSize: "11px",
-                  fontFamily: "inherit",
-                  cursor: isStreaming ? "not-allowed" : "pointer",
-                  fontWeight: 500,
-                  opacity: isStreaming ? 0.5 : 1,
-                  transition: "background 120ms, color 120ms, border-color 120ms",
-                }}
-              >
-                <IconBulb size={12} /> Plan mode {planMode ? "on" : "off"}
-              </button>
-              {!hasMessages && (
-                <div style={{ display: "flex", gap: "16px", alignItems: "center", color: "#b5b1a9", fontSize: "12px" }}>
-                  <span>Press Enter to send · Shift+Enter for new line</span>
-                  {modelVersion && <span style={{ fontSize: "11px", color: "#d1cdc4" }}>policyengine-uk v{modelVersion}</span>}
-                </div>
-              )}
+            <div style={{ marginTop: "14px", color: "#b5b1a9", fontSize: "12px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
+                <button
+                  type="button"
+                  onClick={() => setPlanMode((value) => !value)}
+                  disabled={isStreaming}
+                  title={planMode
+                    ? "Plan mode on - the next message will get clarifying questions before the agent runs anything."
+                    : "Plan mode off - turn on to have the agent ask 1-3 clarifying questions before answering."}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "6px",
+                    padding: "4px 10px",
+                    background: planMode ? THEME.primary : "transparent",
+                    color: planMode ? "#fff" : "#6b7280",
+                    border: `1px solid ${planMode ? THEME.primary : "#e5e7eb"}`,
+                    fontSize: "11px",
+                    fontFamily: "inherit",
+                    cursor: isStreaming ? "not-allowed" : "pointer",
+                    fontWeight: 500,
+                    opacity: isStreaming ? 0.5 : 1,
+                    transition: "background 120ms, color 120ms, border-color 120ms",
+                  }}
+                >
+                  <IconBulb size={12} /> Plan mode {planMode ? "on" : "off"}
+                </button>
+                {!hasMessages && <span>Press Enter to send · Shift+Enter for new line</span>}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
+                {modelBackends.length > 1 && (
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#b5b1a9", fontSize: "11px" }}>
+                    <span style={{ color: "#d1cdc4" }}>Engine</span>
+                    <div style={{ display: "inline-flex", alignItems: "center", padding: "2px", border: `1px solid ${THEME.border}`, background: "#fbfaf8" }}>
+                      {modelBackends.map((backend) => {
+                        const selected = backend.id === selectedBackendId;
+                        return (
+                          <button
+                            key={backend.id}
+                            type="button"
+                            onClick={() => handleBackendChange(backend.id)}
+                            disabled={isStreaming || selected}
+                            title={backend.display_name}
+                            style={{
+                              border: "none",
+                              background: selected ? "#fff" : "transparent",
+                              color: selected ? THEME.primary : "#9e9a90",
+                              cursor: isStreaming || selected ? "default" : "pointer",
+                              fontFamily: "inherit",
+                              fontSize: "11px",
+                              fontWeight: selected ? 500 : 400,
+                              lineHeight: 1,
+                              padding: "5px 7px",
+                              boxShadow: selected ? "0 1px 2px rgba(28, 26, 23, 0.08)" : "none",
+                              opacity: isStreaming && !selected ? 0.5 : 1,
+                            }}
+                          >
+                            {formatBackendLabel(backend)}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {selectedBackendVersion && <span style={{ fontSize: "11px", color: "#d1cdc4", lineHeight: 1 }}>{selectedBackendVersion}</span>}
+              </div>
             </div>
           </div>
         </div>

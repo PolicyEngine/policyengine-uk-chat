@@ -23,6 +23,20 @@ class TestHealth:
         assert r.json()["status"] == "ok"
 
 
+class TestChatBackends:
+    def test_lists_backends(self):
+        r = client.get("/chat/backends")
+        assert r.status_code == 200
+        data = r.json()
+        assert data["default"] == "uk_compiled"
+        assert "uk_compiled" in data["backends"]
+        assert "uk_python" in data["backends"]
+        assert data["backends"]["uk_compiled"]["package_label"] == "policyengine-uk-compiled"
+        assert data["backends"]["uk_python"]["package_label"] == "policyengine-uk"
+        assert "version" in data["backends"]["uk_compiled"]
+        assert "version" in data["backends"]["uk_python"]
+
+
 # ---------------------------------------------------------------------------
 # Conversations CRUD
 # ---------------------------------------------------------------------------
@@ -172,6 +186,14 @@ def parse_sse(response_text: str) -> list[dict]:
 
 
 class TestChatMessage:
+    def test_unknown_model_backend_returns_400(self):
+        r = client.post("/chat/message", json={
+            "messages": [{"role": "user", "content": "hello"}],
+            "model_backend": "not_a_backend",
+        })
+        assert r.status_code == 400
+        assert "Unknown model backend" in r.json()["error"]
+
     def test_simple_chat_returns_sse(self):
         with client.stream("POST", "/chat/message", json={
             "messages": [{"role": "user", "content": "Say exactly: hello"}],
@@ -267,18 +289,18 @@ class TestPlanMode:
 
     def test_directive_present_when_plan_mode_on(self):
         from routes.chatbot import _build_system_blocks, PLAN_MODE_DIRECTIVE
-        blocks = _build_system_blocks(plan_mode=True)
+        blocks = _build_system_blocks("uk_compiled", plan_mode=True)
         assert any(PLAN_MODE_DIRECTIVE in b.get("text", "") for b in blocks)
 
     def test_directive_absent_when_plan_mode_off(self):
         from routes.chatbot import _build_system_blocks, PLAN_MODE_DIRECTIVE
-        blocks = _build_system_blocks(plan_mode=False)
+        blocks = _build_system_blocks("uk_compiled", plan_mode=False)
         assert not any(PLAN_MODE_DIRECTIVE in b.get("text", "") for b in blocks)
 
     def test_base_prompt_cache_breakpoint_unchanged(self):
         from routes.chatbot import _build_system_blocks
-        on = _build_system_blocks(plan_mode=True)
-        off = _build_system_blocks(plan_mode=False)
+        on = _build_system_blocks("uk_compiled", plan_mode=True)
+        off = _build_system_blocks("uk_compiled", plan_mode=False)
         assert on[0] == off[0]
         assert "cache_control" in on[0]
 

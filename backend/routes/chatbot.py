@@ -17,7 +17,8 @@ from pydantic_ai import Agent
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.settings import ModelSettings
 
-from agent_tools import execute_tool, TOOL_DEFINITIONS
+from agent_tools import execute_tool, get_tool_definitions
+from model_backends import available_backends, get_backend
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ router = APIRouter(prefix="/chat", tags=["chatbot"])
 # ---------------------------------------------------------------------------
 # System prompt
 # ---------------------------------------------------------------------------
-SYSTEM_PROMPT = """You are an expert policy analysis assistant for a UK microsimulation platform. You help users understand and analyse UK tax and benefit policy using reproducible Python code.
+SYSTEM_PROMPT_TEMPLATE = """You are an expert policy analysis assistant for a microsimulation platform. You help users understand and analyse tax and benefit policy using reproducible Python code.
 
 CRITICAL - ALWAYS COMPUTE WITH PYTHON:
 - Never answer quantitative policy questions from memory.
@@ -39,19 +40,7 @@ CRITICAL - START BY READING THE MODEL INSTRUCTIONS:
 - Use that to ground yourself in the available datasets, years, programmes, and caveats before you simulate.
 - If the user asks about something outside the modelled scope, say so clearly instead of guessing.
 
-CRITICAL - USE THE OFFICIAL POLICYENGINE PYTHON INTERFACE:
-- The Python environment preloads:
-  `policyengine_uk_compiled` as `pe`
-  `Simulation`
-  `Parameters`
-  `StructuralReform`
-  `aggregate_microdata`
-  `combine_microdata`
-  `capabilities`
-  `ensure_dataset`
-  `pd`, `np`, `json`, `math`
-- Prefer writing code directly against those objects so the run is reproducible outside chat.
-- Do not recreate policy logic manually if the package already provides it.
+{backend_prompt_context}
 
 REPRODUCIBILITY RULES:
 - Write clear Python that another developer could copy and run.
@@ -61,10 +50,10 @@ REPRODUCIBILITY RULES:
 - Do not rely on hidden reasoning for calculations when code can do the work.
 
 API AND DATASETS:
-- A live API reference (docstrings, `capabilities()` snapshot, full `Parameters` JSON schema) is attached to this system prompt — consult it for signatures, reform keys, and dataset descriptions rather than guessing.
+- A live API reference (docstrings, `capabilities()` snapshot, full `Parameters` JSON schema) is attached to this system prompt — consult it for signatures, reform keys, and dataset descriptions rather than guessing. The reference reflects the currently selected backend.
 - Call `capabilities()` at the start of a new line of analysis to check what's modelled and locally available before committing to an approach.
 - Tell the user which dataset you used when it matters.
-- If something is not modelled well enough for a quantitative answer, say so clearly and do not fabricate estimates.
+- If a dataset is unavailable in the selected backend, explain the limitation rather than fabricating estimates.
 
 ANALYTICAL NOTES:
 - Decile impacts are decile-level averages, not economy-wide means.
@@ -80,11 +69,18 @@ USER-FACING STYLE:
 """
 
 
+def _build_system_prompt(backend_id: str) -> str:
+    backend = get_backend(backend_id)
+    return SYSTEM_PROMPT_TEMPLATE.format(
+        backend_prompt_context=backend.prompt_context()
+    )
+
+
 # ---------------------------------------------------------------------------
 # Pydantic-AI agent setup
 # ---------------------------------------------------------------------------
 
-# We build the agent with tools dynamically from TOOL_DEFINITIONS
+# We build the agent with tools dynamically per backend via get_tool_definitions.
 # pydantic-ai uses its own tool registration, but we'll drive it through
 # our own SSE loop using the underlying model API directly for streaming.
 
@@ -123,18 +119,19 @@ def _get_sync_anthropic_client():
     return anthropic_sdk.Anthropic(api_key=api_key)
 
 
-def _tool_defs_for_anthropic():
-    """Convert our TOOL_DEFINITIONS to Anthropic SDK format.
+def _tool_defs_for_anthropic(backend_id: str):
+    """Convert backend tool definitions to Anthropic SDK format.
     Mark the last tool with cache_control so the system prompt + all tools
     are cached across requests (prompt caching)."""
     defs = []
-    for i, t in enumerate(TOOL_DEFINITIONS):
+    tool_definitions = get_tool_definitions(backend_id)
+    for i, t in enumerate(tool_definitions):
         d = {
             "name": t["name"],
             "description": t["description"],
             "input_schema": t["input_schema"],
         }
-        if i == len(TOOL_DEFINITIONS) - 1:
+        if i == len(tool_definitions) - 1:
             d["cache_control"] = {"type": "ephemeral"}
         defs.append(d)
     return defs
@@ -149,10 +146,10 @@ def _estimate_message_tokens(messages: List[dict]) -> int:
     return char_count // 4
 
 
-def _select_chat_model(messages: List[dict]) -> str:
+def _select_chat_model(messages: List[dict], backend_id: str) -> str:
     estimated_input_tokens = (
         _estimate_message_tokens(messages)
-        + len(SYSTEM_PROMPT) // 4
+        + len(_build_system_prompt(backend_id)) // 4
         + len(REFERENCE_DOC) // 4
     )
     if estimated_input_tokens > FAST_MODEL_MAX_INPUT_TOKENS:
@@ -160,7 +157,7 @@ def _select_chat_model(messages: List[dict]) -> str:
     return DEFAULT_FAST_MODEL
 
 
-def _build_system_blocks(plan_mode: bool = False) -> List[dict]:
+def _build_system_blocks(backend_id: str, plan_mode: bool = False) -> List[dict]:
     """System prompt + cached library reference + optional plan-mode directive.
 
     The system prompt and reference are each marked with cache_control so they
@@ -169,7 +166,7 @@ def _build_system_blocks(plan_mode: bool = False) -> List[dict]:
     """
     blocks: List[dict] = [{
         "type": "text",
-        "text": SYSTEM_PROMPT,
+        "text": _build_system_prompt(backend_id),
         "cache_control": {"type": "ephemeral"},
     }]
     if REFERENCE_DOC:
@@ -196,6 +193,7 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     session_id: str | None = None
     user_id: str | None = None
+    model_backend: str | None = None
     plan_mode: bool = False
 
 
@@ -239,6 +237,14 @@ def generate_title(request: TitleRequest):
     return {"title": response.content[0].text.strip()}
 
 
+@router.get("/backends")
+def list_backends():
+    return {
+        "default": os.environ.get("POLICYENGINE_CHAT_BACKEND", "uk_compiled"),
+        "backends": available_backends(),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Chat endpoint — SSE streaming
 # ---------------------------------------------------------------------------
@@ -257,6 +263,13 @@ async def chat_message(request: ChatRequest, http_request: Request):
             pass  # Supabase not configured — skip billing check
 
     session_id = request.session_id or str(uuid.uuid4())
+    backend_id = request.model_backend or os.environ.get(
+        "POLICYENGINE_CHAT_BACKEND", "uk_compiled"
+    )
+    try:
+        backend = get_backend(backend_id)
+    except ValueError as e:
+        return JSONResponse(status_code=400, content={"error": str(e)})
 
     messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
 
@@ -267,6 +280,27 @@ async def chat_message(request: ChatRequest, http_request: Request):
             deduplicated.append(msg)
         else:
             deduplicated[-1]["content"] += "\n\n" + msg["content"]
+
+    if os.environ.get("POLICYENGINE_CHAT_AGENT_RUNNER") == "claude_sdk":
+        from claude_agent_sdk_runner import generate_claude_agent_sdk_stream
+
+        # The SDK runner takes a single system_prompt string. Plan mode is still
+        # enforced inside it (see runner). Cached reference doc is *not* sent
+        # through this path yet — the SDK runner is opt-in/experimental.
+        return StreamingResponse(
+            generate_claude_agent_sdk_stream(
+                conversation=deduplicated.copy(),
+                system_prompt=_build_system_prompt(backend.id)
+                + ("\n\n" + PLAN_MODE_DIRECTIVE if request.plan_mode else ""),
+                plan_mode=request.plan_mode,
+                session_id=session_id,
+                user_id=user_id,
+                backend_id=backend.id,
+                model=_select_chat_model(deduplicated, backend.id),
+            ),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+        )
 
     async def generate_stream():
         try:
@@ -280,13 +314,13 @@ async def chat_message(request: ChatRequest, http_request: Request):
             recent_tool_calls: List[str] = []
 
             client = _get_anthropic_client()
-            model = _select_chat_model(conversation)
-            tools = _tool_defs_for_anthropic()
+            model = _select_chat_model(conversation, backend.id)
+            tools = _tool_defs_for_anthropic(backend.id)
             plan_mode = request.plan_mode
-            system_blocks = _build_system_blocks(plan_mode=plan_mode)
+            system_blocks = _build_system_blocks(backend.id, plan_mode=plan_mode)
 
             logger.info(
-                f"[CHAT] Session {session_id}: {len(conversation)} messages"
+                f"[CHAT] Session {session_id}: {len(conversation)} messages, backend={backend.id}"
                 f"{' [PLAN MODE]' if plan_mode else ''}"
             )
 
@@ -394,7 +428,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
                         )
                     except Exception as e:
                         logger.warning(f"[CHAT] Failed to record usage: {e}")
-                    yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'model_backend': backend.id, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
                     break
 
                 # Detect infinite loops
@@ -420,7 +454,9 @@ async def chat_message(request: ChatRequest, http_request: Request):
                 async def execute_tool_async(tu):
                     loop = asyncio.get_event_loop()
                     logger.info(f"[CHAT] Starting tool: {tu['name']} input={tu['input']}")
-                    result = await loop.run_in_executor(None, execute_tool, tu["name"], tu["input"])
+                    result = await loop.run_in_executor(
+                        None, execute_tool, tu["name"], tu["input"], backend.id
+                    )
                     logger.info(f"[CHAT] Finished tool: {tu['name']} result_keys={list(result.keys()) if isinstance(result, dict) else type(result)}")
                     return tu, result
 
@@ -475,7 +511,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
                 except Exception as e:
                     logger.warning(f"[CHAT] Failed to record usage: {e}")
                 yield f"data: {json.dumps({'type': 'chunk', 'content': '\\n\\n*[Reached maximum iterations]*'})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'model_backend': backend.id, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
 
         except Exception as e:
             import traceback
