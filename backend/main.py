@@ -18,6 +18,10 @@ logger = logging.getLogger(__name__)
 
 _hostnames_env = os.environ.get("HOSTNAMES", "")
 HOSTNAMES = _hostnames_env.split(",") if _hostnames_env else ["*"]
+# Optional regex used by preview deploys where Vercel assigns multiple
+# hostnames per deployment (full + truncated-with-hash) and we can't
+# enumerate them ahead of time. Setting this overrides HOSTNAMES.
+HOSTNAME_REGEX = os.environ.get("HOSTNAME_REGEX") or None
 
 
 class NaNSafeJSONResponse(JSONResponse):
@@ -41,13 +45,17 @@ app = FastAPI(
     default_response_class=NaNSafeJSONResponse,
 )
 
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=HOSTNAMES,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+_cors_kwargs = {
+    "allow_credentials": True,
+    "allow_methods": ["*"],
+    "allow_headers": ["*"],
+}
+if HOSTNAME_REGEX:
+    _cors_kwargs["allow_origin_regex"] = HOSTNAME_REGEX
+else:
+    _cors_kwargs["allow_origins"] = HOSTNAMES
+
+app.add_middleware(CORSMiddleware, **_cors_kwargs)
 
 app.include_router(billing.router)
 app.include_router(chatbot.router)
