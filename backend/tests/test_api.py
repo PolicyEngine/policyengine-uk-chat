@@ -310,3 +310,46 @@ class TestPlanMode:
         assert req.plan_mode is True
         req2 = ChatRequest(messages=[{"role": "user", "content": "hi"}])
         assert req2.plan_mode is False
+
+
+# ---------------------------------------------------------------------------
+# Scenario context (embedder integration)
+# ---------------------------------------------------------------------------
+
+class TestScenarioContext:
+    """Embedders (e.g. app-v2) pass a scenario_context string. It must reach
+    the system prompt as its own block, after the cache breakpoints, without
+    invalidating cached blocks."""
+
+    def test_block_present_when_context_set(self):
+        from routes.chatbot import _build_system_blocks
+        blocks = _build_system_blocks(
+            "uk_compiled",
+            scenario_context="User is viewing a UK PA-raise report.",
+        )
+        assert any("User is viewing a UK PA-raise report." in b.get("text", "") for b in blocks)
+
+    def test_block_absent_when_context_unset(self):
+        from routes.chatbot import _build_system_blocks
+        blocks = _build_system_blocks("uk_compiled")
+        assert not any("SCENARIO CONTEXT FROM EMBEDDER" in b.get("text", "") for b in blocks)
+
+    def test_context_does_not_invalidate_cache_breakpoints(self):
+        from routes.chatbot import _build_system_blocks
+        with_ctx = _build_system_blocks("uk_compiled", scenario_context="hello")
+        without_ctx = _build_system_blocks("uk_compiled")
+        # Cached blocks (system prompt, reference doc) come first and must
+        # be identical so prompt caching stays warm across embedders.
+        cached_a = [b for b in with_ctx if b.get("cache_control")]
+        cached_b = [b for b in without_ctx if b.get("cache_control")]
+        assert cached_a == cached_b
+
+    def test_request_accepts_scenario_context_field(self):
+        from routes.chatbot import ChatRequest
+        req = ChatRequest(
+            messages=[{"role": "user", "content": "hi"}],
+            scenario_context="some context",
+        )
+        assert req.scenario_context == "some context"
+        req2 = ChatRequest(messages=[{"role": "user", "content": "hi"}])
+        assert req2.scenario_context is None

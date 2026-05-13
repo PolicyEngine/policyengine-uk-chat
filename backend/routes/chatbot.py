@@ -157,12 +157,18 @@ def _select_chat_model(messages: List[dict], backend_id: str) -> str:
     return DEFAULT_FAST_MODEL
 
 
-def _build_system_blocks(backend_id: str, plan_mode: bool = False) -> List[dict]:
-    """System prompt + cached library reference + optional plan-mode directive.
+def _build_system_blocks(
+    backend_id: str,
+    plan_mode: bool = False,
+    scenario_context: str | None = None,
+) -> List[dict]:
+    """System prompt + cached library reference + optional plan-mode and
+    scenario-context directives.
 
     The system prompt and reference are each marked with cache_control so they
-    persist across requests. The plan-mode directive is appended AFTER both
-    cache breakpoints so toggling plan mode never invalidates cached blocks.
+    persist across requests. The plan-mode and scenario-context blocks are
+    appended AFTER both cache breakpoints so per-session/per-turn variation
+    never invalidates the cached blocks.
     """
     blocks: List[dict] = [{
         "type": "text",
@@ -174,6 +180,11 @@ def _build_system_blocks(backend_id: str, plan_mode: bool = False) -> List[dict]
             "type": "text",
             "text": REFERENCE_DOC,
             "cache_control": {"type": "ephemeral"},
+        })
+    if scenario_context:
+        blocks.append({
+            "type": "text",
+            "text": f"SCENARIO CONTEXT FROM EMBEDDER:\n{scenario_context}",
         })
     if plan_mode:
         blocks.append({"type": "text", "text": PLAN_MODE_DIRECTIVE})
@@ -195,6 +206,11 @@ class ChatRequest(BaseModel):
     user_id: str | None = None
     model_backend: str | None = None
     plan_mode: bool = False
+    # Free-form context prepended to the system prompt for the calling
+    # session — used by embedders (e.g. app-v2) to seed the assistant with
+    # the scenario the user is already looking at. Lives in its own block
+    # *after* the cached breakpoints so it never invalidates the prompt cache.
+    scenario_context: str | None = None
 
 
 PLAN_MODE_DIRECTIVE = """
@@ -287,11 +303,17 @@ async def chat_message(request: ChatRequest, http_request: Request):
         # The SDK runner takes a single system_prompt string. Plan mode is still
         # enforced inside it (see runner). Cached reference doc is *not* sent
         # through this path yet — the SDK runner is opt-in/experimental.
+        sdk_system_prompt = _build_system_prompt(backend.id)
+        if request.scenario_context:
+            sdk_system_prompt += (
+                f"\n\nSCENARIO CONTEXT FROM EMBEDDER:\n{request.scenario_context}"
+            )
+        if request.plan_mode:
+            sdk_system_prompt += "\n\n" + PLAN_MODE_DIRECTIVE
         return StreamingResponse(
             generate_claude_agent_sdk_stream(
                 conversation=deduplicated.copy(),
-                system_prompt=_build_system_prompt(backend.id)
-                + ("\n\n" + PLAN_MODE_DIRECTIVE if request.plan_mode else ""),
+                system_prompt=sdk_system_prompt,
                 plan_mode=request.plan_mode,
                 session_id=session_id,
                 user_id=user_id,
@@ -317,7 +339,11 @@ async def chat_message(request: ChatRequest, http_request: Request):
             model = _select_chat_model(conversation, backend.id)
             tools = _tool_defs_for_anthropic(backend.id)
             plan_mode = request.plan_mode
-            system_blocks = _build_system_blocks(backend.id, plan_mode=plan_mode)
+            system_blocks = _build_system_blocks(
+                backend.id,
+                plan_mode=plan_mode,
+                scenario_context=request.scenario_context,
+            )
 
             logger.info(
                 f"[CHAT] Session {session_id}: {len(conversation)} messages, backend={backend.id}"

@@ -197,6 +197,10 @@ export default function ChatPage() {
   const [balance, setBalance] = useState<BalanceSummary | null>(null);
   const [topUpLoading, setTopUpLoading] = useState(false);
   const [planMode, setPlanMode] = useState(false);
+  // Set once from URL query param (?scenario_context=...) so embedders like
+  // app-v2 can seed a chat session with the report they're already viewing.
+  // Read once on mount to avoid invalidating prompt cache mid-conversation.
+  const [scenarioContext, setScenarioContext] = useState<string | null>(null);
   const hasMessages = messages.length > 0;
   const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, !hasMessages && !input);
   const selectedBackend = modelBackends.find((backend) => backend.id === selectedBackendId);
@@ -217,6 +221,12 @@ export default function ChatPage() {
     } catch (e) { console.error("Checkout failed", e); }
     finally { setTopUpLoading(false); }
   };
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const ctx = new URLSearchParams(window.location.search).get("scenario_context");
+    if (ctx) setScenarioContext(ctx);
+  }, []);
 
   useEffect(() => {
     apiRequest<ModelBackendsResponse>("GET", "chat/backends")
@@ -461,6 +471,7 @@ export default function ChatPage() {
           user_id: user?.id || null,
           model_backend: selectedBackendId,
           plan_mode: planMode,
+          scenario_context: scenarioContext,
         }),
         signal: controller.signal,
       });
