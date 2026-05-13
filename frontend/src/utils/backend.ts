@@ -1,12 +1,19 @@
+function slugifyBranchName(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-{2,}/g, "-");
+}
+
+// Match the slug derivation in app/api/proxy/[...slug]/route.ts and in
+// .github/workflows/pr-beta-deploy.yml — all three must agree on the Modal
+// app name for a given branch.
 function getPreviewBackendBase(): string | null {
-  if (typeof window === "undefined") return null;
-
-  const match = window.location.hostname.match(
-    /^policyengine-uk-chat-git-(.+)-policy-engine\.vercel\.app$/,
-  );
-  if (!match) return null;
-
-  return `https://policyengine--peukchat-${match[1]}-web.modal.run`;
+  if (process.env.NEXT_PUBLIC_VERCEL_ENV !== "preview") return null;
+  const gitRef = process.env.NEXT_PUBLIC_VERCEL_GIT_COMMIT_REF;
+  if (!gitRef) return null;
+  return `https://policyengine--peukchat-${slugifyBranchName(gitRef)}-web.modal.run`;
 }
 
 export function getBackendBase(): string {
