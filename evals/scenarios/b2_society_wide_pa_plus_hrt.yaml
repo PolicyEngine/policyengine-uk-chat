@@ -1,0 +1,46 @@
+id: b2_society_wide_pa_plus_hrt
+test: B
+title: "Society-wide multi-parameter reform"
+what_it_tests: "Composition. Single-parameter reform tests can pass while multi-parameter ones fail — the LLM applies the first change correctly but botches the combination. This catches that bug class."
+
+prompt: |
+  Run an economy-wide comparison for the UK in 2025. Baseline: current law. Reform applies TWO changes simultaneously:
+    (a) raise the income tax personal allowance from £12,570 to £15,000
+    (b) raise the higher-rate threshold from £50,270 to £55,000
+
+  Use the Enhanced FRS 2023-24 dataset: hf://policyengine/policyengine-uk-data-private/enhanced_frs_2023_24.h5. Use Microsimulation, not Simulation.
+
+  Report precisely from the model run:
+  (1) total budgetary impact in £
+  (2) income tax revenue change in £
+  (3) average household income change in £ for each decile (1-10)
+  (4) relative income change in % for each decile (1-10)
+  (5) BHC poverty rate baseline vs reform, for: all, child, working-age, senior
+
+  British English. Every figure from the model run, not memory.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+reference:
+  fixture: pe_api/b2_society_wide_pa_plus_hrt.json
+  fields_to_compare:
+    - path: budget.budgetary_impact
+      tolerance_pct: 1.0
+    - path: budget.tax_revenue_impact
+      tolerance_pct: 1.0
+    - path: decile.average
+      tolerance_pct: 1.0
+    - path: decile.relative
+      tolerance_pct: 1.0
+    - path: poverty.poverty.all.baseline
+      tolerance_pct: 1.0
+    - path: poverty.poverty.all.reform
+      tolerance_pct: 1.0
+    - path: poverty.poverty.child
+      tolerance_pct: 1.0
+    - path: poverty.poverty.adult
+      tolerance_pct: 1.0
+    - path: poverty.poverty.senior
+      tolerance_pct: 1.0

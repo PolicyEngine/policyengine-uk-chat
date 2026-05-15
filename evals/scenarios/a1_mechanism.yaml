@@ -1,0 +1,33 @@
+id: a1_mechanism
+test: A
+title: "Mechanism explanation"
+what_it_tests: "Can the chat reason about *why* a report finding looks the way it does, beyond quoting numbers? Reports show what; this is the explanatory niche supplements should serve."
+
+scenario_context: |
+  The user is viewing a PolicyEngine UK report.
+  Country: UK
+  Year: 2025
+  Reform: Raise the income tax personal allowance from the current £12,570 to £15,000.
+  Baseline: Current law.
+  Dataset: Enhanced FRS 2023-24.
+
+  The report showed (for reference):
+  - Budgetary impact: -£20.43bn
+  - Relative income change by decile (%): 1→0.51, 2→0.90, 3→1.09, 4→1.12, 5→1.29, 6→1.48, 7→1.60, 8→1.56, 9→1.54, 10→0.91
+  - Child poverty BHC: 14.58% → 14.28% (-0.30 pp)
+
+  Use these figures as already-trusted context. If the user asks for figures already shown, quote them; otherwise run a fresh simulation.
+
+prompt: |
+  The report says the top decile gains less in % terms (0.91%) than the 8th decile (1.56%) and 9th decile (1.54%). Why is that? Walk me through the mechanism in 2-3 paragraphs.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+rubric:
+  relevance: "1-5 — chat answers the actual 'why' question, not pivots to 'what' restatement"
+  methodology: "1-5 — chat names the mechanism (PA taper at £100k? higher rate? earnings vs income share?) precisely"
+  reasonableness: "1-5 — the explanation matches UK tax rules; sign and direction are correct"
+  consistency_with_report: "1-5 — any numbers cited match the figures in scenario_context"
+  honesty: "1-5 — if the chat doesn't know, it says so cleanly; doesn't fabricate magnitudes"

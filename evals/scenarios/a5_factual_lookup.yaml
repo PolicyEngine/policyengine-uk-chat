@@ -1,0 +1,26 @@
+id: a5_factual_lookup
+test: A
+title: "Historical parameter lookup — no simulation needed"
+what_it_tests: "Does the chat handle factual-lookup questions efficiently, without unnecessary tool use? Tests whether the chat knows when a question is a parameter retrieval vs when it needs to run code."
+
+scenario_context: |
+  The user is viewing a PolicyEngine UK report.
+  Country: UK
+  Year: 2025
+  Reform: Raise the income tax personal allowance from the current £12,570 to £15,000.
+  Baseline: Current law.
+  Dataset: Enhanced FRS 2023-24.
+
+prompt: |
+  How has the UK personal allowance changed over the last 15 years? Just the figures by year, no analysis.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+rubric:
+  relevance: "1-5 — chat returns a year-by-year series, not commentary or simulation output"
+  methodology: "1-5 — chat names the parameter path it queried (e.g. gov.hmrc.income_tax.allowances.personal_allowance.amount) so the answer is reproducible"
+  reasonableness: "1-5 — the values are correct historical PA amounts. 2010 ≈ £6,475; 2014 ≈ £10,000; 2016 ≈ £11,000; 2019 ≈ £12,500; 2021-2027 frozen at £12,570. Off-by-tax-year shifts are forgivable; wildly wrong values are not"
+  consistency_with_report: "1-5 — if the current value (£12,570) is in the series, it matches the report's baseline"
+  honesty: "1-5 — if the underlying model doesn't go back 15 years, chat says so and gives the range it has, rather than fabricating early-2010s values"

@@ -1,0 +1,28 @@
+id: a2_subset_slice
+test: A
+title: "Subset breakdown not in the report"
+what_it_tests: "Can the chat slice the population (single parents with two children) in a way the canonical report doesn't, computing fresh from the model? Stress test — combines applying a reform with filtering the population, two non-trivial operations against the Python backend's API."
+
+scenario_context: |
+  The user is viewing a PolicyEngine UK report.
+  Country: UK
+  Year: 2025
+  Reform: Raise the income tax personal allowance from the current £12,570 to £15,000.
+  Baseline: Current law.
+  Dataset: Enhanced FRS 2023-24.
+
+  The report showed aggregate (whole-UK) impacts but did not break down by household type.
+
+prompt: |
+  How does this PA reform affect single parents with two children specifically? Give me decile-by-decile average gains in £ for just that household type, using the same dataset and year as the report.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+rubric:
+  relevance: "1-5 — chat actually filters to single-parent-2-child households, not just regurgitates the whole-UK numbers"
+  methodology: "1-5 — chat states how it identified single parents (count_adults=1, count_children=2?), names the dataset, year, income equivalisation choice"
+  reasonableness: "1-5 — the per-decile gains are positive, monotone-ish in income, and plausible vs the whole-UK figures (probably similar magnitudes since the reform is a tax change, not benefit)"
+  consistency_with_report: "1-5 — references to the whole-UK figures match scenario_context exactly"
+  honesty: "1-5 — if the chat runs out of tool budget or can't filter cleanly, it says so rather than fabricating; explicitly flags low-N decile cells"

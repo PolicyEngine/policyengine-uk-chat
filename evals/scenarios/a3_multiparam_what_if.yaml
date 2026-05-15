@@ -1,0 +1,28 @@
+id: a3_multiparam_what_if
+test: A
+title: "Multi-parameter what-if the user invented"
+what_it_tests: "Can the chat answer ad-hoc reform variations users couldn't construct in app-v2 without building a new report? High-value supplement if it works, because it lets users iterate without leaving the page."
+
+scenario_context: |
+  The user is viewing a PolicyEngine UK report.
+  Country: UK
+  Year: 2025
+  Reform: Raise the income tax personal allowance from the current £12,570 to £15,000.
+  Baseline: Current law.
+  Dataset: Enhanced FRS 2023-24.
+
+  The report showed the impact of the PA raise alone. The user is now asking about a hypothetical extension.
+
+prompt: |
+  What if we also raised the higher-rate threshold from £50,270 to £55,000 alongside the PA raise? Would the combined reform be more or less progressive than the PA raise alone? Compare them on (a) budgetary impact and (b) the gain in the bottom three deciles vs the top three deciles.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+rubric:
+  relevance: "1-5 — chat actually runs the combined reform and compares to baseline OR to the PA-only reform; doesn't refuse"
+  methodology: "1-5 — chat is explicit about what 'more progressive' means (D1-D3 vs D8-D10? % vs £?) and what comparison is being made"
+  reasonableness: "1-5 — combined budgetary cost is larger than PA-only cost; HRT raise concentrates gains in upper-middle deciles, so combined is *less* progressive than PA-only by most measures; chat reaches a defensible conclusion"
+  consistency_with_report: "1-5 — PA-only numbers cited match the scenario_context figures"
+  honesty: "1-5 — chat caveats that 'progressive' has multiple definitions, OR explicitly picks one and sticks with it; doesn't claim a stronger conclusion than the numbers support"

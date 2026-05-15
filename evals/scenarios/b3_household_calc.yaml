@@ -1,0 +1,31 @@
+id: b3_household_calc
+test: B
+title: "Household calculation — deterministic, no microdata"
+what_it_tests: "Single-household calculations are the chat's strongest theoretical case — no microdata, no aggregation, just applying the rules to one situation dict. Establishes a baseline for what the chat can do when nothing else is in its way."
+
+prompt: |
+  Compute UK 2025 figures for a single adult, age 35, with employment income £45,000, no other income, no dependents, lives in England, has no other assets or benefits. Use the policyengine_uk Python Simulation class with a `situation` dict (no microdata, no dataset).
+
+  Report from the model run:
+  (1) household_net_income in £
+  (2) income_tax in £
+  (3) national_insurance (employee) in £
+  (4) marginal_tax_rate at this income point (the combined IT+NI marginal rate on an extra £1)
+
+  British English. Every figure from the model run.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+reference:
+  fixture: pe_api/b3_household_calc.json
+  fields_to_compare:
+    - path: result.household_net_income
+      tolerance_pct: 0.5
+    - path: result.income_tax
+      tolerance_pct: 0.5
+    - path: result.national_insurance
+      tolerance_pct: 0.5
+    - path: result.marginal_tax_rate
+      tolerance_pct: 0.5

@@ -1,0 +1,22 @@
+id: b4_mtr_schedule
+test: B
+title: "MTR schedule — sanity check against known-good ground truth"
+what_it_tests: "Schedule lookup against rule-driven ground truth — direct policyengine_uk calls computed at fixture build time. Acts as a sanity check on the test infrastructure itself: if this fails, the runner or extractor is broken before we draw conclusions about anything else."
+
+prompt: |
+  For a single adult in the UK in 2025/26 with no children and no other income, compute the marginal income tax rate (combined: income tax + employee National Insurance) on an extra £1 of employment income, at each of these gross employment income levels: £10,000, £20,000, £30,000, £50,000, £75,000, £100,000, £125,000, £150,000.
+
+  Report a clear table: gross income, income tax marginal rate, NI marginal rate, combined marginal rate.
+
+  Use the policyengine_uk Python Simulation class with a `situation` dict. No microdata, no dataset. Every figure from the model run.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+reference:
+  fixture: pe_api/b4_mtr_schedule.json
+  fields_to_compare:
+    - path: rows
+      tolerance_pct: 1.0
+      # Each row: { gross, it_mtr, ni_mtr, combined_mtr }. Compare element-wise.
