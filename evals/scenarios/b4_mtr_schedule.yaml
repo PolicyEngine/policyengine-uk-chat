@@ -20,3 +20,19 @@ reference:
     - path: rows
       tolerance_pct: 1.0
       # Each row: { gross, it_mtr, ni_mtr, combined_mtr }. Compare element-wise.
+
+anchor:
+  # Pure rule-driven schedule — anchor is the expected schedule values themselves.
+  must_mention:
+    - "personal allowance"         # below £12,570 = 0% MTR
+    - "60%"                        # the PA-taper band £100k-£125k
+    - "Upper Earnings Limit"       # £50,270, where NI drops from 8% to 2%
+  must_not_say:
+    - "MTR is constant"            # the schedule has steps; chat should describe them
+  ideal_finding: |
+    Combined IT+NI MTR schedule for a single adult, no other income, 2025-26:
+    £10k → 0% (below PA and NI primary threshold).
+    £20k–£50k → 28% (20% basic IT + 8% main NI).
+    £75k → 42% (40% higher-rate IT + 2% NI above UEL).
+    £100k–£125k → 62% (40% higher IT + 20% effective from PA taper + 2% NI).
+    £150k → 47% (45% additional-rate IT + 2% NI, PA fully tapered out).

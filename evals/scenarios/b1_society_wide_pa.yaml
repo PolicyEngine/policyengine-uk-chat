@@ -43,3 +43,20 @@ reference:
       tolerance_pct: 1.0
     - path: poverty.poverty.senior
       tolerance_pct: 1.0
+
+anchor:
+  # No PolicyEngine blog post analyses this exact reform; anchor is derived from
+  # PE-API's own output (the fixture) plus general PolicyEngine reporting norms.
+  must_mention:
+    - "Enhanced FRS"              # the dataset
+    - "2025"                      # the year
+    - "BHC"                       # which poverty measure (since the question asked for BHC)
+  must_not_say:
+    - "the reform pays for itself"   # PA raise is a cost, not revenue-raising
+    - "everyone gains"               # poorest decile gains very little since they pay little income tax
+  ideal_finding: |
+    The reform is a tax cut of broadly £20bn order of magnitude in 2025-26, with
+    relative gains rising through the middle deciles and falling off in the top
+    decile because the PA taper above £100k removes the benefit for very high
+    earners. BHC poverty falls modestly because the gains for low-income
+    taxpaying households push some across the relative-poverty line.

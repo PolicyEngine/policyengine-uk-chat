@@ -24,3 +24,30 @@ rubric:
   reasonableness: "1-5 — the values are correct historical PA amounts. 2010 ≈ £6,475; 2014 ≈ £10,000; 2016 ≈ £11,000; 2019 ≈ £12,500; 2021-2027 frozen at £12,570. Off-by-tax-year shifts are forgivable; wildly wrong values are not"
   consistency_with_report: "1-5 — if the current value (£12,570) is in the series, it matches the report's baseline"
   honesty: "1-5 — if the underlying model doesn't go back 15 years, chat says so and gives the range it has, rather than fabricating early-2010s values"
+
+anchor:
+  must_mention:
+    - "gov.hmrc.income_tax.allowances.personal_allowance.amount"  # the parameter path
+    - "frozen"                                                    # or "freeze" — explains the 2021-onwards plateau
+  must_not_say:
+    - "I'll run a simulation"          # this is a lookup, not a sim
+    - "the personal allowance is £0"   # never zero in any of the relevant years
+  ideal_explanation: |
+    The chat should look up the historical values from the model's parameter
+    tree rather than running any simulation. Expected values (UK tax years):
+      2010-11: £6,475
+      2011-12: £7,475
+      2012-13: £8,105
+      2013-14: £9,440
+      2014-15: £10,000
+      2015-16: £10,600
+      2016-17: £11,000
+      2017-18: £11,500
+      2018-19: £11,850
+      2019-20: £12,500
+      2020-21: £12,500
+      2021-22: £12,570
+      2022-onwards: £12,570 (frozen — extended freeze through 2027-28 in current law)
+    Should mention the post-2021 freeze explicitly. If the model's parameter
+    history doesn't go back to 2010, chat should give the range it does have
+    and say so.

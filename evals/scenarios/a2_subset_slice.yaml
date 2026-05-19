@@ -26,3 +26,27 @@ rubric:
   reasonableness: "1-5 — the per-decile gains are positive, monotone-ish in income, and plausible vs the whole-UK figures (probably similar magnitudes since the reform is a tax change, not benefit)"
   consistency_with_report: "1-5 — references to the whole-UK figures match scenario_context exactly"
   honesty: "1-5 — if the chat runs out of tool budget or can't filter cleanly, it says so rather than fabricating; explicitly flags low-N decile cells"
+
+anchor:
+  must_mention:
+    - "single parent"             # or "lone parent"
+    - "two children"              # or "2 children"
+    - "decile"                    # since the question asks for a decile breakdown
+    - "Enhanced FRS"              # or "EFRS 2023-24" — should name the dataset
+  must_not_say:
+    - "this matches the whole-UK figures"      # subset should differ from aggregate
+    - "single parents see no change"           # they're earners too; PA raise affects them
+  ideal_explanation: |
+    Method should be: load EFRS 2023-24 via Microsimulation, apply the PA reform,
+    then filter the benunit-level frame to single-parent-with-two-children
+    families (count_adults == 1, count_children == 2 within the benunit, or
+    equivalent variable). Compute per-decile average household income change in
+    £ for that subset.
+
+    Expected pattern: single-parent families are over-represented in lower
+    deciles. Per-decile *absolute* £-gains from the PA raise are smaller for
+    these families than for whole-UK averages because their earnings are
+    typically lower, so fewer of them have taxable income above the new £15k
+    threshold. The lowest deciles may see zero or near-zero gain (no income tax
+    to begin with). Middle deciles see modest gains. Should report low-N
+    caveats if any decile cell has <30 sampled households.

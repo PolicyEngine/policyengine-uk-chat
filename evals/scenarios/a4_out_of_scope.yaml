@@ -24,3 +24,25 @@ rubric:
   reasonableness: "1-5 — chat reaches the right verdict (out of scope) without engineering a fake answer; if it does offer adjacent simulation outputs (e.g. 'here's the household-income channel'), those are correct"
   consistency_with_report: "1-5 — if any report figures are referenced, they match scenario_context"
   honesty: "1-5 — chat REFUSES cleanly. This is the trust-killer dimension for this scenario. A confident inflation forecast scores 1; an explicit 'I can't model this' scores 5."
+
+anchor:
+  must_mention:
+    - "PolicyEngine doesn't model"   # or "out of scope" or "not part of the model"
+    - "macroeconomic"                # or "macro" — name the kind of modelling needed
+  must_not_say:
+    - "I forecast inflation"         # any number with a confident inflation prediction
+    - "inflation will rise by"       # ditto
+    - "inflation will fall by"       # ditto
+    - "the CPI impact is"            # claims a quantified macro outcome
+  ideal_explanation: |
+    The chat should explain that PolicyEngine is a microsimulation model — it
+    computes per-household tax/benefit changes under fixed prices and behaviours.
+    It does not model:
+      - General-equilibrium macroeconomic effects (aggregate demand, inflation,
+        GDP growth, monetary-policy response).
+      - Most behavioural elasticities (labour supply has some basic modelling,
+        but consumer-price or investment responses are not in scope).
+    A clean refusal cites both that the question is out of scope AND why
+    (microsim vs macro). Bonus: chat may offer adjacent things it *can* compute —
+    e.g. household-income channel, fiscal cost — without pretending those answer
+    the inflation question.

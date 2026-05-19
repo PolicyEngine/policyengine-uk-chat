@@ -29,3 +29,19 @@ reference:
       tolerance_pct: 0.5
     - path: result.marginal_tax_rate
       tolerance_pct: 0.5
+
+anchor:
+  # Anchor derived from UK tax rule knowledge — no blog post needed since this is
+  # a deterministic single-household calculation in the basic-rate band.
+  must_mention:
+    - "personal allowance"        # £12,570 is the threshold to flag
+    - "basic rate"                # £45,000 is in the basic-rate band
+    - "8%"                        # employee NI rate at this income
+  must_not_say:
+    - "higher rate"               # £45k is below the higher-rate threshold of £50,270
+    - "no income tax"             # £45k is well above the PA
+  ideal_finding: |
+    At £45,000 gross, the worker pays 20% income tax on £32,430 (£45,000 −
+    £12,570 personal allowance) = £6,486, and 8% NI on the same band = £2,594
+    (approximately). Combined marginal tax rate on an extra £1 of earnings is
+    28% (20% income tax + 8% NI). Net income ≈ £35,920.

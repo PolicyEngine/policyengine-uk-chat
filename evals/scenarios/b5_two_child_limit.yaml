@@ -1,0 +1,62 @@
+id: b5_two_child_limit
+test: B
+title: "Remove the two-child benefit limit (Autumn Budget 2025)"
+what_it_tests: "Benefit-side reform (UC and CTC), not tax. Tests a different model surface from the previous B scenarios and a different kind of distributional shape — large gains concentrated in the lower deciles. Reference is PolicyEngine's published analysis (Vahid Ahmadi, Oct 2025) — directly comparing chat output to canonical PolicyEngine analysis."
+
+source_post: "uk-two-child-limit.md"
+source_post_url: "https://policyengine.org/uk/research/uk-two-child-limit"
+
+prompt: |
+  Run a UK 2026-27 economy-wide comparison. Baseline: current law (the two-child limit on Universal Credit and Child Tax Credit is in place). Reform: remove the two-child limit, so families receive child elements for every eligible child regardless of how many.
+
+  Use the Enhanced FRS 2023-24 dataset: hf://policyengine/policyengine-uk-data-private/enhanced_frs_2023_24.h5.
+
+  Report from the model run:
+  (a) Government spending impact (benefit cost) in £ for 2026-27.
+  (b) Relative income change in % by decile (1-10) for 2026-27.
+  (c) Change in absolute child poverty BHC in % terms (e.g. -X.X%, signed).
+  (d) Change in the Gini coefficient (signed).
+  (e) For an illustrative household — two parents, three children aged 3, 5, 7, both earning at the median — the change in household net income in 2026-27.
+
+  British English. Every figure from the model run.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+reference:
+  fixture: pe_api/b5_two_child_limit.json
+  fields_to_compare:
+    # All from Vahid Ahmadi, "How removing the two-child benefit limit would affect the UK", Oct 2025.
+    # PolicyEngine reform ID 93219 against baseline 1, 2026-27.
+    - path: budget.cost_2026_27
+      expected_approx: 2_900_000_000        # £2.9bn in 2026-27 per PolicyEngine
+      tolerance_pct: 5.0
+    - path: decile.relative.d2
+      expected_approx: 2.59                 # D2 sees the largest gain — 2.59% by 2029-30 (use 2026-27 fixture value once generated)
+      tolerance_pct: 25.0                   # decile-2 figure is for 2029-30; 2026-27 will be smaller
+    - path: poverty.absolute_child_bhc.relative_change
+      expected_approx: -13.5                # -13.5% absolute child poverty BHC
+      tolerance_pct: 10.0
+    - path: inequality.gini.relative_change
+      expected_approx: -0.55                # Gini falls 0.55% in 2026-27
+      tolerance_pct: 15.0
+
+anchor:
+  must_mention:
+    - "Universal Credit"          # the primary benefit affected
+    - "Child Tax Credit"          # legacy benefit also affected
+    - "transitional protection"   # why caseload grows over time
+    - "lower deciles"             # where the gains concentrate
+  must_not_say:
+    - "all families gain"         # only ~4.4% of population gains anything; the rest are unaffected
+    - "the reform raises revenue" # it's a cost, not a revenue raiser
+    - "the largest gains are in higher deciles"  # opposite is true
+  ideal_finding: |
+    Removing the two-child limit costs roughly £2.9bn in 2026-27, rising as more
+    post-2017 children age into the affected population. About 4.4% of the
+    population gains, heavily concentrated in the bottom three deciles (D2 sees
+    the largest relative gain). Absolute child poverty BHC falls by ~13.5% in
+    2026-27. The Gini coefficient falls by ~0.55% — modest overall inequality
+    reduction reflecting how concentrated the gains are. The reform interacts
+    with UC tapers, so as employment income rises the marginal gain falls.

@@ -59,7 +59,18 @@ reference:
       tolerance_pct: 1.0
     - path: decile.relative
       tolerance_pct: 1.0
+
+# Both A and B — golden-path guidance the grader uses (and an LLM-judge will use later).
+anchor:
+  must_mention: ["personal allowance taper", "60%", "£100,000"]
+  must_not_say: ["top decile pays more tax than the 8th"]
+  ideal_explanation: |
+    Multi-line prose describing what a Vahid-quality answer would look like.
+    Used by the human grader as a reference; will become input to an
+    automated LLM-judge in v2.
 ```
+
+Where anchors come from: PolicyEngine's published research blog where one matches the scenario (Vahid's UK posts under `app/src/data/posts/articles/` in the app-v2 repo), otherwise UK tax-rule knowledge. See `SPEC.md` § "Anchors" for the per-scenario sourcing.
 
 The runner (added in a follow-up PR) reads every YAML in `scenarios/`, POSTs to a configured chat backend, and writes outputs under `runs/<timestamp>/<scenario-id>/`. See SPEC.md "Roadmap" for what's coming next.
 

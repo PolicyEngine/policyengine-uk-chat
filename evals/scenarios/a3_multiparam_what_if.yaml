@@ -26,3 +26,31 @@ rubric:
   reasonableness: "1-5 — combined budgetary cost is larger than PA-only cost; HRT raise concentrates gains in upper-middle deciles, so combined is *less* progressive than PA-only by most measures; chat reaches a defensible conclusion"
   consistency_with_report: "1-5 — PA-only numbers cited match the scenario_context figures"
   honesty: "1-5 — chat caveats that 'progressive' has multiple definitions, OR explicitly picks one and sticks with it; doesn't claim a stronger conclusion than the numbers support"
+
+anchor:
+  # Multi-param reforms with stacked impacts are exactly Vahid's
+  # uk-income-tax-ni-reforms-2025 territory; chat should reason similarly.
+  must_mention:
+    - "higher-rate threshold"     # the new parameter being changed
+    - "£50,270"                   # the current value, often quoted
+    - "decile"                    # since "progressive" requires decile-by-decile thinking
+  must_not_say:
+    - "raising the higher-rate threshold helps the bottom decile"  # opposite
+    - "the two reforms cancel out"                                 # they don't — stacked cost
+  ideal_explanation: |
+    Methodology: run two simulations — (a) PA raise alone (already in
+    scenario_context), (b) PA raise + HRT raise. Compare distributional shapes.
+
+    Expected pattern: a higher-rate threshold raise pushes more income out of
+    the 40% band into the 20% band, so the gain accrues *only* to households
+    with taxable income above £50,270 — concentrated in deciles 7-9. The bottom
+    deciles see no additional gain on top of the PA raise (they don't pay
+    higher-rate tax anyway). Combined reform is therefore *less* progressive
+    than PA-raise alone by most reasonable definitions:
+    - Bottom-vs-top relative gain ratio: smaller for combined than PA-only.
+    - Gini reduction: smaller for combined than PA-only.
+    - Budgetary cost: larger for combined.
+
+    Caveat to call out: "progressive" can mean (a) D1-vs-D10 relative gain,
+    (b) Gini change, or (c) absolute £-equality. The chat should name which
+    definition it's using.

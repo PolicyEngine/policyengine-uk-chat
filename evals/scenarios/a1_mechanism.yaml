@@ -31,3 +31,29 @@ rubric:
   reasonableness: "1-5 — the explanation matches UK tax rules; sign and direction are correct"
   consistency_with_report: "1-5 — any numbers cited match the figures in scenario_context"
   honesty: "1-5 — if the chat doesn't know, it says so cleanly; doesn't fabricate magnitudes"
+
+anchor:
+  # The mechanism question has a known correct answer in UK tax rules — drawn
+  # both from rule knowledge and from how Vahid's "uk-income-tax-ni-reforms-2025"
+  # post discusses the PA-taper interaction.
+  must_mention:
+    - "personal allowance taper"     # or equivalent: "PA withdrawal", "tapering"
+    - "£100,000"                     # or "100k" — the threshold where the taper starts
+    - "60%"                          # the effective MTR band created by the taper
+  must_not_say:
+    - "the top decile pays more tax than the 8th"  # opposite of the question
+    - "the reform takes income from the top decile"  # PA raise gives them less benefit, doesn't take income
+  ideal_explanation: |
+    Two mechanisms in play. First, between £100,000 and roughly £125,140, the
+    personal allowance is withdrawn at the rate of £1 for every £2 of income
+    above £100k. This creates an effective 60% marginal tax band: 40% higher-rate
+    income tax PLUS the 20% effective rate from losing tax-free allowance. So
+    high earners who span that range gain *less* from a PA raise than households
+    whose taxable income sits below £100k.
+
+    Second, the absolute £-gain from the PA raise is the same for any taxpayer
+    in the higher band (PA goes up by £2,430 × marginal rate). But because the
+    top decile has much larger total household income, that fixed £-gain is a
+    smaller *percentage* of their income than it is for someone in the 8th or
+    9th decile. So both the PA taper and the percentage-of-income arithmetic
+    push the top decile's relative gain below the 8th and 9th.
