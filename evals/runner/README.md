@@ -1,6 +1,9 @@
-# eval runner
+# eval runner + grader
 
-POSTs each scenario in `evals/scenarios/*.yaml` to a chat backend, saves raw SSE + extracted text + a meta JSON per run. No grading — that's a separate step.
+Two scripts:
+
+- `run.py` — POSTs each scenario in `evals/scenarios/*.yaml` to a chat backend, saves raw SSE + extracted text + meta JSON per run under `evals/runs/<timestamp>/`.
+- `grade.py` — reads a finished run dir. For Test A scenarios, emits a markdown grading sheet the human fills in. For Test B, runs automated numeric extraction + anchor checks against fixtures.
 
 ## Run
 
@@ -57,6 +60,48 @@ pip install -r evals/runner/requirements.txt
 
 ## What the runner is not
 
-- It is **not** a grader. Test A grading is a human step; Test B has a separate extractor PR.
 - It is **not** parallel. Sequential by design for clean logs and to avoid hitting backend rate limits during long economy-wide runs. If/when we move to ~50 scenarios, add a `--parallel N` flag.
 - It does **not** mutate the scenarios or fixtures dir.
+
+---
+
+## Grade
+
+```sh
+# Generate A_grading.md (human sheet) + B_results.md (automated diffs).
+python evals/runner/grade.py evals/runs/2026-05-15_120000
+
+# Just one path.
+python evals/runner/grade.py <run_dir> --test A
+python evals/runner/grade.py <run_dir> --test B
+
+# After A_grading.md has been filled in by a human, apply Test A thresholds.
+python evals/runner/grade.py <run_dir> --threshold-check
+```
+
+### Test A flow
+
+`grade.py --test A` walks the run dir and produces `A_grading.md`. Each A response gets a section with:
+
+- Prompt and scenario_context (collapsible)
+- The anchor (must_mention / must_not_say with regex hit/miss, plus `ideal_explanation`)
+- The chat response
+- Empty score fields for each rubric dimension
+
+The grader (you) opens the file in an editor, replaces each ⬜ with a 1-5 score, and marks the fabrication question yes/no.
+
+Then `--threshold-check` parses the filled sheet and applies the SPEC.md thresholds: mean rubric ≥ 4.0, no individual < 2 on reasonableness/honesty, fabrication rate ≤ 20%. Output goes to `threshold_check.md` and `.json`.
+
+### Test B flow
+
+Fully automated. For each B scenario:
+
+- Loads the fixture from `evals/fixtures/pe_api/`.
+- For each run, extracts numeric values from the response prose using per-field label regexes (heuristic).
+- Diffs against the fixture with per-field `tolerance_pct`.
+- Computes self-consistency (SD across runs as % of mean).
+- Runs the anchor's `must_mention` / `must_not_say` regex checks.
+
+Output: `B_results.json` (machine-readable) and `B_results.md` (human-readable per-scenario diffs + threshold verdict).
+
+The extractor is best-effort regex over prose, so some fields legitimately come back as `⏭ no expected / couldn't extract`. Those are diagnostics for the grader, not failure verdicts.
