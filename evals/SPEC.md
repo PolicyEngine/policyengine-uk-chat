@@ -176,11 +176,10 @@ If we add scenarios later, the strong preference is to **anchor each one against
 
 ## Roadmap
 
-This PR lands the **spec, directory scaffold, and the 10 scenario files** only. Subsequent PRs:
+This PR lands the spec, the 10 anchored scenarios, and the runner. Still to come (in this same PR):
 
-1. **Runner.** A small Python script under `evals/runner/` that loads scenarios, POSTs each prompt N times to a configured chat backend URL, saves raw SSE logs under `evals/runs/<timestamp>/`.
-2. **B fixtures.** Generate reference outputs for B1-B5 into `evals/fixtures/pe_api/` — PE-API calls for the society-wide / regional scenarios, direct `policyengine_uk` calls for the household / MTR scenarios.
-3. **Grader.** For Test A: a markdown grading sheet (one row per response) with the rubric columns. Manual fill for v1. For Test B: an extractor that pulls numerics from SSE responses and diffs against fixtures.
-4. **Findings writeup.** Once 30 conversations are graded, a `RESULTS-YYYY-MM-DD.md` per-run report. Per-scenario verdicts, threshold check results, recommended positioning, new failure modes if any.
+1. **B fixtures.** Generate reference outputs for B1-B5 into `evals/fixtures/pe_api/` — PE-API calls for the society-wide scenarios, direct `policyengine_uk` calls for the household / MTR scenarios.
+2. **Grader.** For Test A: a markdown grading sheet (one row per response) with the rubric and anchor columns. Manual fill for v1. For Test B: an extractor that pulls numerics from SSE responses and diffs against fixtures.
+3. **Findings writeup.** Once 30 conversations are graded, a `RESULTS-YYYY-MM-DD.md` report. Per-scenario verdicts, threshold check results, recommended positioning, new failure modes if any.
 
 The chat backend URL the runner targets is configurable via env var so the eval can run against either a preview deploy or production.
