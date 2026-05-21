@@ -332,9 +332,154 @@ MODELLING SCOPE:
         return globals_dict
 
 
+class USPolicyEnginePythonBackend(ModelBackend):
+    def __init__(self) -> None:
+        super().__init__(
+            id="us_python",
+            display_name="PolicyEngine US Python backend",
+            package_name="policyengine-us",
+            package_label="policyengine-us",
+            import_roots=frozenset(
+                {
+                    "json",
+                    "math",
+                    "numpy",
+                    "pandas",
+                    "policyengine",
+                    "policyengine_core",
+                    "policyengine_us",
+                    "microdf",
+                }
+            ),
+        )
+
+    def _ensure_importable(self) -> None:
+        repo_parent = Path(__file__).resolve().parents[2]
+        _ensure_sibling_package_importable(
+            "policyengine_us",
+            [
+                repo_parent / "policyengine-core",
+                repo_parent / "policyengine.py" / "src",
+                repo_parent / "policyengine-us",
+            ],
+        )
+
+    def prompt_context(self) -> str:
+        return """CRITICAL - USE THE POLICYENGINE US PYTHON MODEL INTERFACE:
+- The selected backend is `us_python`, the Python `policyengine-us` model package.
+- This is the detailed PolicyEngine Core/OpenFisca-style US model covering federal taxes/benefits and all 50 states + DC.
+- The Python environment preloads:
+  `policyengine_us` as `pe`
+  `Simulation`
+  `Microsimulation`
+  `CountryTaxBenefitSystem`
+  `capabilities`
+  `pd`, `np`, `json`, `math`
+- If installed, the higher-level `policyengine` package is also preloaded as `policyengine`.
+- Prefer writing code against `policyengine_us` objects and formulas rather than recreating policy logic.
+
+COMMON WORKFLOWS FOR THIS BACKEND:
+- First inspect backend details:
+  `result = capabilities()`
+- Custom household/situation run (state is required — set in `households`):
+  `sim = Simulation(situation={"people": {...}, "households": {"hh": {"state_code": {"2025": "CA"}, ...}}})`
+  `result = sim.calculate("household_net_income", 2025).tolist()`
+- Microsimulation from published US data (CPS-based):
+  `sim = Microsimulation(dataset="hf://policyengine/policyengine-us-data/enhanced_cps_2024.h5")`
+  `result = sim.calculate("household_net_income", 2025).head().to_list()`
+- Parameter reform: pass parameter changes through documented `policyengine_us` reform helpers.
+
+MODELLING SCOPE:
+- This backend exposes the Python `policyengine-us` model surface — federal taxes/benefits plus all 50 states + DC.
+- US households need a `state_code` (two-letter, e.g. CA, TX, NY) for state-level policy to apply correctly.
+- If a dataset is unavailable locally or requires a download/token, report that clearly instead of guessing."""
+
+    def tool_description(self) -> str:
+        return (
+            "Execute reproducible Python code using the Python `policyengine-us` "
+            "backend. The environment preloads `policyengine_us` as `pe`, "
+            "`Simulation`, `Microsimulation`, `CountryTaxBenefitSystem`, "
+            "`capabilities`, `pd`, `np`, `json`, and `math`; the higher-level "
+            "`policyengine` package is available when installed. Assign the "
+            "final answer to `result` and use `print()` for short diagnostics."
+        )
+
+    def execution_globals(self) -> Dict[str, Any]:
+        self._ensure_importable()
+        import pandas as pd
+        import policyengine_us as pe
+
+        try:
+            import numpy as np
+        except ImportError:
+            np = None
+
+        try:
+            import policyengine
+        except ImportError:
+            policyengine = None
+
+        from policyengine_us import (
+            CountryTaxBenefitSystem,
+            Microsimulation,
+            Simulation,
+        )
+
+        def capabilities() -> Dict[str, Any]:
+            system = CountryTaxBenefitSystem()
+            variables = system.variables
+            parameters = system.parameters
+            return {
+                "backend": self.id,
+                "display_name": self.display_name,
+                "package": "policyengine-us",
+                "interface": "Python PolicyEngine Core/OpenFisca-style US model",
+                "preloaded": [
+                    "policyengine_us as pe",
+                    "Simulation",
+                    "Microsimulation",
+                    "CountryTaxBenefitSystem",
+                    "pd",
+                    "np",
+                    "json",
+                    "math",
+                ],
+                "variable_count": len(variables),
+                "sample_variables": sorted(variables)[:50],
+                "parameter_root_children": sorted(parameters.children.keys()),
+                "dataset_notes": [
+                    "Pass a situation dict for household-style calculations. US households need a state_code (two-letter, e.g. 'CA').",
+                    "Pass a USSingleYearDataset, USMultiYearDataset, DataFrame, or hf:// URL for microsimulation.",
+                    "Default datasets are CPS-based (enhanced_cps_2024.h5 is the canonical one).",
+                ],
+                "comparison_note": (
+                    "Results may differ from the UK backends because this covers the US tax/benefit system (federal + state)."
+                ),
+            }
+
+        globals_dict: Dict[str, Any] = {
+            "math": math,
+            "json": json,
+            "pd": pd,
+            "pe": pe,
+            "policyengine_us": pe,
+            "Simulation": Simulation,
+            "Microsimulation": Microsimulation,
+            "CountryTaxBenefitSystem": CountryTaxBenefitSystem,
+            "capabilities": capabilities,
+        }
+        if policyengine is not None:
+            globals_dict["policyengine"] = policyengine
+        if np is not None:
+            globals_dict["np"] = np
+            globals_dict["numpy"] = np
+        return globals_dict
+
+
 _BACKENDS: Dict[str, ModelBackend] = {
     "uk_compiled": UKCompiledBackend(),
     "uk_python": UKPolicyEnginePythonBackend(),
+    "us_python": USPolicyEnginePythonBackend(),
 }
 
 

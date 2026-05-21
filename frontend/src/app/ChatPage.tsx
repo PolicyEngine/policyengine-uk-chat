@@ -138,8 +138,9 @@ interface ModelBackendsResponse {
 }
 
 function formatBackendLabel(backend: ModelBackendOption): string {
-  if (backend.id === "uk_compiled") return "Compiled";
-  if (backend.id === "uk_python") return "Python";
+  if (backend.id === "uk_compiled") return "UK (Compiled)";
+  if (backend.id === "uk_python") return "UK (Python)";
+  if (backend.id === "us_python") return "US (Python)";
   return backend.display_name;
 }
 
