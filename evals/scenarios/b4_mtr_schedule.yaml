@@ -17,9 +17,13 @@ chat_settings:
 reference:
   fixture: pe_api/b4_mtr_schedule.json
   fields_to_compare:
+    # Compare the combined MTR at each row. `rows` is a list-of-dicts; the
+    # grader iterates over it, using `key_by` to identify each row (gross
+    # income) and `compare` to pick which field to diff.
     - path: rows
+      key_by: gross
+      compare: combined_mtr
       tolerance_pct: 1.0
-      # Each row: { gross, it_mtr, ni_mtr, combined_mtr }. Compare element-wise.
 
 anchor:
   # Pure rule-driven schedule — anchor is the expected schedule values themselves.

@@ -447,6 +447,155 @@ def extract_b_value(answer: str, field_path: str) -> float | None:
     return parse_number_near(answer, label)
 
 
+def _resolve_path(node: Any, dotted_path: str) -> Any | None:
+    """Walk a dotted path into nested dicts/lists; return None if missing.
+
+    Integer-looking parts index into lists. So `rows.0.combined_mtr` works.
+    """
+    cur = node
+    for part in dotted_path.split("."):
+        if isinstance(cur, dict) and part in cur:
+            cur = cur[part]
+        elif isinstance(cur, list) and part.isdigit():
+            idx = int(part)
+            if 0 <= idx < len(cur):
+                cur = cur[idx]
+            else:
+                return None
+        else:
+            return None
+    return cur
+
+
+def _diff_scalar(fc: dict[str, Any], fixture: dict[str, Any] | None, answer: str) -> dict[str, Any]:
+    path = fc["path"]
+    tolerance_pct = fc.get("tolerance_pct", 1.0)
+    extracted = extract_b_value(answer, path)
+    expected = fc.get("expected_approx")
+    if expected is None and fixture is not None:
+        value = _resolve_path(fixture, path)
+        if isinstance(value, (int, float)):
+            expected = float(value)
+    within = None
+    pct_off = None
+    if extracted is not None and expected is not None and expected != 0:
+        pct_off = abs(extracted - expected) / abs(expected) * 100
+        within = pct_off <= tolerance_pct
+    return {
+        "path": path,
+        "expected": expected,
+        "extracted": extracted,
+        "pct_off": pct_off,
+        "tolerance_pct": tolerance_pct,
+        "within_tolerance": within,
+    }
+
+
+def _diff_list_of_dicts(
+    fc: dict[str, Any], fixture: dict[str, Any] | None, answer: str
+) -> list[dict[str, Any]]:
+    """Compare each row in a list-of-dicts field.
+
+    `path` points to the list. Each row in the *fixture* contributes one diff
+    entry, labelled by the row's `key_by` value (e.g. gross income) and
+    comparing the row's `compare` field (e.g. combined_mtr). Extraction
+    heuristic: search the chat answer for the key value (e.g. "£10,000"),
+    then pull the next number off the same line/sentence.
+    """
+    path = fc["path"]
+    key_by = fc["key_by"]
+    compare_field = fc["compare"]
+    tolerance_pct = fc.get("tolerance_pct", 1.0)
+
+    rows = _resolve_path(fixture, path) if fixture is not None else None
+    diffs: list[dict[str, Any]] = []
+    if not isinstance(rows, list):
+        diffs.append({
+            "path": path,
+            "expected": None,
+            "extracted": None,
+            "pct_off": None,
+            "tolerance_pct": tolerance_pct,
+            "within_tolerance": None,
+            "note": "list-of-dicts path missing in fixture",
+        })
+        return diffs
+
+    for row in rows:
+        if not isinstance(row, dict) or key_by not in row or compare_field not in row:
+            continue
+        key_value = row[key_by]
+        expected = row[compare_field]
+        if not isinstance(expected, (int, float)):
+            continue
+
+        # Extraction: find the key value in the chat answer, then look for
+        # the comparison field's number near it. Heuristic — falls back to
+        # None if nothing nearby looks like a percentage.
+        extracted = _extract_row_value(answer, key_value, compare_field)
+
+        within = None
+        pct_off = None
+        if extracted is not None and expected != 0:
+            pct_off = abs(extracted - float(expected)) / abs(float(expected)) * 100
+            within = pct_off <= tolerance_pct
+
+        diffs.append({
+            "path": f"{path}[{key_by}={key_value}].{compare_field}",
+            "expected": float(expected),
+            "extracted": extracted,
+            "pct_off": pct_off,
+            "tolerance_pct": tolerance_pct,
+            "within_tolerance": within,
+        })
+    return diffs
+
+
+def _extract_row_value(answer: str, key_value: Any, compare_field: str) -> float | None:
+    """Find the chat's reported value for a row keyed by `key_value`.
+
+    Looks for the key (formatted as £-amount if numeric and large) in the
+    chat answer, then pulls the first number from the surrounding line. The
+    `compare_field` name is mostly used to bias which number to pick when
+    multiple are present — for MTR fields we prefer the last % on the line.
+    """
+    # Format the key as it's likely to appear in chat prose.
+    if isinstance(key_value, (int, float)):
+        candidates = [
+            f"£{int(key_value):,}",       # £10,000
+            f"£{int(key_value)/1000:g}k", # £10k
+            f"{int(key_value):,}",
+            str(int(key_value)),
+        ]
+    else:
+        candidates = [str(key_value)]
+
+    for needle in candidates:
+        idx = answer.find(needle)
+        if idx == -1:
+            continue
+        # Look at the surrounding line: from previous newline to next newline.
+        line_start = answer.rfind("\n", 0, idx) + 1
+        line_end_search = answer.find("\n", idx)
+        line_end = line_end_search if line_end_search != -1 else len(answer)
+        line = answer[line_start:line_end]
+
+        # For MTR-style fields, prefer "combined" % if multiple appear, else
+        # the last % on the line.
+        if "mtr" in compare_field.lower() or "rate" in compare_field.lower():
+            # Pull all percentages from the line.
+            pcts = re.findall(r"(\d+(?:\.\d+)?)\s*%", line)
+            if pcts:
+                if "combined" in compare_field.lower():
+                    return float(pcts[-1])  # combined usually last in the row
+                return float(pcts[-1])
+        # Otherwise, take the first scaled or numeric value after the needle.
+        n = parse_number_near(line, re.escape(needle))
+        if n is not None:
+            return n
+    return None
+
+
 def grade_b_scenario(
     responses_for_scenario: list[RunResponse],
 ) -> dict[str, Any]:
@@ -473,34 +622,17 @@ def grade_b_scenario(
 
         field_diffs = []
         for fc in reference.get("fields_to_compare") or []:
-            path = fc["path"]
-            tolerance_pct = fc.get("tolerance_pct", 1.0)
-            extracted = extract_b_value(r.answer_text, path)
-            expected = fc.get("expected_approx")
-            if expected is None and fixture is not None:
-                # Pluck the path out of the fixture JSON.
-                node = fixture
-                for part in path.split("."):
-                    if isinstance(node, dict) and part in node:
-                        node = node[part]
-                    else:
-                        node = None
-                        break
-                if isinstance(node, (int, float)):
-                    expected = float(node)
-            within = None
-            pct_off = None
-            if extracted is not None and expected is not None and expected != 0:
-                pct_off = abs(extracted - expected) / abs(expected) * 100
-                within = pct_off <= tolerance_pct
-            field_diffs.append({
-                "path": path,
-                "expected": expected,
-                "extracted": extracted,
-                "pct_off": pct_off,
-                "tolerance_pct": tolerance_pct,
-                "within_tolerance": within,
-            })
+            # Two shapes:
+            #   1) scalar field — `path: budget.budgetary_impact`
+            #   2) list-of-dicts field — `path: rows`, `key_by: gross`,
+            #      `compare: combined_mtr`. Each row becomes one diff entry
+            #      keyed by the row's `key_by` value.
+            if fc.get("key_by") and fc.get("compare"):
+                field_diffs.extend(
+                    _diff_list_of_dicts(fc, fixture, r.answer_text)
+                )
+            else:
+                field_diffs.append(_diff_scalar(fc, fixture, r.answer_text))
         per_run_results.append({
             "run_index": r.run_index,
             "anchor": check,

@@ -1,0 +1,52 @@
+{
+  "rows": [
+    {
+      "gross": 10000,
+      "it_mtr": 0.0,
+      "ni_mtr": 0.0,
+      "combined_mtr": 0.0
+    },
+    {
+      "gross": 20000,
+      "it_mtr": 20.0,
+      "ni_mtr": 8.0,
+      "combined_mtr": 28.0
+    },
+    {
+      "gross": 30000,
+      "it_mtr": 20.0,
+      "ni_mtr": 8.0,
+      "combined_mtr": 28.0
+    },
+    {
+      "gross": 50000,
+      "it_mtr": 20.0,
+      "ni_mtr": 8.0,
+      "combined_mtr": 28.0
+    },
+    {
+      "gross": 75000,
+      "it_mtr": 40.0,
+      "ni_mtr": 2.0,
+      "combined_mtr": 42.0
+    },
+    {
+      "gross": 100000,
+      "it_mtr": 60.0,
+      "ni_mtr": 2.0,
+      "combined_mtr": 62.0
+    },
+    {
+      "gross": 125000,
+      "it_mtr": 60.0,
+      "ni_mtr": 2.0,
+      "combined_mtr": 62.0
+    },
+    {
+      "gross": 150000,
+      "it_mtr": 45.0,
+      "ni_mtr": 2.0,
+      "combined_mtr": 47.0
+    }
+  ]
+}
