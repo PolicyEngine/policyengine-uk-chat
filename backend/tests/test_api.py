@@ -343,3 +343,54 @@ class TestRateLimitConfig:
         assert CHAT_PER_MIN == int(os.environ["RATE_LIMIT_CHAT_PER_MIN"])
         assert CHAT_PER_HOUR == int(os.environ["RATE_LIMIT_CHAT_PER_HOUR"])
         assert CHAT_IP_PER_MIN == int(os.environ["RATE_LIMIT_CHAT_IP_PER_MIN"])
+
+    def test_client_ip_prefers_x_forwarded_for(self):
+        # Behind a proxy, request.client.host is the proxy — X-Forwarded-For
+        # carries the real client. The limiter must key on the latter.
+        from rate_limit import client_ip
+        req = self._request(headers={"x-forwarded-for": "1.2.3.4"}, client_host="10.0.0.1")
+        assert client_ip(req) == "1.2.3.4"
+
+    def test_client_ip_takes_first_forwarded_entry(self):
+        from rate_limit import client_ip
+        req = self._request(headers={"x-forwarded-for": "1.2.3.4, 10.0.0.1, 10.0.0.2"})
+        assert client_ip(req) == "1.2.3.4"
+
+    def test_client_ip_falls_back_to_socket_peer(self):
+        from rate_limit import client_ip
+        req = self._request(client_host="198.51.100.7")
+        assert client_ip(req) == "198.51.100.7"
+
+    def test_chat_key_func_uses_forwarded_ip_for_anonymous(self):
+        from rate_limit import chat_key_func
+        req = self._request(headers={"x-forwarded-for": "1.2.3.4"}, client_host="10.0.0.1")
+        assert chat_key_func(req) == "ip:1.2.3.4"
+
+    def test_chat_endpoint_exposes_starlette_request_to_slowapi(self):
+        """Regression guard for the slowapi wiring.
+
+        slowapi's @limiter.limit grabs the endpoint parameter named
+        `request` and requires it to be a starlette Request. If that name
+        is given to the Pydantic body instead, slowapi raises and every
+        call to /chat/message 500s before the handler runs.
+        """
+        import inspect
+        from starlette.requests import Request as StarletteRequest
+        from routes.chatbot import chat_message
+        params = inspect.signature(chat_message).parameters
+        assert "request" in params, "endpoint needs a `request` parameter for slowapi"
+        assert params["request"].annotation is StarletteRequest, (
+            "the `request` parameter must be a starlette Request, not the body model"
+        )
+
+    def test_chat_message_does_not_500_from_rate_limit_decorator(self):
+        """A single call must stream normally, not 500.
+
+        conftest.py raises the limits far above test workload, so the only
+        thing that can fail here is the rate-limit decorator itself — which
+        is exactly the regression this guards.
+        """
+        with client.stream("POST", "/chat/message", json={
+            "messages": [{"role": "user", "content": "Say exactly: hi"}],
+        }) as r:
+            assert r.status_code != 500

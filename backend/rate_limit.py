@@ -14,6 +14,13 @@ their requests across containers and bypass any single container's count
 — the IP layer is approximate but adequate for the threat model. If we
 need accuracy across containers later, point slowapi at Redis via
 `storage_uri` from the environment.
+
+Both keys are derived from request-supplied data: `X-User-Id` is set by
+the frontend and `X-Forwarded-For` by the edge proxy. Neither is
+authenticated, so a determined attacker can rotate them to dodge the
+limiter. This is deliberate defence-in-depth against casual abuse and
+runaway clients, not a security control — real abuse mitigation would
+need authenticated identities and/or a trusted proxy allowlist.
 """
 
 import os
@@ -31,6 +38,23 @@ CHAT_PER_HOUR = int(os.environ.get("RATE_LIMIT_CHAT_PER_HOUR", "60"))
 CHAT_IP_PER_MIN = int(os.environ.get("RATE_LIMIT_CHAT_IP_PER_MIN", "30"))
 
 
+def client_ip(request: Request) -> str:
+    """Best-effort client IP for rate-limit keying.
+
+    Behind Modal's proxy `request.client.host` is the proxy address, so
+    every request would collapse into one bucket. Prefer the first entry
+    of `X-Forwarded-For` (the original client as seen by the edge) and
+    fall back to the socket peer. Approximate and client-spoofable — see
+    the module docstring.
+    """
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        first = forwarded.split(",")[0].strip()
+        if first:
+            return first
+    return get_remote_address(request)
+
+
 def chat_key_func(request: Request) -> str:
     """Key chat requests by user id when present, otherwise client IP.
 
@@ -41,12 +65,12 @@ def chat_key_func(request: Request) -> str:
     user_id = request.headers.get("x-user-id")
     if user_id:
         return f"user:{user_id}"
-    return f"ip:{get_remote_address(request)}"
+    return f"ip:{client_ip(request)}"
 
 
 # Default key_func is IP-based; per-route decorators override with
 # `chat_key_func` when user-id keying is wanted.
-limiter = Limiter(key_func=get_remote_address)
+limiter = Limiter(key_func=client_ip)
 
 
 CHAT_USER_LIMIT = f"{CHAT_PER_MIN}/minute;{CHAT_PER_HOUR}/hour"

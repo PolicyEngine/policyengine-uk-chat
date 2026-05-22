@@ -247,9 +247,12 @@ def generate_title(request: TitleRequest):
 @router.post("/message")
 @limiter.limit(CHAT_USER_LIMIT, key_func=chat_key_func)
 @limiter.limit(CHAT_IP_LIMIT)
-async def chat_message(request: ChatRequest, http_request: Request):
+async def chat_message(request: Request, chat_request: ChatRequest):
+    # `request` is the Starlette Request (slowapi's @limiter.limit decorators
+    # require the endpoint parameter named `request` to be that type); the
+    # parsed body is `chat_request`.
     # Check billing balance if user is authenticated
-    user_id = request.user_id
+    user_id = chat_request.user_id
     if user_id:
         try:
             from routes.billing import check_balance
@@ -259,9 +262,9 @@ async def chat_message(request: ChatRequest, http_request: Request):
         except RuntimeError:
             pass  # Supabase not configured — skip billing check
 
-    session_id = request.session_id or str(uuid.uuid4())
+    session_id = chat_request.session_id or str(uuid.uuid4())
 
-    messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
+    messages = [{"role": msg.role, "content": msg.content} for msg in chat_request.messages]
 
     # Deduplicate consecutive same-role messages
     deduplicated = []
@@ -285,7 +288,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
             client = _get_anthropic_client()
             model = _select_chat_model(conversation)
             tools = _tool_defs_for_anthropic()
-            plan_mode = request.plan_mode
+            plan_mode = chat_request.plan_mode
             system_blocks = _build_system_blocks(plan_mode=plan_mode)
 
             logger.info(
@@ -294,7 +297,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
             )
 
             while iteration < max_iterations:
-                if await http_request.is_disconnected():
+                if await request.is_disconnected():
                     return
 
                 iteration += 1
@@ -432,7 +435,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
 
                 for fut in asyncio.as_completed(tasks):
                     tu, result = await fut
-                    if await http_request.is_disconnected():
+                    if await request.is_disconnected():
                         return
                     completed_tools[tu["id"]] = result
                     result_str = _serialise_tool_result(result)
