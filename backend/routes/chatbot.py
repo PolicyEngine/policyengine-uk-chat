@@ -297,6 +297,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
                 iteration += 1
                 tool_uses = []
                 assistant_content = ""
+                last_stop_reason: str | None = None
 
                 logger.info(f"[CHAT] Iteration {iteration}: calling Anthropic, {len(conversation)} messages")
                 # Stream from Anthropic with retry on transient errors
@@ -352,6 +353,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
 
                             # Use final message for complete, parsed tool inputs
                             final = await stream.get_final_message()
+                            last_stop_reason = getattr(final, "stop_reason", None)
                             for block in final.content:
                                 if block.type == "tool_use":
                                     if plan_mode:
@@ -394,7 +396,7 @@ async def chat_message(request: ChatRequest, http_request: Request):
                         )
                     except Exception as e:
                         logger.warning(f"[CHAT] Failed to record usage: {e}")
-                    yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'stop_reason': last_stop_reason, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
                     break
 
                 # Detect infinite loops
