@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconBulb } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconBulb, IconCopy, IconDownload } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -125,6 +125,99 @@ interface BalanceSummary {
   total_available_gbp: number;
 }
 
+// ---- Export helpers ---------------------------------------------------------
+
+const stripChartPlaceholders = (text: string): string =>
+  text.replace(/\[CHART_PLACEHOLDER_\d+\]/g, "[Chart]").replace(/\[CHART_LOADING\]/g, "[Chart]");
+
+const formatPythonOutput = (summary?: string): string => {
+  if (!summary) return "";
+  try {
+    const parsed = JSON.parse(summary);
+    const parts: string[] = [];
+    if (parsed.output) parts.push(parsed.output);
+    if (parsed.result !== undefined && parsed.result !== null) parts.push(`result = ${JSON.stringify(parsed.result, null, 2)}`);
+    if (parsed.error) parts.push(`Error: ${parsed.error}`);
+    return parts.join("\n") || summary;
+  } catch {
+    return summary;
+  }
+};
+
+/** Check if a text event is transitional CoT that shouldn't appear in final output. */
+const isTransitionalText = (text: string): boolean => {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > 200) return false;
+  // Short sentences starting with transitional phrases
+  return /^(let me|now I|I'll|I need to|I can|I should|I want to|good\.|great\.|ok\b|alright|perfect|right|so |now let|let's)/i.test(trimmed);
+};
+
+/**
+ * Text events the user actually sees as the final answer, matching renderAssistantMessage's
+ * split: no-tool messages keep all text; tool-using messages keep only post-last-tool text
+ * with transitional filler dropped. Single source of truth for render, copy, and export.
+ */
+const visibleFinalEvents = (msg: Message): { type: "text"; content: string }[] => {
+  if (!msg.events?.length) return [];
+  const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
+  const textEvents = (evs: StreamEvent[]) =>
+    evs.filter((e): e is { type: "text"; content: string } => e.type === "text");
+  if (lastToolIdx < 0) return textEvents(msg.events);
+  return textEvents(msg.events.slice(lastToolIdx + 1)).filter((e) => !isTransitionalText(e.content));
+};
+
+/** Final user-facing prose of an assistant message — what the user reads, charts as [Chart]. */
+const extractFinalProse = (msg: Message): string => {
+  if (msg.role === "user") return msg.content;
+  if (!msg.events?.length) return stripChartPlaceholders(msg.content);
+  return stripChartPlaceholders(visibleFinalEvents(msg).map((e) => e.content).join(""));
+};
+
+/** Full record of a single message — includes working section and tool blocks for assistants. */
+const messageToMarkdown = (msg: Message): string => {
+  if (msg.role === "user") return `## You\n\n${msg.content}`;
+  const parts: string[] = ["## Assistant\n"];
+  if (msg.events?.length) {
+    const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
+    if (lastToolIdx >= 0) {
+      parts.push("\n<details>\n<summary>Worked through the problem</summary>\n");
+      for (const event of msg.events.slice(0, lastToolIdx + 1)) {
+        if (event.type === "text" && event.content.trim()) {
+          parts.push(`\n${stripChartPlaceholders(event.content)}\n`);
+        } else if (event.type === "tool") {
+          const t = event.data;
+          if (t.tool_name === "run_python") {
+            const code = (t.input as Record<string, string>)?.code || "";
+            const output = formatPythonOutput(t.result_summary);
+            if (code) parts.push(`\n\`\`\`python\n${code}\n\`\`\`\n`);
+            if (output) parts.push(`\n\`\`\`\n${output}\n\`\`\`\n`);
+          } else {
+            const inputStr = t.input ? JSON.stringify(t.input, null, 2) : "";
+            if (inputStr) parts.push(`\n**${t.tool_name} input**\n\`\`\`json\n${inputStr}\n\`\`\`\n`);
+            if (t.result_summary) parts.push(`\n**${t.tool_name} output**\n\`\`\`\n${t.result_summary}\n\`\`\`\n`);
+          }
+        }
+      }
+      parts.push("\n</details>\n");
+    }
+    const finalText = visibleFinalEvents(msg).map((e) => e.content).join("");
+    if (finalText.trim()) parts.push(`\n${stripChartPlaceholders(finalText)}\n`);
+  } else if (msg.content) {
+    parts.push(`\n${stripChartPlaceholders(msg.content)}\n`);
+  }
+  return parts.join("");
+};
+
+const conversationToMarkdown = (msgs: Message[], title?: string): string => {
+  const header = title ? `# ${title}\n\n` : "";
+  return header + msgs.map(messageToMarkdown).join("\n\n---\n\n") + "\n";
+};
+
+const slugify = (s: string): string =>
+  s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "chat";
+
+// ---- /Export helpers --------------------------------------------------------
+
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
   const url = new URL(getBackendEndpoint(endpoint), window.location.origin);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -149,6 +242,7 @@ export default function ChatPage() {
   const [collapsedWorking, setCollapsedWorking] = useState<Set<number>>(new Set());
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
+  const [copiedMessageIdx, setCopiedMessageIdx] = useState<number | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
@@ -495,7 +589,7 @@ export default function ChatPage() {
                 setMessages((prev) => {
                   const newMsgs = [...prev];
                   const lastIdx = newMsgs.length - 1;
-                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], cost_gbp: msgCost };
+                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true, cost_gbp: msgCost };
                   return newMsgs;
                 });
               }
@@ -570,6 +664,40 @@ export default function ChatPage() {
     } catch (error) {
       console.error("Failed to copy snippet", error);
     }
+  };
+
+  const copyMessage = async (idx: number) => {
+    const msg = messages[idx];
+    if (!msg) return;
+    const prose = extractFinalProse(msg);
+    if (!prose.trim()) return;
+    try {
+      await navigator.clipboard.writeText(prose);
+      setCopiedMessageIdx(idx);
+      setTimeout(() => setCopiedMessageIdx((current) => current === idx ? null : current), 2000);
+    } catch (error) {
+      console.error("Failed to copy message", error);
+    }
+  };
+
+  const downloadConversation = () => {
+    if (!messages.length) return;
+    const title = activeConversationId
+      ? conversations.find((c) => c.id === activeConversationId)?.title
+      : undefined;
+    const md = conversationToMarkdown(messages, title);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const slug = title ? `-${slugify(title)}` : "";
+    const filename = `policyengine-chat-${stamp}${slug}.md`;
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const renderToolDetails = (t: ToolData) => {
@@ -739,14 +867,6 @@ export default function ChatPage() {
   /** Return a fixed label for the collapsed working section. */
   const getWorkingSummary = (_events: StreamEvent[]): string => "Worked through the problem";
 
-  /** Check if a text event is transitional CoT that shouldn't appear in final output. */
-  const isTransitionalText = (text: string): boolean => {
-    const trimmed = text.trim();
-    if (!trimmed || trimmed.length > 200) return false;
-    // Short sentences starting with transitional phrases
-    return /^(let me|now I|I'll|I need to|I can|I should|I want to|good\.|great\.|ok\b|alright|perfect|right|so |now let|let's)/i.test(trimmed);
-  };
-
   const renderAssistantMessage = (msg: Message, msgIdx: number) => {
     if (!msg.events?.length) return renderMarkdown(msg.content);
 
@@ -763,8 +883,7 @@ export default function ChatPage() {
 
     if (msg.isComplete && hasTools) {
       workingEvents = msg.events.slice(0, lastToolIdx + 1);
-      const rawFinal = msg.events.slice(lastToolIdx + 1);
-      finalEvents = rawFinal.filter((e) => e.type === "text" && !isTransitionalText(e.content));
+      finalEvents = visibleFinalEvents(msg);
     } else if (!msg.isComplete && hasTools) {
       // Streaming with tools: everything in working, nothing in output yet
       workingEvents = [...msg.events];
@@ -906,6 +1025,15 @@ export default function ChatPage() {
                 <IconBug size={12} />
                 Report issue
               </button>
+              <button
+                onClick={downloadConversation}
+                disabled={isStreaming}
+                style={{ fontSize: "12px", color: isStreaming ? "#d1d5db" : "#9e9a90", background: "none", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", padding: "0", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                title="Download this conversation as Markdown"
+              >
+                <IconDownload size={12} />
+                Download .md
+              </button>
             </div>
           )}
 
@@ -923,9 +1051,25 @@ export default function ChatPage() {
                       <div className={!msg.isComplete ? "streaming-text" : undefined} style={{ fontFamily: "'Source Serif 4', Georgia, serif", color: "#3a3835", fontSize: "15.5px", lineHeight: 1.8, minWidth: 0 }}>
                         {renderAssistantMessage(msg, idx)}
                       </div>
-                      {msg.cost_gbp !== undefined && (
-                        <div style={{ fontSize: "11px", color: "#d1cdc4", marginTop: "4px", fontVariantNumeric: "tabular-nums" }}>
-                          {msg.cost_gbp < 0.01 ? `${(msg.cost_gbp * 100).toFixed(2)}p` : `£${msg.cost_gbp.toFixed(3)}`}
+                      {(msg.isComplete || msg.cost_gbp !== undefined) && (
+                        <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "4px" }}>
+                          {msg.isComplete && (
+                            <button
+                              type="button"
+                              onClick={() => copyMessage(idx)}
+                              title={copiedMessageIdx === idx ? "Copied" : "Copy answer to clipboard"}
+                              style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: copiedMessageIdx === idx ? THEME.primary : "#9e9a90", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+                              onMouseEnter={(e) => { if (copiedMessageIdx !== idx) (e.currentTarget as HTMLElement).style.color = THEME.primary; }}
+                              onMouseLeave={(e) => { if (copiedMessageIdx !== idx) (e.currentTarget as HTMLElement).style.color = "#9e9a90"; }}
+                            >
+                              <IconCopy size={12} /> {copiedMessageIdx === idx ? "Copied" : "Copy"}
+                            </button>
+                          )}
+                          {msg.cost_gbp !== undefined && (
+                            <span style={{ fontSize: "11px", color: "#d1cdc4", fontVariantNumeric: "tabular-nums" }}>
+                              {msg.cost_gbp < 0.01 ? `${(msg.cost_gbp * 100).toFixed(2)}p` : `£${msg.cost_gbp.toFixed(3)}`}
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
