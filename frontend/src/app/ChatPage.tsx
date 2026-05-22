@@ -144,17 +144,33 @@ const formatPythonOutput = (summary?: string): string => {
   }
 };
 
-/** Final user-facing prose of an assistant message — post-last-tool, transitional filler dropped. */
+/** Check if a text event is transitional CoT that shouldn't appear in final output. */
+const isTransitionalText = (text: string): boolean => {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > 200) return false;
+  // Short sentences starting with transitional phrases
+  return /^(let me|now I|I'll|I need to|I can|I should|I want to|good\.|great\.|ok\b|alright|perfect|right|so |now let|let's)/i.test(trimmed);
+};
+
+/**
+ * Text events the user actually sees as the final answer, matching renderAssistantMessage's
+ * split: no-tool messages keep all text; tool-using messages keep only post-last-tool text
+ * with transitional filler dropped. Single source of truth for render, copy, and export.
+ */
+const visibleFinalEvents = (msg: Message): { type: "text"; content: string }[] => {
+  if (!msg.events?.length) return [];
+  const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
+  const textEvents = (evs: StreamEvent[]) =>
+    evs.filter((e): e is { type: "text"; content: string } => e.type === "text");
+  if (lastToolIdx < 0) return textEvents(msg.events);
+  return textEvents(msg.events.slice(lastToolIdx + 1)).filter((e) => !isTransitionalText(e.content));
+};
+
+/** Final user-facing prose of an assistant message — what the user reads, charts as [Chart]. */
 const extractFinalProse = (msg: Message): string => {
   if (msg.role === "user") return msg.content;
   if (!msg.events?.length) return stripChartPlaceholders(msg.content);
-  const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
-  const finalEvents = msg.events.slice(lastToolIdx + 1);
-  const text = finalEvents
-    .filter((e): e is { type: "text"; content: string } => e.type === "text")
-    .map((e) => e.content)
-    .join("");
-  return stripChartPlaceholders(text || msg.content);
+  return stripChartPlaceholders(visibleFinalEvents(msg).map((e) => e.content).join(""));
 };
 
 /** Full record of a single message — includes working section and tool blocks for assistants. */
@@ -184,11 +200,7 @@ const messageToMarkdown = (msg: Message): string => {
       }
       parts.push("\n</details>\n");
     }
-    const finalEvents = msg.events.slice(lastToolIdx + 1);
-    const finalText = finalEvents
-      .filter((e): e is { type: "text"; content: string } => e.type === "text")
-      .map((e) => e.content)
-      .join("");
+    const finalText = visibleFinalEvents(msg).map((e) => e.content).join("");
     if (finalText.trim()) parts.push(`\n${stripChartPlaceholders(finalText)}\n`);
   } else if (msg.content) {
     parts.push(`\n${stripChartPlaceholders(msg.content)}\n`);
@@ -577,7 +589,7 @@ export default function ChatPage() {
                 setMessages((prev) => {
                   const newMsgs = [...prev];
                   const lastIdx = newMsgs.length - 1;
-                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], cost_gbp: msgCost };
+                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true, cost_gbp: msgCost };
                   return newMsgs;
                 });
               }
@@ -657,8 +669,10 @@ export default function ChatPage() {
   const copyMessage = async (idx: number) => {
     const msg = messages[idx];
     if (!msg) return;
+    const prose = extractFinalProse(msg);
+    if (!prose.trim()) return;
     try {
-      await navigator.clipboard.writeText(extractFinalProse(msg));
+      await navigator.clipboard.writeText(prose);
       setCopiedMessageIdx(idx);
       setTimeout(() => setCopiedMessageIdx((current) => current === idx ? null : current), 2000);
     } catch (error) {
@@ -853,14 +867,6 @@ export default function ChatPage() {
   /** Return a fixed label for the collapsed working section. */
   const getWorkingSummary = (_events: StreamEvent[]): string => "Worked through the problem";
 
-  /** Check if a text event is transitional CoT that shouldn't appear in final output. */
-  const isTransitionalText = (text: string): boolean => {
-    const trimmed = text.trim();
-    if (!trimmed || trimmed.length > 200) return false;
-    // Short sentences starting with transitional phrases
-    return /^(let me|now I|I'll|I need to|I can|I should|I want to|good\.|great\.|ok\b|alright|perfect|right|so |now let|let's)/i.test(trimmed);
-  };
-
   const renderAssistantMessage = (msg: Message, msgIdx: number) => {
     if (!msg.events?.length) return renderMarkdown(msg.content);
 
@@ -877,8 +883,7 @@ export default function ChatPage() {
 
     if (msg.isComplete && hasTools) {
       workingEvents = msg.events.slice(0, lastToolIdx + 1);
-      const rawFinal = msg.events.slice(lastToolIdx + 1);
-      finalEvents = rawFinal.filter((e) => e.type === "text" && !isTransitionalText(e.content));
+      finalEvents = visibleFinalEvents(msg);
     } else if (!msg.isComplete && hasTools) {
       // Streaming with tools: everything in working, nothing in output yet
       workingEvents = [...msg.events];
