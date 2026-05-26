@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconBulb, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconBulb, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -115,6 +115,10 @@ interface Message {
   events?: StreamEvent[];
   isComplete?: boolean;
   cost_gbp?: number;
+  /** Anthropic stop_reason on the final iteration. "max_tokens" means truncated. */
+  stop_reason?: string;
+  /** True when the user clicked Stop and the stream was aborted mid-flight. */
+  stopped?: boolean;
 }
 
 interface BalanceSummary {
@@ -124,6 +128,99 @@ interface BalanceSummary {
   spent_this_month_gbp: number;
   total_available_gbp: number;
 }
+
+// ---- Export helpers ---------------------------------------------------------
+
+const stripChartPlaceholders = (text: string): string =>
+  text.replace(/\[CHART_PLACEHOLDER_\d+\]/g, "[Chart]").replace(/\[CHART_LOADING\]/g, "[Chart]");
+
+const formatPythonOutput = (summary?: string): string => {
+  if (!summary) return "";
+  try {
+    const parsed = JSON.parse(summary);
+    const parts: string[] = [];
+    if (parsed.output) parts.push(parsed.output);
+    if (parsed.result !== undefined && parsed.result !== null) parts.push(`result = ${JSON.stringify(parsed.result, null, 2)}`);
+    if (parsed.error) parts.push(`Error: ${parsed.error}`);
+    return parts.join("\n") || summary;
+  } catch {
+    return summary;
+  }
+};
+
+/** Check if a text event is transitional CoT that shouldn't appear in final output. */
+const isTransitionalText = (text: string): boolean => {
+  const trimmed = text.trim();
+  if (!trimmed || trimmed.length > 200) return false;
+  // Short sentences starting with transitional phrases
+  return /^(let me|now I|I'll|I need to|I can|I should|I want to|good\.|great\.|ok\b|alright|perfect|right|so |now let|let's)/i.test(trimmed);
+};
+
+/**
+ * Text events the user actually sees as the final answer, matching renderAssistantMessage's
+ * split: no-tool messages keep all text; tool-using messages keep only post-last-tool text
+ * with transitional filler dropped. Single source of truth for render, copy, and export.
+ */
+const visibleFinalEvents = (msg: Message): { type: "text"; content: string }[] => {
+  if (!msg.events?.length) return [];
+  const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
+  const textEvents = (evs: StreamEvent[]) =>
+    evs.filter((e): e is { type: "text"; content: string } => e.type === "text");
+  if (lastToolIdx < 0) return textEvents(msg.events);
+  return textEvents(msg.events.slice(lastToolIdx + 1)).filter((e) => !isTransitionalText(e.content));
+};
+
+/** Final user-facing prose of an assistant message — what the user reads, charts as [Chart]. */
+const extractFinalProse = (msg: Message): string => {
+  if (msg.role === "user") return msg.content;
+  if (!msg.events?.length) return stripChartPlaceholders(msg.content);
+  return stripChartPlaceholders(visibleFinalEvents(msg).map((e) => e.content).join(""));
+};
+
+/** Full record of a single message — includes working section and tool blocks for assistants. */
+const messageToMarkdown = (msg: Message): string => {
+  if (msg.role === "user") return `## You\n\n${msg.content}`;
+  const parts: string[] = ["## Assistant\n"];
+  if (msg.events?.length) {
+    const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
+    if (lastToolIdx >= 0) {
+      parts.push("\n<details>\n<summary>Worked through the problem</summary>\n");
+      for (const event of msg.events.slice(0, lastToolIdx + 1)) {
+        if (event.type === "text" && event.content.trim()) {
+          parts.push(`\n${stripChartPlaceholders(event.content)}\n`);
+        } else if (event.type === "tool") {
+          const t = event.data;
+          if (t.tool_name === "run_python") {
+            const code = (t.input as Record<string, string>)?.code || "";
+            const output = formatPythonOutput(t.result_summary);
+            if (code) parts.push(`\n\`\`\`python\n${code}\n\`\`\`\n`);
+            if (output) parts.push(`\n\`\`\`\n${output}\n\`\`\`\n`);
+          } else {
+            const inputStr = t.input ? JSON.stringify(t.input, null, 2) : "";
+            if (inputStr) parts.push(`\n**${t.tool_name} input**\n\`\`\`json\n${inputStr}\n\`\`\`\n`);
+            if (t.result_summary) parts.push(`\n**${t.tool_name} output**\n\`\`\`\n${t.result_summary}\n\`\`\`\n`);
+          }
+        }
+      }
+      parts.push("\n</details>\n");
+    }
+    const finalText = visibleFinalEvents(msg).map((e) => e.content).join("");
+    if (finalText.trim()) parts.push(`\n${stripChartPlaceholders(finalText)}\n`);
+  } else if (msg.content) {
+    parts.push(`\n${stripChartPlaceholders(msg.content)}\n`);
+  }
+  return parts.join("");
+};
+
+const conversationToMarkdown = (msgs: Message[], title?: string): string => {
+  const header = title ? `# ${title}\n\n` : "";
+  return header + msgs.map(messageToMarkdown).join("\n\n---\n\n") + "\n";
+};
+
+const slugify = (s: string): string =>
+  s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 60) || "chat";
+
+// ---- /Export helpers --------------------------------------------------------
 
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
   const url = new URL(getBackendEndpoint(endpoint), window.location.origin);
@@ -149,6 +246,7 @@ export default function ChatPage() {
   const [collapsedWorking, setCollapsedWorking] = useState<Set<number>>(new Set());
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
+  const [copiedMessageIdx, setCopiedMessageIdx] = useState<number | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
@@ -251,7 +349,18 @@ export default function ChatPage() {
     try {
       const data = conversationCache.current.get(conv.id) || await apiRequest<ConversationDetail>("GET", `conversations/${conv.id}`);
       if (!data?.messages?.length) { console.error("No messages in conversation", data); return; }
-      const loaded: Message[] = data.messages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content || "", isComplete: true, events: m.events }));
+      const loaded: Message[] = data.messages.map((m) => {
+        const raw = m as { role: string; content: string; events?: StreamEvent[]; stop_reason?: string; stopped?: boolean; cost_gbp?: number };
+        return {
+          role: raw.role as "user" | "assistant",
+          content: raw.content || "",
+          isComplete: true,
+          events: raw.events,
+          stop_reason: raw.stop_reason,
+          stopped: raw.stopped,
+          cost_gbp: raw.cost_gbp,
+        };
+      });
       const collapsed = new Set(loaded.map((m, i) => (m.role === "assistant" && m.events?.some((e) => e.type === "tool") ? i : -1)).filter((i) => i >= 0));
       sessionId.current = data.session_id;
       setActiveConversationId(data.id);
@@ -304,10 +413,14 @@ export default function ChatPage() {
     } catch (e) { console.error("Title generation failed", e); }
 
     const apiMessages = msgs.map((m) => {
-      if (m.role === "assistant" && m.isComplete && m.events?.length) {
-        return { role: m.role, content: m.content, events: m.events };
+      const base: Record<string, unknown> = { role: m.role, content: m.content };
+      if (m.role === "assistant") {
+        if (m.isComplete && m.events?.length) base.events = m.events;
+        if (m.cost_gbp !== undefined) base.cost_gbp = m.cost_gbp;
+        if (m.stop_reason) base.stop_reason = m.stop_reason;
+        if (m.stopped) base.stopped = true;
       }
-      return { role: m.role, content: m.content };
+      return base;
     });
 
     try {
@@ -508,12 +621,13 @@ export default function ChatPage() {
               updateMessage();
               if (data.session_id) sessionId.current = data.session_id;
               const msgCost = typeof data.cost_gbp === "number" ? data.cost_gbp : undefined;
+              const stopReason = typeof data.stop_reason === "string" ? data.stop_reason : undefined;
               const hasTools = events.some((e) => e.type === "tool");
               if (hasTools) {
                 setMessages((prev) => {
                   const newMsgs = [...prev];
                   const lastIdx = newMsgs.length - 1;
-                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true, cost_gbp: msgCost };
+                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true, cost_gbp: msgCost, stop_reason: stopReason };
                   setCollapsedWorking((c) => new Set(c).add(lastIdx));
                   return newMsgs;
                 });
@@ -521,7 +635,7 @@ export default function ChatPage() {
                 setMessages((prev) => {
                   const newMsgs = [...prev];
                   const lastIdx = newMsgs.length - 1;
-                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], cost_gbp: msgCost };
+                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true, cost_gbp: msgCost, stop_reason: stopReason };
                   return newMsgs;
                 });
               }
@@ -547,14 +661,15 @@ export default function ChatPage() {
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        // User stopped the stream — flush what we have
+        // User stopped the stream — flush what we have, mark `stopped`
+        // so the UI shows a Continue affordance.
         if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
         displayedText = currentText;
         updateMessage();
         setMessages((prev) => {
           const newMsgs = [...prev];
           const lastIdx = newMsgs.length - 1;
-          if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true };
+          if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true, stopped: true };
           return newMsgs;
         });
       } else {
@@ -570,6 +685,187 @@ export default function ChatPage() {
   };
 
   const stopStreaming = () => { abortRef.current?.abort(); };
+
+  /** Resume a previously truncated or stopped assistant turn.
+   *
+   * The conversation up to and including the partial assistant message is
+   * sent to /chat/message; the model continues from there via Anthropic's
+   * assistant-prefill behaviour (no extra user nudge needed). New text and
+   * events are appended into the SAME message bubble so the user sees one
+   * continuous answer.
+   */
+  const continueMessage = async (idx: number) => {
+    if (isStreaming) return;
+    const target = messages[idx];
+    if (!target || target.role !== "assistant" || !target.isComplete) return;
+    // Refuse if a tool is still pending in this message — re-triggering
+    // would orphan the partial tool call.
+    if (target.events?.some((e) => e.type === "tool" && e.data.status === "pending")) return;
+
+    const priorMessages = messages.slice(0, idx + 1);
+    const apiMessages = priorMessages.map((msg) => {
+      let content = msg.content;
+      if (msg.role === "assistant" && msg.events) {
+        const toolResults = msg.events.filter((e): e is { type: "tool"; data: ToolData } => e.type === "tool" && !!e.data.result_summary).map((e) => `[Tool: ${e.data.tool_name}] ${e.data.result_summary}`).join("\n\n");
+        if (toolResults) content += "\n\n---\nTool results:\n" + toolResults;
+      }
+      return { role: msg.role, content };
+    });
+
+    // The partial turn is sent as the final message so the model continues it
+    // (assistant prefill). Anthropic rejects a prefill that is empty or ends
+    // with whitespace — trim it, and bail if there is nothing to continue from.
+    const prefill = apiMessages[apiMessages.length - 1];
+    prefill.content = prefill.content.trimEnd();
+    if (!prefill.content) return;
+
+    // Optimistic: clear truncation/stopped flags and mark in-flight.
+    setMessages((prev) => prev.map((m, i) => i === idx ? { ...m, isComplete: false, stop_reason: undefined, stopped: undefined } : m));
+    setIsStreaming(true);
+    setIsWaiting(true);
+
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    let appendedText = "";
+    const newEvents: StreamEvent[] = [];
+    const toolsMap = new Map<string, ToolData>();
+    const baseContent = target.content;
+    const baseEvents = target.events ? [...target.events] : [];
+    const baseCost = target.cost_gbp || 0;
+
+    const flushTarget = () => {
+      setMessages((prev) => prev.map((m, i) => i === idx ? {
+        ...m,
+        content: baseContent + appendedText,
+        events: [...baseEvents, ...newEvents],
+      } : m));
+    };
+
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (user?.id) headers["X-User-Id"] = user.id;
+      const response = await fetch(getBackendEndpoint("chat/message"), {
+        method: "POST",
+        headers,
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, plan_mode: false }),
+        signal: controller.signal,
+      });
+      if (response.status === 402) {
+        const err = await response.json().catch(() => ({ error: "No credit remaining" }));
+        setMessages((prev) => [...prev, { role: "assistant", content: err.error || "No credit remaining. Please top up to continue.", isComplete: true }]);
+        return;
+      }
+      if (response.status === 429) {
+        const seconds = parseInt(response.headers.get("retry-after") || "60", 10);
+        setMessages((prev) => [...prev, { role: "assistant", content: `You're sending messages a bit fast — please wait ~${seconds}s and try again.`, isComplete: true }]);
+        return;
+      }
+      if (!response.ok) throw new Error("Request failed");
+      const reader = response.body?.getReader();
+      const decoder = new TextDecoder();
+      if (!reader) throw new Error("No body");
+
+      let buffer = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split("\n");
+        buffer = lines.pop() || "";
+        for (const line of lines) {
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const data = JSON.parse(line.slice(6));
+            if (data.type === "chunk") {
+              setIsWaiting(false);
+              const lastEvent = newEvents[newEvents.length - 1];
+              if (lastEvent?.type === "text" && !lastEvent.thinking) lastEvent.content += data.content;
+              else newEvents.push({ type: "text", content: data.content });
+              appendedText += data.content;
+              flushTarget();
+            } else if (data.type === "tool_start") {
+              setIsWaiting(false);
+              const toolData: ToolData = { tool_name: data.tool_name, tool_id: data.tool_id, status: "pending" };
+              toolsMap.set(data.tool_id, toolData);
+              newEvents.push({ type: "tool", data: toolData });
+              flushTarget();
+            } else if (data.type === "tool_use") {
+              const existing = toolsMap.get(data.tool_id);
+              if (existing) existing.input = data.tool_input;
+              else { const td: ToolData = { tool_name: data.tool_name, tool_id: data.tool_id, status: "pending", input: data.tool_input }; toolsMap.set(data.tool_id, td); newEvents.push({ type: "tool", data: td }); }
+              flushTarget();
+            } else if (data.type === "tool_result") {
+              const tool = toolsMap.get(data.tool_id);
+              if (tool) { tool.status = data.status; tool.result_summary = data.result_summary; }
+              flushTarget();
+              setIsWaiting(true);
+            } else if (data.type === "done") {
+              setIsWaiting(false);
+              const newCost = typeof data.cost_gbp === "number" ? data.cost_gbp : 0;
+              const stopReason = typeof data.stop_reason === "string" ? data.stop_reason : undefined;
+              const finalContent = baseContent + appendedText;
+              const finalEvents = [...baseEvents, ...newEvents];
+              setMessages((prev) => prev.map((m, i) => i === idx ? {
+                ...m,
+                isComplete: true,
+                content: finalContent,
+                events: finalEvents,
+                cost_gbp: baseCost + newCost,
+                stop_reason: stopReason,
+                stopped: false,
+              } : m));
+              if (data.balance) setBalance(data.balance); else fetchBalance();
+              if (sessionId.current) {
+                // Persist the fresh post-continuation metadata too — otherwise a
+                // reload restores the stale truncation flag and pre-continuation
+                // cost, making the resumed turn look like it never continued.
+                const savedMessages = messages.map((m, i) => i === idx ? {
+                  ...m,
+                  isComplete: true,
+                  content: finalContent,
+                  events: finalEvents,
+                  cost_gbp: baseCost + newCost,
+                  stop_reason: stopReason,
+                  stopped: false,
+                } : m);
+                saveConversation(savedMessages, sessionId.current);
+              }
+            } else if (data.type === "error") {
+              const errorText = `Error: ${data.content || "Something went wrong"}`;
+              const lastEvent = newEvents[newEvents.length - 1];
+              if (lastEvent?.type === "text") lastEvent.content += "\n\n" + errorText;
+              else newEvents.push({ type: "text", content: errorText });
+              appendedText += errorText;
+              flushTarget();
+            }
+          } catch {}
+        }
+      }
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        setMessages((prev) => prev.map((m, i) => i === idx ? {
+          ...m,
+          isComplete: true,
+          content: baseContent + appendedText,
+          events: [...baseEvents, ...newEvents],
+          stopped: true,
+        } : m));
+      } else {
+        const errorText = `Continuation failed: ${error instanceof Error ? error.message : "Unknown error"}`;
+        setMessages((prev) => prev.map((m, i) => i === idx ? {
+          ...m,
+          isComplete: true,
+          content: baseContent + appendedText + "\n\n" + errorText,
+          events: [...baseEvents, ...newEvents],
+        } : m));
+      }
+    } finally {
+      abortRef.current = null;
+      setIsStreaming(false);
+      setIsWaiting(false);
+    }
+  };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
@@ -596,6 +892,40 @@ export default function ChatPage() {
     } catch (error) {
       console.error("Failed to copy snippet", error);
     }
+  };
+
+  const copyMessage = async (idx: number) => {
+    const msg = messages[idx];
+    if (!msg) return;
+    const prose = extractFinalProse(msg);
+    if (!prose.trim()) return;
+    try {
+      await navigator.clipboard.writeText(prose);
+      setCopiedMessageIdx(idx);
+      setTimeout(() => setCopiedMessageIdx((current) => current === idx ? null : current), 2000);
+    } catch (error) {
+      console.error("Failed to copy message", error);
+    }
+  };
+
+  const downloadConversation = () => {
+    if (!messages.length) return;
+    const title = activeConversationId
+      ? conversations.find((c) => c.id === activeConversationId)?.title
+      : undefined;
+    const md = conversationToMarkdown(messages, title);
+    const stamp = new Date().toISOString().slice(0, 10);
+    const slug = title ? `-${slugify(title)}` : "";
+    const filename = `policyengine-chat-${stamp}${slug}.md`;
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
   };
 
   const renderToolDetails = (t: ToolData) => {
@@ -765,14 +1095,6 @@ export default function ChatPage() {
   /** Return a fixed label for the collapsed working section. */
   const getWorkingSummary = (_events: StreamEvent[]): string => "Worked through the problem";
 
-  /** Check if a text event is transitional CoT that shouldn't appear in final output. */
-  const isTransitionalText = (text: string): boolean => {
-    const trimmed = text.trim();
-    if (!trimmed || trimmed.length > 200) return false;
-    // Short sentences starting with transitional phrases
-    return /^(let me|now I|I'll|I need to|I can|I should|I want to|good\.|great\.|ok\b|alright|perfect|right|so |now let|let's)/i.test(trimmed);
-  };
-
   const renderAssistantMessage = (msg: Message, msgIdx: number) => {
     if (!msg.events?.length) return renderMarkdown(msg.content);
 
@@ -789,8 +1111,7 @@ export default function ChatPage() {
 
     if (msg.isComplete && hasTools) {
       workingEvents = msg.events.slice(0, lastToolIdx + 1);
-      const rawFinal = msg.events.slice(lastToolIdx + 1);
-      finalEvents = rawFinal.filter((e) => e.type === "text" && !isTransitionalText(e.content));
+      finalEvents = visibleFinalEvents(msg);
     } else if (!msg.isComplete && hasTools) {
       // Streaming with tools: everything in working, nothing in output yet
       workingEvents = [...msg.events];
@@ -972,6 +1293,15 @@ export default function ChatPage() {
                 <IconBug size={12} />
                 Report issue
               </button>
+              <button
+                onClick={downloadConversation}
+                disabled={isStreaming}
+                style={{ fontSize: "12px", color: isStreaming ? "var(--faint)" : "var(--muted)", background: "none", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", padding: "0", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                title="Download this conversation as Markdown"
+              >
+                <IconDownload size={12} />
+                Download .md
+              </button>
             </div>
           )}
 
@@ -994,9 +1324,42 @@ export default function ChatPage() {
                       <div className={!msg.isComplete ? "streaming-text" : undefined} style={{ fontFamily: "system-ui, -apple-system, sans-serif", color: "var(--text)", fontSize: "15.5px", lineHeight: 1.7, minWidth: 0 }}>
                         {renderAssistantMessage(msg, idx)}
                       </div>
-                      {msg.cost_gbp !== undefined && (
-                        <div style={{ fontSize: "11px", color: "var(--faint)", marginTop: "4px", fontVariantNumeric: "tabular-nums" }}>
-                          {msg.cost_gbp < 0.01 ? `${(msg.cost_gbp * 100).toFixed(2)}p` : `£${msg.cost_gbp.toFixed(3)}`}
+                      {(msg.isComplete || msg.cost_gbp !== undefined) && (
+                        <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "4px" }}>
+                          {msg.isComplete && (
+                            <button
+                              type="button"
+                              onClick={() => copyMessage(idx)}
+                              title={copiedMessageIdx === idx ? "Copied" : "Copy answer to clipboard"}
+                              style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: copiedMessageIdx === idx ? "var(--accent)" : "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+                              onMouseEnter={(e) => { if (copiedMessageIdx !== idx) (e.currentTarget as HTMLElement).style.color = "var(--text)"; }}
+                              onMouseLeave={(e) => { if (copiedMessageIdx !== idx) (e.currentTarget as HTMLElement).style.color = "var(--muted)"; }}
+                            >
+                              <IconCopy size={12} /> {copiedMessageIdx === idx ? "Copied" : "Copy"}
+                            </button>
+                          )}
+                          {msg.cost_gbp !== undefined && (
+                            <span style={{ fontSize: "11px", color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}>
+                              {msg.cost_gbp < 0.01 ? `${(msg.cost_gbp * 100).toFixed(2)}p` : `£${msg.cost_gbp.toFixed(3)}`}
+                            </span>
+                          )}
+                        </div>
+                      )}
+                      {msg.isComplete && !isStreaming && (msg.stop_reason === "max_tokens" || msg.stopped) && !msg.events?.some((e) => e.type === "tool" && e.data.status === "pending") && (
+                        <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "8px" }}>
+                          <button
+                            type="button"
+                            onClick={() => continueMessage(idx)}
+                            title={msg.stop_reason === "max_tokens"
+                              ? "The answer hit the response length cap — continue from where it stopped."
+                              : "Resume from where you stopped the answer."}
+                            style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "var(--accent)", background: "transparent", border: "1px solid var(--accent)", borderRadius: "999px", padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}
+                          >
+                            ↳ Continue
+                          </button>
+                          <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                            {msg.stop_reason === "max_tokens" ? "Truncated at max length" : "Stopped"}
+                          </span>
                         </div>
                       )}
                     </div>
