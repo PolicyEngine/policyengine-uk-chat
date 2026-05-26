@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconBulb } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconBulb, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -164,6 +164,23 @@ export default function ChatPage() {
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [planMode, setPlanMode] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  useEffect(() => {
+    const stored = typeof window !== "undefined" ? localStorage.getItem("theme") : null;
+    const initial: "light" | "dark" = stored === "dark" ? "dark" : "light";
+    setTheme(initial);
+    if (typeof document !== "undefined") {
+      if (initial === "dark") document.documentElement.setAttribute("data-theme", "dark");
+      else document.documentElement.removeAttribute("data-theme");
+    }
+  }, []);
+  const toggleTheme = () => {
+    const next = theme === "light" ? "dark" : "light";
+    setTheme(next);
+    try { localStorage.setItem("theme", next); } catch {}
+    if (next === "dark") document.documentElement.setAttribute("data-theme", "dark");
+    else document.documentElement.removeAttribute("data-theme");
+  };
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sessionId = useRef<string | null>(null);
@@ -819,97 +836,137 @@ export default function ChatPage() {
   const isEmbed = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("embed");
 
   return (
-    <div style={{ minHeight: "100vh", background: "#fafaf9", fontFamily: "system-ui, sans-serif" }}>
-      {/* Header */}
-      {!isEmbed && (
-        <div style={{ borderBottom: "1px solid #e5e7eb", background: "#fff", padding: "0 40px", height: "56px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <img src="/policyengine-logo.svg" alt="PolicyEngine" style={{ height: "24px" }} />
-          <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-            {hasMessages && (
-              <button onClick={startNewChat} style={{ fontSize: "13px", color: THEME.primary, cursor: "pointer", padding: "5px 12px", border: `1px solid ${THEME.primary}`, background: "transparent", fontFamily: "inherit" }}>
-                New chat
-              </button>
-            )}
+    <div style={{ minHeight: "100vh", background: "var(--bg)", color: "var(--text)", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      {/* Body */}
+      <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", minHeight: "100vh" }}>
+        {!isEmbed && !historyOpen && (
+          /* Rail */
+          <div style={{ width: "60px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 0", position: "sticky", top: 0, height: "100vh" }}>
+            <button onClick={() => setHistoryOpen(true)} title="Open sidebar" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "8px", borderRadius: "10px", display: "flex", color: "var(--text)", marginBottom: "4px" }}
+              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
+              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+            >
+              <img src="/favicon.svg" alt="PolicyEngine" style={{ width: "24px", height: "24px", filter: theme === "dark" ? "invert(1) hue-rotate(180deg)" : undefined }} />
+            </button>
+            <button onClick={startNewChat} title="New chat" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginTop: "4px" }}
+              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
+              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+            >
+              <IconEdit size={20} />
+            </button>
+            <button onClick={() => setHistoryOpen(true)} title="Chats" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)" }}
+              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
+              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+            >
+              <IconMessage size={20} />
+            </button>
+            <div style={{ flex: 1 }} />
+            <button onClick={toggleTheme} title={theme === "light" ? "Switch to dark" : "Switch to light"} style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginBottom: "6px" }}
+              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
+              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+            >
+              {theme === "light" ? <IconMoon size={18} /> : <IconSun size={18} />}
+            </button>
             {user ? (
-              <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                {balance && (
-                  <span style={{ fontSize: "12px", color: balance.total_available_gbp > 0.5 ? "#6b7280" : "#b91c1c", fontVariantNumeric: "tabular-nums" }}>
-                    {balance.total_available_gbp <= 0 ? "No credit" : `£${balance.total_available_gbp.toFixed(3)} remaining`}
-                  </span>
-                )}
-                <span style={{ fontSize: "13px", color: "#6b7280" }}>{user.email}</span>
-                <button onClick={signOut} title="Sign out" style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", display: "flex", padding: "4px" }}>
-                  <IconLogout size={16} />
-                </button>
-              </div>
+              <button onClick={signOut} title={`${user.email} — sign out`} style={{ background: "var(--accent)", color: "var(--accent-fg)", border: "none", cursor: "pointer", width: "32px", height: "32px", borderRadius: "999px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", fontWeight: 600, textTransform: "uppercase" }}>
+                {(user.email || "?").charAt(0)}
+              </button>
             ) : (
-              <button onClick={() => { setShowAuth(true); setAuthError(null); }} style={{ fontSize: "13px", color: "#6b7280", cursor: "pointer", padding: "5px 12px", border: "1px solid #e5e7eb", background: "transparent", fontFamily: "inherit", display: "flex", alignItems: "center", gap: "6px" }}>
-                <IconUser size={14} /> Sign in
+              <button onClick={() => { setShowAuth(true); setAuthError(null); }} title="Sign in" style={{ background: "transparent", border: "1px solid var(--border)", cursor: "pointer", padding: "8px", borderRadius: "999px", display: "flex", color: "var(--text-2)" }}>
+                <IconUser size={16} />
               </button>
             )}
           </div>
-        </div>
-      )}
-
-      {/* Body */}
-      <div style={{ display: "flex", maxWidth: "1200px", margin: "0 auto", padding: "0 40px", gap: "0" }}>
+        )}
         {/* Sidebar */}
-        {user && (!hasMessages || historyOpen) && (
-          <div style={{ width: "280px", flexShrink: 0, borderRight: "1px solid #e5e7eb", paddingRight: "24px", paddingTop: "32px", position: "sticky", top: 0, height: "calc(100vh - 57px)", overflowY: "auto", alignSelf: "flex-start" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
-              <div style={{ fontSize: "11px", color: "#9e9a90", letterSpacing: "0.05em", textTransform: "uppercase", fontWeight: 500 }}>Previous chats</div>
-              {hasMessages && (
-                <button onClick={() => setHistoryOpen(false)} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", display: "flex", padding: 0 }}>
-                  <IconX size={14} />
-                </button>
-              )}
+        {historyOpen && (
+          <div style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: 0, height: "calc(100vh - 57px)", alignSelf: "flex-start", display: "flex", flexDirection: "column" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", gap: "4px" }}>
+              <button onClick={startNewChat} style={{ flex: 1, fontSize: "14px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", fontWeight: 500, justifyContent: "flex-start" }}
+                onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
+                onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+              >
+                <IconPlus size={16} /> New chat
+              </button>
+              <button onClick={() => setHistoryOpen(false)} title="Collapse sidebar" style={{ background: "transparent", border: "none", borderRadius: "8px", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "8px" }}
+                onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
+                onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+              >
+                <IconX size={16} />
+              </button>
             </div>
-            {conversations.length === 0
-              ? <div style={{ fontSize: "12px", color: "#9ca3af", fontStyle: "italic" }}>No previous chats</div>
-              : <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
-                  {conversations.map((conv) => (
-                    <div key={conv.id} onClick={() => loadConversation(conv)} style={{ padding: "10px 12px", cursor: "pointer", background: activeConversationId === conv.id ? THEME.primaryLight : "transparent", borderLeft: activeConversationId === conv.id ? `2px solid ${THEME.primary}` : "2px solid transparent", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "8px" }}
-                      onMouseEnter={(e) => { if (activeConversationId !== conv.id) (e.currentTarget as HTMLElement).style.background = "#f9fafb"; }}
-                      onMouseLeave={(e) => { if (activeConversationId !== conv.id) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingTop: "8px" }}>
+              <div style={{ fontSize: "11px", color: "var(--muted)", letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600, marginBottom: "6px", paddingLeft: "10px" }}>Chats</div>
+              {!user ? (
+                <div style={{ fontSize: "13px", color: "var(--muted)", padding: "8px 10px", lineHeight: 1.5 }}>
+                  <button onClick={() => { setShowAuth(true); setAuthError(null); }} style={{ color: "var(--text)", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: "13px", textDecoration: "underline" }}>Sign in</button>
+                  {" to save your chats."}
+                </div>
+              ) : conversations.length === 0 ? (
+                <div style={{ fontSize: "13px", color: "var(--muted)", fontStyle: "italic", padding: "8px 10px" }}>No previous chats</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
+                  {conversations.map((conv) => {
+                    const isActive = activeConversationId === conv.id;
+                    return (
+                    <div key={conv.id} onClick={() => loadConversation(conv)} style={{ padding: "8px 10px", cursor: "pointer", background: isActive ? "var(--surface-hover)" : "transparent", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}
+                      onMouseEnter={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"; }}
+                      onMouseLeave={(e) => { if (!isActive) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
                     >
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: "14px", color: "#1c1a17", lineHeight: 1.45 }}>{conv.title}</div>
-                        <div style={{ fontSize: "12px", color: "#9e9a90", marginTop: "4px" }}>{formatRelativeTime(conv.updated_at)}</div>
+                      <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                        <div style={{ fontSize: "14px", color: "var(--text)", lineHeight: 1.4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{conv.title}</div>
                       </div>
-                      <div style={{ display: "flex", gap: "4px", flexShrink: 0 }}>
-                        <button onClick={(e) => shareConversation(e, conv.id)} title={copiedShareId === conv.id ? "Link copied" : "Share"} style={{ background: "none", border: "none", color: copiedShareId === conv.id ? THEME.primary : "#d1d5db", cursor: "pointer", display: "flex", padding: "2px" }}
-                          onMouseEnter={(e) => { if (copiedShareId !== conv.id) (e.currentTarget as HTMLElement).style.color = THEME.primary; }}
-                          onMouseLeave={(e) => { if (copiedShareId !== conv.id) (e.currentTarget as HTMLElement).style.color = "#d1d5db"; }}
+                      <div style={{ display: "flex", gap: "2px", flexShrink: 0, opacity: 0.6 }}>
+                        <button onClick={(e) => shareConversation(e, conv.id)} title={copiedShareId === conv.id ? "Link copied" : "Share"} style={{ background: "none", border: "none", color: copiedShareId === conv.id ? "var(--accent)" : "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "4px" }}
+                          onMouseEnter={(e) => { if (copiedShareId !== conv.id) (e.currentTarget as HTMLElement).style.color = "var(--text)"; }}
+                          onMouseLeave={(e) => { if (copiedShareId !== conv.id) (e.currentTarget as HTMLElement).style.color = "var(--muted)"; }}
                         >
                           <IconShare size={12} />
                         </button>
-                        <button onClick={(e) => deleteConversation(e, conv.id)} title="Delete" style={{ background: "none", border: "none", color: "#d1d5db", cursor: "pointer", display: "flex", padding: "2px" }}
-                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#b91c1c"; }}
-                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "#d1d5db"; }}
+                        <button onClick={(e) => deleteConversation(e, conv.id)} title="Delete" style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "4px" }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#ef4444"; }}
+                          onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--muted)"; }}
                         >
                           <IconTrash size={12} />
                         </button>
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
-            }
+              )}
+            </div>
+            <div style={{ borderTop: "1px solid var(--border)", paddingTop: "10px", marginTop: "8px" }}>
+              {user ? (
+                <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", borderRadius: "10px" }}>
+                  <div style={{ width: "28px", height: "28px", borderRadius: "999px", background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 600, flexShrink: 0, textTransform: "uppercase" }}>
+                    {(user.email || "?").slice(0, 1)}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0, fontSize: "13px", color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.email}</div>
+                  <button onClick={signOut} title="Sign out" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "4px" }}>
+                    <IconLogout size={14} />
+                  </button>
+                </div>
+              ) : (
+                <button onClick={() => { setShowAuth(true); setAuthError(null); }} style={{ width: "100%", fontSize: "13px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", justifyContent: "flex-start" }}
+                  onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
+                  onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+                >
+                  <IconUser size={16} /> Sign in
+                </button>
+              )}
+            </div>
           </div>
         )}
 
         {/* Chat area */}
-        <div style={{ flex: 1, paddingLeft: "40px", paddingTop: "32px", maxWidth: "840px", minWidth: 0, minHeight: hasMessages ? "auto" : "calc(100vh - 120px)", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center" }}>
+        <div style={{ flex: 1, padding: "0 24px", paddingTop: "16px", minWidth: 0, minHeight: hasMessages ? "auto" : "calc(100vh - 120px)", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center", alignItems: "stretch" }}>
           {hasMessages && (
-            <div style={{ marginBottom: "8px", display: "flex", alignItems: "center", gap: "8px" }}>
-              {user && !historyOpen && (
-                <button onClick={() => setHistoryOpen(true)} style={{ fontSize: "12px", color: "#9e9a90", background: "none", border: "none", cursor: "pointer", padding: "0", fontFamily: "inherit" }}>
-                  ← History
-                </button>
-              )}
+            <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", marginBottom: "8px", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px" }}>
               <button
                 onClick={() => { setReportError(null); setReportOpen(true); }}
                 disabled={isStreaming}
-                style={{ fontSize: "12px", color: isStreaming ? "#d1d5db" : "#9e9a90", background: "none", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", padding: "0", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "5px" }}
+                style={{ fontSize: "12px", color: isStreaming ? "var(--faint)" : "var(--muted)", background: "none", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", padding: "0", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "5px" }}
                 title="Report this thread"
               >
                 <IconBug size={12} />
@@ -918,22 +975,27 @@ export default function ChatPage() {
             </div>
           )}
 
+          {!hasMessages && (
+            <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", textAlign: "center", marginBottom: "20px" }}>
+              <h1 style={{ fontSize: "30px", fontWeight: 500, color: "var(--text)", margin: 0, letterSpacing: "-0.01em" }}>What&apos;s on your mind today?</h1>
+            </div>
+          )}
+
           {hasMessages && (
-            <div ref={scrollRef} style={{ marginBottom: "20px" }}>
+            <div ref={scrollRef} style={{ width: "100%", maxWidth: "760px", margin: "0 auto", marginBottom: "20px" }}>
               {messages.map((msg, idx) => (
-                <div key={idx} style={{ marginBottom: "18px" }}>
+                <div key={idx} style={{ marginBottom: "8px" }}>
                   {msg.role === "user" ? (
-                    <div style={{ display: "flex", gap: "14px", padding: "14px 0", borderBottom: "1px solid #e5e7eb" }}>
-                      <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", fontWeight: 500, color: "#fff", background: THEME.primary, width: "24px", height: "24px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>&gt;</div>
-                      <div style={{ color: "#1c1a17", fontSize: "15px", lineHeight: 1.6, whiteSpace: "pre-wrap", fontWeight: 500, letterSpacing: "-0.01em" }}>{msg.content}</div>
+                    <div style={{ display: "flex", justifyContent: "flex-end", padding: "10px 0" }}>
+                      <div style={{ background: "var(--user-bubble)", color: "var(--text)", padding: "10px 16px", borderRadius: "22px", maxWidth: "75%", whiteSpace: "pre-wrap", fontSize: "15px", lineHeight: 1.55 }}>{msg.content}</div>
                     </div>
                   ) : (
-                    <div style={{ padding: "18px 0 14px" }}>
-                      <div className={!msg.isComplete ? "streaming-text" : undefined} style={{ fontFamily: "'Source Serif 4', Georgia, serif", color: "#3a3835", fontSize: "15.5px", lineHeight: 1.8, minWidth: 0 }}>
+                    <div style={{ padding: "10px 0 18px" }}>
+                      <div className={!msg.isComplete ? "streaming-text" : undefined} style={{ fontFamily: "system-ui, -apple-system, sans-serif", color: "var(--text)", fontSize: "15.5px", lineHeight: 1.7, minWidth: 0 }}>
                         {renderAssistantMessage(msg, idx)}
                       </div>
                       {msg.cost_gbp !== undefined && (
-                        <div style={{ fontSize: "11px", color: "#d1cdc4", marginTop: "4px", fontVariantNumeric: "tabular-nums" }}>
+                        <div style={{ fontSize: "11px", color: "var(--faint)", marginTop: "4px", fontVariantNumeric: "tabular-nums" }}>
                           {msg.cost_gbp < 0.01 ? `${(msg.cost_gbp * 100).toFixed(2)}p` : `£${msg.cost_gbp.toFixed(3)}`}
                         </div>
                       )}
@@ -944,9 +1006,9 @@ export default function ChatPage() {
               {isWaiting && (
                 <div style={{ padding: "18px 0 14px", marginBottom: "18px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                    <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#9e9a90", animation: "thinking-dot 1.2s ease-in-out 0s infinite" }} />
-                    <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#9e9a90", animation: "thinking-dot 1.2s ease-in-out 0.2s infinite" }} />
-                    <div style={{ width: "4px", height: "4px", borderRadius: "50%", background: "#9e9a90", animation: "thinking-dot 1.2s ease-in-out 0.4s infinite" }} />
+                    <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "var(--muted)", animation: "thinking-dot 1.2s ease-in-out 0s infinite" }} />
+                    <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "var(--muted)", animation: "thinking-dot 1.2s ease-in-out 0.2s infinite" }} />
+                    <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "var(--muted)", animation: "thinking-dot 1.2s ease-in-out 0.4s infinite" }} />
                     <style>{`@keyframes thinking-dot { 0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)} }
 @keyframes blurIn { from{opacity:0;filter:blur(3px)}to{opacity:1;filter:blur(0)} }
 .streaming-text > div:last-child > :last-child { animation: blurIn 400ms both; }
@@ -959,22 +1021,30 @@ export default function ChatPage() {
           )}
 
           {/* Input */}
-          <div>
-            {isStreaming && (
-              <div style={{ display: "flex", justifyContent: "center", marginBottom: "12px" }}>
-                <button onClick={stopStreaming} style={{ fontSize: "12px", color: THEME.muted, cursor: "pointer", padding: "5px 14px", border: `1px solid ${THEME.border}`, background: "#fff", fontFamily: "inherit", display: "flex", alignItems: "center", gap: "6px" }}>
-                  <IconX size={12} /> Stop
-                </button>
-              </div>
+          <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", position: "relative" }}>
+            {!hasMessages && (
+              <div aria-hidden="true" style={{ position: "absolute", inset: "-40px -60px", background: "radial-gradient(ellipse at center, var(--accent-15), transparent 70%)", filter: "blur(20px)", pointerEvents: "none", zIndex: 0 }} />
             )}
-            <div style={{ display: "flex", gap: "12px", alignItems: "flex-start" }}>
-              <div style={{ color: isStreaming ? "#d1d5db" : THEME.primary, fontWeight: 500, fontSize: "16px", lineHeight: 1.65 }}>&gt;</div>
-              <div style={{ flex: 1, position: "relative" }}>
+            <div style={{
+              position: "relative",
+              zIndex: 1,
+              border: "1px solid var(--border)",
+              background: "var(--surface)",
+              borderRadius: "28px",
+              padding: "14px 18px 10px",
+              boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
+            }}>
+              <div style={{ position: "relative" }}>
                 {!input && !hasMessages && (
-                  <div style={{ position: "absolute", top: 0, left: 0, fontSize: "16px", lineHeight: 1.65, color: "#b5b1a9", pointerEvents: "none", fontStyle: "italic" }}>
-                    {animatedPlaceholder}
-                    <span style={{ display: "inline-block", width: "2px", height: "1em", background: "#9ca3af", marginLeft: "1px", verticalAlign: "text-bottom", animation: "blink 1s step-end infinite" }} />
+                  <div style={{ position: "absolute", top: "4px", left: "0", fontSize: "16px", lineHeight: 1.5, color: "var(--faint)", pointerEvents: "none" }}>
+                    {animatedPlaceholder || "Ask anything"}
+                    <span style={{ display: "inline-block", width: "2px", height: "1em", background: "var(--muted)", marginLeft: "1px", verticalAlign: "text-bottom", animation: "blink 1s step-end infinite" }} />
                     <style>{`@keyframes blink{50%{opacity:0}}`}</style>
+                  </div>
+                )}
+                {!input && hasMessages && (
+                  <div style={{ position: "absolute", top: "4px", left: "0", fontSize: "16px", lineHeight: 1.5, color: "var(--faint)", pointerEvents: "none" }}>
+                    Ask anything
                   </div>
                 )}
                 <textarea
@@ -984,41 +1054,59 @@ export default function ChatPage() {
                   onKeyDown={handleKeyDown}
                   disabled={isStreaming}
                   rows={1}
-                  style={{ width: "100%", background: "transparent", border: "none", outline: "none", fontSize: "16px", lineHeight: 1.65, color: "#1c1a17", fontFamily: "inherit", resize: "none", padding: 0, opacity: isStreaming ? 0.5 : 1, overflow: "hidden", caretColor: (!input && !hasMessages) ? "transparent" : "#1c1a17" }}
+                  style={{ width: "100%", background: "transparent", border: "none", outline: "none", fontSize: "16px", lineHeight: 1.5, color: "var(--text)", fontFamily: "inherit", resize: "none", padding: "4px 0", opacity: isStreaming ? 0.5 : 1, overflow: "hidden", caretColor: "var(--text)", boxSizing: "border-box" }}
                 />
               </div>
+              <div style={{ marginTop: "6px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
+                <button
+                  type="button"
+                  onClick={() => setPlanMode((v) => !v)}
+                  disabled={isStreaming}
+                  title={planMode
+                    ? "Plan mode on — the next message will get clarifying questions before the agent runs anything."
+                    : "Plan mode off — turn on to have the agent ask 1–3 clarifying questions before answering."}
+                  style={{
+                    display: "inline-flex", alignItems: "center", gap: "6px",
+                    padding: "5px 11px",
+                    background: planMode ? "var(--accent-15)" : "transparent",
+                    color: planMode ? "var(--accent)" : "var(--text-3)",
+                    border: `1px solid ${planMode ? "var(--accent)" : "var(--border)"}`,
+                    borderRadius: "999px",
+                    fontSize: "12px",
+                    fontFamily: "inherit",
+                    cursor: isStreaming ? "not-allowed" : "pointer",
+                    fontWeight: 500,
+                    opacity: isStreaming ? 0.5 : 1,
+                    transition: "background 120ms, color 120ms, border-color 120ms",
+                  }}
+                >
+                  <IconBulb size={12} /> Plan {planMode ? "on" : "off"}
+                </button>
+                {isStreaming ? (
+                  <button
+                    onClick={stopStreaming}
+                    title="Stop"
+                    style={{ width: "32px", height: "32px", borderRadius: "999px", background: "var(--accent)", color: "var(--accent-fg)", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+                  >
+                    <IconX size={16} />
+                  </button>
+                ) : (
+                  <button
+                    onClick={sendMessage}
+                    disabled={!input.trim()}
+                    title="Send"
+                    style={{ width: "32px", height: "32px", borderRadius: "999px", background: input.trim() ? "var(--accent)" : "var(--surface-hover)", color: input.trim() ? "var(--accent-fg)" : "var(--muted)", border: "none", cursor: input.trim() ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, transition: "background 120ms" }}
+                  >
+                    <IconArrowUp size={16} />
+                  </button>
+                )}
+              </div>
             </div>
-            <div style={{ marginTop: "14px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "12px", flexWrap: "wrap" }}>
-              <button
-                type="button"
-                onClick={() => setPlanMode((v) => !v)}
-                disabled={isStreaming}
-                title={planMode
-                  ? "Plan mode on — the next message will get clarifying questions before the agent runs anything."
-                  : "Plan mode off — turn on to have the agent ask 1–3 clarifying questions before answering."}
-                style={{
-                  display: "flex", alignItems: "center", gap: "6px",
-                  padding: "4px 10px",
-                  background: planMode ? THEME.primary : "transparent",
-                  color: planMode ? "#fff" : "#6b7280",
-                  border: `1px solid ${planMode ? THEME.primary : "#e5e7eb"}`,
-                  fontSize: "11px",
-                  fontFamily: "inherit",
-                  cursor: isStreaming ? "not-allowed" : "pointer",
-                  fontWeight: 500,
-                  opacity: isStreaming ? 0.5 : 1,
-                  transition: "background 120ms, color 120ms, border-color 120ms",
-                }}
-              >
-                <IconBulb size={12} /> Plan mode {planMode ? "on" : "off"}
-              </button>
-              {!hasMessages && (
-                <div style={{ display: "flex", gap: "16px", alignItems: "center", color: "#b5b1a9", fontSize: "12px" }}>
-                  <span>Press Enter to send · Shift+Enter for new line</span>
-                  {modelVersion && <span style={{ fontSize: "11px", color: "#d1cdc4" }}>policyengine-uk v{modelVersion}</span>}
-                </div>
-              )}
-            </div>
+            {!hasMessages && modelVersion && (
+              <div style={{ marginTop: "20px", display: "flex", justifyContent: "center", color: "var(--faint)", fontSize: "11px" }}>
+                policyengine-uk v{modelVersion}
+              </div>
+            )}
           </div>
         </div>
       </div>
