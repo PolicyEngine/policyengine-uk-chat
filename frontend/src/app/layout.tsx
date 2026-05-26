@@ -28,7 +28,7 @@ const themeVars = `
     --user-bubble: #f4f4f4;
     --code-bg: #1a1917;
     --code-text: #c9c5bc;
-    --sidebar-bg: #f9f9f9;
+    --sidebar-bg: #f4f4f4;
     color-scheme: light;
   }
   :root[data-theme="dark"] {
@@ -54,6 +54,10 @@ const themeVars = `
     color-scheme: dark;
   }
   body { background: var(--bg); color: var(--text); }
+  @media (max-width: 640px) {
+    [data-pe-sidebar] { display: none !important; }
+    [data-pe-chat] { padding-left: 12px !important; padding-right: 12px !important; }
+  }
 `;
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -988,7 +988,7 @@ export default function ChatPage() {
                 {copiedSnippetId === `${t.tool_id}-input` ? "copied" : "copy input"}
               </button>
             </div>
-            <pre style={{ ...codeStyle, background: "#f5f4f2", color: THEME.text2, borderLeft: `2px solid ${THEME.border}` }}>{inputStr.length > 2000 ? inputStr.slice(0, 2000) + "…" : inputStr}</pre>
+            <pre style={{ ...codeStyle, background: "var(--surface-2)", color: THEME.text2, borderLeft: `2px solid ${THEME.border}` }}>{inputStr.length > 2000 ? inputStr.slice(0, 2000) + "…" : inputStr}</pre>
           </div>
         )}
         {outputStr && (
@@ -999,7 +999,7 @@ export default function ChatPage() {
                 {copiedSnippetId === `${t.tool_id}-output` ? "copied" : "copy output"}
               </button>
             </div>
-            <pre style={{ ...codeStyle, background: "#f5f4f2", color: THEME.text2, borderLeft: `2px solid ${THEME.primary}` }}>{outputStr.length > 2000 ? outputStr.slice(0, 2000) + "…" : outputStr}</pre>
+            <pre style={{ ...codeStyle, background: "var(--surface-2)", color: THEME.text2, borderLeft: `2px solid ${THEME.primary}` }}>{outputStr.length > 2000 ? outputStr.slice(0, 2000) + "…" : outputStr}</pre>
           </div>
         )}
       </div>
@@ -1015,7 +1015,7 @@ export default function ChatPage() {
           onClick={hasDetails ? () => toggleTool(t.tool_id) : undefined}
           style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: "11px", color: THEME.muted, padding: "2px 0", cursor: hasDetails ? "pointer" : "default" }}
         >
-          {t.status === "pending" && <Loader size={10} color={THEME.primary} />}
+          {t.status === "pending" && <Loader size={10} color="#8e8e8e" />}
           {hasDetails && <IconChevronDown size={10} style={{ opacity: 0.4, transform: isExpanded ? "none" : "rotate(-90deg)", transition: "transform 0.15s" }} />}
           <span style={{ color: THEME.text3 }}>{t.tool_name === "run_python" ? "python" : t.tool_name}</span>
           {t.status !== "pending" && <span style={{ color: THEME.muted }}>✓</span>}
@@ -1032,28 +1032,28 @@ export default function ChatPage() {
       code({ className, children, ...props }: { className?: string; children?: React.ReactNode; [key: string]: unknown }) {
         const match = /language-(\w+)/.exec(className || "");
         const isInline = !match && !String(children).includes("\n");
-        if (!isInline && match) return <SyntaxHighlighter style={oneDark} language={match[1]} customStyle={{ margin: "12px 0", fontSize: "12px", lineHeight: 1.7, background: "#1a1917", border: "none", borderRadius: 0, borderLeft: `3px solid ${THEME.primary}`, padding: "16px 18px" }}>{String(children).replace(/\n$/, "")}</SyntaxHighlighter>;
-        if (isInline) return <code style={{ background: "#f0f0f0", padding: "2px 5px", fontSize: "13px" }}>{children}</code>;
-        return <pre style={{ display: "block", margin: "12px 0", lineHeight: 1.7, whiteSpace: "pre-wrap", background: "#1a1917", color: "#c9c5bc", padding: "16px 18px", borderLeft: `3px solid ${THEME.primary}`, fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" }}><code>{children}</code></pre>;
+        if (!isInline && match) return <SyntaxHighlighter style={oneDark} language={match[1]} customStyle={{ margin: "12px 0", fontSize: "12px", lineHeight: 1.7, background: "#1a1917", border: "none", borderRadius: "8px", padding: "16px 18px" }}>{String(children).replace(/\n$/, "")}</SyntaxHighlighter>;
+        if (isInline) return <code style={{ background: "var(--surface-2)", color: "var(--text)", padding: "2px 5px", fontSize: "13px", borderRadius: "4px" }}>{children}</code>;
+        return <pre style={{ display: "block", margin: "12px 0", lineHeight: 1.7, whiteSpace: "pre-wrap", background: "#1a1917", color: "#c9c5bc", padding: "16px 18px", borderRadius: "8px", fontFamily: "'JetBrains Mono', monospace", fontSize: "12px" }}><code>{children}</code></pre>;
       },
       p: ({ children }: { children?: React.ReactNode }) => <p style={{ margin: "0 0 14px 0", lineHeight: 1.75 }}>{children}</p>,
-      strong: ({ children }: { children?: React.ReactNode }) => <strong style={{ fontWeight: 600, color: THEME.text }}>{children}</strong>,
+      strong: ({ children }: { children?: React.ReactNode }) => <strong style={{ fontWeight: 600, color: "var(--text)" }}>{children}</strong>,
       ul: ({ children }: { children?: React.ReactNode }) => <ul style={{ margin: "0 0 14px 0", paddingLeft: "22px", listStyleType: "disc" }}>{children}</ul>,
       ol: ({ children }: { children?: React.ReactNode }) => <ol style={{ margin: "0 0 14px 0", paddingLeft: "22px", listStyleType: "decimal" }}>{children}</ol>,
       li: ({ children }: { children?: React.ReactNode }) => <li style={{ marginBottom: "5px", lineHeight: 1.65, listStyleType: "inherit" }}>{children}</li>,
-      h1: ({ children }: { children?: React.ReactNode }) => <h1 style={{ fontSize: "20px", fontWeight: 600, margin: "22px 0 10px", color: "#1c1a17" }}>{children}</h1>,
-      h2: ({ children }: { children?: React.ReactNode }) => <h2 style={{ fontSize: "18px", fontWeight: 600, margin: "20px 0 8px", color: "#1c1a17" }}>{children}</h2>,
-      h3: ({ children }: { children?: React.ReactNode }) => <h3 style={{ fontSize: "16px", fontWeight: 600, margin: "16px 0 6px", color: "#1c1a17" }}>{children}</h3>,
+      h1: ({ children }: { children?: React.ReactNode }) => <h1 style={{ fontSize: "20px", fontWeight: 600, margin: "22px 0 10px", color: "var(--text)" }}>{children}</h1>,
+      h2: ({ children }: { children?: React.ReactNode }) => <h2 style={{ fontSize: "18px", fontWeight: 600, margin: "20px 0 8px", color: "var(--text)" }}>{children}</h2>,
+      h3: ({ children }: { children?: React.ReactNode }) => <h3 style={{ fontSize: "16px", fontWeight: 600, margin: "16px 0 6px", color: "var(--text)" }}>{children}</h3>,
       table: ({ children }: { children?: React.ReactNode }) => <table style={{ margin: "14px 0", borderCollapse: "collapse", fontSize: "14px", width: "100%" }}>{children}</table>,
       thead: ({ children }: { children?: React.ReactNode }) => <thead>{children}</thead>,
       tbody: ({ children }: { children?: React.ReactNode }) => <tbody>{children}</tbody>,
       tr: ({ children, ...props }: { children?: React.ReactNode }) => {
         const node = props as { node?: { position?: { start?: { line?: number } } } };
         const rowIndex = node?.node?.position?.start?.line ?? 0;
-        return <tr style={{ borderBottom: "1px solid #f0f0ee", background: rowIndex % 2 === 0 ? "#f9f8f6" : "transparent" }}>{children}</tr>;
+        return <tr style={{ borderBottom: "1px solid var(--border-light)", background: rowIndex % 2 === 0 ? "var(--surface-2)" : "transparent" }}>{children}</tr>;
       },
-      th: ({ children }: { children?: React.ReactNode }) => <th style={{ padding: "10px 14px", textAlign: "left", fontFamily: "'Newsreader', Georgia, serif", fontSize: "13px", fontWeight: 400, fontStyle: "italic", color: "#9e9a90", borderBottom: "2px solid #1c1a17" }}>{children}</th>,
-      td: ({ children }: { children?: React.ReactNode }) => <td style={{ padding: "9px 14px", color: "#3a3835", fontSize: "14px" }}>{children}</td>,
+      th: ({ children }: { children?: React.ReactNode }) => <th style={{ padding: "10px 14px", textAlign: "left", fontSize: "12px", fontWeight: 600, color: "var(--muted)", borderBottom: "1px solid var(--border)", textTransform: "uppercase", letterSpacing: "0.04em" }}>{children}</th>,
+      td: ({ children }: { children?: React.ReactNode }) => <td style={{ padding: "9px 14px", color: "var(--text-2)", fontSize: "14px" }}>{children}</td>,
       del: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
     };
 
@@ -1081,7 +1081,7 @@ export default function ChatPage() {
             if (!segment.content?.trim()) return null;
             return <ReactMarkdown key={idx} remarkPlugins={[[remarkGfm, { singleTilde: false }]]} components={markdownComponents as never}>{segment.content}</ReactMarkdown>;
           }
-          if (segment.type === "loading") return <div key={idx} style={{ margin: "16px 0", padding: "40px", background: "#f9fafb", border: "1px solid #e5e7eb", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", color: "#9ca3af", fontSize: "13px" }}><Loader size={14} color={THEME.primary} /><span>Generating chart…</span></div>;
+          if (segment.type === "loading") return <div key={idx} style={{ margin: "16px 0", padding: "40px", background: "var(--surface-2)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", color: "var(--muted)", fontSize: "13px" }}><Loader size={14} color="#8e8e8e" /><span>Generating chart…</span></div>;
           if (segment.type === "chart" && segment.chartIdx !== undefined) {
             const chart = charts[segment.chartIdx];
             if (chart) return <div key={idx} style={{ margin: "16px 0" }}><Chart spec={chart} width={680} height={400} /></div>;
@@ -1162,12 +1162,12 @@ export default function ChatPage() {
       <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", minHeight: "100vh" }}>
         {!isEmbed && !historyOpen && (
           /* Rail */
-          <div style={{ width: "60px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 0", position: "sticky", top: 0, height: "100vh" }}>
+          <div data-pe-sidebar style={{ width: "60px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 0", position: "sticky", top: 0, height: "100vh" }}>
             <button onClick={() => setHistoryOpen(true)} title="Open sidebar" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "8px", borderRadius: "10px", display: "flex", color: "var(--text)", marginBottom: "4px" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
             >
-              <img src="/favicon.svg" alt="PolicyEngine" style={{ width: "24px", height: "24px", filter: theme === "dark" ? "invert(1) hue-rotate(180deg)" : undefined }} />
+              <span role="img" aria-label="PolicyEngine" style={{ display: "inline-block", width: "24px", height: "24px", background: "var(--text)", WebkitMaskImage: "url(/favicon.svg)", maskImage: "url(/favicon.svg)", WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskSize: "contain", maskSize: "contain", WebkitMaskPosition: "center", maskPosition: "center" }} />
             </button>
             <button onClick={startNewChat} title="New chat" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginTop: "4px" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
@@ -1200,8 +1200,8 @@ export default function ChatPage() {
           </div>
         )}
         {/* Sidebar */}
-        {historyOpen && (
-          <div style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: 0, height: "calc(100vh - 57px)", alignSelf: "flex-start", display: "flex", flexDirection: "column" }}>
+        {!isEmbed && historyOpen && (
+          <div data-pe-sidebar style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: 0, height: "calc(100vh - 57px)", alignSelf: "flex-start", display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", gap: "4px" }}>
               <button onClick={startNewChat} style={{ flex: 1, fontSize: "14px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", fontWeight: 500, justifyContent: "flex-start" }}
                 onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
@@ -1281,7 +1281,7 @@ export default function ChatPage() {
         )}
 
         {/* Chat area */}
-        <div style={{ flex: 1, padding: "0 24px", paddingTop: "16px", minWidth: 0, minHeight: hasMessages ? "auto" : "calc(100vh - 120px)", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center", alignItems: "stretch" }}>
+        <div data-pe-chat style={{ flex: 1, padding: "0 24px", paddingTop: "16px", minWidth: 0, minHeight: hasMessages ? "auto" : "calc(100vh - 120px)", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center", alignItems: "stretch" }}>
           {hasMessages && (
             <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", marginBottom: "8px", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px" }}>
               <button
@@ -1476,12 +1476,12 @@ export default function ChatPage() {
 
       {/* Auth modal */}
       {showAuth && (
-        <div onClick={() => setShowAuth(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", padding: "32px", width: "360px", maxWidth: "90vw" }}>
-            <h2 style={{ margin: "0 0 20px", fontSize: "18px", fontWeight: 600, color: "#1c1a17" }}>
+        <div onClick={() => setShowAuth(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface)", color: "var(--text)", padding: "32px", width: "360px", maxWidth: "90vw", borderRadius: "16px", border: "1px solid var(--border)", boxShadow: "0 10px 40px rgba(0,0,0,0.15)" }}>
+            <h2 style={{ margin: "0 0 20px", fontSize: "18px", fontWeight: 600, color: "var(--text)" }}>
               {authMode === "signin" ? "Sign in" : "Create account"}
             </h2>
-            {authError && <div style={{ padding: "8px 12px", background: "#fef2f2", color: "#b91c1c", fontSize: "13px", marginBottom: "16px" }}>{authError}</div>}
+            {authError && <div style={{ padding: "8px 12px", background: "var(--accent-15)", color: "#ef4444", fontSize: "13px", marginBottom: "16px", borderRadius: "8px" }}>{authError}</div>}
             <form onSubmit={async (e) => {
               e.preventDefault();
               setAuthSubmitting(true);
@@ -1491,17 +1491,17 @@ export default function ChatPage() {
               if (error) setAuthError(error);
               else { setShowAuth(false); setAuthEmail(""); setAuthPassword(""); }
             }}>
-              <input type="email" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} required style={{ width: "100%", padding: "10px 12px", fontSize: "14px", border: "1px solid #e5e7eb", marginBottom: "10px", fontFamily: "inherit", boxSizing: "border-box" }} />
-              <input type="password" placeholder="Password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} required minLength={6} style={{ width: "100%", padding: "10px 12px", fontSize: "14px", border: "1px solid #e5e7eb", marginBottom: "16px", fontFamily: "inherit", boxSizing: "border-box" }} />
-              <button type="submit" disabled={authSubmitting} style={{ width: "100%", padding: "10px", fontSize: "14px", background: THEME.primaryGradient, color: "#fff", border: "none", cursor: authSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: authSubmitting ? 0.7 : 1 }}>
+              <input type="email" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} required style={{ width: "100%", padding: "10px 12px", fontSize: "14px", border: "1px solid var(--border)", marginBottom: "10px", fontFamily: "inherit", boxSizing: "border-box", borderRadius: "8px", background: "var(--surface)", color: "var(--text)" }} />
+              <input type="password" placeholder="Password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} required minLength={6} style={{ width: "100%", padding: "10px 12px", fontSize: "14px", border: "1px solid var(--border)", marginBottom: "16px", fontFamily: "inherit", boxSizing: "border-box", borderRadius: "8px", background: "var(--surface)", color: "var(--text)" }} />
+              <button type="submit" disabled={authSubmitting} style={{ width: "100%", padding: "10px", fontSize: "14px", background: "var(--accent)", color: "var(--accent-fg)", border: "none", cursor: authSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: authSubmitting ? 0.7 : 1, borderRadius: "8px", fontWeight: 500 }}>
                 {authSubmitting ? "..." : authMode === "signin" ? "Sign in" : "Create account"}
               </button>
             </form>
-            <div style={{ marginTop: "16px", textAlign: "center", fontSize: "13px", color: "#6b7280" }}>
+            <div style={{ marginTop: "16px", textAlign: "center", fontSize: "13px", color: "var(--muted)" }}>
               {authMode === "signin" ? (
-                <>No account? <button onClick={() => { setAuthMode("signup"); setAuthError(null); }} style={{ color: THEME.primary, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px" }}>Create one</button></>
+                <>No account? <button onClick={() => { setAuthMode("signup"); setAuthError(null); }} style={{ color: "var(--text)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px", textDecoration: "underline" }}>Create one</button></>
               ) : (
-                <>Have an account? <button onClick={() => { setAuthMode("signin"); setAuthError(null); }} style={{ color: THEME.primary, background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px" }}>Sign in</button></>
+                <>Have an account? <button onClick={() => { setAuthMode("signin"); setAuthError(null); }} style={{ color: "var(--text)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px", textDecoration: "underline" }}>Sign in</button></>
               )}
             </div>
           </div>
@@ -1509,10 +1509,10 @@ export default function ChatPage() {
       )}
 
       {reportOpen && (
-        <div onClick={() => !reportSubmitting && setReportOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.25)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "#fff", padding: "28px", width: "520px", maxWidth: "92vw", border: `1px solid ${THEME.border}` }}>
-            <h2 style={{ margin: "0 0 10px", fontSize: "18px", fontWeight: 600, color: THEME.text }}>Report this thread</h2>
-            <p style={{ margin: "0 0 14px", fontSize: "14px", lineHeight: 1.6, color: THEME.text3 }}>
+        <div onClick={() => !reportSubmitting && setReportOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface)", color: "var(--text)", padding: "28px", width: "520px", maxWidth: "92vw", border: "1px solid var(--border)", borderRadius: "16px", boxShadow: "0 10px 40px rgba(0,0,0,0.15)" }}>
+            <h2 style={{ margin: "0 0 10px", fontSize: "18px", fontWeight: 600, color: "var(--text)" }}>Report this thread</h2>
+            <p style={{ margin: "0 0 14px", fontSize: "14px", lineHeight: 1.6, color: "var(--text-3)" }}>
               This will open a prefilled GitHub issue with a link to the shared thread and the most relevant parts of the conversation so we can debug it later.
             </p>
             <textarea
@@ -1520,25 +1520,25 @@ export default function ChatPage() {
               onChange={(e) => setReportNote(e.target.value)}
               placeholder="What looks off? For example: the budget impact seems too high, the answer ignored Scotland, or the explanation contradicts the chart."
               rows={5}
-              style={{ width: "100%", padding: "12px", fontSize: "14px", border: `1px solid ${THEME.border}`, fontFamily: "inherit", boxSizing: "border-box", resize: "vertical", color: THEME.text, lineHeight: 1.5 }}
+              style={{ width: "100%", padding: "12px", fontSize: "14px", border: "1px solid var(--border)", borderRadius: "8px", fontFamily: "inherit", boxSizing: "border-box", resize: "vertical", color: "var(--text)", background: "var(--surface)", lineHeight: 1.5 }}
             />
             {reportError && (
-              <div style={{ marginTop: "10px", fontSize: "13px", color: "#b91c1c" }}>{reportError}</div>
+              <div style={{ marginTop: "10px", fontSize: "13px", color: "#ef4444" }}>{reportError}</div>
             )}
             <div style={{ marginTop: "16px", display: "flex", justifyContent: "flex-end", gap: "10px" }}>
               <button
                 onClick={() => setReportOpen(false)}
                 disabled={reportSubmitting}
-                style={{ fontSize: "13px", padding: "8px 12px", border: `1px solid ${THEME.border}`, background: "#fff", color: THEME.text3, cursor: reportSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit" }}
+                style={{ fontSize: "13px", padding: "8px 14px", border: "1px solid var(--border)", borderRadius: "999px", background: "transparent", color: "var(--text-2)", cursor: reportSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit" }}
               >
                 Cancel
               </button>
               <button
                 onClick={submitReport}
                 disabled={reportSubmitting}
-                style={{ fontSize: "13px", padding: "8px 12px", border: "none", background: THEME.primaryGradient, color: "#fff", cursor: reportSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "6px", opacity: reportSubmitting ? 0.7 : 1 }}
+                style={{ fontSize: "13px", padding: "8px 14px", border: "none", borderRadius: "999px", background: "var(--accent)", color: "var(--accent-fg)", cursor: reportSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "6px", opacity: reportSubmitting ? 0.7 : 1 }}
               >
-                {reportSubmitting ? <Loader size={12} color="#fff" /> : <IconBug size={13} />}
+                {reportSubmitting ? <Loader size={12} color="#ffffff" /> : <IconBug size={13} />}
                 Open GitHub issue
               </button>
             </div>
