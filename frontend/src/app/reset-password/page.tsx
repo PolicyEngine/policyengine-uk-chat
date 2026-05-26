@@ -21,11 +21,19 @@ export default function ResetPasswordPage() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
+  // The Supabase SDK parses the recovery token from the URL hash asynchronously
+  // after createClient runs, then fires an auth-state-change event. Without a
+  // grace period the page would briefly render "invalid link" before the
+  // session arrives. Wait 600ms before treating "no user" as a failure.
+  const [hashGracePassed, setHashGracePassed] = useState(false);
 
-  // Once the SDK processes the hash and the user is recognised, we can show
-  // the form. If after auth has loaded there's still no user, the link was
-  // invalid or expired.
   const ready = !loading && !!user;
+  const linkInvalid = !loading && !user && hashGracePassed;
+
+  useEffect(() => {
+    const t = setTimeout(() => setHashGracePassed(true), 600);
+    return () => clearTimeout(t);
+  }, []);
 
   useEffect(() => {
     if (done) {
@@ -54,12 +62,23 @@ export default function ResetPasswordPage() {
           You'll be signed in once the new password is saved.
         </p>
 
-        {loading && <div style={{ fontSize: "13px", color: "#6b7280" }}>Verifying reset link…</div>}
+        {(loading || (!user && !hashGracePassed)) && (
+          <div style={{ fontSize: "13px", color: "#6b7280" }}>Verifying reset link…</div>
+        )}
 
-        {!loading && !user && (
-          <div style={{ padding: "10px 12px", background: "#fef2f2", color: "#b91c1c", fontSize: "13px" }}>
-            This reset link is invalid or has expired. Request a new one from the sign-in screen.
-          </div>
+        {linkInvalid && (
+          <>
+            <div style={{ padding: "10px 12px", background: "#fef2f2", color: "#b91c1c", fontSize: "13px", marginBottom: "12px" }}>
+              This reset link is invalid or has expired.
+            </div>
+            <button
+              type="button"
+              onClick={() => router.push("/")}
+              style={{ width: "100%", padding: "10px", fontSize: "14px", background: THEME.primaryGradient, color: "#fff", border: "none", cursor: "pointer", fontFamily: "inherit" }}
+            >
+              Back to sign in
+            </button>
+          </>
         )}
 
         {ready && !done && (
