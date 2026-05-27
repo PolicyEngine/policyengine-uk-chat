@@ -157,11 +157,30 @@ def summarise_events(events: list[dict[str, Any]]) -> dict[str, Any]:
 
     errors = [e for e in events if e.get("type") == "error"]
 
+    # Per-tool routing: which tools did Claude pick, in what order, how often.
+    # Used to answer "did registering a new typed tool actually shift Claude's
+    # behaviour, or did it stick with run_python?" — visible in the manifest
+    # without re-reading every SSE log.
+    tool_call_sequence = [
+        e.get("tool_name", "?") for e in events if e.get("type") == "tool_start"
+    ]
+    tool_call_counts_by_name: dict[str, int] = {}
+    for name in tool_call_sequence:
+        tool_call_counts_by_name[name] = tool_call_counts_by_name.get(name, 0) + 1
+
+    tool_failures = [
+        e for e in events
+        if e.get("type") == "tool_result" and e.get("status") == "error"
+    ]
+
     return {
         "event_counts": counts,
         "answer_text": full_text,
         "answer_length_chars": len(full_text),
         "tool_call_count": counts.get("tool_use", 0),
+        "tool_call_sequence": tool_call_sequence,
+        "tool_call_counts_by_name": tool_call_counts_by_name,
+        "tool_failure_count": len(tool_failures),
         "completed": done is not None,
         "error_count": len(errors),
         "errors": errors,
@@ -317,6 +336,9 @@ def run_all(
                 "elapsed_seconds": meta["elapsed_seconds"],
                 "http_error": meta["http_error"],
                 "tool_call_count": meta["summary"]["tool_call_count"],
+                "tool_call_counts_by_name": meta["summary"]["tool_call_counts_by_name"],
+                "tool_call_sequence": meta["summary"]["tool_call_sequence"],
+                "tool_failure_count": meta["summary"]["tool_failure_count"],
                 "answer_length_chars": meta["summary"]["answer_length_chars"],
             })
             manifest_path.write_text(json.dumps(manifest, indent=2))
