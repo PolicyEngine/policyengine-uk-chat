@@ -7,6 +7,12 @@ node_modules/
 *.egg-info/
 dist/
 
+# Local caches from running policyengine_uk against HF datasets.
+.datasets/
+
+# TypeScript incremental-build cache.
+*.tsbuildinfo
+
 # Generated at image build time by backend/scripts/build_reference.py.
 # Both backend/Dockerfile and modal_app.py regenerate this against the
 # installed policyengine-uk-compiled version, so it never lives in git.
