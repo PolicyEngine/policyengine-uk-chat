@@ -551,45 +551,134 @@ def _diff_list_of_dicts(
     return diffs
 
 
-def _extract_row_value(answer: str, key_value: Any, compare_field: str) -> float | None:
-    """Find the chat's reported value for a row keyed by `key_value`.
-
-    Looks for the key (formatted as £-amount if numeric and large) in the
-    chat answer, then pulls the first number from the surrounding line. The
-    `compare_field` name is mostly used to bias which number to pick when
-    multiple are present — for MTR fields we prefer the last % on the line.
-    """
-    # Format the key as it's likely to appear in chat prose.
-    if isinstance(key_value, (int, float)):
-        candidates = [
+def _key_candidates(key_value: Any) -> list[str]:
+    """Plausible string renderings of a row key the chat might use."""
+    if isinstance(key_value, (int, float)) and abs(key_value) >= 1000:
+        return [
             f"£{int(key_value):,}",       # £10,000
             f"£{int(key_value)/1000:g}k", # £10k
             f"{int(key_value):,}",
             str(int(key_value)),
         ]
-    else:
-        candidates = [str(key_value)]
+    if isinstance(key_value, (int, float)):
+        return [str(int(key_value)), f"£{int(key_value)}"]
+    return [str(key_value)]
 
+
+def _parse_md_table(answer: str) -> list[tuple[list[str], list[list[str]]]]:
+    """Find markdown tables in the answer. Returns a list of (header, rows).
+
+    A markdown table is consecutive lines starting with `|`, with the second
+    line being a separator (`|---|---|`). Headers and cells are stripped.
+    """
+    tables = []
+    lines = answer.splitlines()
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
+        # A row starts with `|` and has at least 2 `|` (one row, multiple cells).
+        if line.startswith("|") and line.count("|") >= 2 and i + 1 < len(lines):
+            sep = lines[i + 1].strip()
+            # Separator row has only -, :, |, and whitespace
+            if re.fullmatch(r"[|:\-\s]+", sep) and "-" in sep:
+                # We're at a header
+                header = [c.strip() for c in line.strip("|").split("|")]
+                rows = []
+                j = i + 2
+                while j < len(lines) and lines[j].strip().startswith("|"):
+                    row = [c.strip() for c in lines[j].strip().strip("|").split("|")]
+                    rows.append(row)
+                    j += 1
+                tables.append((header, rows))
+                i = j
+                continue
+        i += 1
+    return tables
+
+
+def _normalise_header(s: str) -> str:
+    """Strip markdown emphasis/units/parens for column-name matching."""
+    s = re.sub(r"[*_`]", "", s)
+    s = re.sub(r"\([^)]*\)", "", s)  # drop "(%)" etc
+    return re.sub(r"\s+", " ", s).strip().lower()
+
+
+def _parse_cell_number(cell: str) -> float | None:
+    """Extract a number from a single markdown-table cell."""
+    cell = cell.strip()
+    if not cell or cell in {"-", "—", "n/a", "na"}:
+        return None
+    m = re.search(r"-?\s*\d[\d,]*(?:\.\d+)?", cell)
+    if not m:
+        return None
+    try:
+        n = float(m.group(0).replace(",", "").replace(" ", ""))
+    except ValueError:
+        return None
+    # If the cell carries a £ prefix and a bn/m unit, scale. Cells are
+    # usually unitless rates or £-amounts already in the natural unit.
+    if re.search(r"\bbn\b|billion", cell, re.IGNORECASE):
+        n *= 1_000_000_000
+    elif re.search(r"\bmn?\b|million", cell, re.IGNORECASE):
+        n *= 1_000_000
+    return n
+
+
+# Heuristic mapping from compare_field name → header substring(s) we look for.
+# Header matching uses normalised form (lowercase, punctuation/units stripped).
+COLUMN_HEADER_HINTS = {
+    "combined_mtr": ("combined",),
+    "it_mtr":       ("income tax", "it "),
+    "ni_mtr":       ("ni ", "national insurance"),
+    "rate":         ("rate",),
+}
+
+
+def _extract_row_value(answer: str, key_value: Any, compare_field: str) -> float | None:
+    """Find the chat's reported value for `compare_field` on the row keyed by
+    `key_value`. Tries markdown tables first (most chat tabular output), falls
+    back to prose-line scanning."""
+    candidates = _key_candidates(key_value)
+
+    # ----- 1. Markdown table path -----
+    field_hints = COLUMN_HEADER_HINTS.get(compare_field, (compare_field.replace("_", " "),))
+    for header, rows in _parse_md_table(answer):
+        norm = [_normalise_header(h) for h in header]
+        # Find the column whose header contains any of the hints.
+        col_idx = None
+        for i, nh in enumerate(norm):
+            if any(h in nh for h in field_hints):
+                col_idx = i
+                break
+        if col_idx is None:
+            continue
+        # Find the row containing the key.
+        for row in rows:
+            if not row:
+                continue
+            row_label = row[0]
+            if any(c in row_label for c in candidates):
+                if col_idx < len(row):
+                    value = _parse_cell_number(row[col_idx])
+                    if value is not None:
+                        return value
+                break
+
+    # ----- 2. Prose-line fallback -----
     for needle in candidates:
         idx = answer.find(needle)
         if idx == -1:
             continue
-        # Look at the surrounding line: from previous newline to next newline.
         line_start = answer.rfind("\n", 0, idx) + 1
         line_end_search = answer.find("\n", idx)
         line_end = line_end_search if line_end_search != -1 else len(answer)
         line = answer[line_start:line_end]
 
-        # For MTR-style fields, prefer "combined" % if multiple appear, else
-        # the last % on the line.
         if "mtr" in compare_field.lower() or "rate" in compare_field.lower():
-            # Pull all percentages from the line.
-            pcts = re.findall(r"(\d+(?:\.\d+)?)\s*%", line)
+            pcts = re.findall(r"(-?\d+(?:\.\d+)?)\s*%", line)
             if pcts:
-                if "combined" in compare_field.lower():
-                    return float(pcts[-1])  # combined usually last in the row
+                # "combined" rates are conventionally the last % in a row.
                 return float(pcts[-1])
-        # Otherwise, take the first scaled or numeric value after the needle.
         n = parse_number_near(line, re.escape(needle))
         if n is not None:
             return n
