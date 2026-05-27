@@ -1,4 +1,6 @@
 {
+  "_source": "local policyengine_uk 2.88.20",
+  "_scenario": "single adult MTR schedule, UK 2025, finite-difference",
   "rows": [
     {
       "gross": 10000,

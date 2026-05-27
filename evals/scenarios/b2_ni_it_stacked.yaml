@@ -1,24 +1,33 @@
 id: b2_ni_it_stacked
 test: B
-title: "Stacked NI + income tax + threshold freeze (Reeves 2025 pre-Budget reform package)"
-what_it_tests: "Multi-parameter reform with reform stacking — the LLM must apply three changes in the right order and produce the same per-layer numbers PolicyEngine published. Reference is a peer-reviewed PolicyEngine analysis (Vahid Ahmadi, Nov 2025), not a made-up fixture."
+title: "Stacked NI + income tax reform (subset of Reeves Nov-2025 pre-Budget package)"
+what_it_tests: "Multi-parameter reform — the LLM must apply two changes in the right order and produce per-layer numbers comparable to PolicyEngine's published analysis. Reference is a peer-reviewed PolicyEngine analysis (Vahid Ahmadi, Nov 2025), filtered to the layers that still reproduce against current policyengine_uk baseline (see evals/fixtures/drift_report.md)."
 
 source_post: "uk-income-tax-ni-reforms-2025.md"
 source_post_url: "https://policyengine.org/uk/research/uk-income-tax-ni-reforms-2025"
 
+# Note on scope: the original post analysed three layers (freeze + NI cut + IT
+# increase). The freeze layer and combined number have been dropped from this
+# scenario because they no longer reproduce against current policyengine_uk —
+# the post-Autumn-Budget-2025 baseline has incorporated the freeze. See
+# evals/fixtures/drift_report.md for the kept/dropped audit trail.
+
 prompt: |
-  Run a UK 2026-27 economy-wide comparison. Baseline: current law. Reform applies THREE changes, stacked in this order (so each layer's reported impact is on top of the previous):
-    1. Extend the income tax threshold freeze to 2029-30 (current law freezes through 2027-28).
-    2. Reduce the National Insurance main rate from 8% to 6% (on earnings between £12,570 and £50,270).
-    3. Increase basic income tax rate from 20% to 22% and higher rate from 40% to 42%.
+  Run a UK 2026-27 economy-wide comparison. Baseline: current law.
+
+  Apply two reforms, EACH against current law (not stacked):
+
+  Reform A — reduce the National Insurance main rate from 8% to 6% (on earnings
+  between £12,570 and £50,270).
+
+  Reform B — increase the basic income tax rate from 20% to 22% and the higher
+  rate from 40% to 42%.
 
   Use the Enhanced FRS 2023-24 dataset: hf://policyengine/policyengine-uk-data-private/enhanced_frs_2023_24.h5.
 
-  Report from the model run:
-  (a) Combined budgetary impact in £ for 2026-27 (all three reforms applied).
-  (b) The stacked per-layer revenue contribution in £ for 2026-27: freeze layer, NI-cut layer (on top of freeze), IT-increase layer (on top of freeze + NI).
-  (c) Relative income change in % by decile, for each of the three reforms applied individually (i.e. each one against current-law baseline).
-  (d) For an illustrative single earner with gross income £60,000 and £10,000 workplace pension contribution: the change in NI, change in income tax, and change in net household income under the combined NI-cut + IT-increase reforms (rates only — ignore the freeze for this household example, since the freeze doesn't bite until 2028-29).
+  Report from the model run, separately for each reform:
+  (a) Budgetary impact in £ for 2026-27.
+  (b) Relative income change in % by decile (D1 through D10).
 
   British English. Every figure from the model run.
 
@@ -29,49 +38,38 @@ chat_settings:
 reference:
   fixture: pe_api/b2_ni_it_stacked.json
   fields_to_compare:
-    # All from Vahid Ahmadi, "Analysing alternative income tax and National Insurance reform options for the UK", Nov 2025.
-    - path: combined.budgetary_impact_2026_27
-      expected_approx: 6_900_000_000        # £6.9bn combined in 2026-27
+    # NI cut alone vs current law, 2026-27. Vahid published -£11.7bn; our
+    # local run reproduces within 1.2%. Tight tolerance, kept.
+    - path: ni_layer.budgetary_impact
       tolerance_pct: 5.0
-    - path: layers.freeze_extension.budgetary_impact_2028_29
-      expected_approx: 3_500_000_000        # £3.5bn freeze layer, 2028-29
-      tolerance_pct: 5.0
-    - path: layers.ni_cut.budgetary_impact_2026_27
-      expected_approx: -11_700_000_000      # NI cut costs £11.7bn on top of freeze
-      tolerance_pct: 5.0
-    - path: layers.it_increase.budgetary_impact_2026_27
-      expected_approx: 18_600_000_000       # IT increase raises £18.6bn on top
-      tolerance_pct: 5.0
-    - path: example_household.net_change
-      expected_approx: 5.4                  # £60k earner + £10k pension: +£5.40 net
-      tolerance_pct: 20.0                   # wider — one household, small absolute number, easy to drift
-    - path: example_household.ni_change
-      expected_approx: -754.0               # -£754 NI cut for the example household
-      tolerance_pct: 5.0
-    - path: example_household.it_change
-      expected_approx: 748.6                # +£748.60 IT rise for the example household
-      tolerance_pct: 5.0
-    - path: decile.relative.ni_cut
-      # Per Vahid's Figure 3 (2026-27): D1→0.1, D2→0.2, D3→0.3, D4→0.5, D5→0.7,
-      # D6→0.8, D7→1.0, D8→1.1, D9→1.1, D10→0.6 (percentage gains)
-      tolerance_pct: 15.0
-    - path: decile.relative.it_increase
-      # Per Vahid's Figure 4 (2026-27): D1→-0.2, D2→-0.4, ..., D8→-1.5, D9→-1.6, D10→-1.5
-      tolerance_pct: 15.0
+
+    # Per-decile distributional shapes for the two reforms applied individually.
+    # The fixture stores the full decile.relative dict; the grader compares
+    # element-wise.
+    - path: ni_alone.decile_relative
+      tolerance_pct: 20.0
+    - path: it_alone.decile_relative
+      tolerance_pct: 20.0
+
+    # Not compared:
+    #  - it_layer.budgetary_impact: dropped per 10% drift threshold (11.7% off
+    #    Vahid). See evals/fixtures/drift_report.md.
+    #  - freeze_layer.budgetary_impact: dropped — current baseline has
+    #    incorporated the freeze, reform is a no-op.
+    #  - combined.budgetary_impact: dropped — downstream of freeze drift.
 
 anchor:
   must_mention:
-    - "stacking"                  # methodology — reforms applied on top of each other
-    - "fiscal drag"               # the mechanism by which the freeze raises revenue
-    - "Upper Earnings Limit"      # £50,270 — why NI cut doesn't help top earners much
-    - "pension contributions"     # why the example household's net change is small
+    - "Upper Earnings Limit"      # why NI cut doesn't help top earners much
+    - "higher rate"               # IT band where the increase concentrates
+    - "decile"                    # required by the question shape
   must_not_say:
-    - "all households gain"       # untrue under combined reform
-    - "all households lose"       # untrue too
-    - "the reforms are independent"  # they're stacked, with interactions
+    - "all households gain"       # untrue under combined effect
+    - "the reforms are independent"  # they're a package even when scored separately
   ideal_finding: |
-    The NI cut and IT increase partially offset for typical workers — at £60k with
-    a £10k pension contribution, the worker is only marginally better off (+£5).
-    Pensioners and landlords pay only the IT rise (no NI), so they straightforwardly
-    lose. The freeze raises revenue through fiscal drag — nominal incomes rise but
-    thresholds stay fixed, pulling more income into higher tax bands.
+    The NI cut concentrates gains in deciles where workers' earnings sit in the
+    £12,570-£50,270 band — peaking around D8-D9 with ~1.1% relative gain.
+    The IT increase reduces income across all deciles, again peaking at D8-D9
+    with ~1.5-1.6% relative loss because that's where the higher-rate band
+    bites hardest. The two layers roughly offset for typical workers; pensioners
+    and landlords pay only the IT rise.

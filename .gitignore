@@ -4,6 +4,7 @@ __pycache__/
 .next/
 node_modules/
 .venv/
+.venv-*/
 *.egg-info/
 dist/
 

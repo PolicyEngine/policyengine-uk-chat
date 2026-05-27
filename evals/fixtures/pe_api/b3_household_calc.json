@@ -1,4 +1,6 @@
 {
+  "_source": "local policyengine_uk 2.88.20",
+  "_scenario": "single adult age 35, gross \u00a345,000, UK 2025, no microdata",
   "result": {
     "household_net_income": 35760.55078125,
     "income_tax": 6486.0,
