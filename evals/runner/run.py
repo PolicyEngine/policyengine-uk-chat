@@ -28,6 +28,8 @@ import json
 import os
 import re
 import sys
+import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -243,6 +245,7 @@ def run_all(
     scenarios: list[Scenario],
     backend_url: str,
     dry_run: bool,
+    concurrency: int = 1,
 ) -> Path | None:
     if dry_run:
         print(f"DRY RUN (backend: {backend_url})\n")
@@ -253,6 +256,8 @@ def run_all(
             )
         total = sum(s.num_runs for s in scenarios)
         print(f"\nWould execute {total} requests across {len(scenarios)} scenarios.")
+        if concurrency > 1:
+            print(f"(would run with concurrency={concurrency})")
         return None
 
     run_dir = make_run_dir()
@@ -262,30 +267,40 @@ def run_all(
         "started_at": dt.datetime.now(dt.timezone.utc).isoformat(),
         "backend_url": backend_url,
         "bypass_token_set": BYPASS_TOKEN is not None,
+        "concurrency": concurrency,
         "scenarios": [s.id for s in scenarios],
         "runs": [],
     }
     manifest_path = run_dir / "manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2))
+    manifest_lock = threading.Lock()
+    print_lock = threading.Lock()
 
-    print(f"Run output: {run_dir}\n")
+    print(f"Run output: {run_dir}")
+    print(f"Concurrency: {concurrency}\n")
 
+    # Pre-create scenario dirs and freeze scenario YAMLs so workers don't race.
     for scenario in scenarios:
         scenario_dir = run_dir / scenario.id
-        # Save a copy of the scenario YAML alongside the runs so we can
-        # tell, months later, exactly what prompt/anchor was in effect.
         scenario_dir.mkdir(parents=True, exist_ok=True)
         (scenario_dir / "scenario.yaml").write_text(yaml.safe_dump(scenario.raw))
 
-        print(f"=== {scenario.id} ({scenario.test}, {scenario.num_runs} runs) ===")
-        for i in range(1, scenario.num_runs + 1):
-            print(f"  run {i}/{scenario.num_runs}...", end=" ", flush=True)
-            meta = run_single(
-                scenario=scenario,
-                backend_url=backend_url,
-                run_index=i,
-                out_dir=scenario_dir,
-            )
+    # Build a flat list of (scenario, run_index) jobs across all scenarios.
+    jobs: list[tuple[Scenario, int]] = [
+        (s, i) for s in scenarios for i in range(1, s.num_runs + 1)
+    ]
+    total_jobs = len(jobs)
+
+    def _execute(job: tuple[Scenario, int]) -> dict[str, Any]:
+        scenario, run_index = job
+        scenario_dir = run_dir / scenario.id
+        meta = run_single(
+            scenario=scenario,
+            backend_url=backend_url,
+            run_index=run_index,
+            out_dir=scenario_dir,
+        )
+        with print_lock:
             elapsed = meta["elapsed_seconds"]
             err = meta["http_error"]
             tools = meta["summary"]["tool_call_count"]
@@ -294,22 +309,40 @@ def run_all(
                 f"ERR ({err})" if err
                 else f"ok  {chars} chars, {tools} tool calls, {elapsed}s"
             )
-            print(status)
-
+            print(f"  [{scenario.id} run {run_index}/{scenario.num_runs}] {status}")
+        with manifest_lock:
             manifest["runs"].append({
                 "scenario_id": scenario.id,
-                "run_index": i,
-                "elapsed_seconds": elapsed,
-                "http_error": err,
-                "tool_call_count": tools,
-                "answer_length_chars": chars,
+                "run_index": run_index,
+                "elapsed_seconds": meta["elapsed_seconds"],
+                "http_error": meta["http_error"],
+                "tool_call_count": meta["summary"]["tool_call_count"],
+                "answer_length_chars": meta["summary"]["answer_length_chars"],
             })
             manifest_path.write_text(json.dumps(manifest, indent=2))
-        print()
+        return meta
+
+    if concurrency <= 1:
+        # Sequential — preserves prior behaviour and predictable per-scenario log order.
+        for scenario in scenarios:
+            with print_lock:
+                print(f"=== {scenario.id} ({scenario.test}, {scenario.num_runs} runs) ===")
+            for i in range(1, scenario.num_runs + 1):
+                _execute((scenario, i))
+            with print_lock:
+                print()
+    else:
+        # Bounded-concurrency thread pool — each worker holds its own httpx
+        # client inside run_single, so they're independent.
+        with ThreadPoolExecutor(max_workers=concurrency) as pool:
+            futures = [pool.submit(_execute, job) for job in jobs]
+            print(f"submitted {total_jobs} jobs to a pool of {concurrency} workers...\n")
+            for _ in as_completed(futures):
+                pass  # progress is printed by _execute
 
     manifest["finished_at"] = dt.datetime.now(dt.timezone.utc).isoformat()
     manifest_path.write_text(json.dumps(manifest, indent=2))
-    print(f"Done. Logs in {run_dir}")
+    print(f"\nDone. Logs in {run_dir}")
     return run_dir
 
 
@@ -330,7 +363,17 @@ def main() -> int:
         action="store_true",
         help="Show what would run without making any requests.",
     )
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="Number of conversations to run in parallel. Default 1 (sequential). "
+             "Useful values: 1 (debug, clean logs), 4-6 (full eval, ~3-4× speedup).",
+    )
     args = parser.parse_args()
+
+    if args.concurrency < 1:
+        parser.error("--concurrency must be >= 1")
 
     scenarios = load_scenarios(args.scenario_ids or None)
     if not scenarios:
@@ -341,6 +384,7 @@ def main() -> int:
         scenarios=scenarios,
         backend_url=args.backend_url,
         dry_run=args.dry_run,
+        concurrency=args.concurrency,
     )
     return 0
 
