@@ -728,6 +728,9 @@ def execute_tool(
         "run_python": run_python,
         "compute": compute,
         "generate_chart": generate_chart,
+        "calculate_household": calculate_household,
+        "run_economy_simulation": run_economy_simulation,
+        "analyse_microdata": analyse_microdata,
     }
     if tool_name not in tools:
         return {"error": f"Unknown tool: {tool_name}"}
@@ -747,12 +750,156 @@ def execute_tool(
         return {"error": str(e)}
 
 
+# Shared reform-input schema for the typed tools. Top-level keys are the UK
+# programme names accepted by _build_compiled_policy(); values within each
+# programme match the corresponding *Params constructor (e.g. IncomeTaxParams).
+# `additionalProperties: True` keeps the schema permissive — _build_compiled_policy
+# enforces the real validation and raises a clean error listing valid fields.
+REFORM_SCHEMA = {
+    "type": "object",
+    "description": (
+        "Parametric reform. Top-level keys are programmes; values are the "
+        "parameter changes for that programme. Valid programmes: income_tax, "
+        "national_insurance, universal_credit, child_benefit, state_pension, "
+        "pension_credit, benefit_cap, housing_benefit, tax_credits, "
+        "scottish_child_payment, stamp_duty, capital_gains_tax, wealth_tax. "
+        "Field names within each programme match the corresponding *Params "
+        "constructor (e.g. income_tax.personal_allowance, "
+        "national_insurance.main_rate). For structural reforms (new policies "
+        "or replacing existing ones), use run_python instead."
+    ),
+    "additionalProperties": True,
+}
+
+
 def get_tool_definitions(backend_id: str = "uk_compiled") -> List[Dict[str, Any]]:
     backend = get_backend(backend_id)
     return [
         {
+            "name": "calculate_household",
+            "description": (
+                "Compute taxes, benefits, and net income for a SPECIFIC household "
+                "you describe (person/benunit/household records). Prefer this over "
+                "run_python for any household-level question with a defined "
+                "household composition. Returns full per-person, per-benunit, and "
+                "per-household results including baseline and reform columns."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "person": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": (
+                            "List of person records. Each must include person_id, "
+                            "benunit_id, household_id, age. Common optional fields: "
+                            "employment_income, self_employment_income, pension_income."
+                        ),
+                    },
+                    "benunit": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": (
+                            "List of benefit-unit records, each with benunit_id "
+                            "and household_id."
+                        ),
+                    },
+                    "household": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": (
+                            "List of household records, each with household_id "
+                            "and region (e.g. 'ENGLAND', 'SCOTLAND', 'WALES', "
+                            "'NORTHERN_IRELAND')."
+                        ),
+                    },
+                    "year": {"type": "integer", "default": 2025},
+                    "reform": REFORM_SCHEMA,
+                },
+                "required": ["person", "benunit", "household"],
+            },
+        },
+        {
+            "name": "run_economy_simulation",
+            "description": (
+                "Run a UK economy-wide microsimulation comparing baseline "
+                "(current law) to a parametric reform. Returns budgetary impact, "
+                "programme breakdown, decile impacts, winners/losers, caseloads, "
+                "HBAI incomes, and poverty metrics — all methodology-pinned to "
+                "PolicyEngine canonical definitions (BHC poverty, OECD-modified "
+                "equivalisation, survey-weighted). Prefer this over run_python "
+                "for any society-wide reform analysis. Does NOT support structural "
+                "reforms — for those, use run_python."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "year": {"type": "integer", "default": 2025},
+                    "reform": REFORM_SCHEMA,
+                    "dataset": {
+                        "type": "string",
+                        "enum": ["frs", "efrs", "spi", "lcfs", "was"],
+                        "default": "frs",
+                        "description": (
+                            "Microdata source. frs = Family Resources Survey "
+                            "(default), efrs = Enhanced FRS (matches PE-API)."
+                        ),
+                    },
+                },
+                "required": [],
+            },
+        },
+        {
+            "name": "analyse_microdata",
+            "description": (
+                "Slice, filter, sample, or aggregate the cached microdata for a "
+                "given year + reform. Use this for 'show me N households like X', "
+                "'break the result down by Y', 'mean income for subset Z'. "
+                "Operates on cached microdata, so it's fast for follow-up "
+                "questions on the same reform."
+            ),
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "entity": {
+                        "type": "string",
+                        "enum": ["persons", "benunits", "households"],
+                    },
+                    "operation": {
+                        "type": "string",
+                        "enum": ["sample", "mean", "sum", "count", "group_by", "describe"],
+                    },
+                    "year": {"type": "integer", "default": 2025},
+                    "reform": REFORM_SCHEMA,
+                    "filters": {
+                        "type": "object",
+                        "description": (
+                            "Column → predicate. Predicate can be a scalar (=), "
+                            "a list (in), or a dict with keys "
+                            "min/max/gt/lt/gte/lte/ne."
+                        ),
+                    },
+                    "columns": {"type": "array", "items": {"type": "string"}},
+                    "group_by": {"type": "array", "items": {"type": "string"}},
+                    "n": {
+                        "type": "integer",
+                        "default": 5,
+                        "description": "Sample size when operation=sample.",
+                    },
+                    "dataset": {"type": "string", "default": "frs"},
+                },
+                "required": ["entity", "operation"],
+            },
+        },
+        {
             "name": "run_python",
-            "description": backend.tool_description(),
+            "description": backend.tool_description() + (
+                "\n\nFALLBACK: prefer the typed tools (calculate_household, "
+                "run_economy_simulation, analyse_microdata) when the question fits "
+                "their shape. Use run_python for questions those tools can't "
+                "express — structural reforms, novel aggregations, parameter "
+                "introspection, historical lookups, etc."
+            ),
             "input_schema": {
                 "type": "object",
                 "properties": {
