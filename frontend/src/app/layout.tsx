@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "@mantine/core/styles.css";
 import Providers from "./Providers";
 
@@ -6,6 +6,18 @@ export const metadata: Metadata = {
   title: "PolicyEngine UK",
   description: "UK tax and benefit microsimulation assistant",
   icons: { icon: "/favicon.svg" },
+};
+
+// Mobile virtual-keyboard handling:
+// - `interactiveWidget: "resizes-content"` tells Chromium-based mobile browsers
+//   to shrink the layout viewport when the soft keyboard appears, so 100dvh
+//   heights track the visible area and the chat input stays in view.
+// - iOS Safari does not honor `interactive-widget` but already updates `dvh`
+//   units via the visual-viewport API, which we rely on in ChatPage.
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  interactiveWidget: "resizes-content",
 };
 
 const themeVars = `
