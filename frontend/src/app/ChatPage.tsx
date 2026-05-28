@@ -309,6 +309,38 @@ export default function ChatPage() {
   const sessionId = useRef<string | null>(null);
   const debugLog = useRef<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
+  const draftRestoredRef = useRef(false);
+
+  // Restore draft from localStorage on initial mount only. Runs once, so it
+  // can't interfere with later state changes (streaming, conversation loads).
+  useEffect(() => {
+    if (draftRestoredRef.current) return;
+    draftRestoredRef.current = true;
+    if (typeof window === "undefined") return;
+    try {
+      const saved = localStorage.getItem("policyengine-uk-chat:draft");
+      if (saved) {
+        setInput(saved);
+        // Defer autoResize until after React commits the value so scrollHeight
+        // reflects the restored content.
+        setTimeout(() => {
+          const el = inputRef.current;
+          if (el) { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; }
+        }, 0);
+      }
+    } catch {}
+  }, []);
+
+  // Persist draft on every change. Only writes after the initial restore has
+  // run so we don't overwrite a saved draft with the empty initial state.
+  useEffect(() => {
+    if (!draftRestoredRef.current) return;
+    if (typeof window === "undefined") return;
+    try {
+      if (input) localStorage.setItem("policyengine-uk-chat:draft", input);
+      else localStorage.removeItem("policyengine-uk-chat:draft");
+    } catch {}
+  }, [input]);
 
   const [modelVersion, setModelVersion] = useState<string | null>(null);
   const [balance, setBalance] = useState<BalanceSummary | null>(null);
@@ -514,6 +546,9 @@ export default function ChatPage() {
     setInput("");
     setAttachedImage(null);
     setAttachError(null);
+    if (typeof window !== "undefined") {
+      try { localStorage.removeItem("policyengine-uk-chat:draft"); } catch {}
+    }
     setPlanMode(false);
     setIsStreaming(true);
     setIsWaiting(true);
