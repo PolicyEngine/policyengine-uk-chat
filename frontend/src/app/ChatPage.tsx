@@ -1786,6 +1786,44 @@ export default function ChatPage() {
                 })}
               </div>
             )}
+            {!hasMessages && !input && (
+              <div style={{ marginTop: "14px", display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "8px", position: "relative", zIndex: 1 }}>
+                {[
+                  "What's the personal allowance?",
+                  "Tax on £50,000 income?",
+                  "Child benefit for 3 kids?",
+                  "How does marriage allowance work?",
+                ].map((prompt) => (
+                  <button
+                    key={prompt}
+                    type="button"
+                    onClick={() => {
+                      setInput(prompt);
+                      setTimeout(() => {
+                        const el = inputRef.current;
+                        if (el) { el.focus(); autoResize(el); }
+                      }, 0);
+                    }}
+                    style={{
+                      padding: "6px 12px",
+                      background: "transparent",
+                      color: "var(--text-3)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "999px",
+                      fontSize: "12px",
+                      fontFamily: "inherit",
+                      cursor: "pointer",
+                      fontWeight: 500,
+                      transition: "background 120ms, color 120ms, border-color 120ms",
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; e.currentTarget.style.color = "var(--text)"; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.color = "var(--text-3)"; }}
+                  >
+                    {prompt}
+                  </button>
+                ))}
+              </div>
+            )}
             {!hasMessages && modelVersion && (
               <div style={{ marginTop: "20px", display: "flex", justifyContent: "center", color: "var(--faint)", fontSize: "11px" }}>
                 policyengine-uk v{modelVersion}
