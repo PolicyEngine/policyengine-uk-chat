@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconBulb, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconBulb, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -278,6 +278,7 @@ export default function ChatPage() {
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [planMode, setPlanMode] = useState(false);
+  const [chartsMode, setChartsMode] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
   const slashMenuRef = useRef<HTMLDivElement>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
@@ -569,7 +570,7 @@ export default function ChatPage() {
       const response = await fetch(getBackendEndpoint("chat/message"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, plan_mode: planMode }),
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, plan_mode: planMode, charts_mode: chartsMode }),
         signal: controller.signal,
       });
       if (response.status === 402) {
@@ -766,7 +767,7 @@ export default function ChatPage() {
       const response = await fetch(getBackendEndpoint("chat/message"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, plan_mode: false }),
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, plan_mode: false, charts_mode: chartsMode }),
         signal: controller.signal,
       });
       if (response.status === 402) {
@@ -1531,30 +1532,56 @@ export default function ChatPage() {
                 />
               </div>
               <div style={{ marginTop: "6px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
-                <button
-                  type="button"
-                  onClick={() => setPlanMode((v) => !v)}
-                  disabled={isStreaming}
-                  title={planMode
-                    ? "Plan mode on — the next message will get clarifying questions before the agent runs anything."
-                    : "Plan mode off — turn on to have the agent ask 1–3 clarifying questions before answering."}
-                  style={{
-                    display: "inline-flex", alignItems: "center", gap: "6px",
-                    padding: "5px 11px",
-                    background: planMode ? "var(--accent-15)" : "transparent",
-                    color: planMode ? "var(--accent)" : "var(--text-3)",
-                    border: `1px solid ${planMode ? "var(--accent)" : "var(--border)"}`,
-                    borderRadius: "999px",
-                    fontSize: "12px",
-                    fontFamily: "inherit",
-                    cursor: isStreaming ? "not-allowed" : "pointer",
-                    fontWeight: 500,
-                    opacity: isStreaming ? 0.5 : 1,
-                    transition: "background 120ms, color 120ms, border-color 120ms",
-                  }}
-                >
-                  <IconBulb size={12} /> Plan {planMode ? "on" : "off"}
-                </button>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  <button
+                    type="button"
+                    onClick={() => setPlanMode((v) => !v)}
+                    disabled={isStreaming}
+                    title={planMode
+                      ? "Plan mode on — the next message will get clarifying questions before the agent runs anything."
+                      : "Plan mode off — turn on to have the agent ask 1–3 clarifying questions before answering."}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "6px",
+                      padding: "5px 11px",
+                      background: planMode ? "var(--accent-15)" : "transparent",
+                      color: planMode ? "var(--accent)" : "var(--text-3)",
+                      border: `1px solid ${planMode ? "var(--accent)" : "var(--border)"}`,
+                      borderRadius: "999px",
+                      fontSize: "12px",
+                      fontFamily: "inherit",
+                      cursor: isStreaming ? "not-allowed" : "pointer",
+                      fontWeight: 500,
+                      opacity: isStreaming ? 0.5 : 1,
+                      transition: "background 120ms, color 120ms, border-color 120ms",
+                    }}
+                  >
+                    <IconBulb size={12} /> Plan {planMode ? "on" : "off"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setChartsMode((v) => !v)}
+                    disabled={isStreaming}
+                    title={chartsMode
+                      ? "Charts mode on — the agent will prefer to include a chart when the question is plot-worthy."
+                      : "Charts mode off — turn on to bias answers toward including a chart for distributions, comparisons, or trends."}
+                    style={{
+                      display: "inline-flex", alignItems: "center", gap: "6px",
+                      padding: "5px 11px",
+                      background: chartsMode ? "var(--accent-15)" : "transparent",
+                      color: chartsMode ? "var(--accent)" : "var(--text-3)",
+                      border: `1px solid ${chartsMode ? "var(--accent)" : "var(--border)"}`,
+                      borderRadius: "999px",
+                      fontSize: "12px",
+                      fontFamily: "inherit",
+                      cursor: isStreaming ? "not-allowed" : "pointer",
+                      fontWeight: 500,
+                      opacity: isStreaming ? 0.5 : 1,
+                      transition: "background 120ms, color 120ms, border-color 120ms",
+                    }}
+                  >
+                    <IconChartBar size={12} /> Charts {chartsMode ? "on" : "off"}
+                  </button>
+                </div>
                 {isStreaming ? (
                   <button
                     onClick={stopStreaming}
