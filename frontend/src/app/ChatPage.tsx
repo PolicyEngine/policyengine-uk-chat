@@ -1412,7 +1412,7 @@ export default function ChatPage() {
                           </span>
                         </div>
                       )}
-                      {msg.isComplete && !isStreaming && msg.suggestions && msg.suggestions.length > 0 && (
+                      {msg.isComplete && msg.suggestions && msg.suggestions.length > 0 && (
                         <div data-pe-suggestions style={{ marginTop: "12px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
                           {msg.suggestions.map((suggestion, sIdx) => (
                             <button
