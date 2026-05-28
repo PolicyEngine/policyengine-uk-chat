@@ -1646,14 +1646,14 @@ export default function ChatPage() {
               />
               <div style={{ position: "relative" }}>
                 {!input && !hasMessages && (
-                  <div style={{ position: "absolute", top: "4px", left: "0", fontSize: "16px", lineHeight: 1.5, color: "var(--faint)", pointerEvents: "none" }}>
+                  <div aria-hidden="true" style={{ position: "absolute", top: "4px", left: "0", fontSize: "16px", lineHeight: 1.5, color: "var(--faint)", pointerEvents: "none" }}>
                     {animatedPlaceholder || "Ask anything"}
                     <span style={{ display: "inline-block", width: "2px", height: "1em", background: "var(--muted)", marginLeft: "1px", verticalAlign: "text-bottom", animation: "blink 1s step-end infinite" }} />
                     <style>{`@keyframes blink{50%{opacity:0}}`}</style>
                   </div>
                 )}
                 {!input && hasMessages && (
-                  <div style={{ position: "absolute", top: "4px", left: "0", fontSize: "16px", lineHeight: 1.5, color: "var(--faint)", pointerEvents: "none" }}>
+                  <div aria-hidden="true" style={{ position: "absolute", top: "4px", left: "0", fontSize: "16px", lineHeight: 1.5, color: "var(--faint)", pointerEvents: "none" }}>
                     Ask anything
                   </div>
                 )}
@@ -1664,6 +1664,7 @@ export default function ChatPage() {
                   onKeyDown={handleKeyDown}
                   disabled={isStreaming}
                   rows={1}
+                  aria-label="Ask a question"
                   style={{ width: "100%", maxHeight: "240px", background: "transparent", border: "none", outline: "none", fontSize: "16px", lineHeight: 1.5, color: "var(--text)", fontFamily: "inherit", resize: "none", padding: "4px 0", opacity: isStreaming ? 0.5 : 1, overflowY: "hidden", caretColor: "var(--text)", boxSizing: "border-box" }}
                 />
               </div>
