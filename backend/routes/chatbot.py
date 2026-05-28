@@ -167,12 +167,13 @@ def _select_chat_model(messages: List[dict]) -> str:
     return DEFAULT_FAST_MODEL
 
 
-def _build_system_blocks(plan_mode: bool = False) -> List[dict]:
-    """System prompt + cached library reference + optional plan-mode directive.
+def _build_system_blocks(plan_mode: bool = False, charts_mode: bool = False) -> List[dict]:
+    """System prompt + cached library reference + optional per-turn directives.
 
     The system prompt and reference are each marked with cache_control so they
-    persist across requests. The plan-mode directive is appended AFTER both
-    cache breakpoints so toggling plan mode never invalidates cached blocks.
+    persist across requests. Per-turn directives (plan mode, charts mode) are
+    appended AFTER both cache breakpoints so toggling them never invalidates
+    cached blocks.
     """
     blocks: List[dict] = [{
         "type": "text",
@@ -187,6 +188,8 @@ def _build_system_blocks(plan_mode: bool = False) -> List[dict]:
         })
     if plan_mode:
         blocks.append({"type": "text", "text": PLAN_MODE_DIRECTIVE})
+    if charts_mode:
+        blocks.append({"type": "text", "text": CHARTS_MODE_DIRECTIVE})
     return blocks
 
 
@@ -204,6 +207,7 @@ class ChatRequest(BaseModel):
     session_id: str | None = None
     user_id: str | None = None
     plan_mode: bool = False
+    charts_mode: bool = False
 
 
 PLAN_MODE_DIRECTIVE = """
@@ -213,6 +217,11 @@ PLAN MODE IS ACTIVE FOR THIS TURN:
 - Ask those 1–3 questions concisely as a numbered list. No preamble beyond one short lead-in sentence.
 - If the question is fully unambiguous, confirm your understanding in one sentence and offer to proceed — still do not call tools.
 - You will continue without plan mode on the next turn once the user replies.
+""".strip()
+
+
+CHARTS_MODE_DIRECTIVE = """
+The user has enabled chart mode. When the question's answer would benefit from a visualization (distributions, comparisons across categories, trends over time, marginal-rate curves, decile/percentile breakdowns), prefer to include a chart using the available chart tools alongside your written explanation. Do not force charts on questions that are not chartable (e.g. definitional, yes/no, or single-number lookups) — this is a preference, not a requirement.
 """.strip()
 
 
@@ -295,11 +304,13 @@ async def chat_message(request: Request, chat_request: ChatRequest):
             model = _select_chat_model(conversation)
             tools = _tool_defs_for_anthropic()
             plan_mode = chat_request.plan_mode
-            system_blocks = _build_system_blocks(plan_mode=plan_mode)
+            charts_mode = chat_request.charts_mode
+            system_blocks = _build_system_blocks(plan_mode=plan_mode, charts_mode=charts_mode)
 
             logger.info(
                 f"[CHAT] Session {session_id}: {len(conversation)} messages"
                 f"{' [PLAN MODE]' if plan_mode else ''}"
+                f"{' [CHARTS MODE]' if charts_mode else ''}"
             )
 
             while iteration < max_iterations:
