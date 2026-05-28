@@ -55,6 +55,22 @@ interface ReportConversationResponse {
   issue_url: string;
 }
 
+type SlashCommand = {
+  name: string;        // without leading slash, e.g. "plan"
+  description: string; // one-line description for the menu
+  kind: "action" | "fill";
+  // For "fill" commands, the textarea value to set on select.
+  fillText?: string;
+};
+
+// v1 slash commands. /charts intentionally omitted — no chartsMode state on main yet.
+const SLASH_COMMANDS: SlashCommand[] = [
+  { name: "plan",  description: "Toggle Plan mode on/off",           kind: "action" },
+  { name: "new",   description: "Start a new chat",                  kind: "action" },
+  { name: "clear", description: "Start a new chat (alias for /new)", kind: "action" },
+  { name: "help",  description: "Insert a starter prompt",           kind: "fill", fillText: "Help me understand " },
+];
+
 function formatRelativeTime(isoString: string): string {
   const date = new Date(isoString);
   const diffMins = Math.floor((Date.now() - date.getTime()) / 60000);
@@ -262,6 +278,8 @@ export default function ChatPage() {
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [planMode, setPlanMode] = useState(false);
+  const [slashIndex, setSlashIndex] = useState(0);
+  const slashMenuRef = useRef<HTMLDivElement>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   useEffect(() => {
     const stored = typeof window !== "undefined" ? localStorage.getItem("theme") : null;
@@ -867,7 +885,99 @@ export default function ChatPage() {
     }
   };
 
+  // ---- Slash-command menu ---------------------------------------------------
+  // Open whenever the input starts with "/" and at least one command matches the
+  // characters typed after the slash. If nothing matches, hide silently so a
+  // real user message starting with "/" doesn't get a stuck empty popup.
+  const slashQuery = input.startsWith("/") ? input.slice(1).toLowerCase() : null;
+  const filteredSlashCommands = slashQuery === null
+    ? []
+    : SLASH_COMMANDS.filter((c) => c.name.startsWith(slashQuery));
+  const slashOpen = slashQuery !== null && filteredSlashCommands.length > 0;
+
+  // Keep the selected index inside the filtered range as the query changes.
+  useEffect(() => {
+    if (slashIndex >= filteredSlashCommands.length) setSlashIndex(0);
+  }, [filteredSlashCommands.length, slashIndex]);
+
+  const closeSlash = useCallback(() => {
+    setInput("");
+    setSlashIndex(0);
+    const el = inputRef.current;
+    if (el) { el.style.height = "auto"; }
+  }, []);
+
+  const selectSlashCommand = useCallback((cmd: SlashCommand) => {
+    if (cmd.kind === "action") {
+      if (cmd.name === "plan") {
+        setPlanMode((v) => !v);
+        closeSlash();
+      } else if (cmd.name === "new" || cmd.name === "clear") {
+        // startNewChat already clears input + refocuses, but call closeSlash
+        // first so we don't leave a "/new" string sitting around if anything
+        // changes about startNewChat in the future.
+        closeSlash();
+        startNewChat();
+      }
+      return;
+    }
+    if (cmd.kind === "fill" && cmd.fillText !== undefined) {
+      setInput(cmd.fillText);
+      setSlashIndex(0);
+      // Refocus + caret at end + resize after React commits the new value.
+      setTimeout(() => {
+        const el = inputRef.current;
+        if (!el) return;
+        el.focus();
+        const end = el.value.length;
+        try { el.setSelectionRange(end, end); } catch {}
+        el.style.height = "auto";
+        el.style.height = el.scrollHeight + "px";
+      }, 0);
+    }
+  }, [closeSlash]);
+
+  // Outside-click clears the slash text and closes the menu (Esc-equivalent).
+  useEffect(() => {
+    if (!slashOpen) return;
+    const onDocPointerDown = (ev: MouseEvent) => {
+      const menu = slashMenuRef.current;
+      const ta = inputRef.current;
+      const target = ev.target as Node | null;
+      if (!target) return;
+      if (menu && menu.contains(target)) return;
+      if (ta && ta.contains(target)) return;
+      setSlashIndex(0);
+      setInput("");
+    };
+    document.addEventListener("mousedown", onDocPointerDown);
+    return () => document.removeEventListener("mousedown", onDocPointerDown);
+  }, [slashOpen]);
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (slashOpen) {
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setSlashIndex((i) => (i + 1) % filteredSlashCommands.length);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setSlashIndex((i) => (i - 1 + filteredSlashCommands.length) % filteredSlashCommands.length);
+        return;
+      }
+      if (e.key === "Enter" || e.key === "Tab") {
+        e.preventDefault();
+        const cmd = filteredSlashCommands[Math.min(slashIndex, filteredSlashCommands.length - 1)];
+        if (cmd) selectSlashCommand(cmd);
+        return;
+      }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeSlash();
+        return;
+      }
+    }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
   };
 
@@ -1465,6 +1575,57 @@ export default function ChatPage() {
                 )}
               </div>
             </div>
+            {slashOpen && (
+              <div
+                ref={slashMenuRef}
+                role="listbox"
+                aria-label="Slash commands"
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: "calc(100% + 6px)",
+                  zIndex: 5,
+                  background: "var(--surface)",
+                  border: "1px solid var(--border)",
+                  borderRadius: "14px",
+                  boxShadow: "0 6px 24px rgba(0,0,0,0.08)",
+                  padding: "6px",
+                  maxHeight: "260px",
+                  overflowY: "auto",
+                }}
+              >
+                {filteredSlashCommands.map((cmd, idx) => {
+                  const active = idx === Math.min(slashIndex, filteredSlashCommands.length - 1);
+                  return (
+                    <div
+                      key={cmd.name}
+                      role="option"
+                      aria-selected={active}
+                      onMouseEnter={() => setSlashIndex(idx)}
+                      onMouseDown={(e) => { e.preventDefault(); selectSlashCommand(cmd); }}
+                      style={{
+                        display: "flex",
+                        alignItems: "baseline",
+                        gap: "10px",
+                        padding: "8px 10px",
+                        borderRadius: "10px",
+                        cursor: "pointer",
+                        background: active ? "var(--surface-hover)" : "transparent",
+                        color: "var(--text)",
+                      }}
+                    >
+                      <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: "13px", color: "var(--accent)", minWidth: "64px" }}>
+                        /{cmd.name}
+                      </span>
+                      <span style={{ fontSize: "13px", color: "var(--text-3)" }}>
+                        {cmd.description}
+                      </span>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
             {!hasMessages && modelVersion && (
               <div style={{ marginTop: "20px", display: "flex", justifyContent: "center", color: "var(--faint)", fontSize: "11px" }}>
                 policyengine-uk v{modelVersion}
