@@ -78,6 +78,12 @@ USER-FACING STYLE:
 - Avoid exposing internal parameter keys unless the user wants code-level detail.
 - Keep the answer grounded in what the Python run actually showed.
 - Do not paste the full Python into the main answer unless the user asks; the UI will show the executed code separately.
+
+CHARTS:
+- When a visualisation would help (distributions, marginal-rate or tax-schedule curves, decile comparisons, trends), call the `generate_chart` tool after you have the data from `run_python`.
+- The tool returns a `chart_markdown` field containing a ```chart fenced JSON block. Paste that block VERBATIM into your next text response — the frontend parses it to render the chart. If you do not include it, no chart will appear.
+- Do not try to draw charts with matplotlib inside `run_python`; matplotlib output is discarded by the UI.
+- Use the `*_format` arguments (e.g. `y_format="currency"`, `x_format="percent"`) so axis ticks and tooltips are formatted correctly.
 """
 
 
