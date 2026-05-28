@@ -1201,7 +1201,7 @@ export default function ChatPage() {
         )}
         {/* Sidebar */}
         {!isEmbed && historyOpen && (
-          <div data-pe-sidebar style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: 0, maxHeight: "calc(100vh - 57px)", alignSelf: "flex-start", display: "flex", flexDirection: "column" }}>
+          <div data-pe-sidebar style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: 0, height: "calc(100vh - 57px)", alignSelf: "flex-start", display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", gap: "4px" }}>
               <button onClick={startNewChat} style={{ flex: 1, fontSize: "14px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", fontWeight: 500, justifyContent: "flex-start" }}
                 onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
