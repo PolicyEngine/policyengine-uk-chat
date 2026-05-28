@@ -119,6 +119,8 @@ interface Message {
   stop_reason?: string;
   /** True when the user clicked Stop and the stream was aborted mid-flight. */
   stopped?: boolean;
+  /** Optional 2–3 follow-up question suggestions generated after the turn. */
+  suggestions?: string[];
 }
 
 interface BalanceSummary {
@@ -350,7 +352,7 @@ export default function ChatPage() {
       const data = conversationCache.current.get(conv.id) || await apiRequest<ConversationDetail>("GET", `conversations/${conv.id}`);
       if (!data?.messages?.length) { console.error("No messages in conversation", data); return; }
       const loaded: Message[] = data.messages.map((m) => {
-        const raw = m as { role: string; content: string; events?: StreamEvent[]; stop_reason?: string; stopped?: boolean; cost_gbp?: number };
+        const raw = m as { role: string; content: string; events?: StreamEvent[]; stop_reason?: string; stopped?: boolean; cost_gbp?: number; suggestions?: string[] };
         return {
           role: raw.role as "user" | "assistant",
           content: raw.content || "",
@@ -359,6 +361,7 @@ export default function ChatPage() {
           stop_reason: raw.stop_reason,
           stopped: raw.stopped,
           cost_gbp: raw.cost_gbp,
+          suggestions: Array.isArray(raw.suggestions) ? raw.suggestions : undefined,
         };
       });
       const collapsed = new Set(loaded.map((m, i) => (m.role === "assistant" && m.events?.some((e) => e.type === "tool") ? i : -1)).filter((i) => i >= 0));
@@ -419,6 +422,7 @@ export default function ChatPage() {
         if (m.cost_gbp !== undefined) base.cost_gbp = m.cost_gbp;
         if (m.stop_reason) base.stop_reason = m.stop_reason;
         if (m.stopped) base.stopped = true;
+        if (m.suggestions?.length) base.suggestions = m.suggestions;
       }
       return base;
     });
@@ -646,6 +650,30 @@ export default function ChatPage() {
               if (data.balance) setBalance(data.balance);
               else fetchBalance();
               setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 100);
+            } else if (data.type === "suggestions") {
+              // Best-effort follow-up chips. Backend may emit this AFTER the
+              // `done` event (the turn is already complete by the time these
+              // arrive). Silently ignore malformed payloads.
+              const raw = Array.isArray(data.suggestions) ? data.suggestions : [];
+              const cleaned = raw.filter((s: unknown): s is string => typeof s === "string" && s.trim().length > 0).slice(0, 3);
+              if (cleaned.length) {
+                setMessages((prev) => {
+                  const newMsgs = [...prev];
+                  const lastIdx = newMsgs.length - 1;
+                  if (newMsgs[lastIdx]?.role === "assistant") {
+                    newMsgs[lastIdx] = { ...newMsgs[lastIdx], suggestions: cleaned };
+                  }
+                  return newMsgs;
+                });
+                // Persist suggestions alongside the saved conversation.
+                if (sessionId.current) {
+                  const finalMsgs = [
+                    ...allMessages,
+                    { role: "assistant" as const, content: currentText, isComplete: true, events: [...events], suggestions: cleaned },
+                  ];
+                  saveConversation(finalMsgs, sessionId.current);
+                }
+              }
             } else if (data.type === "error") {
               const errorText = `Error: ${data.content || "Something went wrong"}`;
               const lastEvent = events[events.length - 1];
@@ -831,6 +859,12 @@ export default function ChatPage() {
                 } : m);
                 saveConversation(savedMessages, sessionId.current);
               }
+            } else if (data.type === "suggestions") {
+              const raw = Array.isArray(data.suggestions) ? data.suggestions : [];
+              const cleaned = raw.filter((s: unknown): s is string => typeof s === "string" && s.trim().length > 0).slice(0, 3);
+              if (cleaned.length) {
+                setMessages((prev) => prev.map((m, i) => i === idx ? { ...m, suggestions: cleaned } : m));
+              }
             } else if (data.type === "error") {
               const errorText = `Error: ${data.content || "Something went wrong"}`;
               const lastEvent = newEvents[newEvents.length - 1];
@@ -872,6 +906,22 @@ export default function ChatPage() {
   };
 
   const autoResize = (el: HTMLTextAreaElement) => { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; };
+
+  /** Fill the textarea with a follow-up suggestion and focus it. Does NOT
+   * send — the user reviews, edits if they want, then presses Enter. */
+  const useSuggestion = (text: string) => {
+    if (isStreaming) return;
+    setInput(text);
+    setTimeout(() => {
+      const el = inputRef.current;
+      if (!el) return;
+      el.focus();
+      autoResize(el);
+      // Place cursor at end so further typing extends the suggestion.
+      const len = el.value.length;
+      try { el.setSelectionRange(len, len); } catch {}
+    }, 0);
+  };
 
   const formatToolSummary = (summary: string): string => {
     // If it looks like raw JSON, just show the tool completed
@@ -1360,6 +1410,45 @@ export default function ChatPage() {
                           <span style={{ fontSize: "11px", color: "var(--muted)" }}>
                             {msg.stop_reason === "max_tokens" ? "Truncated at max length" : "Stopped"}
                           </span>
+                        </div>
+                      )}
+                      {msg.isComplete && !isStreaming && msg.suggestions && msg.suggestions.length > 0 && (
+                        <div data-pe-suggestions style={{ marginTop: "12px", display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                          {msg.suggestions.map((suggestion, sIdx) => (
+                            <button
+                              key={sIdx}
+                              type="button"
+                              onClick={() => useSuggestion(suggestion)}
+                              title="Use this follow-up — you can edit it before sending"
+                              style={{
+                                fontSize: "12.5px",
+                                color: "var(--text-2)",
+                                background: "var(--surface)",
+                                border: "1px solid var(--border)",
+                                borderRadius: "999px",
+                                padding: "5px 12px",
+                                cursor: "pointer",
+                                fontFamily: "inherit",
+                                lineHeight: 1.3,
+                                textAlign: "left",
+                                transition: "background 120ms, color 120ms, border-color 120ms",
+                              }}
+                              onMouseEnter={(e) => {
+                                const el = e.currentTarget as HTMLElement;
+                                el.style.background = "var(--surface-hover)";
+                                el.style.color = "var(--text)";
+                                el.style.borderColor = "var(--accent)";
+                              }}
+                              onMouseLeave={(e) => {
+                                const el = e.currentTarget as HTMLElement;
+                                el.style.background = "var(--surface)";
+                                el.style.color = "var(--text-2)";
+                                el.style.borderColor = "var(--border)";
+                              }}
+                            >
+                              {suggestion}
+                            </button>
+                          ))}
                         </div>
                       )}
                     </div>
