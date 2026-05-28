@@ -1201,7 +1201,7 @@ export default function ChatPage() {
         )}
         {/* Sidebar */}
         {!isEmbed && historyOpen && (
-          <div data-pe-sidebar style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: 0, height: "calc(100vh - 57px)", alignSelf: "flex-start", display: "flex", flexDirection: "column" }}>
+          <div data-pe-sidebar style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: 0, maxHeight: "calc(100vh - 57px)", alignSelf: "flex-start", display: "flex", flexDirection: "column" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", gap: "4px" }}>
               <button onClick={startNewChat} style={{ flex: 1, fontSize: "14px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", fontWeight: 500, justifyContent: "flex-start" }}
                 onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
@@ -1216,7 +1216,7 @@ export default function ChatPage() {
                 <IconX size={16} />
               </button>
             </div>
-            <div style={{ flex: 1, minHeight: 0, overflowY: "auto", paddingTop: "8px" }}>
+            <div style={{ flex: "0 1 auto", minHeight: 0, overflowY: "auto", paddingTop: "8px" }}>
               <div style={{ fontSize: "11px", color: "var(--muted)", letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600, marginBottom: "6px", paddingLeft: "10px" }}>Chats</div>
               {!user ? (
                 <div style={{ fontSize: "13px", color: "var(--muted)", padding: "8px 10px", lineHeight: 1.5 }}>
@@ -1257,7 +1257,7 @@ export default function ChatPage() {
                 </div>
               )}
             </div>
-            <div style={{ borderTop: "1px solid var(--border)", paddingTop: "10px", marginTop: "8px" }}>
+            <div style={{ borderTop: "1px solid var(--border)", paddingTop: "10px" }}>
               {user ? (
                 <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", borderRadius: "10px" }}>
                   <div style={{ width: "28px", height: "28px", borderRadius: "999px", background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 600, flexShrink: 0, textTransform: "uppercase" }}>
