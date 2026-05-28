@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconBulb, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconBulb, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -281,6 +281,12 @@ export default function ChatPage() {
   const [chartsMode, setChartsMode] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
   const slashMenuRef = useRef<HTMLDivElement>(null);
+  // Image attachment for the next user message. Stored as the full data URL
+  // (`data:image/png;base64,...`) so the thumbnail can be rendered directly
+  // via <img src>. We split off the prefix before sending to the backend.
+  const [attachedImage, setAttachedImage] = useState<{ dataUrl: string; mediaType: string; name: string } | null>(null);
+  const [attachError, setAttachError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [theme, setTheme] = useState<"light" | "dark">("light");
   useEffect(() => {
     const stored = typeof window !== "undefined" ? localStorage.getItem("theme") : null;
@@ -495,12 +501,19 @@ export default function ChatPage() {
   };
 
   const sendMessage = async () => {
-    if (!input.trim() || isStreaming) return;
-    const userMessage: Message = { role: "user", content: input };
+    if ((!input.trim() && !attachedImage) || isStreaming) return;
+    // If the user attached an image but didn't type anything, give the model
+    // a minimal nudge so the request still has a coherent user turn.
+    const displayContent = input.trim() || (attachedImage ? `[Attached image: ${attachedImage.name}]` : "");
+    const userMessage: Message = { role: "user", content: displayContent };
     const allMessages = [...messages, userMessage];
     setMessages((prev) => [...prev, userMessage]);
     if (messages.length === 0 && user) setHistoryOpen(true);
+    // Snapshot the attachment for this send, then clear it from the input.
+    const sendingImage = attachedImage;
     setInput("");
+    setAttachedImage(null);
+    setAttachError(null);
     setPlanMode(false);
     setIsStreaming(true);
     setIsWaiting(true);
@@ -567,10 +580,19 @@ export default function ChatPage() {
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (user?.id) headers["X-User-Id"] = user.id;
+      // The image is sent as raw base64 (no `data:image/...;base64,` prefix)
+      // alongside its media type. The backend re-wraps it into Anthropic's
+      // vision content-block shape on the latest user message.
+      const imagePayload = sendingImage
+        ? {
+            image_base64: sendingImage.dataUrl.replace(/^data:[^;]+;base64,/, ""),
+            image_media_type: sendingImage.mediaType,
+          }
+        : {};
       const response = await fetch(getBackendEndpoint("chat/message"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, plan_mode: planMode, charts_mode: chartsMode }),
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, plan_mode: planMode, charts_mode: chartsMode, ...imagePayload }),
         signal: controller.signal,
       });
       if (response.status === 402) {
@@ -980,6 +1002,40 @@ export default function ChatPage() {
       }
     }
     if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+  };
+
+  const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  const ALLOWED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
+  const showAttachError = (msg: string) => {
+    setAttachError(msg);
+    setTimeout(() => setAttachError((prev) => (prev === msg ? null : prev)), 4000);
+  };
+
+  const handleFileSelected = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    // Reset the input value so picking the same file twice still fires onChange.
+    e.target.value = "";
+    if (!file) return;
+    if (!ALLOWED_IMAGE_TYPES.includes(file.type)) {
+      showAttachError("Only JPG, PNG, WEBP, or GIF images are supported.");
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      showAttachError("Image is larger than 5MB. Please attach a smaller file.");
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === "string" ? reader.result : "";
+      if (!dataUrl) {
+        showAttachError("Could not read that image. Please try again.");
+        return;
+      }
+      setAttachedImage({ dataUrl, mediaType: file.type, name: file.name });
+    };
+    reader.onerror = () => showAttachError("Could not read that image. Please try again.");
+    reader.readAsDataURL(file);
   };
 
   const autoResize = (el: HTMLTextAreaElement) => { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; };
@@ -1508,6 +1564,38 @@ export default function ChatPage() {
               padding: "14px 18px 10px",
               boxShadow: "0 1px 3px rgba(0,0,0,0.04)",
             }}>
+              {attachedImage && (
+                <div style={{ marginBottom: "8px", display: "flex", alignItems: "flex-start", gap: "8px" }}>
+                  <div style={{ position: "relative", display: "inline-block" }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={attachedImage.dataUrl}
+                      alt={attachedImage.name}
+                      style={{ display: "block", maxWidth: "80px", maxHeight: "80px", borderRadius: "8px", border: "1px solid var(--border)", objectFit: "cover" }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setAttachedImage(null)}
+                      disabled={isStreaming}
+                      title="Remove image"
+                      aria-label="Remove attached image"
+                      style={{ position: "absolute", top: "-6px", right: "-6px", width: "18px", height: "18px", borderRadius: "999px", background: "var(--text)", color: "var(--surface)", border: "1px solid var(--surface)", cursor: isStreaming ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}
+                    >
+                      <IconX size={12} />
+                    </button>
+                  </div>
+                </div>
+              )}
+              {attachError && (
+                <div role="alert" style={{ marginBottom: "8px", fontSize: "12px", color: "var(--accent)" }}>{attachError}</div>
+              )}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                onChange={handleFileSelected}
+                style={{ display: "none" }}
+              />
               <div style={{ position: "relative" }}>
                 {!input && !hasMessages && (
                   <div style={{ position: "absolute", top: "4px", left: "0", fontSize: "16px", lineHeight: 1.5, color: "var(--faint)", pointerEvents: "none" }}>
@@ -1533,6 +1621,16 @@ export default function ChatPage() {
               </div>
               <div style={{ marginTop: "6px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
                 <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={isStreaming}
+                    title="Attach an image (JPG, PNG, WEBP, or GIF, up to 5MB)"
+                    aria-label="Attach image"
+                    style={{ width: "32px", height: "32px", borderRadius: "999px", background: "transparent", color: "var(--text-3)", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, opacity: isStreaming ? 0.5 : 1, transition: "background 120ms, color 120ms" }}
+                  >
+                    <IconPaperclip size={18} />
+                  </button>
                   <button
                     type="button"
                     onClick={() => setPlanMode((v) => !v)}
@@ -1593,9 +1691,9 @@ export default function ChatPage() {
                 ) : (
                   <button
                     onClick={sendMessage}
-                    disabled={!input.trim()}
+                    disabled={!input.trim() && !attachedImage}
                     title="Send"
-                    style={{ width: "32px", height: "32px", borderRadius: "999px", background: input.trim() ? "var(--accent)" : "var(--surface-hover)", color: input.trim() ? "var(--accent-fg)" : "var(--muted)", border: "none", cursor: input.trim() ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, transition: "background 120ms" }}
+                    style={{ width: "32px", height: "32px", borderRadius: "999px", background: (input.trim() || attachedImage) ? "var(--accent)" : "var(--surface-hover)", color: (input.trim() || attachedImage) ? "var(--accent-fg)" : "var(--muted)", border: "none", cursor: (input.trim() || attachedImage) ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, transition: "background 120ms" }}
                   >
                     <IconArrowUp size={16} />
                   </button>

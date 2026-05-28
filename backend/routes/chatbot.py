@@ -208,6 +208,13 @@ class ChatRequest(BaseModel):
     user_id: str | None = None
     plan_mode: bool = False
     charts_mode: bool = False
+    # Optional image attached to the latest user message. Sent as raw base64
+    # (no `data:image/...;base64,` prefix) plus a media type like `image/png`.
+    # When present, the backend converts the latest user message into a
+    # multi-block content list with an Anthropic vision image block + the
+    # original text block before calling the Messages API.
+    image_base64: str | None = None
+    image_media_type: str | None = None
 
 
 PLAN_MODE_DIRECTIVE = """
@@ -288,6 +295,35 @@ async def chat_message(request: Request, chat_request: ChatRequest):
             deduplicated.append(msg)
         else:
             deduplicated[-1]["content"] += "\n\n" + msg["content"]
+
+    # If an image is attached, rewrite the final user message into Anthropic's
+    # multi-block content form: [image block, text block]. The image block uses
+    # the SDK's base64 source shape. Whitelist media types defensively — the
+    # API rejects anything else and we'd rather fail with a clear 400 than
+    # forward a bad payload.
+    _ALLOWED_IMAGE_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+    if chat_request.image_base64 and chat_request.image_media_type:
+        media_type = chat_request.image_media_type
+        if media_type not in _ALLOWED_IMAGE_MEDIA_TYPES:
+            return JSONResponse(status_code=400, content={"error": f"Unsupported image media type: {media_type}"})
+        # Find the last user message — that's the one the image belongs to.
+        for i in range(len(deduplicated) - 1, -1, -1):
+            if deduplicated[i]["role"] == "user":
+                text_content = deduplicated[i]["content"]
+                new_content: List[Dict[str, Any]] = [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": chat_request.image_base64,
+                        },
+                    }
+                ]
+                if text_content:
+                    new_content.append({"type": "text", "text": text_content})
+                deduplicated[i] = {"role": "user", "content": new_content}
+                break
 
     async def generate_stream():
         try:
