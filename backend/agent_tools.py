@@ -689,6 +689,7 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"[TOOLS] Executing {tool_name}")
     tools = {
         "run_python": run_python,
+        "generate_chart": generate_chart,
     }
     if tool_name not in tools:
         return {"error": f"Unknown tool: {tool_name}"}
@@ -716,6 +717,80 @@ TOOL_DEFINITIONS = [
                 "code": {"type": "string", "description": "Python code to execute. Must assign the final answer to `result`. Use the preloaded PolicyEngine interface directly, for example: `sim = Simulation(year=2025)` or `policy = Parameters.model_validate({...})`."},
             },
             "required": ["code"],
+        },
+    },
+    {
+        "name": "generate_chart",
+        "description": (
+            "Generate a chart JSON block for the frontend to render. "
+            "Use this for visualisations such as income distributions, marginal-rate or tax-schedule curves, "
+            "decile impact comparisons, and trends over time or income. "
+            "The tool returns a `chart_markdown` field containing a ```chart fenced JSON block — you MUST paste that "
+            "string verbatim into your next text response, otherwise the chart will not appear to the user. "
+            "Do not attempt to render charts with matplotlib inside `run_python`; the UI cannot display matplotlib output. "
+            "Compute the data first with `run_python` (returning a list of row dicts), then pass it to this tool."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "chart_type": {
+                    "type": "string",
+                    "enum": ["line", "bar", "area", "scatter"],
+                    "description": "Chart type. Use `line` for schedules/curves over a continuous x, `bar` for category comparisons (e.g. deciles), `area` for stacked compositions, `scatter` for point clouds.",
+                },
+                "title": {"type": "string", "description": "Chart title shown above the plot."},
+                "data": {
+                    "type": "array",
+                    "description": "List of row objects. Each row must contain the `x_field` key and every key listed in `y_fields`.",
+                    "items": {"type": "object"},
+                },
+                "x_field": {"type": "string", "description": "Key in each data row to use as the x value."},
+                "y_fields": {
+                    "type": "array",
+                    "description": "Keys in each data row to plot as y series. Provide multiple for multi-series charts (e.g. baseline vs reform).",
+                    "items": {"type": "string"},
+                },
+                "x_label": {"type": "string", "description": "Axis label for x (defaults to `x_field`)."},
+                "y_label": {"type": "string", "description": "Axis label for y (defaults to first y field or 'Value')."},
+                "x_format": {
+                    "type": "string",
+                    "enum": ["currency", "percent", "percent_decimal", "number", "compact", "year"],
+                    "description": "Number format for x-axis ticks and tooltips. Use `currency` for £ amounts, `percent` for values already on a 0–100 scale, `percent_decimal` for 0–1 shares, `compact` for large counts (1.2k), `year` for calendar years.",
+                },
+                "y_format": {
+                    "type": "string",
+                    "enum": ["currency", "percent", "percent_decimal", "number", "compact", "year"],
+                    "description": "Number format for y-axis ticks and tooltips. Same options as `x_format`.",
+                },
+                "x_min": {"type": "number", "description": "Optional fixed minimum for the x axis."},
+                "x_max": {"type": "number", "description": "Optional fixed maximum for the x axis."},
+                "y_min": {"type": "number", "description": "Optional fixed minimum for the y axis."},
+                "y_max": {"type": "number", "description": "Optional fixed maximum for the y axis."},
+                "series_labels": {
+                    "type": "array",
+                    "description": "Display labels for each y series, in the same order as `y_fields`.",
+                    "items": {"type": "string"},
+                },
+                "series_styles": {
+                    "type": "array",
+                    "description": "Line style per series (line/area charts).",
+                    "items": {"type": "string", "enum": ["solid", "dashed", "dotted"]},
+                },
+                "series_curves": {
+                    "type": "array",
+                    "description": "Curve interpolation per series (line/area charts).",
+                    "items": {"type": "string", "enum": ["smooth", "step", "linear"]},
+                },
+                "subtitle": {"type": "string", "description": "Optional subtitle shown under the title."},
+                "source": {"type": "string", "description": "Optional source/caption shown beneath the chart."},
+                "arrangement": {
+                    "type": "string",
+                    "enum": ["grouped", "stacked"],
+                    "description": "For bar charts only: `grouped` side-by-side or `stacked`.",
+                },
+                "area_fill": {"type": "boolean", "description": "For line charts only: fill the area under the line."},
+            },
+            "required": ["chart_type", "title", "data", "x_field", "y_fields"],
         },
     },
 ]
