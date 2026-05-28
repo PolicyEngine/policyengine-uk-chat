@@ -1073,7 +1073,20 @@ export default function ChatPage() {
     reader.readAsDataURL(file);
   };
 
-  const autoResize = (el: HTMLTextAreaElement) => { el.style.height = "auto"; el.style.height = el.scrollHeight + "px"; };
+  const autoResize = (el: HTMLTextAreaElement) => {
+    // Cap height at ~10 lines (16px font * 1.5 line-height * 10) so a long paste
+    // can't push the chat transcript off-screen; scroll inside the textarea above the cap.
+    const MAX_HEIGHT = 240;
+    el.style.height = "auto";
+    const next = el.scrollHeight;
+    if (next > MAX_HEIGHT) {
+      el.style.height = MAX_HEIGHT + "px";
+      el.style.overflowY = "auto";
+    } else {
+      el.style.height = next + "px";
+      el.style.overflowY = "hidden";
+    }
+  };
 
   const formatToolSummary = (summary: string): string => {
     // If it looks like raw JSON, just show the tool completed
@@ -1651,7 +1664,7 @@ export default function ChatPage() {
                   onKeyDown={handleKeyDown}
                   disabled={isStreaming}
                   rows={1}
-                  style={{ width: "100%", background: "transparent", border: "none", outline: "none", fontSize: "16px", lineHeight: 1.5, color: "var(--text)", fontFamily: "inherit", resize: "none", padding: "4px 0", opacity: isStreaming ? 0.5 : 1, overflow: "hidden", caretColor: "var(--text)", boxSizing: "border-box" }}
+                  style={{ width: "100%", maxHeight: "240px", background: "transparent", border: "none", outline: "none", fontSize: "16px", lineHeight: 1.5, color: "var(--text)", fontFamily: "inherit", resize: "none", padding: "4px 0", opacity: isStreaming ? 0.5 : 1, overflowY: "hidden", caretColor: "var(--text)", boxSizing: "border-box" }}
                 />
               </div>
               <div style={{ marginTop: "6px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
