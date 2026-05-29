@@ -1758,7 +1758,7 @@ export default function ChatPage() {
                 />
               </div>
               <div style={{ marginTop: "6px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
-                <div style={{ display: "inline-flex", alignItems: "center", gap: "6px" }}>
+                <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", minWidth: 0 }}>
                   <button
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
@@ -1817,6 +1817,20 @@ export default function ChatPage() {
                   >
                     <IconChartBar size={12} /> Charts {chartsMode ? "on" : "off"}
                   </button>
+                  {input.length > 0 && (
+                    <span
+                      aria-live="polite"
+                      style={{
+                        fontSize: "11px",
+                        fontVariantNumeric: "tabular-nums",
+                        color: input.length >= 8000 ? "var(--accent)" : input.length >= 4000 ? "var(--text-3)" : "var(--faint)",
+                        transition: "color 160ms",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      {input.length.toLocaleString()}{input.length >= 16000 ? " — long" : ""}
+                    </span>
+                  )}
                 </div>
                 {isStreaming ? (
                   <button
