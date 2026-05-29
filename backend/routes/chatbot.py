@@ -105,6 +105,9 @@ import anthropic as anthropic_sdk
 DEFAULT_FAST_MODEL = os.environ.get("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5")
 DEFAULT_COMPLEX_MODEL = os.environ.get("ANTHROPIC_COMPLEX_MODEL", "claude-sonnet-4-6")
 TITLE_MODEL = os.environ.get("ANTHROPIC_TITLE_MODEL", DEFAULT_FAST_MODEL)
+# Follow-up suggestion chips run on the same fast model — cheap, latency-tolerant.
+SUGGESTION_MODEL = os.environ.get("ANTHROPIC_SUGGESTION_MODEL", DEFAULT_FAST_MODEL)
+SUGGESTION_TIMEOUT_SECS = float(os.environ.get("ANTHROPIC_SUGGESTION_TIMEOUT_SECS", "5"))
 FAST_MODEL_MAX_INPUT_TOKENS = int(os.environ.get("ANTHROPIC_FAST_MODEL_MAX_INPUT_TOKENS", "120000"))
 
 _REFERENCE_PATH = Path(__file__).resolve().parent.parent / "reference.md"
@@ -235,6 +238,92 @@ The user has enabled chart mode. When the question's answer would benefit from a
 class TitleRequest(BaseModel):
     first_user_message: str
     first_assistant_message: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Follow-up suggestion chips
+# ---------------------------------------------------------------------------
+
+_SUGGESTION_SYSTEM = (
+    "You suggest follow-up questions for a UK tax and benefit policy chatbot. "
+    "Given the latest user question and the assistant's answer, propose 2–3 short, "
+    "specific follow-ups the user is likely to want next (a comparison, a slice by "
+    "region or decile, a different reform, a chart request, an alternative dataset, "
+    "etc.). Each question must be under 80 characters, phrased as the user would "
+    "type it, in British English, with no numbering or trailing punctuation beyond "
+    "a question mark. Respond ONLY with a JSON object of the form "
+    '{"suggestions": ["...", "..."]} — no prose, no code fences.'
+)
+
+
+async def _generate_followup_suggestions(
+    last_user_message: str,
+    assistant_answer: str,
+) -> List[str]:
+    """Best-effort follow-up question generation.
+
+    Returns up to 3 short follow-up strings. ANY failure (timeout, API error,
+    malformed JSON, empty result) returns []. Never raises — callers must be
+    able to drop the suggestions silently without surfacing an error.
+    """
+    if not assistant_answer.strip():
+        return []
+    try:
+        client = _get_anthropic_client()
+        # Trim to keep input small: the helper sees the last user turn and the
+        # assistant answer, both capped. Long tool transcripts aren't needed —
+        # the answer text is what the user is reading.
+        user_block = (
+            "Latest user question:\n"
+            + last_user_message.strip()[:1500]
+            + "\n\nAssistant answer:\n"
+            + assistant_answer.strip()[:4000]
+        )
+        response = await asyncio.wait_for(
+            client.messages.create(
+                model=SUGGESTION_MODEL,
+                max_tokens=200,
+                system=_SUGGESTION_SYSTEM,
+                messages=[{"role": "user", "content": user_block}],
+            ),
+            timeout=SUGGESTION_TIMEOUT_SECS,
+        )
+        text_parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
+        raw = "".join(text_parts).strip()
+        if not raw:
+            return []
+        # Strip optional code fences just in case the model ignored instructions.
+        if raw.startswith("```"):
+            raw = raw.strip("`")
+            if raw.lower().startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
+        # Allow either {"suggestions":[...]} or a bare JSON list.
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            items = parsed.get("suggestions") or parsed.get("questions") or []
+        elif isinstance(parsed, list):
+            items = parsed
+        else:
+            return []
+        cleaned: List[str] = []
+        for item in items:
+            if not isinstance(item, str):
+                continue
+            s = item.strip().strip('"').strip()
+            if not s:
+                continue
+            # Hard cap length and dedupe.
+            if len(s) > 120:
+                s = s[:117].rstrip() + "..."
+            if s not in cleaned:
+                cleaned.append(s)
+            if len(cleaned) == 3:
+                break
+        return cleaned
+    except Exception as e:  # noqa: BLE001 — best-effort, swallow everything
+        logger.info(f"[CHAT] Follow-up suggestion generation failed (silent): {e}")
+        return []
 
 
 # ---------------------------------------------------------------------------
@@ -456,6 +545,25 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                     except Exception as e:
                         logger.warning(f"[CHAT] Failed to record usage: {e}")
                     yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'stop_reason': last_stop_reason, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
+                    # Best-effort follow-up suggestions. Plan-mode answers are
+                    # already clarifying questions, so don't suggest more on top.
+                    # Truncated/error stops are skipped because the answer
+                    # isn't really finished from the user's perspective.
+                    if not plan_mode and last_stop_reason in ("end_turn", "stop_sequence", None):
+                        last_user_msg = next(
+                            (m["content"] for m in reversed(deduplicated) if m.get("role") == "user"),
+                            "",
+                        )
+                        if isinstance(last_user_msg, list):  # defensive: structured content
+                            last_user_msg = " ".join(
+                                str(b.get("text", "")) for b in last_user_msg if isinstance(b, dict)
+                            )
+                        suggestions = await _generate_followup_suggestions(
+                            last_user_message=str(last_user_msg),
+                            assistant_answer=assistant_content,
+                        )
+                        if suggestions:
+                            yield f"data: {json.dumps({'type': 'suggestions', 'suggestions': suggestions})}\n\n"
                     break
 
                 # Detect infinite loops
