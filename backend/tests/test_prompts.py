@@ -36,6 +36,14 @@ def test_main_prompt_contains_microdata_privacy_rules():
     assert "cannot access or disclose real households" in SYSTEM_PROMPT
     assert "illustrative synthetic households" in SYSTEM_PROMPT
     assert "Simulation.single_person()" in SYSTEM_PROMPT
+    assert "analyse_microdata` must not be used with FRS" in SYSTEM_PROMPT
+
+
+def test_main_prompt_prefers_typed_tools_before_python():
+    assert "calculate_household" in SYSTEM_PROMPT
+    assert "run_economy_simulation" in SYSTEM_PROMPT
+    assert "analyse_microdata" in SYSTEM_PROMPT
+    assert "Use `run_python` as the fallback" in SYSTEM_PROMPT
 
 
 def test_run_python_tool_repeats_microdata_contract():
@@ -44,6 +52,16 @@ def test_run_python_tool_repeats_microdata_contract():
     assert "illustrative synthetic households" in description
     assert "Simulation.single_person()" in description
     assert "rather than real households" in description
+    assert "fallback" in description.lower()
+
+
+def test_analyse_microdata_tool_excludes_frs():
+    tool = _tool("analyse_microdata")
+    description = tool["description"]
+    dataset_schema = tool["input_schema"]["properties"]["dataset"]
+    assert "does not support FRS" in description
+    assert dataset_schema["default"] == "efrs"
+    assert "frs" not in dataset_schema["enum"]
 
 
 def test_generate_chart_tool_requires_neutral_titles():
@@ -51,6 +69,7 @@ def test_generate_chart_tool_requires_neutral_titles():
     description = chart_tool["description"]
     title_description = chart_tool["input_schema"]["properties"]["title"]["description"]
     assert "factually neutral" in description
+    assert "typed calculation tool or `run_python`" in description
     assert "factually neutral" in title_description.lower()
 
 

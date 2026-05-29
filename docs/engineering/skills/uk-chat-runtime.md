@@ -34,7 +34,13 @@ belong in `backend/prompts.py`.
 Only tools listed in `TOOL_DEFINITIONS` and dispatched by `execute_tool()` are
 exposed to the model. At present, the exposed tools are:
 
-- `run_python`: execute reproducible PolicyEngine UK Python code.
+- `calculate_household`: calculate illustrative synthetic household outcomes.
+- `run_economy_simulation`: calculate aggregate society-wide impacts for
+  parametric reforms.
+- `analyse_microdata`: analyse allowed non-FRS model microdata through bounded
+  filtering, sampling, grouping, and aggregation operations.
+- `run_python`: execute reproducible PolicyEngine UK Python code for fallback
+  cases that do not fit the typed tools.
 - `generate_chart`: return frontend-renderable chart JSON markdown.
 
 Helper functions in `backend/agent_tools.py` are implementation details unless
@@ -45,22 +51,31 @@ they are added to both the tool definitions and dispatcher.
 - Non-deterministic: user text interpretation, model planning, tool selection,
   prose generation, follow-up suggestions, and title generation.
 - Deterministic: request validation, plan-mode tool omission, tool dispatch,
-  Python execution, chart JSON construction, result truncation/summarisation,
-  billing calculation, and database writes.
+  typed tool execution after selection, Python execution, chart JSON
+  construction, result truncation/summarisation, billing calculation, and
+  database writes.
 
 Plan mode must remain structurally enforced by omitting tools from the model
 request, not only by prompting the model not to call tools.
+
+Tool choice is model-mediated unless the route layer deliberately forces a
+specific tool. Prompt and schema guidance improve selection consistency, but
+they are not deterministic controls. The chat route defaults the model
+temperature to `0` to reduce sampling variance.
 
 ## Policy Analysis Rules
 
 - Be factually neutral. Do not call UK tax or benefit choices good, bad, fair,
   unfair, regressive, progressive, generous, punitive, or similar.
-- Quantitative policy answers should be computed with `run_python`; do not
+- Quantitative policy answers should be computed with the typed calculation
+  tools when they fit the request, or with `run_python` as a fallback; do not
   answer tax, benefit, reform, poverty, decile, or distributional questions from
   memory.
 - Do not access, display, quote, or imply access to row-level survey microdata
   or real households.
 - Use aggregate microdata interfaces only for aggregate outputs.
+- Do not use `analyse_microdata` with FRS. For FRS-backed questions, use
+  aggregate outputs such as `run_economy_simulation`.
 - If a user asks for household examples, construct illustrative synthetic
   households with the public `Simulation` API. Prefer
   `Simulation.single_person()` for single-person examples, and label examples as

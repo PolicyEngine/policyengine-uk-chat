@@ -6,14 +6,18 @@ Run inside the backend container: pytest tests/
 
 import importlib.util
 import os
+from types import SimpleNamespace
 
 import pytest
 
+import agent_tools
 from agent_tools import (
     get_baseline_parameters,
     calculate_household,
+    analyse_microdata,
     generate_chart,
     execute_tool,
+    TOOL_DEFINITIONS,
     _build_compiled_policy,
     _json_safe,
     run_python,
@@ -24,6 +28,10 @@ requires_compiled = pytest.mark.skipif(
     os.environ.get("CI") != "true" and not COMPILED_AVAILABLE,
     reason="policyengine_uk_compiled is not installed",
 )
+
+
+def _tool(name: str) -> dict:
+    return next(tool for tool in TOOL_DEFINITIONS if tool["name"] == name)
 
 
 # ---------------------------------------------------------------------------
@@ -252,6 +260,157 @@ class TestJsonSafe:
         assert serialised == {"result": {"child_benefit": 123}}
 
 
+class TestToolDefinitions:
+    def test_exposes_typed_tools_and_fallback_python(self):
+        names = [tool["name"] for tool in TOOL_DEFINITIONS]
+        assert "calculate_household" in names
+        assert "run_economy_simulation" in names
+        assert "analyse_microdata" in names
+        assert "run_python" in names
+
+    def test_analyse_microdata_schema_excludes_frs(self):
+        dataset_schema = _tool("analyse_microdata")["input_schema"]["properties"]["dataset"]
+        assert dataset_schema["default"] == "efrs"
+        assert "frs" not in dataset_schema["enum"]
+        assert "efrs" in dataset_schema["enum"]
+
+    def test_run_python_is_described_as_fallback(self):
+        description = _tool("run_python")["description"]
+        assert "fallback" in description.lower()
+        assert "calculate_household" in description
+        assert "run_economy_simulation" in description
+        assert "analyse_microdata" in description
+
+
+class TestAnalyseMicrodataContract:
+    @pytest.mark.parametrize("dataset", ["frs", "FRS"])
+    def test_rejects_frs_before_loading_microdata(self, monkeypatch, dataset):
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("FRS rejection must happen before loading or building simulations")
+
+        monkeypatch.setattr(agent_tools, "_get_cached_microdata", fail_if_called)
+        monkeypatch.setattr(agent_tools, "_build_simulation", fail_if_called)
+        monkeypatch.setattr(agent_tools, "_build_compiled_policy", fail_if_called)
+        monkeypatch.setattr(agent_tools, "_build_structural_reform", fail_if_called)
+
+        result = analyse_microdata(entity="households", operation="count", dataset=dataset)
+        assert "error" in result
+        assert "FRS" in result["error"]
+
+    def _install_mock_microdata(self, monkeypatch, row_count=4):
+        import pandas as pd
+
+        household_ids = list(range(row_count))
+        regions = ["North" if i % 2 == 0 else "South" for i in household_ids]
+        weights = [2.0, 1.0, 3.0, 4.0] if row_count == 4 else [1.0] * row_count
+        incomes = [10.0, 30.0, 20.0, 40.0] if row_count == 4 else [float(i) for i in household_ids]
+
+        households = pd.DataFrame(
+            {
+                "household_id": household_ids,
+                "region": regions,
+                "weight": weights,
+                "baseline_net_income": incomes,
+                "reform_net_income": [income + 5.0 for income in incomes],
+                "baseline_total_tax": [income / 10.0 for income in incomes],
+                "reform_total_tax": [income / 10.0 + 1.0 for income in incomes],
+                "baseline_total_benefits": [1.0 for _ in household_ids],
+                "reform_total_benefits": [2.0 for _ in household_ids],
+            }
+        )
+        persons = pd.DataFrame(
+            {
+                "person_id": household_ids,
+                "household_id": household_ids,
+                "age": [30 + i for i in household_ids],
+                "gender": ["F" if i % 2 == 0 else "M" for i in household_ids],
+                "employment_income": incomes,
+                "baseline_income_tax": [income / 10.0 for income in incomes],
+                "reform_income_tax": [income / 10.0 + 1.0 for income in incomes],
+                "baseline_total_income": incomes,
+                "reform_total_income": [income + 5.0 for income in incomes],
+            }
+        )
+        benunits = pd.DataFrame(
+            {
+                "benunit_id": household_ids,
+                "household_id": household_ids,
+                "baseline_total_benefits": [1.0 for _ in household_ids],
+                "reform_total_benefits": [2.0 for _ in household_ids],
+            }
+        )
+        microdata = SimpleNamespace(persons=persons, benunits=benunits, households=households)
+
+        calls = []
+
+        def get_cached_microdata(year, reform, dataset):
+            calls.append({"year": year, "reform": reform, "dataset": dataset})
+            return microdata
+
+        monkeypatch.setattr(agent_tools, "_get_cached_microdata", get_cached_microdata)
+        return calls
+
+    def test_count_uses_weights_after_filtering(self, monkeypatch):
+        self._install_mock_microdata(monkeypatch)
+
+        result = analyse_microdata(
+            entity="households",
+            operation="count",
+            filters={"region": "North"},
+            dataset="efrs",
+        )
+
+        assert result["row_count"] == 2
+        assert result["result"] == {"row_count": 2, "weighted_population": 5}
+
+    def test_mean_uses_weights(self, monkeypatch):
+        self._install_mock_microdata(monkeypatch)
+
+        result = analyse_microdata(
+            entity="households",
+            operation="mean",
+            columns=["baseline_net_income"],
+            dataset="efrs",
+        )
+
+        assert result["result"]["baseline_net_income"] == pytest.approx(27.0)
+
+    def test_group_by_returns_weighted_group_means(self, monkeypatch):
+        self._install_mock_microdata(monkeypatch)
+
+        result = analyse_microdata(
+            entity="households",
+            operation="group_by",
+            columns=["baseline_net_income"],
+            group_by=["region"],
+            dataset="efrs",
+        )
+
+        rows = {row["region"]: row for row in result["result"]}
+        assert rows["North"]["row_count"] == 2
+        assert rows["North"]["weighted_population"] == 5.0
+        assert rows["North"]["baseline_net_income"] == pytest.approx(16.0)
+        assert rows["South"]["row_count"] == 2
+        assert rows["South"]["weighted_population"] == 5.0
+        assert rows["South"]["baseline_net_income"] == pytest.approx(38.0)
+
+    def test_sample_is_deterministic_and_capped_for_non_frs(self, monkeypatch):
+        self._install_mock_microdata(monkeypatch, row_count=25)
+
+        kwargs = {
+            "entity": "households",
+            "operation": "sample",
+            "columns": ["household_id", "baseline_net_income"],
+            "n": 100,
+            "dataset": "efrs",
+        }
+        first = analyse_microdata(**kwargs)
+        second = analyse_microdata(**kwargs)
+
+        assert len(first["result"]) == 20
+        assert first["result"] == second["result"]
+
+
 @requires_compiled
 class TestRunPython:
     def test_replaces_old_compute_sum_use_case(self):
@@ -321,6 +480,21 @@ class TestExecuteTool:
     def test_compute_is_not_exposed(self):
         result = execute_tool("compute", {"operation": "sum", "data": [1, 2, 3]})
         assert result["error"] == "Unknown tool: compute"
+
+    def test_dispatches_calculate_household(self, monkeypatch):
+        monkeypatch.setattr(agent_tools, "calculate_household", lambda **kwargs: {"tool": "household", "input": kwargs})
+        result = execute_tool("calculate_household", {"person": [], "benunit": [], "household": []})
+        assert result["tool"] == "household"
+
+    def test_dispatches_run_economy_simulation(self, monkeypatch):
+        monkeypatch.setattr(agent_tools, "run_economy_simulation", lambda **kwargs: {"tool": "economy", "input": kwargs})
+        result = execute_tool("run_economy_simulation", {"year": 2025})
+        assert result["tool"] == "economy"
+
+    def test_dispatches_analyse_microdata(self, monkeypatch):
+        monkeypatch.setattr(agent_tools, "analyse_microdata", lambda **kwargs: {"tool": "microdata", "input": kwargs})
+        result = execute_tool("analyse_microdata", {"entity": "households", "operation": "count"})
+        assert result["tool"] == "microdata"
 
     def test_dispatches_generate_chart(self):
         result = execute_tool("generate_chart", {

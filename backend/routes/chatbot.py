@@ -54,6 +54,7 @@ TITLE_MODEL = os.environ.get("ANTHROPIC_TITLE_MODEL", DEFAULT_FAST_MODEL)
 SUGGESTION_MODEL = os.environ.get("ANTHROPIC_SUGGESTION_MODEL", DEFAULT_FAST_MODEL)
 SUGGESTION_TIMEOUT_SECS = float(os.environ.get("ANTHROPIC_SUGGESTION_TIMEOUT_SECS", "5"))
 FAST_MODEL_MAX_INPUT_TOKENS = int(os.environ.get("ANTHROPIC_FAST_MODEL_MAX_INPUT_TOKENS", "120000"))
+CHAT_TEMPERATURE = float(os.environ.get("ANTHROPIC_CHAT_TEMPERATURE", "0"))
 
 _REFERENCE_PATH = Path(__file__).resolve().parent.parent / "reference.md"
 try:
@@ -372,6 +373,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                         stream_kwargs: Dict[str, Any] = {
                             "model": model,
                             "max_tokens": 16000,
+                            "temperature": CHAT_TEMPERATURE,
                             "system": system_blocks,
                             "messages": conversation,
                         }
@@ -495,7 +497,9 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                     assistant_message["content"].append({"type": "tool_use", "id": tu["id"], "name": tu["name"], "input": tu["input"]})
                 conversation.append(assistant_message)
 
-                # Execute tools in parallel
+                # Execute tools in parallel and stream results as each finishes.
+                # The model-facing transcript below remains deterministic because
+                # it appends tool results in the original tool-call order.
                 logger.info(f"[CHAT] Executing {len(tool_uses)} tools: {[t['name'] for t in tool_uses]}")
 
                 async def execute_tool_async(tu):

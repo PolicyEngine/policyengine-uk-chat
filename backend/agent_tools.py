@@ -437,21 +437,30 @@ def analyse_microdata(
     columns: Optional[List[str]] = None,
     group_by: Optional[List[str]] = None,
     n: int = 5,
-    dataset: str = "frs",
+    dataset: str = "efrs",
 ) -> Dict[str, Any]:
     try:
+        dataset_key = (dataset or "").lower()
+        if dataset_key == "frs":
+            return {
+                "error": "analyse_microdata does not support FRS row-level access",
+                "hint": (
+                    "Use run_economy_simulation for aggregate FRS outputs, or choose "
+                    "a non-FRS dataset for analyse_microdata."
+                ),
+            }
         import pandas as pd
 
         policy = _build_compiled_policy(reform)
         structural = _build_structural_reform(structural_reform)
         if structural is not None:
             from policyengine_uk_compiled import combine_microdata
-            sim = _build_simulation(year, dataset)
+            sim = _build_simulation(year, dataset_key)
             baseline_microdata = sim.run_microdata()
             reform_microdata = sim.run_microdata(policy=policy, structural=structural)
             microdata = combine_microdata(baseline_microdata, reform_microdata)
         else:
-            microdata = _get_cached_microdata(year, reform, dataset)
+            microdata = _get_cached_microdata(year, reform, dataset_key)
 
         entity_map = {"persons": microdata.persons, "benunits": microdata.benunits, "households": microdata.households}
         if entity not in entity_map:
@@ -522,16 +531,34 @@ def analyse_microdata(
             result = {c: float((df[c] * df["weight"]).sum()) for c in numeric_cols}
         elif operation == "count":
             result = {"row_count": row_count, "weighted_population": weighted_count}
+        elif operation == "group_by":
+            if not group_by:
+                return {"error": "group_by operation requires at least one group_by column"}
+            missing_groups = [c for c in group_by if c not in df.columns]
+            if missing_groups:
+                return {"error": f"Group columns not found: {missing_groups}. Available: {all_cols}"}
+            numeric_cols = [c for c in value_cols if pd.api.types.is_numeric_dtype(df[c]) and c != "weight"]
+            grouped_rows = []
+            for keys, group in df.groupby(group_by, dropna=False):
+                if not isinstance(keys, tuple):
+                    keys = (keys,)
+                row = {col: _json_safe(value) for col, value in zip(group_by, keys)}
+                row["row_count"] = int(len(group))
+                row["weighted_population"] = float(group["weight"].sum())
+                for col in numeric_cols:
+                    row[col] = float((group[col] * group["weight"]).sum() / group["weight"].sum()) if group["weight"].sum() > 0 else float(group[col].mean())
+                grouped_rows.append(row)
+            result = grouped_rows
         elif operation == "describe":
             numeric_cols = [c for c in value_cols if pd.api.types.is_numeric_dtype(df[c]) and c != "weight"]
             result = {c: {"mean": float((df[c] * df["weight"]).sum() / df["weight"].sum()) if df["weight"].sum() > 0 else float(df[c].mean()), "min": float(df[c].min()), "max": float(df[c].max()), "count": int(df[c].count())} for c in numeric_cols}
             for c in [c for c in value_cols if not pd.api.types.is_numeric_dtype(df[c])]:
                 result[c] = {str(k): int(v) for k, v in df[c].value_counts().head(10).items()}
         else:
-            return {"error": f"Unknown operation '{operation}'. Use: mean, sum, count, sample, describe"}
+            return {"error": f"Unknown operation '{operation}'. Use: mean, sum, count, sample, group_by, describe"}
 
         dataset_labels = {"frs": "Family Resources Survey", "efrs": "Enhanced FRS", "spi": "Survey of Personal Incomes", "lcfs": "Living Costs and Food Survey", "was": "Wealth and Assets Survey"}
-        return {"entity": entity, "operation": operation, "year": year, "dataset": dataset_labels.get(dataset, dataset), "reform_applied": reform is not None, "structural_reform_applied": structural is not None, "filters_applied": filters_applied, "row_count": row_count, "weighted_count": weighted_count, "result": result, "available_columns": all_cols}
+        return {"entity": entity, "operation": operation, "year": year, "dataset": dataset_labels.get(dataset_key, dataset_key), "reform_applied": reform is not None, "structural_reform_applied": structural is not None, "filters_applied": filters_applied, "row_count": row_count, "weighted_count": weighted_count, "result": result, "available_columns": all_cols}
     except Exception as e:
         logger.error(f"Error in analyse_microdata: {e}")
         import traceback; logger.error(traceback.format_exc())
@@ -688,6 +715,9 @@ def _run_generator(code: str) -> Dict[str, Any]:
 def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     logger.info(f"[TOOLS] Executing {tool_name}")
     tools = {
+        "calculate_household": calculate_household,
+        "run_economy_simulation": run_economy_simulation,
+        "analyse_microdata": analyse_microdata,
         "run_python": run_python,
         "generate_chart": generate_chart,
     }
@@ -707,10 +737,146 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
         return {"error": str(e)}
 
 
+REFORM_SCHEMA = {
+    "type": "object",
+    "description": (
+        "Parametric reform. Top-level keys are programmes; values are the "
+        "parameter changes for that programme. Valid programmes include "
+        "income_tax, national_insurance, universal_credit, child_benefit, "
+        "state_pension, pension_credit, benefit_cap, housing_benefit, "
+        "tax_credits, scottish_child_payment, stamp_duty, capital_gains_tax, "
+        "and wealth_tax. Field names within each programme match the "
+        "corresponding *Params constructor. For structural reforms, use "
+        "run_python instead."
+    ),
+    "additionalProperties": True,
+}
+
+
 TOOL_DEFINITIONS = [
     {
+        "name": "calculate_household",
+        "description": (
+            "Compute taxes, benefits, and net income for an illustrative "
+            "specific household described with person, benefit-unit, and "
+            "household records. Prefer this over run_python for household-level "
+            "questions with a defined household composition. These inputs are "
+            "synthetic examples, not real households."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "person": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": (
+                        "Person records. Each should include person_id, "
+                        "benunit_id, household_id, and age. Common optional "
+                        "fields include employment_income, "
+                        "self_employment_income, and pension_income."
+                    ),
+                },
+                "benunit": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": (
+                        "Benefit-unit records, each with benunit_id and "
+                        "household_id."
+                    ),
+                },
+                "household": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                    "description": (
+                        "Household records, each with household_id. Add "
+                        "location fields when relevant, for example region or "
+                        "is_in_scotland."
+                    ),
+                },
+                "year": {"type": "integer", "default": 2025},
+                "reform": REFORM_SCHEMA,
+            },
+            "required": ["person", "benunit", "household"],
+        },
+    },
+    {
+        "name": "run_economy_simulation",
+        "description": (
+            "Run a UK economy-wide microsimulation comparing baseline current "
+            "law to a parametric reform. Returns aggregate outputs including "
+            "budgetary impact, programme breakdown, decile impacts, "
+            "winners/losers, caseloads, HBAI incomes, and poverty metrics. "
+            "Prefer this over run_python for society-wide reform analysis. "
+            "Use run_python for structural reforms."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "year": {"type": "integer", "default": 2025},
+                "reform": REFORM_SCHEMA,
+                "dataset": {
+                    "type": "string",
+                    "enum": ["frs", "efrs", "spi", "lcfs", "was"],
+                    "default": "frs",
+                    "description": (
+                        "Microdata source for aggregate simulation. FRS is the "
+                        "default for aggregate outputs."
+                    ),
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "analyse_microdata",
+        "description": (
+            "Slice, filter, sample, or aggregate non-FRS model microdata for a "
+            "given year and optional parametric reform. Use this for allowed "
+            "non-FRS microdata follow-ups such as subset means, counts, group "
+            "breakdowns, descriptions, or small model-record samples. This tool "
+            "explicitly does not support FRS; use run_economy_simulation for "
+            "aggregate FRS outputs."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "entity": {
+                    "type": "string",
+                    "enum": ["persons", "benunits", "households"],
+                },
+                "operation": {
+                    "type": "string",
+                    "enum": ["sample", "mean", "sum", "count", "group_by", "describe"],
+                },
+                "year": {"type": "integer", "default": 2025},
+                "reform": REFORM_SCHEMA,
+                "filters": {
+                    "type": "object",
+                    "description": (
+                        "Column to predicate map. Predicate can be a scalar, a "
+                        "list, or a dict with min, max, gt, lt, gte, lte, or ne."
+                    ),
+                },
+                "columns": {"type": "array", "items": {"type": "string"}},
+                "group_by": {"type": "array", "items": {"type": "string"}},
+                "n": {
+                    "type": "integer",
+                    "default": 5,
+                    "description": "Sample size when operation is sample.",
+                },
+                "dataset": {
+                    "type": "string",
+                    "enum": ["efrs", "spi", "lcfs", "was"],
+                    "default": "efrs",
+                    "description": "FRS is not available for analyse_microdata.",
+                },
+            },
+            "required": ["entity", "operation"],
+        },
+    },
+    {
         "name": "run_python",
-        "description": "Execute reproducible Python code using the official PolicyEngine UK compiled interface. The environment preloads `policyengine_uk_compiled` as `pe`, plus `Simulation`, `Parameters`, `StructuralReform`, `aggregate_microdata`, `combine_microdata`, `capabilities`, `ensure_dataset`, `pd`, `np`, `json`, and `math`. Assign the final answer to `result` and use `print()` for intermediate output. Do not inspect or return row-level survey microdata. For household examples, create illustrative synthetic households, prefer `Simulation.single_person()` for single-person examples, and label them as illustrative rather than real households.",
+        "description": "Execute reproducible Python code using the official PolicyEngine UK compiled interface. Prefer the typed tools (`calculate_household`, `run_economy_simulation`, `analyse_microdata`) when the question fits their shape; use `run_python` as a fallback for structural reforms, novel aggregations, parameter introspection, historical lookups, or unsupported cases. The environment preloads `policyengine_uk_compiled` as `pe`, plus `Simulation`, `Parameters`, `StructuralReform`, `aggregate_microdata`, `combine_microdata`, `capabilities`, `ensure_dataset`, `pd`, `np`, `json`, and `math`. Assign the final answer to `result` and use `print()` for intermediate output. Do not inspect or return row-level survey microdata, including FRS data. For household examples, create illustrative synthetic households, prefer `Simulation.single_person()` for single-person examples, and label them as illustrative rather than real households.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -730,7 +896,8 @@ TOOL_DEFINITIONS = [
             "The tool returns a `chart_markdown` field containing a ```chart fenced JSON block — you MUST paste that "
             "string verbatim into your next text response, otherwise the chart will not appear to the user. "
             "Do not attempt to render charts with matplotlib inside `run_python`; the UI cannot display matplotlib output. "
-            "Compute the data first with `run_python` (returning a list of row dicts), then pass it to this tool."
+            "Compute the data first with a typed calculation tool or `run_python` "
+            "(returning a list of row dicts), then pass it to this tool."
         ),
         "input_schema": {
             "type": "object",
