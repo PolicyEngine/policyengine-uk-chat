@@ -11,6 +11,7 @@ from config.clients import get_async_client, get_sync_client
 from config.models import (
     DEFAULT_COMPLEX_MODEL,
     DEFAULT_FAST_MODEL,
+    DEFAULT_REASONING_MODEL,
     FAST_MODEL_MAX_INPUT_TOKENS,
     SUGGESTION_MODEL,
     SUGGESTION_TIMEOUT_SECS,
@@ -24,6 +25,7 @@ __all__ = [
     "SUGGESTION_TEMPERATURE",
     "DEFAULT_FAST_MODEL",
     "DEFAULT_COMPLEX_MODEL",
+    "DEFAULT_REASONING_MODEL",
     "TITLE_MODEL",
     "SUGGESTION_MODEL",
     "SUGGESTION_TIMEOUT_SECS",

@@ -395,6 +395,46 @@ class TestChatRouteWithMockedAnthropic:
 
 
 # ---------------------------------------------------------------------------
+# Model routing — reform / distributional questions upgrade to Opus (#83)
+# ---------------------------------------------------------------------------
+
+class TestSelectChatModel:
+    """Pure-Python checks on the model routing heuristic.
+
+    These don't hit Anthropic — they exercise `_select_chat_model` directly
+    with synthetic message lists and verify the routing decision.
+    """
+
+    def test_decile_reform_routes_to_opus(self):
+        from chat.model_selection import _select_chat_model
+        from config import DEFAULT_REASONING_MODEL
+
+        msgs = [{"role": "user", "content": "Show me the decile impact of a reform raising the personal allowance by 5%"}]
+        assert _select_chat_model(msgs) == DEFAULT_REASONING_MODEL
+
+    def test_plain_question_routes_to_fast_model(self):
+        from chat.model_selection import _select_chat_model
+        from config import DEFAULT_FAST_MODEL
+
+        msgs = [{"role": "user", "content": "What is the personal allowance for 2025?"}]
+        assert _select_chat_model(msgs) == DEFAULT_FAST_MODEL
+
+    def test_charts_mode_upgrades_without_reform_signal(self):
+        from chat.model_selection import _select_chat_model
+        from config import DEFAULT_REASONING_MODEL
+
+        msgs = [{"role": "user", "content": "Plot the income tax schedule"}]
+        assert _select_chat_model(msgs, charts_mode=True) == DEFAULT_REASONING_MODEL
+
+    def test_rate_change_pattern_routes_to_opus(self):
+        from chat.model_selection import _select_chat_model
+        from config import DEFAULT_REASONING_MODEL
+
+        msgs = [{"role": "user", "content": "What happens if the basic rate goes from 20% to 25%?"}]
+        assert _select_chat_model(msgs) == DEFAULT_REASONING_MODEL
+
+
+# ---------------------------------------------------------------------------
 # Rate limiting
 # ---------------------------------------------------------------------------
 
