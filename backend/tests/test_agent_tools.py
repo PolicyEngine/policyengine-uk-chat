@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 import agent_tools
+import tool_definitions
 from agent_tools import (
     get_baseline_parameters,
     validate_reform,
@@ -275,6 +276,23 @@ class TestToolDefinitions:
         definition_names = [tool["name"] for tool in TOOL_DEFINITIONS]
         assert len(definition_names) == len(set(definition_names))
         assert set(definition_names) == set(agent_tools.TOOL_HANDLERS)
+
+    def test_agent_tools_reexports_canonical_tool_definitions(self):
+        assert TOOL_DEFINITIONS is tool_definitions.TOOL_DEFINITIONS
+
+    def test_shared_schema_fragments_are_reused(self):
+        household_schema = _tool("calculate_household")["input_schema"]
+        economy_schema = _tool("run_economy_simulation")["input_schema"]
+        microdata_schema = _tool("analyse_microdata")["input_schema"]
+        chart_schema = _tool("generate_chart")["input_schema"]
+
+        assert household_schema["properties"]["year"] is tool_definitions.YEAR_SCHEMA
+        assert economy_schema["properties"]["year"] is tool_definitions.YEAR_SCHEMA
+        assert microdata_schema["properties"]["year"] is tool_definitions.YEAR_SCHEMA
+        assert economy_schema["properties"]["reform"] is tool_definitions.REFORM_PROPERTY
+        assert microdata_schema["properties"]["reform"] is tool_definitions.REFORM_PROPERTY
+        assert microdata_schema["properties"]["columns"] is tool_definitions.STRING_ARRAY_SCHEMA
+        assert chart_schema["properties"]["x_format"]["enum"] == tool_definitions.CHART_FORMAT_SCHEMA["enum"]
 
     def test_validate_reform_tool_is_debugging_tool(self):
         description = _tool("validate_reform")["description"]

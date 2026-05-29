@@ -11,8 +11,11 @@ tools, calculation behavior, or AI-facing runtime boundaries.
   system block assembly, model calls, SSE streaming, tool-loop handling,
   usage/billing, title generation, and follow-up suggestions.
 - `backend/agent_tools.py` owns the model-facing tool functions, dispatcher,
-  and tool schemas. Shared deterministic tool helpers live under
-  `backend/tooling/`.
+  and compatibility exports.
+- `backend/tool_definitions.py` owns model-facing tool schemas and
+  descriptions. Reuse shared schema fragments there rather than duplicating
+  object/array/dataset/format shapes.
+- Shared deterministic tool helpers live under `backend/tooling/`.
 - `backend/scripts/build_reference.py` builds the API reference that is attached
   to the chat system prompt.
 
