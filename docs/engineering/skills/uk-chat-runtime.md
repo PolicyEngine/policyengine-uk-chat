@@ -10,8 +10,9 @@ tools, calculation behavior, or AI-facing runtime boundaries.
 - `backend/routes/chatbot.py` owns application orchestration: request parsing,
   system block assembly, model calls, SSE streaming, tool-loop handling,
   usage/billing, title generation, and follow-up suggestions.
-- `backend/agent_tools.py` owns deterministic tool implementations and model
-  tool schemas.
+- `backend/agent_tools.py` owns the model-facing tool functions, dispatcher,
+  and tool schemas. Shared deterministic tool helpers live under
+  `backend/tooling/`.
 - `backend/scripts/build_reference.py` builds the API reference that is attached
   to the chat system prompt.
 
@@ -35,6 +36,8 @@ Only tools listed in `TOOL_DEFINITIONS` and dispatched by `execute_tool()` are
 exposed to the model. At present, the exposed tools are:
 
 - `calculate_household`: calculate illustrative synthetic household outcomes.
+- `validate_reform`: validate parametric reform JSON without running a
+  simulation.
 - `run_economy_simulation`: calculate aggregate society-wide impacts for
   parametric reforms.
 - `analyse_microdata`: analyse allowed non-FRS model microdata through bounded
@@ -43,8 +46,8 @@ exposed to the model. At present, the exposed tools are:
   cases that do not fit the typed tools.
 - `generate_chart`: return frontend-renderable chart JSON markdown.
 
-Helper functions in `backend/agent_tools.py` are implementation details unless
-they are added to both the tool definitions and dispatcher.
+Helper functions in `backend/tooling/` are implementation details unless they
+are added to both the tool definitions and dispatcher.
 
 ## Deterministic And Non-Deterministic Segments
 
@@ -71,6 +74,9 @@ temperature to `0` to reduce sampling variance.
   tools when they fit the request, or with `run_python` as a fallback; do not
   answer tax, benefit, reform, poverty, decile, or distributional questions from
   memory.
+- Use `validate_reform` only when the user is drafting, debugging, or asking
+  whether reform JSON is valid. Do not use it as a routine preflight before
+  every simulation.
 - Do not access, display, quote, or imply access to row-level survey microdata
   or real households.
 - Use aggregate microdata interfaces only for aggregate outputs.

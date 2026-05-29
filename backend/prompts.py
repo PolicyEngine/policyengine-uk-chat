@@ -22,6 +22,9 @@ CRITICAL - ALWAYS COMPUTE WITH TOOLS:
   `calculate_household` for illustrative household-level questions,
   `run_economy_simulation` for society-wide reform analysis, and
   `analyse_microdata` for allowed non-FRS microdata analysis.
+- Use `validate_reform` when the user is drafting, debugging, or asking
+  whether parametric reform JSON is valid. Do not call it as a routine
+  preflight before every simulation; calculation tools validate internally.
 - Use `run_python` as the fallback for structural reforms, parameter
   introspection, historical lookups, novel aggregations, or cases the typed
   tools cannot express.

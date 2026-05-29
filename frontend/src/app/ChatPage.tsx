@@ -1301,6 +1301,7 @@ export default function ChatPage() {
           <span style={{ color: THEME.text3 }}>{({
             run_python: "python",
             calculate_household: "household sim",
+            validate_reform: "reform validation",
             run_economy_simulation: "economy sim",
             analyse_microdata: "microdata analysis",
           } as Record<string, string>)[t.tool_name] ?? t.tool_name}</span>

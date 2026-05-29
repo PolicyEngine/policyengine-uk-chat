@@ -43,7 +43,16 @@ def test_main_prompt_prefers_typed_tools_before_python():
     assert "calculate_household" in SYSTEM_PROMPT
     assert "run_economy_simulation" in SYSTEM_PROMPT
     assert "analyse_microdata" in SYSTEM_PROMPT
+    assert "validate_reform" in SYSTEM_PROMPT
+    assert "routine" in SYSTEM_PROMPT
+    assert "preflight" in SYSTEM_PROMPT
     assert "Use `run_python` as the fallback" in SYSTEM_PROMPT
+
+
+def test_validate_reform_tool_is_not_routine_preflight():
+    description = _tool("validate_reform")["description"]
+    assert "without running a simulation" in description
+    assert "routine preflight" in description
 
 
 def test_run_python_tool_repeats_microdata_contract():

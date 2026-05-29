@@ -13,7 +13,9 @@ import pytest
 import agent_tools
 from agent_tools import (
     get_baseline_parameters,
+    validate_reform,
     calculate_household,
+    run_economy_simulation,
     analyse_microdata,
     generate_chart,
     execute_tool,
@@ -263,10 +265,22 @@ class TestJsonSafe:
 class TestToolDefinitions:
     def test_exposes_typed_tools_and_fallback_python(self):
         names = [tool["name"] for tool in TOOL_DEFINITIONS]
+        assert "validate_reform" in names
         assert "calculate_household" in names
         assert "run_economy_simulation" in names
         assert "analyse_microdata" in names
         assert "run_python" in names
+
+    def test_tool_definitions_match_dispatch_handlers(self):
+        definition_names = [tool["name"] for tool in TOOL_DEFINITIONS]
+        assert len(definition_names) == len(set(definition_names))
+        assert set(definition_names) == set(agent_tools.TOOL_HANDLERS)
+
+    def test_validate_reform_tool_is_debugging_tool(self):
+        description = _tool("validate_reform")["description"]
+        assert "without running a simulation" in description
+        assert "drafting" in description
+        assert "routine preflight" in description
 
     def test_analyse_microdata_schema_excludes_frs(self):
         dataset_schema = _tool("analyse_microdata")["input_schema"]["properties"]["dataset"]
@@ -411,6 +425,89 @@ class TestAnalyseMicrodataContract:
         assert first["result"] == second["result"]
 
 
+# ---------------------------------------------------------------------------
+# validate_reform
+# ---------------------------------------------------------------------------
+
+class TestValidateReform:
+    @pytest.fixture(autouse=True)
+    def mock_parameter_classes(self, monkeypatch):
+        import tooling.reforms as reform_helpers
+
+        class DummyIncomeTaxParams:
+            model_fields = {"personal_allowance": None, "higher_rate": None}
+
+            def __init__(self, **kwargs):
+                self.kwargs = kwargs
+
+        monkeypatch.setattr(
+            reform_helpers,
+            "_parameter_classes",
+            lambda: ({"income_tax": DummyIncomeTaxParams}, object, object),
+        )
+
+    def test_valid_reform_returns_normalized_reform(self):
+        result = validate_reform({"income_tax": {"personal_allowance": 15000}})
+
+        assert result["valid"] is True
+        assert result["normalized_reform"] == {"income_tax": {"personal_allowance": 15000}}
+        assert result["programs"] == ["income_tax"]
+        assert result["warnings"] == []
+
+    def test_unknown_program_returns_json_error(self):
+        result = validate_reform({"not_real": {"field": 1}})
+
+        assert result["valid"] is False
+        assert result["errors"][0]["path"] == "not_real"
+        assert "Unknown reform program" in result["errors"][0]["message"]
+        assert result["valid_programs"] == ["income_tax"]
+
+    def test_unknown_field_returns_json_error(self):
+        result = validate_reform({"income_tax": {"not_real_field": 1}})
+
+        assert result["valid"] is False
+        assert result["errors"][0]["path"] == "income_tax.not_real_field"
+        assert "Unknown field" in result["errors"][0]["message"]
+
+    def test_null_fields_are_stripped(self):
+        result = validate_reform(
+            {"income_tax": {"personal_allowance": 15000, "higher_rate": None}}
+        )
+
+        assert result["valid"] is True
+        assert result["normalized_reform"] == {"income_tax": {"personal_allowance": 15000}}
+
+    def test_simulation_and_validator_share_invalid_reform_rules(self):
+        reform = {"income_tax": {"not_real_field": 1}}
+
+        validation = validate_reform(reform)
+        simulation = run_economy_simulation(reform=reform)
+
+        assert validation["valid"] is False
+        assert "Unknown field" in validation["errors"][0]["message"]
+        assert "error" in simulation
+        assert "Unknown field" in simulation["error"]
+
+
+@requires_compiled
+class TestValidateReformCompiledPath:
+    def test_valid_reform_uses_compiled_parameter_classes(self):
+        result = validate_reform({"income_tax": {"personal_allowance": 15000}})
+
+        assert result["valid"] is True
+        assert result["normalized_reform"] == {"income_tax": {"personal_allowance": 15000}}
+
+    def test_valid_programs_match_compiled_parameter_classes(self):
+        from tooling.reforms import _parameter_classes, get_valid_programs
+
+        param_cls_map, _, _ = _parameter_classes()
+
+        assert get_valid_programs() == list(param_cls_map)
+        result = validate_reform({"not_real": {"field": 1}})
+        assert result["valid"] is False
+        assert result["valid_programs"] == list(param_cls_map)
+
+
 @requires_compiled
 class TestRunPython:
     def test_replaces_old_compute_sum_use_case(self):
@@ -481,18 +578,23 @@ class TestExecuteTool:
         result = execute_tool("compute", {"operation": "sum", "data": [1, 2, 3]})
         assert result["error"] == "Unknown tool: compute"
 
+    def test_dispatches_validate_reform(self, monkeypatch):
+        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "validate_reform", lambda **kwargs: {"tool": "validator", "input": kwargs})
+        result = execute_tool("validate_reform", {"reform": {}})
+        assert result["tool"] == "validator"
+
     def test_dispatches_calculate_household(self, monkeypatch):
-        monkeypatch.setattr(agent_tools, "calculate_household", lambda **kwargs: {"tool": "household", "input": kwargs})
+        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "calculate_household", lambda **kwargs: {"tool": "household", "input": kwargs})
         result = execute_tool("calculate_household", {"person": [], "benunit": [], "household": []})
         assert result["tool"] == "household"
 
     def test_dispatches_run_economy_simulation(self, monkeypatch):
-        monkeypatch.setattr(agent_tools, "run_economy_simulation", lambda **kwargs: {"tool": "economy", "input": kwargs})
+        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "run_economy_simulation", lambda **kwargs: {"tool": "economy", "input": kwargs})
         result = execute_tool("run_economy_simulation", {"year": 2025})
         assert result["tool"] == "economy"
 
     def test_dispatches_analyse_microdata(self, monkeypatch):
-        monkeypatch.setattr(agent_tools, "analyse_microdata", lambda **kwargs: {"tool": "microdata", "input": kwargs})
+        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "analyse_microdata", lambda **kwargs: {"tool": "microdata", "input": kwargs})
         result = execute_tool("analyse_microdata", {"entity": "households", "operation": "count"})
         assert result["tool"] == "microdata"
 
