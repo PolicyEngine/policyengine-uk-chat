@@ -1,0 +1,76 @@
+id: b6_basic_rate_plus_1pp
+test: B
+title: "Income tax basic rate +1pp — silent regression catcher (#82)"
+what_it_tests: |
+  Direct regression test for the failure observed in the 2026-05-28 live test:
+  the agent could not express a basic-rate +1pp reform via the PolicyEngine UK
+  API and produced no eval signal. This case asserts the agent (a) runs the
+  reform end-to-end, (b) reports a *positive* budgetary impact (revenue raise),
+  (c) gets the magnitude inside the right order (~£5-10bn for 2025-26 on
+  Enhanced FRS 2023-24), and (d) attributes the burden to upper deciles.
+
+  Assertions are loose by design — direction + order-of-magnitude only. Tax
+  microsim numbers shift with dataset version and parameter year; exact-number
+  pinning would create flaky tests. See evals/SPEC.md and issue #82.
+
+source_issue: "https://github.com/PolicyEngine/policyengine-uk-chat/issues/82"
+
+prompt: |
+  Run a UK 2025 economy-wide comparison. Baseline: current law. Reform: raise
+  the income tax basic rate from 20% to 21%. Use the Enhanced FRS 2023-24
+  dataset: hf://policyengine/policyengine-uk-data-private/enhanced_frs_2023_24.h5.
+  Use Microsimulation.
+
+  Report from the model run:
+  (1) total budgetary impact in £
+  (2) income tax revenue change in £
+  (3) average household income change in £ for each decile (1-10)
+
+  British English. Every figure from the model run, not memory.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+# Pinned for reproducibility — see issue #82 constraint.
+dataset: enhanced_frs_2023_24
+parameter_year: 2025
+
+reference:
+  # No fixture file — assertions are direction + order-of-magnitude only, so
+  # `expected_approx` is supplied inline and the grader skips fixture loading.
+  # The wide `tolerance_pct` deliberately encodes "within an order of magnitude"
+  # rather than a pinned exact value. Sign of `expected_approx` enforces the
+  # direction assertion (positive = revenue-raising).
+  fields_to_compare:
+    # Direction: POSITIVE revenue change. Magnitude: ~£5-10bn band.
+    # Midpoint £7.5bn with ±50% tolerance covers £3.75bn–£11.25bn — wide
+    # enough to absorb dataset/year drift, tight enough to catch a sign flip
+    # or an order-of-magnitude miss.
+    - path: budget.budgetary_impact
+      expected_approx: 7_500_000_000
+      tolerance_pct: 50.0
+    - path: budget.tax_revenue_impact
+      expected_approx: 7_500_000_000
+      tolerance_pct: 50.0
+
+anchor:
+  # Direction-of-burden and parameter-mention assertions live here. The grader
+  # runs case-insensitive substring checks on these against the chat response.
+  must_mention:
+    - "basic rate"            # the parameter under reform
+    - "21"                    # the new rate
+    - "income tax"            # the tax surface
+    - "revenue"               # the magnitude language
+  must_not_say:
+    - "revenue falls"         # +1pp is a revenue raise, not a cost
+    - "tax cut"               # this is a tax rise
+    - "everyone loses equally"  # upper deciles bear most of the burden
+  ideal_finding: |
+    Raising the income tax basic rate from 20% to 21% is a revenue-raising
+    reform of order £5-10bn for 2025-26 on Enhanced FRS 2023-24. Because the
+    basic-rate band caps at the higher-rate threshold (£50,270), the £ burden
+    rises with income up to that point and then flattens — meaning upper-middle
+    and top deciles bear most of the absolute burden, while bottom deciles
+    (largely below the personal allowance) are barely affected. Relative-income
+    losses are larger in the upper deciles than the bottom.

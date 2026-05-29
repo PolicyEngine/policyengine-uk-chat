@@ -1,0 +1,58 @@
+id: b8_ni_primary_threshold_plus_1k
+test: B
+title: "NI primary threshold +£1,000 — reform-API regression (#82)"
+what_it_tests: |
+  Asserts the agent applies an NI-side threshold change (not a tax-side change)
+  end-to-end. Targets a different model surface than the income tax cases
+  (b6, b7): if the chat conflates NI thresholds with the income tax PA, this
+  case will catch it via the direction + must_mention checks.
+
+  Assertions are loose by design — direction + order-of-magnitude only. See
+  issue #82.
+
+source_issue: "https://github.com/PolicyEngine/policyengine-uk-chat/issues/82"
+
+prompt: |
+  Run a UK 2025 economy-wide comparison. Baseline: current law. Reform: raise
+  the National Insurance primary threshold by £1,000 (from £12,570 to £13,570).
+  Use the Enhanced FRS 2023-24 dataset:
+  hf://policyengine/policyengine-uk-data-private/enhanced_frs_2023_24.h5.
+  Use Microsimulation.
+
+  Report from the model run:
+  (1) total budgetary impact in £
+  (2) average household income change in £ for each decile (1-10)
+
+  British English. Every figure from the model run, not memory.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+dataset: enhanced_frs_2023_24
+parameter_year: 2025
+
+reference:
+  # Direction: NEGATIVE (cost). Magnitude: ~£2-5bn band. Midpoint -£3.5bn
+  # with ±60% tolerance covers -£1.4bn to -£5.6bn.
+  fields_to_compare:
+    - path: budget.budgetary_impact
+      expected_approx: -3_500_000_000
+      tolerance_pct: 60.0
+
+anchor:
+  must_mention:
+    - "national insurance"
+    - "primary threshold"
+    - "1,000"
+  must_not_say:
+    - "personal allowance"        # this reform is NI-side, not income-tax-side; conflation = regression
+    - "revenue rise"              # threshold lift is a cost, not revenue-raising
+  ideal_finding: |
+    Lifting the NI primary threshold by £1,000 costs the exchequer of order
+    £2-5bn in 2025-26 on Enhanced FRS 2023-24. Workers earning above the new
+    threshold (£13,570) gain a flat ~£80/year from the rate-times-band
+    arithmetic. Mid-to-low earners — those whose earnings clear the threshold
+    but who are not concentrated at the top of the distribution — benefit
+    most in proportional terms; pensioners and non-workers see no change since
+    NI is not levied on pension income.

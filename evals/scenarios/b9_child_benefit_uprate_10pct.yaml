@@ -1,0 +1,64 @@
+id: b9_child_benefit_uprate_10pct
+test: B
+title: "Child benefit uprated by 10% — reform-API regression (#82)"
+what_it_tests: |
+  First benefit-side reform in this regression set — distinct from the
+  tax-side cases (b6, b7, b8). Asserts the agent can express a percentage
+  uprating of an existing benefit parameter (not a level change) and reports
+  the right direction (spending increase = revenue cost) at the right order
+  of magnitude. Households with children should gain.
+
+  Assertions are loose by design — direction + order-of-magnitude only. See
+  issue #82.
+
+source_issue: "https://github.com/PolicyEngine/policyengine-uk-chat/issues/82"
+
+prompt: |
+  Run a UK 2025 economy-wide comparison. Baseline: current law. Reform: uprate
+  Child Benefit by 10% (raise both the eldest-child rate and the
+  additional-child rate by 10% of their current values). Use the Enhanced FRS
+  2023-24 dataset:
+  hf://policyengine/policyengine-uk-data-private/enhanced_frs_2023_24.h5.
+  Use Microsimulation.
+
+  Report from the model run:
+  (1) total budgetary impact in £ (i.e. cost to the exchequer)
+  (2) average household income change in £ for each decile (1-10)
+  (3) the change in household income for households with at least one child
+
+  British English. Every figure from the model run, not memory.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+dataset: enhanced_frs_2023_24
+parameter_year: 2025
+
+reference:
+  # Direction: NEGATIVE (cost). Magnitude: ~£1-2bn band on a benefit that
+  # currently costs ~£12-13bn/year. Midpoint -£1.3bn with ±70% tolerance.
+  fields_to_compare:
+    - path: budget.budgetary_impact
+      expected_approx: -1_300_000_000
+      tolerance_pct: 70.0
+    - path: budget.benefit_spending_impact
+      expected_approx: 1_300_000_000
+      tolerance_pct: 70.0
+
+anchor:
+  must_mention:
+    - "child benefit"
+    - "10%"
+    - "households with children"   # the affected population
+  must_not_say:
+    - "no households gain"
+    - "revenue rise"               # spending-side uprating is a cost, not revenue
+  ideal_finding: |
+    Uprating Child Benefit by 10% costs the exchequer of order £1-2bn in
+    2025-26. The gain concentrates in households with children, regardless of
+    income (since Child Benefit is universal at the household level, subject
+    to the High Income Child Benefit Charge withdrawal). Lower deciles see a
+    larger proportional gain because Child Benefit is a larger share of their
+    income; the High Income Child Benefit Charge taper limits the gain for
+    higher-earning parents.

@@ -12,7 +12,9 @@ evals/
   README.md              ← this file
   scenarios/
     a1_*.yaml            ← Test A scenarios (supplement)
-    b1_*.yaml            ← Test B scenarios (alternative)
+    b1_*.yaml — b5_*.yaml ← Test B scenarios (alternative — fixture-backed)
+    b6_*.yaml — b10_*.yaml ← Test B reform-API regression catchers (issue #82,
+                              direction + order-of-magnitude, no fixtures)
   fixtures/
     pe_api/              ← reference PE-API responses for Test B
                           ← populated by a follow-up PR
@@ -85,4 +87,25 @@ Pre-committed in SPEC.md so we don't rationalize ambiguous results later:
 
 Add a YAML file. That's it — the runner picks it up automatically. Keep the `id` short and stable (it appears in filenames and reports).
 
-When adding a Test B scenario, also add the reference fixture under `fixtures/pe_api/` and reference it via the relative path in the scenario YAML.
+When adding a Test B scenario, you have two options for the reference:
+
+1. **Fixture-backed** (preferred for replication tests, e.g. b1-b4): add the
+   reference JSON under `fixtures/pe_api/` and reference it via
+   `reference.fixture` in the YAML.
+2. **`expected_approx` inline** (for regression catchers — see b6-b10 below,
+   filed against [#82](https://github.com/PolicyEngine/policyengine-uk-chat/issues/82)):
+   omit `reference.fixture` and put `expected_approx` directly on each entry
+   in `fields_to_compare`. Use a wide `tolerance_pct` (50-70%) so the assertion
+   encodes *direction + order-of-magnitude* rather than exact-number pinning.
+   Tax microsim numbers shift with dataset version and parameter year; exact
+   pinning creates flaky tests.
+
+### Reform-API regression suite (b6-b10, issue #82)
+
+A small sub-suite of B scenarios exists specifically to catch silent
+regressions in reform expressibility — the failure mode where the agent
+silently fails to apply a reform and produces no eval signal. Each pins
+`dataset` and `parameter_year` at the YAML top level, uses `expected_approx`
+inline (no fixture), and relies on the anchor's `must_mention` to assert the
+reform parameters appear in the chat's prose answer. Direction and
+order-of-magnitude only — no exact-number pinning.

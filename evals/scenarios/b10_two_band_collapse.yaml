@@ -1,0 +1,77 @@
+id: b10_two_band_collapse
+test: B
+title: "Collapse basic + higher rates into a single 25% band — reform-API regression (#82)"
+what_it_tests: |
+  Structural reform — not a single parameter tweak — that asks the agent to
+  apply two changes at once (lift basic to 25%, drop higher to 25%) and
+  describe the result. The revenue sign is *deliberately not pinned* because
+  the net direction depends on the dataset and is genuinely ambiguous; what
+  matters is that the chat (a) mentions both bands by name, (b) understands
+  it's a structural reform rather than a single-parameter change, and (c)
+  produces *a* numeric budgetary impact (not silence or refusal).
+
+  Assertions are loose by design — direction + order-of-magnitude only. See
+  issue #82.
+
+source_issue: "https://github.com/PolicyEngine/policyengine-uk-chat/issues/82"
+
+prompt: |
+  Run a UK 2025 economy-wide comparison. Baseline: current law. Reform:
+  collapse the income tax basic rate (currently 20%) and higher rate
+  (currently 40%) into a single 25% band that covers all income from the
+  personal allowance up to the additional-rate threshold (£125,140). Leave
+  the additional rate (45% above £125,140) untouched.
+
+  Use the Enhanced FRS 2023-24 dataset:
+  hf://policyengine/policyengine-uk-data-private/enhanced_frs_2023_24.h5.
+  Use Microsimulation.
+
+  Report from the model run:
+  (1) total budgetary impact in £ (state direction explicitly — gain or cost)
+  (2) average household income change in £ for each decile (1-10)
+  (3) which decile is the biggest absolute loser and biggest absolute gainer
+
+  British English. Every figure from the model run, not memory.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+dataset: enhanced_frs_2023_24
+parameter_year: 2025
+
+reference:
+  # Direction is NOT pinned for this scenario — a structural reform of this
+  # shape can come out either sign depending on dataset composition. The
+  # `expected_approx` value of 0 with a very wide percentage tolerance is
+  # effectively a *magnitude* check only: the field must be extractable and
+  # in the £-billion range. Sign is asserted via the anchor's
+  # `must_mention` ("either revenue raise or revenue cost", forcing the
+  # chat to commit to one direction in prose).
+  #
+  # NOTE: tolerance_pct against expected_approx=0 produces div-by-zero
+  # gracefully (the grader's `_diff_scalar` checks `expected != 0`); the
+  # diff entry will show extracted-only and the chat answer's must_mention
+  # block does the sign-direction work instead. This is intentional.
+  fields_to_compare:
+    - path: budget.budgetary_impact
+      expected_approx: 0
+      tolerance_pct: 100.0
+
+anchor:
+  must_mention:
+    - "basic rate"
+    - "higher rate"
+    - "25%"
+  must_not_say:
+    - "the basic rate stays the same"     # it changes from 20% to 25%
+    - "the higher rate stays the same"    # it changes from 40% to 25%
+  ideal_finding: |
+    Collapsing basic (20%) and higher (40%) into a single 25% band is a
+    structural reform with offsetting effects: basic-rate taxpayers (the bulk
+    of D5-D8) pay more, higher-rate taxpayers (D9-D10) pay less. The net
+    budgetary direction depends on which population is larger by tax base in
+    the dataset. The chat must (a) commit to a numeric budgetary impact with
+    an explicit sign, (b) describe the distributional split across deciles
+    (mid-deciles lose, top deciles gain), and (c) reference both bands by
+    name rather than treating this as a single-parameter change.

@@ -1,0 +1,60 @@
+id: b7_pa_to_15k
+test: B
+title: "Personal allowance raised to £15,000 — reform-API regression (#82)"
+what_it_tests: |
+  Companion to b1_society_wide_pa.yaml but framed as a regression check rather
+  than a fixture replication: asserts only direction (revenue cost, not raise)
+  and order-of-magnitude (~£15-25bn). Catches a class of failure where the
+  agent silently fails to apply the reform and reports baseline numbers, or
+  inverts the sign of the budgetary impact.
+
+  Assertions are loose by design — direction + order-of-magnitude only. See
+  issue #82.
+
+source_issue: "https://github.com/PolicyEngine/policyengine-uk-chat/issues/82"
+
+prompt: |
+  Run a UK 2025 economy-wide comparison. Baseline: current law. Reform: raise
+  the income tax personal allowance from £12,570 to £15,000. Use the Enhanced
+  FRS 2023-24 dataset:
+  hf://policyengine/policyengine-uk-data-private/enhanced_frs_2023_24.h5.
+  Use Microsimulation.
+
+  Report from the model run:
+  (1) total budgetary impact in £
+  (2) average household income change in £ for each decile (1-10)
+  (3) relative income change in % for each decile (1-10)
+
+  British English. Every figure from the model run, not memory.
+
+chat_settings:
+  model_backend: uk_python
+  num_runs: 3
+
+dataset: enhanced_frs_2023_24
+parameter_year: 2025
+
+reference:
+  # Direction: NEGATIVE budgetary impact (cost to the exchequer).
+  # Magnitude: ~£15-25bn band. Midpoint -£20bn with ±50% tolerance covers
+  # -£10bn to -£30bn — wide enough to absorb dataset drift, tight enough to
+  # catch a sign flip.
+  fields_to_compare:
+    - path: budget.budgetary_impact
+      expected_approx: -20_000_000_000
+      tolerance_pct: 50.0
+
+anchor:
+  must_mention:
+    - "personal allowance"
+    - "15,000"
+    - "12,570"
+  must_not_say:
+    - "revenue rise"          # a PA raise is a cost
+    - "top decile benefits most"   # PA taper above £100k removes the gain for very high earners
+  ideal_finding: |
+    Raising the PA to £15,000 is a tax cut of order £15-25bn in 2025-26 on
+    Enhanced FRS 2023-24. Households in the bottom deciles (especially D2-D4)
+    see meaningful proportional gains because the PA bites earlier in their
+    earnings; the top decile sees a smaller proportional gain because the PA
+    taper above £100k eliminates the personal allowance for very high earners.
