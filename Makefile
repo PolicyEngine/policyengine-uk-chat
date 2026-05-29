@@ -1,4 +1,4 @@
-.PHONY: up down build logs restart shell-backend shell-frontend
+.PHONY: up down build logs restart shell-backend shell-frontend test test-backend test-frontend
 
 # Start all services in dev mode (live reload)
 up:
@@ -42,3 +42,12 @@ shell-frontend:
 # One-time setup: copy .env.example to .env
 init:
 	@if [ ! -f .env ]; then cp .env.example .env && echo "Created .env — fill in your ANTHROPIC_API_KEY"; else echo ".env already exists"; fi
+
+# Run the same checks used by PR CI, assuming dependencies are already installed.
+test: test-backend test-frontend
+
+test-backend:
+	PYTHONPATH=backend python -m pytest backend/tests
+
+test-frontend:
+	cd frontend && npm run build

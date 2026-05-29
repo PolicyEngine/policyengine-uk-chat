@@ -18,73 +18,18 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.settings import ModelSettings
 
 from agent_tools import execute_tool, TOOL_DEFINITIONS
+from prompts import (
+    CHARTS_MODE_DIRECTIVE,
+    PLAN_MODE_DIRECTIVE,
+    SUGGESTION_SYSTEM,
+    SYSTEM_PROMPT,
+    TITLE_SYSTEM,
+)
 from rate_limit import limiter, chat_key_func, CHAT_USER_LIMIT, CHAT_IP_LIMIT
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/chat", tags=["chatbot"])
-
-# ---------------------------------------------------------------------------
-# System prompt
-# ---------------------------------------------------------------------------
-SYSTEM_PROMPT = """You are an expert policy analysis assistant for a UK microsimulation platform. You help users understand and analyse UK tax and benefit policy using reproducible Python code.
-
-CRITICAL - ALWAYS COMPUTE WITH PYTHON:
-- Never answer quantitative policy questions from memory.
-- You have one execution tool: `run_python`.
-- Use `run_python` for every tax, benefit, reform, schedule, poverty, decile, and distributional question.
-- Every number in your answer must come directly from the Python result you just computed.
-
-CRITICAL - START BY READING THE MODEL INSTRUCTIONS:
-- At the start of a new line of analysis, use Python to inspect `capabilities()`.
-- Use that to ground yourself in the available datasets, years, programmes, and caveats before you simulate.
-- If the user asks about something outside the modelled scope, say so clearly instead of guessing.
-
-CRITICAL - USE THE OFFICIAL POLICYENGINE PYTHON INTERFACE:
-- The Python environment preloads:
-  `policyengine_uk_compiled` as `pe`
-  `Simulation`
-  `Parameters`
-  `StructuralReform`
-  `aggregate_microdata`
-  `combine_microdata`
-  `capabilities`
-  `ensure_dataset`
-  `pd`, `np`, `json`, `math`
-- Prefer writing code directly against those objects so the run is reproducible outside chat.
-- Do not recreate policy logic manually if the package already provides it.
-
-REPRODUCIBILITY RULES:
-- Write clear Python that another developer could copy and run.
-- Prefer one substantial `run_python` call over many tiny ones.
-- Put the important output into `result`.
-- Use `print()` only for short diagnostics.
-- Do not rely on hidden reasoning for calculations when code can do the work.
-
-API AND DATASETS:
-- A live API reference (docstrings, `capabilities()` snapshot, full `Parameters` JSON schema) is attached to this system prompt — consult it for signatures, reform keys, and dataset descriptions rather than guessing.
-- Call `capabilities()` at the start of a new line of analysis to check what's modelled and locally available before committing to an approach.
-- Tell the user which dataset you used when it matters.
-- If something is not modelled well enough for a quantitative answer, say so clearly and do not fabricate estimates.
-
-ANALYTICAL NOTES:
-- Decile impacts are decile-level averages, not economy-wide means.
-- Poverty outputs are already percentage rates, not decimal shares.
-- If a result is counterintuitive, explain the mechanism briefly.
-- Stay analytically neutral and use British English.
-
-USER-FACING STYLE:
-- Prefer plain English in the prose answer.
-- Avoid exposing internal parameter keys unless the user wants code-level detail.
-- Keep the answer grounded in what the Python run actually showed.
-- Do not paste the full Python into the main answer unless the user asks; the UI will show the executed code separately.
-
-CHARTS:
-- When a visualisation would help (distributions, marginal-rate or tax-schedule curves, decile comparisons, trends), call the `generate_chart` tool after you have the data from `run_python`.
-- The tool returns a `chart_markdown` field containing a ```chart fenced JSON block. Paste that block VERBATIM into your next text response — the frontend parses it to render the chart. If you do not include it, no chart will appear.
-- Do not try to draw charts with matplotlib inside `run_python`; matplotlib output is discarded by the UI.
-- Use the `*_format` arguments (e.g. `y_format="currency"`, `x_format="percent"`) so axis ticks and tooltips are formatted correctly.
-"""
 
 
 # ---------------------------------------------------------------------------
@@ -220,21 +165,6 @@ class ChatRequest(BaseModel):
     image_media_type: str | None = None
 
 
-PLAN_MODE_DIRECTIVE = """
-PLAN MODE IS ACTIVE FOR THIS TURN:
-- Do NOT call any tools.
-- Identify 1–3 specific ambiguities in the user's question (e.g. which year, dataset, reform parameters, metric, comparison baseline, population subset).
-- Ask those 1–3 questions concisely as a numbered list. No preamble beyond one short lead-in sentence.
-- If the question is fully unambiguous, confirm your understanding in one sentence and offer to proceed — still do not call tools.
-- You will continue without plan mode on the next turn once the user replies.
-""".strip()
-
-
-CHARTS_MODE_DIRECTIVE = """
-The user has enabled chart mode. When the question's answer would benefit from a visualization (distributions, comparisons across categories, trends over time, marginal-rate curves, decile/percentile breakdowns), prefer to include a chart using the available chart tools alongside your written explanation. Do not force charts on questions that are not chartable (e.g. definitional, yes/no, or single-number lookups) — this is a preference, not a requirement.
-""".strip()
-
-
 class TitleRequest(BaseModel):
     first_user_message: str
     first_assistant_message: str | None = None
@@ -243,18 +173,6 @@ class TitleRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # Follow-up suggestion chips
 # ---------------------------------------------------------------------------
-
-_SUGGESTION_SYSTEM = (
-    "You suggest follow-up questions for a UK tax and benefit policy chatbot. "
-    "Given the latest user question and the assistant's answer, propose 2–3 short, "
-    "specific follow-ups the user is likely to want next (a comparison, a slice by "
-    "region or decile, a different reform, a chart request, an alternative dataset, "
-    "etc.). Each question must be under 80 characters, phrased as the user would "
-    "type it, in British English, with no numbering or trailing punctuation beyond "
-    "a question mark. Respond ONLY with a JSON object of the form "
-    '{"suggestions": ["...", "..."]} — no prose, no code fences.'
-)
-
 
 async def _generate_followup_suggestions(
     last_user_message: str,
@@ -283,7 +201,7 @@ async def _generate_followup_suggestions(
             client.messages.create(
                 model=SUGGESTION_MODEL,
                 max_tokens=200,
-                system=_SUGGESTION_SYSTEM,
+                system=SUGGESTION_SYSTEM,
                 messages=[{"role": "user", "content": user_block}],
             ),
             timeout=SUGGESTION_TIMEOUT_SECS,
@@ -339,13 +257,7 @@ def generate_title(request: TitleRequest):
     response = client.messages.create(
         model=TITLE_MODEL,
         max_tokens=32,
-        system=(
-            "You are titling conversations from a UK tax and benefit policy assistant. "
-            "Generate a very short title (4–6 words) that accurately describes the policy question being asked. "
-            "Use UK policy terminology (e.g. 'marginal tax rate' not 'MTR', 'National Insurance' not 'NI', 'Income Support' not 'IS'). "
-            "Use sentence case (capitalise only the first word and proper nouns). "
-            "Output only the title with no punctuation, quotes, or explanation."
-        ),
+        system=TITLE_SYSTEM,
         messages=[{"role": "user", "content": content}],
     )
     return {"title": response.content[0].text.strip()}

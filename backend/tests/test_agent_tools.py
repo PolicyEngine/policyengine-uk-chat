@@ -4,11 +4,14 @@ These call the compiled PolicyEngine UK engine directly — no mocking.
 Run inside the backend container: pytest tests/
 """
 
+import importlib.util
+import os
+
 import pytest
+
 from agent_tools import (
     get_baseline_parameters,
     calculate_household,
-    compute,
     generate_chart,
     execute_tool,
     _build_compiled_policy,
@@ -16,11 +19,31 @@ from agent_tools import (
     run_python,
 )
 
+COMPILED_AVAILABLE = importlib.util.find_spec("policyengine_uk_compiled") is not None
+requires_compiled = pytest.mark.skipif(
+    os.environ.get("CI") != "true" and not COMPILED_AVAILABLE,
+    reason="policyengine_uk_compiled is not installed",
+)
+
+
+# ---------------------------------------------------------------------------
+# policyengine_uk_compiled interface
+# ---------------------------------------------------------------------------
+
+@requires_compiled
+class TestCompiledInterface:
+    def test_simulation_single_person_available(self):
+        from policyengine_uk_compiled import Simulation
+
+        assert hasattr(Simulation, "single_person")
+        assert callable(Simulation.single_person)
+
 
 # ---------------------------------------------------------------------------
 # get_baseline_parameters
 # ---------------------------------------------------------------------------
 
+@requires_compiled
 class TestGetBaselineParameters:
     def test_returns_parameters(self):
         result = get_baseline_parameters(year=2023)
@@ -48,6 +71,7 @@ SINGLE_ADULT = dict(
     year=2023,
 )
 
+@requires_compiled
 class TestCalculateHousehold:
     def test_basic_household(self):
         result = calculate_household(**SINGLE_ADULT)
@@ -181,56 +205,6 @@ class TestCalculateHousehold:
 
 
 # ---------------------------------------------------------------------------
-# compute
-# ---------------------------------------------------------------------------
-
-class TestCompute:
-    def test_diff(self):
-        result = compute("diff", [1, 3, 6, 10])
-        assert result["result"] == [2, 3, 4]
-
-    def test_pct_change(self):
-        result = compute("pct_change", [100, 110])
-        assert abs(result["result"][0] - 10.0) < 0.001
-
-    def test_mean(self):
-        result = compute("mean", [1, 2, 3, 4, 5])
-        assert result["result"] == 3.0
-
-    def test_sum(self):
-        result = compute("sum", [10, 20, 30])
-        assert result["result"] == 60
-
-    def test_marginal_rate(self):
-        # net incomes at £10k steps, gross incomes
-        net = [8000, 14800, 21600]
-        gross = [10000, 20000, 30000]
-        result = compute("marginal_rate", net, gross)
-        # (14800-8000)/(20000-10000)*100 = 68%
-        assert abs(result["result"][0] - 68.0) < 0.01
-
-    def test_subtract(self):
-        result = compute("subtract", [10, 20, 30], [1, 2, 3])
-        assert result["result"] == [9, 18, 27]
-
-    def test_divide_by_zero(self):
-        result = compute("divide", [10, 20], [0, 4])
-        assert result["result"][0] == 0  # safe division
-
-    def test_empty_data(self):
-        result = compute("sum", [])
-        assert "error" in result
-
-    def test_unknown_operation(self):
-        result = compute("nonexistent", [1, 2, 3])
-        assert "error" in result
-
-    def test_mismatched_lengths(self):
-        result = compute("subtract", [1, 2, 3], [1, 2])
-        assert "error" in result
-
-
-# ---------------------------------------------------------------------------
 # generate_chart
 # ---------------------------------------------------------------------------
 
@@ -261,13 +235,41 @@ class TestGenerateChart:
         assert result["chart_markdown"].startswith("```chart\n")
         assert result["chart_markdown"].endswith("\n```")
 
+    def test_with_formats(self):
+        data = [{"income": i * 10000, "tax": i * 2000} for i in range(10)]
+        result = generate_chart("line", "Tax schedule", data, "income", ["tax"], x_format="currency", y_format="currency")
+        assert result["status"] == "success"
+
 
 class DummyModelDump:
     def model_dump(self):
         return {"child_benefit": 123}
 
 
+class TestJsonSafe:
+    def test_serialises_simulation_like_objects(self):
+        serialised = _json_safe({"result": DummyModelDump()})
+        assert serialised == {"result": {"child_benefit": 123}}
+
+
+@requires_compiled
 class TestRunPython:
+    def test_replaces_old_compute_sum_use_case(self):
+        result = run_python("data = [10, 20, 30]\nresult = sum(data)")
+        assert result["result"] == 60
+
+    def test_replaces_old_compute_marginal_rate_use_case(self):
+        code = """
+net = [8000, 14800, 21600]
+gross = [10000, 20000, 30000]
+result = [
+    (net[i + 1] - net[i]) / (gross[i + 1] - gross[i]) * 100
+    for i in range(len(net) - 1)
+]
+"""
+        result = run_python(code)
+        assert abs(result["result"][0] - 68.0) < 0.01
+
     def test_supports_basic_introspection(self):
         result = run_python("value = {'a': 1}\nresult = {'type': type(value).__name__, 'dir_has_keys': 'keys' in dir(value)}")
         assert result["result"] == {"type": "dict", "dir_has_keys": True}
@@ -276,20 +278,12 @@ class TestRunPython:
         result = run_python("import json\nresult = json.loads('{\"ok\": true}')")
         assert result["result"] == {"ok": True}
 
-    def test_serialises_simulation_like_objects(self):
-        serialised = _json_safe({"result": DummyModelDump()})
-        assert serialised == {"result": {"child_benefit": 123}}
-
-    def test_with_formats(self):
-        data = [{"income": i * 10000, "tax": i * 2000} for i in range(10)]
-        result = generate_chart("line", "Tax schedule", data, "income", ["tax"], x_format="currency", y_format="currency")
-        assert result["status"] == "success"
-
 
 # ---------------------------------------------------------------------------
 # _build_compiled_policy
 # ---------------------------------------------------------------------------
 
+@requires_compiled
 class TestBuildCompiledPolicy:
     def test_none_reform_returns_none(self):
         assert _build_compiled_policy(None) is None
@@ -319,9 +313,14 @@ class TestExecuteTool:
         result = execute_tool("nonexistent_tool", {})
         assert "error" in result
 
-    def test_dispatches_compute(self):
-        result = execute_tool("compute", {"operation": "sum", "data": [1, 2, 3]})
+    @requires_compiled
+    def test_dispatches_run_python(self):
+        result = execute_tool("run_python", {"code": "result = sum([1, 2, 3])"})
         assert result["result"] == 6
+
+    def test_compute_is_not_exposed(self):
+        result = execute_tool("compute", {"operation": "sum", "data": [1, 2, 3]})
+        assert result["error"] == "Unknown tool: compute"
 
     def test_dispatches_generate_chart(self):
         result = execute_tool("generate_chart", {

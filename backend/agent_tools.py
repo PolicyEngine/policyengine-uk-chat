@@ -710,7 +710,7 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
 TOOL_DEFINITIONS = [
     {
         "name": "run_python",
-        "description": "Execute reproducible Python code using the official PolicyEngine UK compiled interface. The environment preloads `policyengine_uk_compiled` as `pe`, plus `Simulation`, `Parameters`, `StructuralReform`, `aggregate_microdata`, `combine_microdata`, `capabilities`, `ensure_dataset`, `pd`, `np`, `json`, and `math`. Assign the final answer to `result` and use `print()` for intermediate output.",
+        "description": "Execute reproducible Python code using the official PolicyEngine UK compiled interface. The environment preloads `policyengine_uk_compiled` as `pe`, plus `Simulation`, `Parameters`, `StructuralReform`, `aggregate_microdata`, `combine_microdata`, `capabilities`, `ensure_dataset`, `pd`, `np`, `json`, and `math`. Assign the final answer to `result` and use `print()` for intermediate output. Do not inspect or return row-level survey microdata. For household examples, create illustrative synthetic households, prefer `Simulation.single_person()` for single-person examples, and label them as illustrative rather than real households.",
         "input_schema": {
             "type": "object",
             "properties": {
@@ -725,6 +725,8 @@ TOOL_DEFINITIONS = [
             "Generate a chart JSON block for the frontend to render. "
             "Use this for visualisations such as income distributions, marginal-rate or tax-schedule curves, "
             "decile impact comparisons, and trends over time or income. "
+            "Use factually neutral titles, subtitles, labels, and captions; do not call policies good, bad, fair, unfair, "
+            "regressive, progressive, generous, or punitive. "
             "The tool returns a `chart_markdown` field containing a ```chart fenced JSON block — you MUST paste that "
             "string verbatim into your next text response, otherwise the chart will not appear to the user. "
             "Do not attempt to render charts with matplotlib inside `run_python`; the UI cannot display matplotlib output. "
@@ -738,7 +740,7 @@ TOOL_DEFINITIONS = [
                     "enum": ["line", "bar", "area", "scatter"],
                     "description": "Chart type. Use `line` for schedules/curves over a continuous x, `bar` for category comparisons (e.g. deciles), `area` for stacked compositions, `scatter` for point clouds.",
                 },
-                "title": {"type": "string", "description": "Chart title shown above the plot."},
+                "title": {"type": "string", "description": "Factually neutral chart title shown above the plot."},
                 "data": {
                     "type": "array",
                     "description": "List of row objects. Each row must contain the `x_field` key and every key listed in `y_fields`.",

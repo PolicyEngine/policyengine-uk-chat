@@ -5,11 +5,19 @@ Run inside the backend container: pytest tests/
 """
 
 import json
+import os
+
 import pytest
 from fastapi.testclient import TestClient
 from main import app
 
 client = TestClient(app)
+
+requires_live_anthropic = pytest.mark.skipif(
+    os.environ.get("RUN_LIVE_ANTHROPIC_TESTS") != "1"
+    or not os.environ.get("ANTHROPIC_API_KEY"),
+    reason="set RUN_LIVE_ANTHROPIC_TESTS=1 and ANTHROPIC_API_KEY to run live Anthropic tests",
+)
 
 
 # ---------------------------------------------------------------------------
@@ -27,6 +35,7 @@ class TestHealth:
 # Conversations CRUD
 # ---------------------------------------------------------------------------
 
+@pytest.mark.usefixtures("isolated_conversations_table")
 class TestConversations:
     def _save(self, session_id="test-session-1", title="Test", messages=None, user_id=None):
         return client.post("/conversations", json={
@@ -135,6 +144,7 @@ class TestConversations:
 # Title generation
 # ---------------------------------------------------------------------------
 
+@requires_live_anthropic
 class TestTitle:
     def test_generates_title(self):
         r = client.post("/chat/title", json={
@@ -171,6 +181,7 @@ def parse_sse(response_text: str) -> list[dict]:
     return events
 
 
+@requires_live_anthropic
 class TestChatMessage:
     def test_simple_chat_returns_sse(self):
         with client.stream("POST", "/chat/message", json={
