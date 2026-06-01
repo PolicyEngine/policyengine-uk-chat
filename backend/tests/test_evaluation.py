@@ -101,7 +101,7 @@ def test_offline_eval_runs_seed_trajectory_and_answer_cases_without_reports():
     )
 
     assert report.failed == 0
-    assert report.passed == 8
+    assert report.passed == 23
 
 
 def test_skipped_tool_contract_cases_require_source_metadata():
