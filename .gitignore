@@ -4,6 +4,7 @@ __pycache__/
 .next/
 node_modules/
 .venv/
+.venv-backend/
 *.egg-info/
 dist/
 
@@ -11,3 +12,6 @@ dist/
 # Both backend/Dockerfile and modal_app.py regenerate this against the
 # installed policyengine-uk-compiled version, so it never lives in git.
 backend/reference.md
+
+# Manual AI evaluation reports.
+evals/reports/

@@ -1,0 +1,105 @@
+source_package: policyengine_uk
+source_distribution: policyengine-uk
+compiled_distribution: policyengine-uk-compiled
+generated_file: evals/cases/tool_contract/policyengine_uk.generated.yaml
+
+cases:
+  - id: policyengine_uk_tax_no_income
+    path: tests/policy/integration/tax.yaml
+    name: No income
+    output_map:
+      income_tax: person[].baseline_income_tax
+      national_insurance: person[].baseline_employee_ni
+
+  - id: policyengine_uk_tax_some_employed_income
+    path: tests/policy/integration/tax.yaml
+    name: Some employed income
+    output_map:
+      income_tax: person[].baseline_income_tax
+      national_insurance: person[].baseline_employee_ni
+
+  - id: policyengine_uk_income_tax_earner
+    path: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
+    name: Income Tax for earner
+    output_map:
+      income_tax: person[].baseline_income_tax
+
+  - id: policyengine_uk_income_tax_pension_contributions
+    path: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
+    name: Income Tax for earner with pension contributions
+    skip:
+      code: compiled_coverage_gap
+      reason: policyengine-uk-compiled does not currently reproduce this upstream pension-contribution treatment through calculate_household.
+      remove_when: policyengine-uk-compiled supports this upstream case through calculate_household.
+
+  - id: policyengine_uk_ni_class_1_employee_below_pt
+    path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
+    name: NI Class 1 employee contributions - below PT
+    skip:
+      code: compiled_coverage_gap
+      reason: policyengine-uk-compiled does not currently expose the upstream intermediate NI Class 1 input/output behavior through calculate_household.
+      remove_when: policyengine-uk-compiled exposes this NI Class 1 behavior through the chat household contract.
+
+  - id: policyengine_uk_ni_class_1_employee_between_pt_and_uel
+    path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
+    name: NI Class 1 employee contributions - between PT and UEL
+    skip:
+      code: compiled_coverage_gap
+      reason: policyengine-uk-compiled does not currently expose the upstream intermediate NI Class 1 input/output behavior through calculate_household.
+      remove_when: policyengine-uk-compiled exposes this NI Class 1 behavior through the chat household contract.
+
+  - id: policyengine_uk_ni_class_1_employee_above_uel
+    path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
+    name: NI Class 1 employee contributions - above UEL
+    skip:
+      code: compiled_coverage_gap
+      reason: policyengine-uk-compiled does not currently expose the upstream intermediate NI Class 1 input/output behavior through calculate_household.
+      remove_when: policyengine-uk-compiled exposes this NI Class 1 behavior through the chat household contract.
+
+  - id: policyengine_uk_ni_sums_non_employer_contributions
+    path: tests/policy/baseline/gov/hmrc/national_insurance/national_insurance.yaml
+    name: National Insurance sums non-employer-side contributions.
+    skip:
+      code: compiled_coverage_gap
+      reason: policyengine-uk-compiled does not currently expose the upstream intermediate NI component inputs through calculate_household.
+      remove_when: policyengine-uk-compiled exposes NI component parity through the chat household contract.
+
+  - id: policyengine_uk_child_benefit_no_children
+    path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
+    name: Child Benefit with no children
+    skip:
+      code: compiled_coverage_gap
+      reason: policyengine-uk-compiled has partial Child Benefit support, but this upstream case is not yet parity-clean through calculate_household.
+      remove_when: policyengine-uk-compiled matches this upstream Child Benefit case through calculate_household.
+
+  - id: policyengine_uk_child_benefit_one_child
+    path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
+    name: Child Benefit with one child
+    skip:
+      code: compiled_coverage_gap
+      reason: policyengine-uk-compiled has partial Child Benefit support, but this upstream case is not yet parity-clean through calculate_household.
+      remove_when: policyengine-uk-compiled matches this upstream Child Benefit case through calculate_household.
+
+  - id: policyengine_uk_child_benefit_two_children_one_over_16
+    path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
+    name: Child Benefit with two children, one over 16
+    skip:
+      code: compiled_coverage_gap
+      reason: policyengine-uk-compiled has partial Child Benefit support, but this upstream case is not yet parity-clean through calculate_household.
+      remove_when: policyengine-uk-compiled matches this upstream Child Benefit case through calculate_household.
+
+  - id: policyengine_uk_uc_income_reduction_applies
+    path: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
+    name: Income reduction applies
+    skip:
+      code: compiled_coverage_gap
+      reason: policyengine-uk-compiled does not currently expose the upstream intermediate Universal Credit variables required by this case through calculate_household.
+      remove_when: policyengine-uk-compiled exposes this Universal Credit behavior through the chat household contract.
+
+  - id: policyengine_uk_uc_capital_above_upper_limit
+    path: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
+    name: Capital above the upper limit removes Universal Credit entitlement
+    skip:
+      code: compiled_coverage_gap
+      reason: policyengine-uk-compiled does not currently expose the upstream intermediate Universal Credit variables required by this case through calculate_household.
+      remove_when: policyengine-uk-compiled exposes this Universal Credit behavior through the chat household contract.

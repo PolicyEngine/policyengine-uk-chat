@@ -7,6 +7,7 @@ pydantic-ai[anthropic]
 policyengine-uk-compiled>=0.20.0
 policyengine_uk
 pandas
+pyyaml
 httpx
 supabase
 stripe

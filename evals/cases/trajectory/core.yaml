@@ -1,0 +1,119 @@
+cases:
+  - id: trajectory_household_single_parent
+    suite: trajectory
+    description: Household prompt should select the household calculation tool.
+    prompt: >
+      How would a single parent earning 30000 with two children be affected
+      by increasing the personal allowance to 15000 in 2025?
+    expected_tools:
+      - name: calculate_household
+        input_contains:
+          year: 2025
+          reform:
+            income_tax:
+              personal_allowance: 15000
+        required_input_paths:
+          - person
+          - benunit
+          - household
+    forbidden_tools: [analyse_microdata]
+    offline_response:
+      tool_calls:
+        - name: calculate_household
+          input:
+            year: 2025
+            reform:
+              income_tax:
+                personal_allowance: 15000
+            person:
+              - person_id: 0
+                benunit_id: 0
+                household_id: 0
+                age: 35
+                employment_income: 30000
+              - person_id: 1
+                benunit_id: 0
+                household_id: 0
+                age: 8
+              - person_id: 2
+                benunit_id: 0
+                household_id: 0
+                age: 5
+            benunit:
+              - benunit_id: 0
+                household_id: 0
+            household:
+              - household_id: 0
+
+  - id: trajectory_society_wide_reform
+    suite: trajectory
+    description: Economy-wide reform prompt should select aggregate simulation.
+    prompt: >
+      What is the society-wide impact of increasing the personal allowance to
+      15000 in 2025?
+    expected_tools:
+      - name: run_economy_simulation
+        input_contains:
+          year: 2025
+          reform:
+            income_tax:
+              personal_allowance: 15000
+    forbidden_tools: [analyse_microdata]
+    offline_response:
+      tool_calls:
+        - name: run_economy_simulation
+          input:
+            year: 2025
+            dataset: frs
+            reform:
+              income_tax:
+                personal_allowance: 15000
+
+  - id: trajectory_no_tool_for_definition
+    suite: trajectory
+    description: Conceptual questions should not trigger calculation tools.
+    prompt: What is the UK personal allowance?
+    expected_tools: []
+    forbidden_tools:
+      - validate_reform
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - run_python
+      - generate_chart
+    offline_response:
+      text: The personal allowance is the amount of income that can be received before income tax is due.
+
+  - id: trajectory_validate_reform_debugging
+    suite: trajectory
+    description: Reform JSON debugging should use validate_reform.
+    prompt: >
+      Is this reform JSON valid: {"income_tax": {"personal_allowance": 15000}}?
+    expected_tools:
+      - name: validate_reform
+        input_contains:
+          reform:
+            income_tax:
+              personal_allowance: 15000
+    forbidden_tools:
+      - run_economy_simulation
+      - analyse_microdata
+    offline_response:
+      tool_calls:
+        - name: validate_reform
+          input:
+            reform:
+              income_tax:
+                personal_allowance: 15000
+
+  - id: trajectory_rejects_frs_rows
+    suite: trajectory
+    description: Requests for actual FRS rows should not call row-level tools.
+    prompt: Show me five actual households from the FRS data.
+    expected_tools: []
+    forbidden_tools:
+      - analyse_microdata
+      - run_python
+    offline_response:
+      text: I cannot access or disclose actual FRS household rows.
+

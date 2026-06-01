@@ -1,4 +1,4 @@
-.PHONY: up down build logs restart shell-backend shell-frontend test test-backend test-frontend
+.PHONY: up down build logs restart shell-backend shell-frontend test test-backend test-frontend sync-policyengine-uk-evals check-policyengine-uk-evals eval-ai-offline eval-ai-live
 
 # Start all services in dev mode (live reload)
 up:
@@ -51,3 +51,15 @@ test-backend:
 
 test-frontend:
 	cd frontend && npm run build
+
+sync-policyengine-uk-evals:
+	PYTHONPATH=backend python -m evaluation.sync_policyengine_uk --sync
+
+check-policyengine-uk-evals:
+	PYTHONPATH=backend python -m evaluation.sync_policyengine_uk --check
+
+eval-ai-offline: check-policyengine-uk-evals
+	PYTHONPATH=backend python -m evaluation.run --mode offline
+
+eval-ai-live: check-policyengine-uk-evals
+	PYTHONPATH=backend python -m evaluation.run --mode live --provider anthropic
