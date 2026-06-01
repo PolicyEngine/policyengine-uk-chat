@@ -6,7 +6,7 @@ anthropic
 claude-agent-sdk
 pydantic-ai[anthropic]
 policyengine-uk-compiled>=0.20.0
-policyengine_uk==2.88.0
+policyengine_uk==2.88.20
 pandas
 httpx
 supabase
