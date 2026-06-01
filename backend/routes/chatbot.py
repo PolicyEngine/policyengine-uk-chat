@@ -96,6 +96,11 @@ DEFAULT_COMPLEX_MODEL = os.environ.get("ANTHROPIC_COMPLEX_MODEL", "claude-sonnet
 TITLE_MODEL = os.environ.get("ANTHROPIC_TITLE_MODEL", DEFAULT_FAST_MODEL)
 FAST_MODEL_MAX_INPUT_TOKENS = int(os.environ.get("ANTHROPIC_FAST_MODEL_MAX_INPUT_TOKENS", "120000"))
 
+# Topic gate — short-circuits requests that are clearly off-topic before they
+# hit the main loop. Opt-in via env so rollout can be staged.
+TOPIC_GATE_ENABLED = os.environ.get("POLICYENGINE_CHAT_TOPIC_GATE_ENABLED", "false").lower() == "true"
+TOPIC_GATE_MODEL = os.environ.get("POLICYENGINE_CHAT_TOPIC_GATE_MODEL", DEFAULT_FAST_MODEL)
+
 _REFERENCE_PATH = Path(__file__).resolve().parent.parent / "reference.md"
 try:
     REFERENCE_DOC = _REFERENCE_PATH.read_text()
@@ -262,6 +267,78 @@ def list_backends():
 
 
 # ---------------------------------------------------------------------------
+# Topic gate
+# ---------------------------------------------------------------------------
+
+# Calibration for the boundary cases:
+#   - "Capital of France?"                          → no (reject)
+#   - "What did the chancellor say yesterday?"      → no (reject — news, not policy)
+#   - "How will the PA reform affect inflation?"    → yes (let through; the main
+#     loop's scope-refusal then explains microsim-vs-macro — see eval A4)
+#   - "What's the EITC?" / "How does UC taper?"     → yes (factual policy)
+#
+# Failure mode preference: false negatives (rejecting on-topic) are worse than
+# false positives (accepting off-topic). The latter wastes a few cents; the
+# former breaks the product. So the prompt biases toward letting things
+# through, and any classifier error short-circuits to "yes".
+_TOPIC_GATE_SYSTEM = """You are a strict classifier deciding whether to forward a user's question to a UK tax-and-benefit policy assistant.
+
+Reply with exactly one token: "yes" or "no".
+
+Reply "yes" when the question is, or could plausibly be, about:
+- UK or US tax, benefits, social-security, or public-finance policy
+- Specific programmes (Universal Credit, EITC, CTC, SNAP, NHS, state pension, etc.)
+- Household-level financial situations the assistant could simulate
+- Reforms, hypothetical policy changes, distributional or budgetary effects
+- Whether something is in scope for a microsimulation model (the assistant will explain limitations)
+- Follow-ups, clarifications, or chit-chat that names a policy topic
+
+Reply "no" only when the question is unambiguously NOT about policy — e.g.:
+- General knowledge (capitals, history, science, sports, weather)
+- News or current events not tied to a specific policy
+- Personal advice, emotional support, creative writing
+- Coding help unrelated to policy modelling
+
+When in doubt, reply "yes".
+"""
+
+
+def _classify_on_topic(last_user_message: str) -> bool:
+    """Single Haiku classification call. Fail-open on any error."""
+    if not last_user_message or not last_user_message.strip():
+        return True
+    try:
+        client = _get_sync_anthropic_client()
+        response = client.messages.create(
+            model=TOPIC_GATE_MODEL,
+            max_tokens=4,
+            system=_TOPIC_GATE_SYSTEM,
+            messages=[{"role": "user", "content": last_user_message[:2000]}],
+        )
+        text = response.content[0].text.strip().lower() if response.content else ""
+        return not text.startswith("no")
+    except Exception as e:
+        logger.warning(f"[CHAT] Topic gate classification failed; failing open: {e}")
+        return True
+
+
+_OFF_TOPIC_REFUSAL = (
+    "I'm built for UK tax and benefit policy questions — things like reform "
+    "impacts, eligibility, programme parameters, or distributional effects. "
+    "I can't help with this one. If you'd like, ask me about a UK policy or "
+    "household situation and I'll run the numbers."
+)
+
+
+def _off_topic_refusal_stream(session_id: str, backend_id: str, model: str):
+    """Emit an SSE stream the frontend renders identically to a normal answer."""
+    async def gen():
+        yield f"data: {json.dumps({'type': 'chunk', 'content': _OFF_TOPIC_REFUSAL})}\n\n"
+        yield f"data: {json.dumps({'type': 'done', 'content': _OFF_TOPIC_REFUSAL, 'session_id': session_id, 'model': model, 'model_backend': backend_id, 'usage': {'input_tokens': 0, 'output_tokens': 0, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0}, 'cost_gbp': None, 'balance': None, 'refused_by_topic_gate': True})}\n\n"
+    return gen
+
+
+# ---------------------------------------------------------------------------
 # Chat endpoint — SSE streaming
 # ---------------------------------------------------------------------------
 
@@ -286,6 +363,23 @@ async def chat_message(request: ChatRequest, http_request: Request):
         backend = get_backend(backend_id)
     except ValueError as e:
         return JSONResponse(status_code=400, content={"error": str(e)})
+
+    # Topic gate — short-circuit clearly off-topic messages before we load
+    # the system prompt, reference doc, or run any tools. Only checks the
+    # most recent user message; mid-conversation drift is left to the main
+    # loop's scope guidance.
+    if TOPIC_GATE_ENABLED:
+        last_user = next(
+            (m.content for m in reversed(request.messages) if m.role == "user"),
+            "",
+        )
+        if not _classify_on_topic(last_user):
+            logger.info(f"[CHAT] Topic gate rejected message in session {session_id}")
+            return StreamingResponse(
+                _off_topic_refusal_stream(session_id, backend.id, TOPIC_GATE_MODEL)(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
 
     messages = [{"role": msg.role, "content": msg.content} for msg in request.messages]
 
