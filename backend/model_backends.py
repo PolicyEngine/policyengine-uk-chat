@@ -216,62 +216,66 @@ class UKPolicyEnginePythonBackend(ModelBackend):
         )
 
     def prompt_context(self) -> str:
-        return """CRITICAL - USE THE POLICYENGINE UK PYTHON MODEL INTERFACE:
-- The selected backend is `uk_python`, the Python `policyengine-uk` model package.
-- This is the detailed PolicyEngine Core/OpenFisca-style UK model, not the compiled Rust wrapper.
+        return """TOOL ROUTING - READ THIS FIRST:
 
-PREFERRED TOOL FOR SOCIETY-WIDE REFORMS: `run_economy_simulation`
-- For ANY economy-wide / society-wide / population-level reform question,
-  CALL `run_economy_simulation` instead of writing Python via `run_python`.
-- This is the typed tool. It runs the same `policyengine_uk` Microsimulation
-  under the hood but pins methodology to match PE-API (`/uk/economy`)
-  exactly: gov_tax/gov_spending aggregates, household_income_decile
-  groupby, in_poverty mapped to person with age-band breakdowns
-  (child <18, adult 18-64, senior >=65).
-- One call replaces 20-40 trial-and-error `run_python` calls and returns
-  a structured result: budget, decile.{average,relative}, poverty.{all,
-  child,adult,senior}.
-- Reform shape is programme-and-field, not dotted paths. Examples:
-  - Raise PA to £15,000:
-    `{"reform": {"income_tax": {"personal_allowance": 15000}}}`
-  - Basic rate 20% to 21%:
-    `{"reform": {"income_tax": {"basic_rate": 0.21}}}`
-  - NI main rate 8% to 6%:
-    `{"reform": {"national_insurance": {"main_rate": 0.06}}}`
-  - Combined reforms (stacked):
-    `{"reform": {"income_tax": {"basic_rate": 0.22, "higher_rate": 0.42},
-                 "national_insurance": {"main_rate": 0.06}}}`
-- Currently mapped programmes/fields: income_tax.{personal_allowance,
-  basic_rate, higher_rate, additional_rate}, national_insurance.{main_rate,
-  primary_threshold}, child_benefit.{eldest_amount, additional_amount}.
-- If the reform you need is OUTSIDE this mapping (e.g. a structural reform
-  or a parameter not listed above), fall back to `run_python` and write
-  the Microsimulation code directly.
+Society-wide / economy-wide / population-level reform question?
+  → CALL `run_economy_simulation` ON YOUR FIRST TURN. Do not call
+    `run_python` first to "explore the API" or "check the interface".
+    Do not call `capabilities()`. Go straight to `run_economy_simulation`.
 
-PYTHON ENVIRONMENT (when you use `run_python` instead):
-- The Python environment preloads:
-  `policyengine_uk` as `pe`
-  `Simulation`
-  `Microsimulation`
-  `CountryTaxBenefitSystem`
-  `Scenario`
-  `capabilities`
-  `pd`, `np`, `json`, `math`
-- If installed, the higher-level `policyengine` package is also preloaded as `policyengine`.
-- Prefer writing code against `policyengine_uk` objects and formulas rather than recreating policy logic.
+Reform expressible in the programme/field shape (see list below)?
+  → `run_economy_simulation` is REQUIRED. Falling back to `run_python`
+    for an expressible reform is a bug: it produces drifting numbers
+    across runs and wastes 10-30 tool calls relearning the engine.
 
-COMMON WORKFLOWS FOR `run_python` (FALLBACK ONLY):
-- First inspect backend details:
-  `result = capabilities()`
-- Custom household/situation run:
-  `sim = Simulation(situation={...})`
-  `result = sim.calculate("household_net_income", 2025).tolist()`
+Reform NOT in the mapped field list, OR question isn't about a reform?
+  → Then and only then, use `run_python`.
+
+`run_economy_simulation` shape:
+- args: `{year, reform, dataset}`. `year` defaults to 2025; `dataset`
+  defaults to "efrs" (Enhanced FRS, the same data PE-API uses).
+- `reform` is a programme→field→value dict, NOT dotted parameter paths.
+- Returns a structured dict: `budget.{budgetary_impact, tax_revenue_impact,
+  benefit_spending_impact}`, `decile.{average, relative}` keyed 1-10,
+  `poverty.poverty.{all, child, adult, senior}.{baseline, reform}`.
+- Numbers match PE-API's `/uk/economy` endpoint by construction (same
+  engine, same methodology).
+
+Worked examples (copy this shape):
+- Raise personal allowance to £15,000:
+  `{"reform": {"income_tax": {"personal_allowance": 15000}}}`
+- Basic rate 20% to 21%:
+  `{"reform": {"income_tax": {"basic_rate": 0.21}}}`
+- NI main rate 8% to 6%:
+  `{"reform": {"national_insurance": {"main_rate": 0.06}}}`
+- Stacked: basic+higher rates + NI cut:
+  `{"reform": {"income_tax": {"basic_rate": 0.22, "higher_rate": 0.42},
+               "national_insurance": {"main_rate": 0.06}}}`
+
+Mapped programme/field combinations (ONLY these are expressible):
+- income_tax: personal_allowance, basic_rate, higher_rate, additional_rate
+- national_insurance: main_rate, primary_threshold
+- child_benefit: eldest_amount, additional_amount
+
+If your reform uses any other field, the tool will return an error
+listing valid fields. THEN fall back to `run_python`.
+
+ABOUT THIS BACKEND:
+- Selected backend is `uk_python`, the Python `policyengine-uk` model package.
+- This is the PolicyEngine Core / OpenFisca-style UK model, not the compiled
+  Rust wrapper.
+
+PYTHON ENVIRONMENT (for `run_python` fallback only):
+- Preloaded: `policyengine_uk` as `pe`, `Simulation`, `Microsimulation`,
+  `CountryTaxBenefitSystem`, `Scenario`, `capabilities`, `pd`, `np`,
+  `json`, `math`. The higher-level `policyengine` package is preloaded
+  when installed.
+- Custom household: `sim = Simulation(situation={...})`,
+  `result = sim.calculate("household_net_income", 2025).tolist()`.
 - Microsimulation from published UK data:
   `sim = Microsimulation(dataset="hf://policyengine/policyengine-uk-data/enhanced_frs_2023_24.h5")`
-  `result = sim.calculate("household_net_income", 2025).head().to_list()`
-- Parameter reform (when not expressible via run_economy_simulation):
-  Pass a `reform=` dict to `Microsimulation(...)` directly, in the dotted-path
-  shape policyengine_uk accepts:
+- Parameter reform NOT expressible via `run_economy_simulation`:
+  pass a dotted-path `reform=` dict to `Microsimulation(...)`:
   `reform = {"gov.hmrc.income_tax.allowances.personal_allowance.amount": {"2025-01-01.2025-12-31": 15000}}`
   `sim = Microsimulation(dataset=..., reform=reform)`
 
