@@ -793,3 +793,295 @@ cases:
       - generate_chart
     offline_response:
       text: To calculate this, I need the tax year, household structure, income, and the new personal allowance amount.
+
+  - id: trajectory_plan_mode_explains_without_tools
+    suite: trajectory
+    description: Plan mode should omit tools and return an explanation path rather than executing.
+    tags: [plan_mode]
+    plan_mode: true
+    prompt: >
+      Plan how you would calculate the effect of increasing the personal
+      allowance to GBP 15k for a single adult earning GBP 30k in 2025.
+    expected_tools: []
+    forbidden_tools:
+      - validate_reform
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - run_python
+      - generate_chart
+    offline_response:
+      text: >
+        I would construct an illustrative single-adult household, apply the
+        personal allowance reform, then compare baseline and reform outputs.
+
+  - id: trajectory_charts_mode_supplied_values
+    suite: trajectory
+    description: Charts mode should route chartable supplied values to generate_chart.
+    tags: [charts_mode, chart_routing]
+    charts_mode: true
+    prompt: >
+      Show a chart of these supplied values: baseline net income GBP 25,119.60
+      and reform net income GBP 25,584.70.
+    expected_tools:
+      - name: generate_chart
+        input_contains:
+          chart_type: bar
+          title: Net income comparison
+          data:
+            - scenario: Baseline
+              net_income: 25119.60
+            - scenario: Reform
+              net_income: 25584.70
+          x_field: scenario
+          y_fields: [net_income]
+    forbidden_tools:
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - run_python
+    offline_response:
+      tool_calls:
+        - name: generate_chart
+          input:
+            chart_type: bar
+            title: Net income comparison
+            data:
+              - scenario: Baseline
+                net_income: 25119.60
+              - scenario: Reform
+                net_income: 25584.70
+            x_field: scenario
+            y_fields: [net_income]
+            y_format: currency
+
+  - id: trajectory_economy_poverty_reform
+    suite: trajectory
+    description: Society-wide poverty questions should use aggregate simulation.
+    tags: [economy_wide]
+    prompt: >
+      What would increasing the personal allowance to GBP 15k do to poverty
+      rates across the UK in 2025?
+    expected_tools:
+      - name: run_economy_simulation
+        input_contains:
+          year: 2025
+          dataset: frs
+          reform:
+            income_tax:
+              personal_allowance: 15000
+    forbidden_tools:
+      - calculate_household
+      - analyse_microdata
+      - run_python
+    offline_response:
+      tool_calls:
+        - name: run_economy_simulation
+          input:
+            year: 2025
+            dataset: frs
+            reform:
+              income_tax:
+                personal_allowance: 15000
+
+  - id: trajectory_economy_decile_distribution
+    suite: trajectory
+    description: Distributional decile prompts should use aggregate simulation.
+    tags: [economy_wide]
+    prompt: >
+      Show the decile-by-decile impact of raising the personal allowance to
+      GBP 15k in 2025.
+    expected_tools:
+      - name: run_economy_simulation
+        input_contains:
+          year: 2025
+          dataset: frs
+          reform:
+            income_tax:
+              personal_allowance: 15000
+    forbidden_tools:
+      - calculate_household
+      - analyse_microdata
+      - run_python
+    offline_response:
+      tool_calls:
+        - name: run_economy_simulation
+          input:
+            year: 2025
+            dataset: frs
+            reform:
+              income_tax:
+                personal_allowance: 15000
+
+  - id: trajectory_economy_child_benefit_budgetary
+    suite: trajectory
+    description: Benefit-specific budgetary-impact prompts should use aggregate simulation.
+    tags: [economy_wide]
+    prompt: >
+      What is the budgetary impact in 2025 of increasing child benefit for the
+      first child to GBP 30 per week?
+    expected_tools:
+      - name: run_economy_simulation
+        input_contains:
+          year: 2025
+          dataset: frs
+          reform:
+            child_benefit:
+              eldest_weekly: 30
+    forbidden_tools:
+      - calculate_household
+      - analyse_microdata
+      - run_python
+    offline_response:
+      tool_calls:
+        - name: run_economy_simulation
+          input:
+            year: 2025
+            dataset: frs
+            reform:
+              child_benefit:
+                eldest_weekly: 30
+
+  - id: trajectory_conflict_validate_only
+    suite: trajectory
+    description: Requests to only validate reform JSON should not run a simulation.
+    tags: [tool_choice_conflict]
+    prompt: >
+      Only check whether this reform JSON is valid; do not run a simulation:
+      {"income_tax": {"personal_allowance": 15000}}
+    expected_tools:
+      - name: validate_reform
+        input_contains:
+          reform:
+            income_tax:
+              personal_allowance: 15000
+    forbidden_tools:
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - run_python
+    offline_response:
+      tool_calls:
+        - name: validate_reform
+          input:
+            reform:
+              income_tax:
+                personal_allowance: 15000
+
+  - id: trajectory_conflict_simulate_without_validate
+    suite: trajectory
+    description: Routine simulations should not use validate_reform as a redundant preflight.
+    tags: [tool_choice_conflict]
+    prompt: >
+      Calculate the society-wide impact in 2025 of this reform:
+      {"income_tax": {"personal_allowance": 15000}}
+    expected_tools:
+      - name: run_economy_simulation
+        input_contains:
+          year: 2025
+          dataset: frs
+          reform:
+            income_tax:
+              personal_allowance: 15000
+    forbidden_tools:
+      - validate_reform
+      - calculate_household
+      - analyse_microdata
+      - run_python
+    offline_response:
+      tool_calls:
+        - name: run_economy_simulation
+          input:
+            year: 2025
+            dataset: frs
+            reform:
+              income_tax:
+                personal_allowance: 15000
+
+  - id: trajectory_conflict_frs_aggregate_not_microdata
+    suite: trajectory
+    description: FRS-backed distributional prompts should not use row-level microdata tools.
+    tags: [tool_choice_conflict, privacy]
+    prompt: >
+      Using FRS, show the winners and losers from increasing the personal
+      allowance to GBP 15k in 2025.
+    expected_tools:
+      - name: run_economy_simulation
+        input_contains:
+          year: 2025
+          dataset: frs
+          reform:
+            income_tax:
+              personal_allowance: 15000
+    forbidden_tools:
+      - analyse_microdata
+      - run_python
+      - calculate_household
+    offline_response:
+      tool_calls:
+        - name: run_economy_simulation
+          input:
+            year: 2025
+            dataset: frs
+            reform:
+              income_tax:
+                personal_allowance: 15000
+
+  - id: trajectory_multiturn_child_ages_followup
+    suite: trajectory
+    description: Follow-up turns should use supplied missing child ages before calculating.
+    tags: [multi_turn, household_structure]
+    prompt: Follow-up after missing dependant ages.
+    messages:
+      - role: user
+        content: I earn GBP 30k and have three dependants. What do I get?
+      - role: assistant
+        content: I need the dependants' ages and whether they are students before I can calculate an illustrative household.
+      - role: user
+        content: They are 4, 9, and 17, and the 17-year-old is in full-time education.
+    expected_tools:
+      - name: calculate_household
+        input_contains:
+          year: 2025
+          person:
+            - employment_income: 30000
+            - age: 4
+            - age: 9
+            - age: 17
+              current_education: FULL_TIME
+          benunit:
+            - benunit_id: 0
+              household_id: 0
+    forbidden_tools:
+      - run_economy_simulation
+      - analyse_microdata
+      - run_python
+    offline_response:
+      tool_calls:
+        - name: calculate_household
+          input:
+            year: 2025
+            person:
+              - person_id: 0
+                benunit_id: 0
+                household_id: 0
+                age: 35
+                employment_income: 30000
+              - person_id: 1
+                benunit_id: 0
+                household_id: 0
+                age: 4
+              - person_id: 2
+                benunit_id: 0
+                household_id: 0
+                age: 9
+              - person_id: 3
+                benunit_id: 0
+                household_id: 0
+                age: 17
+                current_education: FULL_TIME
+            benunit:
+              - benunit_id: 0
+                household_id: 0
+            household:
+              - household_id: 0

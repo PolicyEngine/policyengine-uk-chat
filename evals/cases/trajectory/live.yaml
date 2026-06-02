@@ -1,0 +1,41 @@
+cases:
+  - id: trajectory_live_anthropic_household_single_adult
+    suite: trajectory
+    description: Live Anthropic baseline for routing a simple household calculation.
+    tags: [live_baseline]
+    requirements: [live_model]
+    prompt: >
+      Calculate an illustrative 2025 household result for a single adult
+      earning GBP 30k.
+    expected_tools:
+      - name: calculate_household
+        input_contains:
+          year: 2025
+          person:
+            - employment_income: 30000
+          benunit:
+            - benunit_id: 0
+              household_id: 0
+          household:
+            - household_id: 0
+    forbidden_tools:
+      - run_economy_simulation
+      - analyse_microdata
+
+  - id: trajectory_live_anthropic_plan_mode_no_tools
+    suite: trajectory
+    description: Live Anthropic baseline for plan mode omitting tool calls.
+    tags: [live_baseline, plan_mode]
+    requirements: [live_model]
+    plan_mode: true
+    prompt: >
+      Plan how you would calculate the effect of raising the personal allowance
+      to GBP 15k for a single adult earning GBP 30k in 2025.
+    expected_tools: []
+    forbidden_tools:
+      - validate_reform
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - run_python
+      - generate_chart

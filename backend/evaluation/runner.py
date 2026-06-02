@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from agent_tools import execute_tool
-from prompts import SYSTEM_PROMPT
+from prompts import CHARTS_MODE_DIRECTIVE, PLAN_MODE_DIRECTIVE, SYSTEM_PROMPT
 from tool_definitions import TOOL_DEFINITIONS
 
 from evaluation.graders import grade_output, grade_text, grade_tool_calls
@@ -129,6 +129,27 @@ def _tool_specs_for_model() -> List[Dict[str, Any]]:
     ]
 
 
+def _messages_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, Any]]:
+    if case.messages:
+        return case.messages
+    return [{"role": "user", "content": case.prompt}]
+
+
+def _system_for_case(case: TrajectoryCase | ToolLoopCase) -> str:
+    sections = [SYSTEM_PROMPT]
+    if case.plan_mode:
+        sections.append(PLAN_MODE_DIRECTIVE)
+    if case.charts_mode:
+        sections.append(CHARTS_MODE_DIRECTIVE)
+    return "\n\n".join(sections)
+
+
+def _tools_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, Any]] | None:
+    if case.plan_mode:
+        return None
+    return _tool_specs_for_model()
+
+
 def _run_tool_contract(case: ToolContractCase) -> CaseResult:
     try:
         output = execute_tool(case.tool_name, case.input)
@@ -148,9 +169,9 @@ def _run_trajectory(case: TrajectoryCase, client: ModelClient) -> CaseResult:
     try:
         turn = client.generate(
             case_id=case.id,
-            messages=[{"role": "user", "content": case.prompt}],
-            system=SYSTEM_PROMPT,
-            tools=_tool_specs_for_model(),
+            messages=_messages_for_case(case),
+            system=_system_for_case(case),
+            tools=_tools_for_case(case),
         )
     except Exception as exc:
         return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
@@ -211,7 +232,7 @@ def _tool_use_id(case: ToolLoopCase, iteration: int, index: int, call_id: str) -
 
 
 def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
-    messages: List[Dict[str, Any]] = [{"role": "user", "content": case.prompt}]
+    messages: List[Dict[str, Any]] = _messages_for_case(case)
     tool_calls = []
     final_text = ""
     errors: List[str] = []
@@ -221,8 +242,8 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
             turn = client.generate(
                 case_id=case.id,
                 messages=messages,
-                system=SYSTEM_PROMPT,
-                tools=_tool_specs_for_model(),
+                system=_system_for_case(case),
+                tools=_tools_for_case(case),
             )
         except Exception as exc:
             return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])

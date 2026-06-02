@@ -251,3 +251,48 @@ cases:
           I cannot access real households or disclose row-level FRS microdata.
           As an illustrative synthetic alternative for 2025, a single adult
           earning £30000 has modelled baseline net income of £25119.60.
+
+  - id: tool_loop_malformed_household_input_recovery
+    suite: tool_loop
+    description: A household tool error should lead to clarification instead of invented numbers.
+    prompt: >
+      Calculate a household for a person earning GBP 30k, but the model
+      accidentally constructs an invalid benefit-unit reference.
+    expected_tools:
+      - name: calculate_household
+        input_contains:
+          year: 2025
+          person:
+            - benunit_id: 999
+    forbidden_tools:
+      - analyse_microdata
+      - run_python
+      - run_economy_simulation
+    expect:
+      required:
+        - could not calculate
+        - benunit_id
+        - "999"
+        - valid benefit unit
+      forbidden_regex:
+        - "£\\s?\\d"
+        - "\\b\\d+(?:\\.\\d+)?%"
+    offline_responses:
+      - tool_calls:
+          - name: calculate_household
+            input:
+              year: 2025
+              person:
+                - person_id: 0
+                  benunit_id: 999
+                  household_id: 0
+                  age: 35
+                  employment_income: 30000
+              benunit:
+                - benunit_id: 0
+                  household_id: 0
+              household:
+                - household_id: 0
+      - text: >
+          I could not calculate the household because benunit_id 999 does not
+          match a valid benefit unit in the supplied structure.

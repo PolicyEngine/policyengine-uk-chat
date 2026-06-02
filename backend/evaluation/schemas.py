@@ -101,6 +101,9 @@ class ToolContractCase(CaseBase):
 class TrajectoryCase(CaseBase):
     suite: Literal["trajectory"] = "trajectory"
     prompt: str
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    plan_mode: bool = False
+    charts_mode: bool = False
     expected_tools: List[ToolCallExpectation] = Field(default_factory=list)
     forbidden_tools: List[str] = Field(default_factory=list)
     offline_response: Optional[ModelTurn] = None
@@ -117,6 +120,9 @@ class AnswerCase(CaseBase):
 class ToolLoopCase(CaseBase):
     suite: Literal["tool_loop"] = "tool_loop"
     prompt: str
+    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    plan_mode: bool = False
+    charts_mode: bool = False
     expected_tools: List[ToolCallExpectation] = Field(default_factory=list)
     forbidden_tools: List[str] = Field(default_factory=list)
     expect: TextExpectation = Field(default_factory=TextExpectation)

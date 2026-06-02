@@ -33,6 +33,13 @@ validate-then-calculate flows.
   case may use them.
 - Mark cases requiring local microdata with `requirements: [data]`.
 - Mark cases requiring the compiled package with `requirements: [compiled]`.
+- Mark Anthropic-only baseline cases with `requirements: [live_model]`; these
+  must skip in offline mode and run only through `make eval-ai-live`.
+- Use `messages` on trajectory or tool-loop cases when the expected behavior
+  depends on prior conversation turns.
+- Use `plan_mode: true` when the case should structurally omit tools from the
+  model request. Use `charts_mode: true` when the chart-mode directive is part
+  of the behavior under test.
 - Use deterministic graders first: JSON partial match, path checks, numeric
   tolerance, forbidden terms, required caveats, privacy statements, and grounded
   number checks.

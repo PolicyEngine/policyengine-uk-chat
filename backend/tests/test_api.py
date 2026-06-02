@@ -6,6 +6,7 @@ Run inside the backend container: pytest tests/
 
 import json
 import os
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
@@ -181,6 +182,68 @@ def parse_sse(response_text: str) -> list[dict]:
     return events
 
 
+def _anthropic_event(name: str, **attrs):
+    event = type(name, (), {})()
+    for key, value in attrs.items():
+        setattr(event, key, value)
+    return event
+
+
+class _FakeAnthropicStream:
+    def __init__(self, *, chunks=None, final_content=None, stop_reason="end_turn"):
+        self._events = [
+            _anthropic_event(
+                "RawContentBlockDeltaEvent",
+                delta=SimpleNamespace(type="text_delta", text=chunk),
+            )
+            for chunk in (chunks or [])
+        ]
+        self._final = SimpleNamespace(
+            content=final_content or [],
+            stop_reason=stop_reason,
+        )
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    def __aiter__(self):
+        return self._iter_events()
+
+    async def _iter_events(self):
+        for event in self._events:
+            yield event
+
+    async def get_final_message(self):
+        return self._final
+
+
+class _FakeAnthropicMessages:
+    def __init__(self, streams):
+        self._streams = list(streams)
+        self.calls = []
+
+    def stream(self, **kwargs):
+        self.calls.append(kwargs)
+        return self._streams.pop(0)
+
+
+class _FakeAnthropicClient:
+    def __init__(self, streams):
+        self.messages = _FakeAnthropicMessages(streams)
+
+
+def _tool_use_block(name: str, tool_input: dict, tool_id: str = "tool-1"):
+    return SimpleNamespace(
+        type="tool_use",
+        id=tool_id,
+        name=name,
+        input=tool_input,
+    )
+
+
 @requires_live_anthropic
 class TestChatMessage:
     def test_simple_chat_returns_sse(self):
@@ -299,6 +362,112 @@ class TestPlanMode:
         assert req.plan_mode is True
         req2 = ChatRequest(messages=[{"role": "user", "content": "hi"}])
         assert req2.plan_mode is False
+
+
+class TestChatRouteWithMockedAnthropic:
+    def test_chat_route_executes_tool_loop_and_returns_final_answer(self, monkeypatch):
+        import routes.chatbot as chatbot
+
+        async def no_suggestions(*_args, **_kwargs):
+            return []
+
+        tool_input = {
+            "year": 2025,
+            "person": [
+                {
+                    "person_id": 0,
+                    "benunit_id": 0,
+                    "household_id": 0,
+                    "age": 35,
+                    "employment_income": 30000,
+                }
+            ],
+            "benunit": [{"benunit_id": 0, "household_id": 0}],
+            "household": [{"household_id": 0}],
+        }
+        fake_client = _FakeAnthropicClient(
+            [
+                _FakeAnthropicStream(
+                    final_content=[
+                        _tool_use_block("calculate_household", tool_input),
+                    ],
+                ),
+                _FakeAnthropicStream(
+                    chunks=["For this illustrative household, net income is £25119.60."],
+                    final_content=[],
+                ),
+            ]
+        )
+        executed = []
+
+        def fake_execute_tool(tool_name, received_input):
+            executed.append((tool_name, received_input))
+            return {
+                "status": "success",
+                "household": [{"baseline_net_income": 25119.60}],
+            }
+
+        monkeypatch.setattr(chatbot, "_get_anthropic_client", lambda: fake_client)
+        monkeypatch.setattr(chatbot, "_generate_followup_suggestions", no_suggestions)
+        monkeypatch.setattr(chatbot, "execute_tool", fake_execute_tool)
+
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={"messages": [{"role": "user", "content": "Calculate this household."}]},
+        ) as response:
+            assert response.status_code == 200
+            text = response.read().decode()
+
+        events = parse_sse(text)
+        assert [event["type"] for event in events if event["type"] in {"tool_use", "tool_result", "done"}] == [
+            "tool_use",
+            "tool_result",
+            "done",
+        ]
+        done = next(event for event in events if event["type"] == "done")
+        assert "£25119.60" in done["content"]
+        assert executed == [("calculate_household", tool_input)]
+        assert "tools" in fake_client.messages.calls[0]
+        second_messages = fake_client.messages.calls[1]["messages"]
+        assert second_messages[-1]["content"][0]["type"] == "tool_result"
+
+    def test_plan_mode_omits_tools_and_drops_unexpected_tool_use(self, monkeypatch):
+        import routes.chatbot as chatbot
+
+        fake_client = _FakeAnthropicClient(
+            [
+                _FakeAnthropicStream(
+                    chunks=["I would first identify the household inputs."],
+                    final_content=[
+                        _tool_use_block("calculate_household", {"year": 2025}),
+                    ],
+                )
+            ]
+        )
+
+        def fail_if_tool_executes(*_args, **_kwargs):
+            raise AssertionError("plan mode must not execute tools")
+
+        monkeypatch.setattr(chatbot, "_get_anthropic_client", lambda: fake_client)
+        monkeypatch.setattr(chatbot, "execute_tool", fail_if_tool_executes)
+
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "plan_mode": True,
+                "messages": [{"role": "user", "content": "Plan this calculation."}],
+            },
+        ) as response:
+            assert response.status_code == 200
+            text = response.read().decode()
+
+        events = parse_sse(text)
+        assert "tools" not in fake_client.messages.calls[0]
+        assert not [event for event in events if event["type"] in {"tool_use", "tool_result"}]
+        done = next(event for event in events if event["type"] == "done")
+        assert "identify the household inputs" in done["content"]
 
 
 # ---------------------------------------------------------------------------

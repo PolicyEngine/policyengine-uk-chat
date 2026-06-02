@@ -7,15 +7,20 @@ from pydantic import ValidationError
 import evaluation.runner as runner
 from evaluation.graders import grade_output, grade_text, grade_tool_calls
 from evaluation.loaders import load_case_file
+from evaluation.reporting import render_markdown
 from evaluation.runner import run_eval
 from evaluation.schemas import (
+    CaseResult,
     CaseSkip,
+    EvalReport,
+    ModelTurn,
     ModelToolCall,
     NumericExpectation,
     OutputExpectation,
     TextExpectation,
     ToolContractCase,
     ToolCallExpectation,
+    TrajectoryCase,
 )
 from evaluation.sync_policyengine_uk import render_generated_cases
 
@@ -124,9 +129,14 @@ def test_offline_eval_runs_seed_trajectory_and_answer_cases_without_reports():
         len(load_case_file(REPO_ROOT / "evals" / "cases" / "trajectory" / "core.yaml"))
         + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answers" / "core.yaml"))
     )
+    live_only_cases = (
+        len(load_case_file(REPO_ROOT / "evals" / "cases" / "trajectory" / "live.yaml"))
+        + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answers" / "live.yaml"))
+    )
 
     assert report.failed == 0
     assert report.passed == expected_cases
+    assert report.skipped == live_only_cases
 
 
 def test_offline_eval_runs_tool_loop_cases_without_reports():
@@ -198,6 +208,114 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
     assert report.failed == 0
     assert report.passed == 1
     assert calls == [("calculate_household", {"year": 2025})]
+
+
+def test_plan_mode_trajectory_omits_tools_and_adds_directive():
+    class RecordingClient:
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, **kwargs):
+            self.calls.append(kwargs)
+            return ModelTurn(text="I would ask for inputs first.")
+
+    case = TrajectoryCase(
+        id="plan_case",
+        description="Plan mode omits tools.",
+        prompt="Plan a calculation.",
+        plan_mode=True,
+    )
+    client = RecordingClient()
+
+    result = runner._run_trajectory(case, client)
+
+    assert result.status == "passed"
+    assert client.calls[0]["tools"] is None
+    assert "PLAN MODE IS ACTIVE" in client.calls[0]["system"]
+
+
+def test_charts_mode_trajectory_adds_directive_and_keeps_tools():
+    class RecordingClient:
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, **kwargs):
+            self.calls.append(kwargs)
+            return ModelTurn(tool_calls=[ModelToolCall(name="generate_chart", input={})])
+
+    case = TrajectoryCase(
+        id="charts_case",
+        description="Charts mode keeps tools available.",
+        prompt="Chart supplied data.",
+        charts_mode=True,
+        expected_tools=[ToolCallExpectation(name="generate_chart")],
+    )
+    client = RecordingClient()
+
+    result = runner._run_trajectory(case, client)
+
+    assert result.status == "passed"
+    assert client.calls[0]["tools"]
+    assert "chart mode" in client.calls[0]["system"]
+
+
+def test_multiturn_trajectory_uses_case_messages():
+    class RecordingClient:
+        def __init__(self):
+            self.calls = []
+
+        def generate(self, **kwargs):
+            self.calls.append(kwargs)
+            return ModelTurn(text="ok")
+
+    messages = [
+        {"role": "user", "content": "I have dependants."},
+        {"role": "assistant", "content": "What ages?"},
+        {"role": "user", "content": "4 and 9."},
+    ]
+    case = TrajectoryCase(
+        id="multi_turn_case",
+        description="Uses supplied transcript.",
+        prompt="fallback prompt",
+        messages=messages,
+    )
+    client = RecordingClient()
+
+    result = runner._run_trajectory(case, client)
+
+    assert result.status == "passed"
+    assert client.calls[0]["messages"] == messages
+
+
+def test_report_markdown_exposes_counts_and_case_status_for_regression_review():
+    report = EvalReport(
+        mode="live",
+        suites=["trajectory"],
+        provider="anthropic",
+        model="claude-haiku-4-5",
+        git_sha="abc123",
+        started_at="2026-06-02T00:00:00+00:00",
+        finished_at="2026-06-02T00:00:01+00:00",
+        results=[
+            CaseResult(id="passed_case", suite="trajectory", status="passed", score=1.0),
+            CaseResult(
+                id="failed_case",
+                suite="trajectory",
+                status="failed",
+                score=0.0,
+                errors=["expected tool 'calculate_household'"],
+            ),
+        ],
+    )
+
+    markdown = render_markdown(report)
+
+    assert "Provider: `anthropic`" in markdown
+    assert "Model: `claude-haiku-4-5`" in markdown
+    assert "Passed: `1`" in markdown
+    assert "Failed: `1`" in markdown
+    assert "`failed_case`" in markdown
+    assert "expected tool" in markdown
 
 
 def test_skipped_tool_contract_cases_require_source_metadata():
