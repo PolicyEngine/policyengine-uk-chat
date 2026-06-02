@@ -683,3 +683,113 @@ cases:
       - generate_chart
     offline_response:
       text: To calculate an illustrative household, I need the dependants' ages and whether they are children, adults, or students.
+
+  - id: trajectory_chart_existing_values
+    suite: trajectory
+    description: A chart-only request over supplied values should use generate_chart without recalculating.
+    tags: [chart_routing]
+    prompt: >
+      Chart these already-computed household net income values: baseline GBP
+      25,119.60 and reform GBP 25,584.70.
+    expected_tools:
+      - name: generate_chart
+        input_contains:
+          chart_type: bar
+          title: Household net income
+          data:
+            - scenario: Baseline
+              net_income: 25119.60
+            - scenario: Reform
+              net_income: 25584.70
+          x_field: scenario
+          y_fields: [net_income]
+    forbidden_tools:
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - run_python
+    offline_response:
+      tool_calls:
+        - name: generate_chart
+          input:
+            chart_type: bar
+            title: Household net income
+            data:
+              - scenario: Baseline
+                net_income: 25119.60
+              - scenario: Reform
+                net_income: 25584.70
+            x_field: scenario
+            y_fields: [net_income]
+            y_format: currency
+
+  - id: trajectory_run_python_for_custom_schedule
+    suite: trajectory
+    description: Custom calculation requests outside typed tool scope should use run_python as fallback.
+    tags: [python_fallback]
+    prompt: >
+      Using PolicyEngine UK, write a reproducible calculation for net income at
+      incomes from GBP 0 to GBP 60k in GBP 10k steps for a single adult.
+    expected_tools:
+      - name: run_python
+        required_input_paths:
+          - code
+    forbidden_tools:
+      - analyse_microdata
+      - run_economy_simulation
+    offline_response:
+      tool_calls:
+        - name: run_python
+          input:
+            code: |
+              rows = []
+              for income in range(0, 60001, 10000):
+                  persons, benunits, households = Simulation.single_person(employment_income=income)
+                  sim = Simulation(year=2025, persons=persons, benunits=benunits, households=households)
+                  md = sim.run_microdata()
+                  rows.append({"employment_income": income, "net_income": md.persons["baseline_net_income"].iloc[0]})
+              result = rows
+
+  - id: trajectory_non_frs_microdata_aggregate
+    suite: trajectory
+    description: Allowed non-FRS aggregate microdata requests should use analyse_microdata.
+    tags: [microdata_aggregate]
+    prompt: >
+      In the Enhanced FRS model data, group households by region and show the
+      average baseline net income.
+    expected_tools:
+      - name: analyse_microdata
+        input_contains:
+          entity: households
+          operation: group_by
+          dataset: efrs
+          group_by: [region]
+          columns: [baseline_net_income]
+    forbidden_tools:
+      - run_python
+      - run_economy_simulation
+    offline_response:
+      tool_calls:
+        - name: analyse_microdata
+          input:
+            entity: households
+            operation: group_by
+            dataset: efrs
+            group_by: [region]
+            columns: [baseline_net_income]
+
+  - id: trajectory_missing_year_asks_followup
+    suite: trajectory
+    description: Quantitative reform prompts with missing year and household details should ask for clarification.
+    tags: [ambiguity]
+    prompt: How would raising the personal allowance affect me?
+    expected_tools: []
+    forbidden_tools:
+      - validate_reform
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - run_python
+      - generate_chart
+    offline_response:
+      text: To calculate this, I need the tax year, household structure, income, and the new personal allowance amount.

@@ -120,9 +120,84 @@ def test_offline_eval_runs_seed_trajectory_and_answer_cases_without_reports():
         mode="offline",
         write_reports=False,
     )
+    expected_cases = (
+        len(load_case_file(REPO_ROOT / "evals" / "cases" / "trajectory" / "core.yaml"))
+        + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answers" / "core.yaml"))
+    )
 
     assert report.failed == 0
-    assert report.passed == 23
+    assert report.passed == expected_cases
+
+
+def test_offline_eval_runs_tool_loop_cases_without_reports():
+    report = run_eval(
+        suites=["tool_loop"],
+        mode="offline",
+        write_reports=False,
+    )
+    expected_cases = len(load_case_file(REPO_ROOT / "evals" / "cases" / "tool_loop" / "core.yaml"))
+
+    assert report.failed == 0
+    assert report.passed == expected_cases
+
+
+def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
+    case_file = tmp_path / "tool_loop.yaml"
+    case_file.write_text(
+        yaml.safe_dump(
+            {
+                "cases": [
+                    {
+                        "id": "loop_case",
+                        "suite": "tool_loop",
+                        "description": "Tool loop executes a tool before grading final text.",
+                        "prompt": "Calculate, then answer.",
+                        "expected_tools": [
+                            {
+                                "name": "calculate_household",
+                                "input_contains": {"year": 2025},
+                            }
+                        ],
+                        "expect": {
+                            "required": ["done", "£42"],
+                            "grounded_numbers": True,
+                            "allowed_numbers": [42],
+                        },
+                        "offline_responses": [
+                            {
+                                "tool_calls": [
+                                    {
+                                        "name": "calculate_household",
+                                        "input": {"year": 2025},
+                                    }
+                                ]
+                            },
+                            {"text": "done £42"},
+                        ],
+                    }
+                ]
+            },
+            sort_keys=False,
+        )
+    )
+    calls = []
+
+    def record_tool_call(tool_name, tool_input):
+        calls.append((tool_name, tool_input))
+        return {"value": 42}
+
+    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+    monkeypatch.setattr(runner, "execute_tool", record_tool_call)
+
+    report = runner.run_eval(
+        suites=["tool_loop"],
+        mode="offline",
+        write_reports=False,
+    )
+
+    assert report.failed == 0
+    assert report.passed == 1
+    assert calls == [("calculate_household", {"year": 2025})]
 
 
 def test_skipped_tool_contract_cases_require_source_metadata():

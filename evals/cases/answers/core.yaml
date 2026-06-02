@@ -90,3 +90,158 @@ cases:
         Using FRS aggregate outputs for 2025, the reform changes the budgetary
         position by £1.2 billion. The reported decile impacts range up to £120
         per year in decile 10.
+
+  - id: answer_household_baseline_only
+    suite: answer
+    description: Baseline-only household answers should stay illustrative and grounded.
+    prompt: Summarise the baseline household result.
+    tool_calls:
+      - name: calculate_household
+        input:
+          year: 2025
+          person:
+            - person_id: 0
+              benunit_id: 0
+              household_id: 0
+              age: 35
+              employment_income: 30000
+          benunit:
+            - benunit_id: 0
+              household_id: 0
+          household:
+            - household_id: 0
+        output:
+          status: success
+          year: 2025
+          reform_applied: false
+          person:
+            - person_id: 0
+              employment_income: 30000
+              baseline_income_tax: 3486
+              baseline_employee_ni: 1394.40
+          household:
+            - household_id: 0
+              baseline_net_income: 25119.60
+    expect:
+      required:
+        - illustrative
+        - "2025"
+        - £25119.60
+        - income tax
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+        - actual household
+      grounded_numbers: true
+      allowed_numbers: [2025, 30000, 25119.60, 3486, 1394.40]
+      number_tolerance: 0.01
+    offline_response:
+      text: >
+        For this illustrative 2025 household earning £30000, baseline net
+        income is £25119.60 after £3486 of income tax and £1394.40 of employee NI.
+
+  - id: answer_chart_markdown_from_tool
+    suite: answer
+    description: Chart answers should include frontend-renderable chart markdown from the chart tool.
+    prompt: Show the chart.
+    tool_calls:
+      - name: generate_chart
+        input:
+          chart_type: bar
+          title: Baseline and reform net income
+          data:
+            - scenario: Baseline
+              net_income: 25119.60
+            - scenario: Reform
+              net_income: 25584.70
+          x_field: scenario
+          y_fields: [net_income]
+          y_format: currency
+        output:
+          status: success
+          chart_markdown: |
+            ```chart
+            {"type":"bar","title":"Baseline and reform net income","data":[{"scenario":"Baseline","net_income":25119.60},{"scenario":"Reform","net_income":25584.70}],"x":{"field":"scenario"},"y":{"field":"net_income","format":"currency"}}
+            ```
+    expect:
+      required:
+        - "```chart"
+        - Baseline
+        - Reform
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+      grounded_numbers: true
+      allowed_numbers: [25119.60, 25584.70]
+      number_tolerance: 0.01
+    offline_response:
+      text: |
+        ```chart
+        {"type":"bar","title":"Baseline and reform net income","data":[{"scenario":"Baseline","net_income":25119.60},{"scenario":"Reform","net_income":25584.70}],"x":{"field":"scenario"},"y":{"field":"net_income","format":"currency"}}
+        ```
+
+  - id: answer_missing_inputs_followup
+    suite: answer
+    description: Missing quantitative inputs should lead to a clarification rather than invented numbers.
+    prompt: How much would I pay?
+    expect:
+      required:
+        - income
+        - tax year
+        - household
+      forbidden_regex:
+        - "£\\s?\\d"
+        - "\\b\\d+(?:\\.\\d+)?%"
+    offline_response:
+      text: >
+        I need your income, household structure, and tax year before I can
+        calculate this.
+
+  - id: answer_reform_validation_error
+    suite: answer
+    description: Reform validation errors should be explained neutrally with the failing path.
+    prompt: Explain why this reform JSON failed.
+    tool_calls:
+      - name: validate_reform
+        input:
+          reform:
+            income_tax:
+              made_up_field: 1
+        output:
+          valid: false
+          errors:
+            - path: income_tax.made_up_field
+              message: Unknown field 'made_up_field' for reform program 'income_tax'.
+          valid_programs:
+            - income_tax
+    expect:
+      required:
+        - not valid
+        - income_tax.made_up_field
+        - made_up_field
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+    offline_response:
+      text: >
+        The reform JSON is not valid because income_tax.made_up_field is not a
+        recognised field. Remove made_up_field or replace it with a supported
+        income_tax parameter.

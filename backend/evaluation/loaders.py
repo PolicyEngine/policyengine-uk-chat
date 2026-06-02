@@ -5,13 +5,20 @@ from typing import Iterable, List
 
 import yaml
 
-from evaluation.schemas import AnswerCase, EvalCase, ToolContractCase, TrajectoryCase
+from evaluation.schemas import (
+    AnswerCase,
+    EvalCase,
+    ToolContractCase,
+    ToolLoopCase,
+    TrajectoryCase,
+)
 
 
 CASE_MODELS = {
     "tool_contract": ToolContractCase,
     "trajectory": TrajectoryCase,
     "answer": AnswerCase,
+    "tool_loop": ToolLoopCase,
 }
 
 

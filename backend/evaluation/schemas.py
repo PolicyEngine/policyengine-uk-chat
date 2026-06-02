@@ -114,7 +114,17 @@ class AnswerCase(CaseBase):
     offline_response: Optional[ModelTurn] = None
 
 
-EvalCase = ToolContractCase | TrajectoryCase | AnswerCase
+class ToolLoopCase(CaseBase):
+    suite: Literal["tool_loop"] = "tool_loop"
+    prompt: str
+    expected_tools: List[ToolCallExpectation] = Field(default_factory=list)
+    forbidden_tools: List[str] = Field(default_factory=list)
+    expect: TextExpectation = Field(default_factory=TextExpectation)
+    max_iterations: int = Field(default=4, ge=1, le=8)
+    offline_responses: List[ModelTurn] = Field(default_factory=list)
+
+
+EvalCase = ToolContractCase | TrajectoryCase | AnswerCase | ToolLoopCase
 
 
 class CaseResult(StrictModel):

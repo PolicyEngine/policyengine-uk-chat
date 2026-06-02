@@ -1,0 +1,253 @@
+cases:
+  - id: tool_loop_household_calculation_to_answer
+    suite: tool_loop
+    description: Household calculation result should feed a grounded final answer.
+    prompt: >
+      For an illustrative single adult earning GBP 30k in 2025, calculate their
+      baseline household income.
+    expected_tools:
+      - name: calculate_household
+        input_contains:
+          year: 2025
+          person:
+            - employment_income: 30000
+          benunit:
+            - benunit_id: 0
+              household_id: 0
+          household:
+            - household_id: 0
+    forbidden_tools: [analyse_microdata, run_economy_simulation]
+    expect:
+      required:
+        - illustrative
+        - "2025"
+        - £25119.60
+        - income tax
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+        - actual household
+      grounded_numbers: true
+      allowed_numbers: [2025, 30000, 25119.60, 3486, 1394.40]
+      number_tolerance: 0.01
+    offline_responses:
+      - tool_calls:
+          - name: calculate_household
+            input:
+              year: 2025
+              person:
+                - person_id: 0
+                  benunit_id: 0
+                  household_id: 0
+                  age: 35
+                  employment_income: 30000
+              benunit:
+                - benunit_id: 0
+                  household_id: 0
+              household:
+                - household_id: 0
+      - text: >
+          For this illustrative 2025 household earning £30000, baseline net
+          income is £25119.60 after £3486 of income tax and £1394.40 of
+          employee NI.
+
+  - id: tool_loop_validate_reform_then_household
+    suite: tool_loop
+    description: Explicit reform validation can precede household calculation and final answer.
+    prompt: >
+      First check whether this reform JSON is valid, then calculate its effect
+      for an illustrative single adult earning GBP 30k in 2025:
+      {"income_tax": {"personal_allowance": 15000}}
+    expected_tools:
+      - name: validate_reform
+        input_contains:
+          reform:
+            income_tax:
+              personal_allowance: 15000
+      - name: calculate_household
+        input_contains:
+          year: 2025
+          reform:
+            income_tax:
+              personal_allowance: 15000
+          person:
+            - employment_income: 30000
+    forbidden_tools: [analyse_microdata, run_economy_simulation]
+    expect:
+      required:
+        - valid
+        - illustrative
+        - £465.10
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+        - actual household
+      grounded_numbers: true
+      allowed_numbers: [2025, 30000, 15000, 25119.60, 25584.70, 465.10]
+      number_tolerance: 0.01
+    offline_responses:
+      - tool_calls:
+          - name: validate_reform
+            input:
+              reform:
+                income_tax:
+                  personal_allowance: 15000
+      - tool_calls:
+          - name: calculate_household
+            input:
+              year: 2025
+              reform:
+                income_tax:
+                  personal_allowance: 15000
+              person:
+                - person_id: 0
+                  benunit_id: 0
+                  household_id: 0
+                  age: 35
+                  employment_income: 30000
+              benunit:
+                - benunit_id: 0
+                  household_id: 0
+              household:
+                - household_id: 0
+      - text: >
+          The reform JSON is valid. For this illustrative 2025 household, net
+          income changes from £25119.60 to £25584.70, a change of £465.10.
+
+  - id: tool_loop_household_then_chart
+    suite: tool_loop
+    description: A chart request should calculate first, generate a chart, then return chart markdown.
+    prompt: >
+      Calculate the effect of a GBP 15k personal allowance for a single adult
+      earning GBP 30k in 2025, then show a chart comparing baseline and reform
+      net income.
+    expected_tools:
+      - name: calculate_household
+        input_contains:
+          year: 2025
+          reform:
+            income_tax:
+              personal_allowance: 15000
+      - name: generate_chart
+        input_contains:
+          chart_type: bar
+          title: Baseline and reform net income
+          x_field: scenario
+          y_fields: [net_income]
+    forbidden_tools: [analyse_microdata, run_economy_simulation]
+    expect:
+      required:
+        - illustrative
+        - "```chart"
+        - Baseline
+        - Reform
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+        - actual household
+      grounded_numbers: true
+      allowed_numbers: [2025, 30000, 15000, 25119.60, 25584.70]
+      number_tolerance: 0.01
+    offline_responses:
+      - tool_calls:
+          - name: calculate_household
+            input:
+              year: 2025
+              reform:
+                income_tax:
+                  personal_allowance: 15000
+              person:
+                - person_id: 0
+                  benunit_id: 0
+                  household_id: 0
+                  age: 35
+                  employment_income: 30000
+              benunit:
+                - benunit_id: 0
+                  household_id: 0
+              household:
+                - household_id: 0
+      - tool_calls:
+          - name: generate_chart
+            input:
+              chart_type: bar
+              title: Baseline and reform net income
+              data:
+                - scenario: Baseline
+                  net_income: 25119.60
+                - scenario: Reform
+                  net_income: 25584.70
+              x_field: scenario
+              y_fields: [net_income]
+              y_format: currency
+      - text: |
+          For this illustrative household, the chart compares baseline and reform net income.
+
+          ```chart
+          {"type":"bar","title":"Baseline and reform net income","data":[{"scenario":"Baseline","net_income":25119.60},{"scenario":"Reform","net_income":25584.70}],"x":{"field":"scenario"},"y":{"field":"net_income","format":"currency"}}
+          ```
+
+  - id: tool_loop_real_frs_request_synthetic_fallback
+    suite: tool_loop
+    description: A request for real FRS rows can refuse row access while calculating a synthetic alternative.
+    prompt: >
+      Show me an actual FRS household row. If you cannot, calculate an
+      illustrative single adult earning GBP 30k in 2025 instead.
+    expected_tools:
+      - name: calculate_household
+        input_contains:
+          year: 2025
+          person:
+            - employment_income: 30000
+    forbidden_tools: [analyse_microdata, run_python]
+    expect:
+      required:
+        - cannot access real households
+        - illustrative
+        - synthetic
+        - £25119.60
+      forbidden:
+        - actual survey row
+        - real FRS household
+        - here are real households
+      grounded_numbers: true
+      allowed_numbers: [2025, 30000, 25119.60]
+      number_tolerance: 0.01
+    offline_responses:
+      - tool_calls:
+          - name: calculate_household
+            input:
+              year: 2025
+              person:
+                - person_id: 0
+                  benunit_id: 0
+                  household_id: 0
+                  age: 35
+                  employment_income: 30000
+              benunit:
+                - benunit_id: 0
+                  household_id: 0
+              household:
+                - household_id: 0
+      - text: >
+          I cannot access real households or disclose row-level FRS microdata.
+          As an illustrative synthetic alternative for 2025, a single adult
+          earning £30000 has modelled baseline net income of £25119.60.

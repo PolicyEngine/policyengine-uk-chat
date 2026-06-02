@@ -16,9 +16,13 @@ the UK chat pathway.
 - `tool_contract`: deterministic public tools through `execute_tool`.
 - `trajectory`: user prompt to model tool calls and arguments.
 - `answer`: frozen tool output to final prose.
+- `tool_loop`: user prompt through one or more model/tool turns to final prose.
 
 Keep cases focused on one boundary. If a case needs to check both tool choice
 and final prose, split it into one trajectory case and one answer case.
+Use `tool_loop` only when the seam being tested requires deterministic tool
+execution between model turns, such as calculate-then-chart or
+validate-then-calculate flows.
 
 ## Case Rules
 
@@ -64,8 +68,9 @@ Checks that generated source-synced cases are fresh.
 make eval-ai-offline
 ```
 
-Runs schema validation, deterministic tool-contract evals, and fake-provider
-trajectory/answer cases.
+Runs schema validation, deterministic tool-contract evals, fake-provider
+trajectory/answer cases, and fake-provider tool-loop cases with deterministic
+tool execution.
 
 ```bash
 ANTHROPIC_API_KEY=... make eval-ai-live

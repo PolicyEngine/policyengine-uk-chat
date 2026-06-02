@@ -21,8 +21,9 @@ class ModelClient(Protocol):
 class FakeModelClient:
     """Deterministic provider used by offline eval cases."""
 
-    def __init__(self, turns: Dict[str, ModelTurn]):
+    def __init__(self, turns: Dict[str, ModelTurn | List[ModelTurn]]):
         self._turns = turns
+        self._offsets: Dict[str, int] = {}
 
     def generate(
         self,
@@ -34,7 +35,14 @@ class FakeModelClient:
     ) -> ModelTurn:
         if case_id not in self._turns:
             raise ValueError(f"No offline response configured for {case_id}")
-        return self._turns[case_id]
+        turn = self._turns[case_id]
+        if isinstance(turn, list):
+            index = self._offsets.get(case_id, 0)
+            if index >= len(turn):
+                raise ValueError(f"No offline response configured for {case_id} turn {index + 1}")
+            self._offsets[case_id] = index + 1
+            return turn[index]
+        return turn
 
 
 class AnthropicModelClient:

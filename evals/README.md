@@ -23,7 +23,9 @@ make eval-ai-offline
 ```
 
 Runs deterministic tool-contract cases plus fake-provider trajectory and answer
-cases. This checks schemas, runners, and graders without calling a live model.
+cases, plus fake-provider tool-loop cases that execute deterministic tools
+between frozen model turns. This checks schemas, runners, and graders without
+calling a live model.
 
 ```bash
 ANTHROPIC_API_KEY=... make eval-ai-live
@@ -39,6 +41,8 @@ Set `RUN_DATA_EVALS=1` to include cases that require local microdata.
 - `tool_contract`: deterministic tool behavior through `execute_tool`.
 - `trajectory`: prompt to tool choice and tool arguments.
 - `answer`: frozen tool output to final prose.
+- `tool_loop`: prompt through model tool calls, deterministic tool execution,
+  and final prose.
 
 Source-synced `policyengine-uk` cases with `compiled_coverage_gap` skips are
 kept in the suite as visible compiled-backlog markers. Remove the skip only

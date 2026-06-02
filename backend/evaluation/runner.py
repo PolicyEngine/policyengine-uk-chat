@@ -23,6 +23,7 @@ from evaluation.schemas import (
     EvalReport,
     ModelTurn,
     ToolContractCase,
+    ToolLoopCase,
     TrajectoryCase,
 )
 
@@ -35,6 +36,7 @@ SUITE_DIRS = {
     "tool_contract": CASE_ROOT / "tool_contract",
     "trajectory": CASE_ROOT / "trajectory",
     "answer": CASE_ROOT / "answers",
+    "tool_loop": CASE_ROOT / "tool_loop",
 }
 
 
@@ -104,8 +106,12 @@ def _load_fixture(name: str) -> Dict[str, Any]:
 
 
 def _build_offline_client(cases: List[EvalCase]) -> FakeModelClient:
-    turns: Dict[str, ModelTurn] = {}
+    turns: Dict[str, ModelTurn | List[ModelTurn]] = {}
     for case in cases:
+        offline_responses = getattr(case, "offline_responses", None)
+        if offline_responses:
+            turns[case.id] = offline_responses
+            continue
         offline_response = getattr(case, "offline_response", None)
         if offline_response is not None:
             turns[case.id] = offline_response
@@ -200,6 +206,73 @@ def _run_answer(case: AnswerCase, client: ModelClient) -> CaseResult:
     )
 
 
+def _tool_use_id(case: ToolLoopCase, iteration: int, index: int, call_id: str) -> str:
+    return call_id or f"{case.id}-{iteration}-{index}"
+
+
+def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
+    messages: List[Dict[str, Any]] = [{"role": "user", "content": case.prompt}]
+    tool_calls = []
+    final_text = ""
+    errors: List[str] = []
+
+    for iteration in range(1, case.max_iterations + 1):
+        try:
+            turn = client.generate(
+                case_id=case.id,
+                messages=messages,
+                system=SYSTEM_PROMPT,
+                tools=_tool_specs_for_model(),
+            )
+        except Exception as exc:
+            return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
+
+        if turn.text:
+            final_text += turn.text
+        if not turn.tool_calls:
+            break
+
+        assistant_content: List[Dict[str, Any]] = []
+        if turn.text:
+            assistant_content.append({"type": "text", "text": turn.text})
+
+        tool_results: List[Dict[str, Any]] = []
+        for index, call in enumerate(turn.tool_calls, start=1):
+            tool_calls.append(call)
+            tool_use_id = _tool_use_id(case, iteration, index, call.id)
+            assistant_content.append(
+                {
+                    "type": "tool_use",
+                    "id": tool_use_id,
+                    "name": call.name,
+                    "input": call.input,
+                }
+            )
+            output = execute_tool(call.name, call.input)
+            tool_results.append(
+                {
+                    "type": "tool_result",
+                    "tool_use_id": tool_use_id,
+                    "content": json.dumps(output, ensure_ascii=False, default=str),
+                }
+            )
+
+        messages.append({"role": "assistant", "content": assistant_content})
+        messages.append({"role": "user", "content": tool_results})
+    else:
+        errors.append("max iterations reached before final answer")
+
+    errors.extend(grade_tool_calls(tool_calls, case.expected_tools, case.forbidden_tools))
+    errors.extend(grade_text(final_text, case.expect))
+    return _result(
+        case,
+        "failed" if errors else "passed",
+        0.0 if errors else 1.0,
+        errors,
+        {"text": final_text, "tool_calls": [call.model_dump() for call in tool_calls]},
+    )
+
+
 def run_eval(
     *,
     suites: List[str] | None = None,
@@ -233,6 +306,9 @@ def run_eval(
         if case.suite in {"trajectory", "answer"} and mode == "offline" and getattr(case, "offline_response", None) is None:
             results.append(_result(case, "skipped", 0.0, ["offline_response is required for offline model evals"]))
             continue
+        if isinstance(case, ToolLoopCase) and mode == "offline" and not case.offline_responses:
+            results.append(_result(case, "skipped", 0.0, ["offline_responses are required for offline tool-loop evals"]))
+            continue
 
         if isinstance(case, ToolContractCase):
             results.append(_run_tool_contract(case))
@@ -240,6 +316,8 @@ def run_eval(
             results.append(_run_trajectory(case, client))
         elif isinstance(case, AnswerCase):
             results.append(_run_answer(case, client))
+        elif isinstance(case, ToolLoopCase):
+            results.append(_run_tool_loop(case, client))
 
     report = EvalReport(
         mode=mode,
