@@ -129,31 +129,6 @@ def _build_microsim(dataset: str, reform_dict: Optional[Dict[str, Any]]):
     return Microsimulation(dataset=ds, reform=reform_dict)
 
 
-def _decile_dict(values, weights, totals) -> Dict[str, float]:
-    """Average over each decile, weighted by household weight."""
-    import numpy as np
-    deciles = np.array(values)
-    weights = np.array(weights)
-    totals = np.array(totals)
-    # totals defines decile boundaries on baseline household income; deciles
-    # are 1..10 with equal household-weighted mass.
-    quantiles = np.quantile(
-        np.repeat(totals, weights.astype(int).clip(min=0)) if weights.sum() > 0 else totals,
-        np.linspace(0.1, 0.9, 9),
-    )
-    bin_ids = np.digitize(totals, quantiles)  # 0..9
-    out: Dict[str, float] = {}
-    for d in range(10):
-        mask = bin_ids == d
-        if not mask.any():
-            out[str(d + 1)] = 0.0
-            continue
-        w = weights[mask]
-        v = deciles[mask]
-        out[str(d + 1)] = float((v * w).sum() / w.sum()) if w.sum() > 0 else 0.0
-    return out
-
-
 def run_economy_simulation(
     year: int = 2025,
     reform: Optional[Dict[str, Any]] = None,
@@ -161,48 +136,122 @@ def run_economy_simulation(
 ) -> Dict[str, Any]:
     """Run a society-wide UK reform comparison via policyengine_uk.
 
-    Engine-locked to ``policyengine_uk == 2.88.20`` (matches the PE-API v1
-    pin). For reforms covered by the field mapping, results equal PE-API's
-    ``/uk/economy`` endpoint to numerical precision.
+    TEMP / TECH DEBT — see https://github.com/PolicyEngine/policyengine-uk-chat
+        This function inlines ~50 lines of glue that ARE ALREADY IMPLEMENTED in
+        ``policyengine.outputs.macro.comparison.calculate_economy_comparison``.
+        The right long-term shape is::
+
+            from policyengine.outputs.macro.comparison.calculate_economy_comparison \\
+                import calculate_economy_comparison
+            return calculate_economy_comparison(sim).model_dump()
+
+        We can't do that today because ``pip install policyengine==0.13.0``
+        transitively requires ``policyengine_us``, which pins
+        ``policyengine_core>=3.26.0``, which conflicts with the precise
+        ``policyengine_core==3.25.3`` the orchestrator at 0.13.0 was built
+        against. Resolution requires either (a) PolicyEngine releasing a
+        coherent triplet of orchestrator + uk + core, or (b) the orchestrator
+        making country backends optional installs (``policyengine[uk]``).
+        Until one of those lands, we mirror the methodology by hand so the
+        chat backend's deps stay tight. Drop this block when the
+        orchestrator imports cleanly.
+
+    Mirrors the methodology in ``calculate_economy_comparison`` line-by-line
+    so output values match PE-API's ``/uk/economy`` endpoint:
+
+    - Total tax ``gov_tax``, total spending ``gov_spending`` for UK.
+    - Decile groupby on ``household_income_decile``, average =
+      sum(change) / count(households) per bin.
+    - Poverty: person-level ``in_poverty`` with ``map_to='person'``,
+      grouped by ``age < 18`` (child), ``18..64`` (adult), ``>= 65``
+      (senior), weighted mean by person_weight.
+
+    Engine-locked to ``policyengine_uk == 2.88.20``.
     """
+    # TODO(tech-debt): Replace body with calculate_economy_comparison(sim).model_dump()
+    # once the policyengine orchestrator dependency resolves cleanly. The output
+    # shape we build below is a subset of what the orchestrator returns.
     try:
         reform_dict = translate_reform(reform, year)
     except ReformTranslationError as exc:
         return {"error": "Reform translation failed", "detail": str(exc)}
 
     try:
-        sim_baseline = _build_microsim(dataset, None)
-        sim_reform = _build_microsim(dataset, reform_dict)
+        from microdf import MicroSeries
 
-        # Aggregates
-        net_b = sim_baseline.calculate("household_net_income", year)
-        net_r = sim_reform.calculate("household_net_income", year)
-        it_b = sim_baseline.calculate("income_tax", year)
-        it_r = sim_reform.calculate("income_tax", year)
-        # Total benefits include UC, CB, etc — kept as a single aggregate
-        # for now; per-programme breakdown can come in a follow-up.
-        benefits_b = sim_baseline.calculate("household_benefits", year)
-        benefits_r = sim_reform.calculate("household_benefits", year)
+        sim_b = _build_microsim(dataset, None)
+        sim_r = _build_microsim(dataset, reform_dict)
 
-        # Household weights (microdata-weighted to the UK population)
-        hh_weight = sim_baseline.calculate("household_weight", year)
+        # --- Budget (mirrors budgetary_impact) ---
+        gov_tax_b = float(sim_b.calculate("gov_tax", year).sum())
+        gov_tax_r = float(sim_r.calculate("gov_tax", year).sum())
+        gov_spend_b = float(sim_b.calculate("gov_spending", year).sum())
+        gov_spend_r = float(sim_r.calculate("gov_spending", year).sum())
 
-        # MicroSeries supports .sum() with weights baked in.
-        budgetary_impact = float((it_r - it_b).sum() + (benefits_b - benefits_r).sum())
-        income_tax_revenue_change = float((it_r - it_b).sum())
-        benefit_spending_change = float((benefits_r - benefits_b).sum())
+        tax_revenue_impact = gov_tax_r - gov_tax_b
+        benefit_spending_impact = gov_spend_r - gov_spend_b
+        budgetary_impact = tax_revenue_impact - benefit_spending_impact
 
-        # Decile impacts (£) and relative (%) change
-        # Use baseline net income for decile boundaries
-        decile_avg = _decile_dict(
-            (net_r - net_b).values,
-            hh_weight.values,
-            net_b.values,
+        # --- Decile (mirrors decile_impact) ---
+        hh_weight = sim_b.calculate("household_weight", year)
+        net_b = MicroSeries(
+            sim_b.calculate("household_net_income", year).values,
+            weights=hh_weight.values,
         )
-        decile_baseline = _decile_dict(net_b.values, hh_weight.values, net_b.values)
-        decile_relative = {
-            k: (decile_avg[k] / decile_baseline[k]) if decile_baseline[k] else 0.0
-            for k in decile_avg
+        net_r = MicroSeries(
+            sim_r.calculate("household_net_income", year).values,
+            weights=hh_weight.values,
+        )
+        decile = MicroSeries(sim_b.calculate("household_income_decile", year).values)
+
+        # Filter out the -1 sentinel
+        mask_valid = decile >= 0
+        net_b_f = net_b[mask_valid]
+        net_r_f = net_r[mask_valid]
+        decile_f = decile[mask_valid]
+
+        income_change = net_r_f - net_b_f
+        rel_by_decile = (
+            income_change.groupby(decile_f).sum()
+            / net_b_f.groupby(decile_f).sum()
+        )
+        avg_by_decile = (
+            income_change.groupby(decile_f).sum()
+            / net_b_f.groupby(decile_f).count()
+        )
+
+        # --- Poverty (mirrors poverty_impact) ---
+        person_weight = sim_b.calculate("person_weight", year)
+        person_in_pov_b = sim_b.calculate("in_poverty", year, map_to="person")
+        person_in_pov_r = sim_r.calculate("in_poverty", year, map_to="person")
+        age = MicroSeries(sim_b.calculate("age", year).values)
+
+        # baseline_poverty uses person_weight for both baseline and reform —
+        # PE-API freezes weights on the baseline so reform comparisons are
+        # apples-to-apples.
+        pov_b = MicroSeries(person_in_pov_b.values, weights=person_weight.values)
+        pov_r = MicroSeries(person_in_pov_r.values, weights=person_weight.values)
+
+        def pov_group(s: MicroSeries, mask) -> float:
+            return float(s[mask].mean())
+
+        poverty = {
+            "child": {
+                "baseline": pov_group(pov_b, age < 18),
+                "reform": pov_group(pov_r, age < 18),
+            },
+            "adult": {
+                "baseline": pov_group(pov_b, (age >= 18) & (age < 65)),
+                "reform": pov_group(pov_r, (age >= 18) & (age < 65)),
+            },
+            "senior": {
+                "baseline": pov_group(pov_b, age >= 65),
+                "reform": pov_group(pov_r, age >= 65),
+            },
+            "all": {
+                "baseline": float(pov_b.mean()),
+                "reform": float(pov_r.mean()),
+            },
         }
 
         return {
@@ -211,13 +260,14 @@ def run_economy_simulation(
             "dataset": dataset,
             "budget": {
                 "budgetary_impact": budgetary_impact,
-                "income_tax_revenue_change": income_tax_revenue_change,
-                "benefit_spending_change": benefit_spending_change,
+                "tax_revenue_impact": tax_revenue_impact,
+                "benefit_spending_impact": benefit_spending_impact,
             },
             "decile": {
-                "average": decile_avg,
-                "relative": decile_relative,
+                "average": {int(k): float(v) for k, v in avg_by_decile.to_dict().items()},
+                "relative": {int(k): float(v) for k, v in rel_by_decile.to_dict().items()},
             },
+            "poverty": {"poverty": poverty},
             "_reform_applied_dotted": reform_dict,
         }
     except Exception as exc:
