@@ -338,16 +338,26 @@ _BACKENDS: Dict[str, ModelBackend] = {
 }
 
 
+# Metadata for /chat/backends. Computed lazily on first call, then cached:
+# the values (id/label/version) don't change within a deploy. Avoids paying
+# for importlib.metadata.version() — and the heavy package import it may
+# trigger — on every request.
+_BACKENDS_METADATA_CACHE: Dict[str, Dict[str, str]] | None = None
+
+
 def available_backends() -> Dict[str, Dict[str, str]]:
-    return {
-        backend_id: {
-            "id": backend.id,
-            "display_name": backend.display_name,
-            "package_label": backend.package_label,
-            "version": backend.package_version(),
+    global _BACKENDS_METADATA_CACHE
+    if _BACKENDS_METADATA_CACHE is None:
+        _BACKENDS_METADATA_CACHE = {
+            backend_id: {
+                "id": backend.id,
+                "display_name": backend.display_name,
+                "package_label": backend.package_label,
+                "version": backend.package_version(),
+            }
+            for backend_id, backend in _BACKENDS.items()
         }
-        for backend_id, backend in _BACKENDS.items()
-    }
+    return _BACKENDS_METADATA_CACHE
 
 
 def get_backend(backend_id: str | None = None) -> ModelBackend:

@@ -15,11 +15,27 @@ app = modal.App(APP_NAME)
 
 
 def _preload_engine():
-    """Bake the compiled engine into the image snapshot for fast cold starts."""
+    """Bake the engines into the image snapshot for fast cold starts.
+
+    The compiled (Rust) backend is the default and gets the full warm-up.
+    The Python backends only need their packages importable — that's enough
+    to make `/chat/backends` return without paying for the heavy
+    PolicyEngine Core/OpenFisca import on the first request.
+    """
     from policyengine_uk_compiled import Simulation
     sim = Simulation(year=2024)
     sim.get_baseline_params()
-    print("Engine pre-loaded.")
+    print("Compiled engine pre-loaded.")
+
+    # Best-effort imports of the Python backends. Failures are non-fatal —
+    # the chat works without them; this is purely to shave cold-start latency
+    # off /chat/backends.
+    for pkg in ("policyengine_uk", "policyengine_us"):
+        try:
+            __import__(pkg)
+            print(f"{pkg} pre-imported.")
+        except ImportError:
+            print(f"{pkg} not installed; skipping pre-import.")
 
 
 image = (
