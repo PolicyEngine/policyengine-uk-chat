@@ -77,6 +77,22 @@ cases:
         - person.0.baseline_income_tax
         - benunit.0.baseline_universal_credit
         - household.0.baseline_net_income
+      numeric:
+        - path: person.0.baseline_income_tax
+          equals: 3486
+          tolerance: 1
+        - path: person.0.baseline_employee_ni
+          equals: 1394.4
+          tolerance: 1
+        - path: benunit.0.baseline_total_benefits
+          equals: 0
+          tolerance: 0
+        - path: household.0.baseline_net_income
+          equals: 25119.6
+          tolerance: 1
+        - path: household.0.baseline_total_tax
+          equals: 6936.89
+          tolerance: 1
 
   - id: economy_simulation_smoke
     suite: tool_contract

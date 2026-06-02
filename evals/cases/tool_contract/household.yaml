@@ -31,9 +31,33 @@ cases:
         - path: person.0.baseline_income_tax
           equals: 5086
           tolerance: 1
+        - path: person.0.baseline_employee_ni
+          equals: 2034.4
+          tolerance: 1
+        - path: person.0.baseline_total_income
+          equals: 38000
+          tolerance: 0
         - path: person.1.baseline_income_tax
           equals: 0
           tolerance: 0
+        - path: person.1.baseline_employee_ni
+          equals: 0
+          tolerance: 0
+        - path: person.1.baseline_total_income
+          equals: 0
+          tolerance: 0
+        - path: benunit.0.baseline_total_benefits
+          equals: 0
+          tolerance: 0
+        - path: household.0.baseline_net_income
+          equals: 30879.6
+          tolerance: 1
+        - path: household.0.baseline_total_tax
+          equals: 9599.69
+          tolerance: 1
+        - path: household.0.baseline_council_tax_calculated
+          equals: 1520
+          tolerance: 1
 
   - id: household_flatmates_separate_benunits
     suite: tool_contract
@@ -71,6 +95,34 @@ cases:
       required_paths:
         - benunit.1.baseline_total_benefits
         - household.0.baseline_net_income
+      numeric:
+        - path: person.0.baseline_income_tax
+          equals: 3086
+          tolerance: 1
+        - path: person.0.baseline_employee_ni
+          equals: 1234.4
+          tolerance: 1
+        - path: person.1.baseline_income_tax
+          equals: 1486
+          tolerance: 1
+        - path: person.1.baseline_employee_ni
+          equals: 594.4
+          tolerance: 1
+        - path: benunit.0.baseline_total_benefits
+          equals: 0
+          tolerance: 0
+        - path: benunit.1.baseline_total_benefits
+          equals: 0
+          tolerance: 0
+        - path: household.0.baseline_net_income
+          equals: 41599.2
+          tolerance: 1
+        - path: household.0.baseline_total_tax
+          equals: 9648.75
+          tolerance: 1
+        - path: household.0.baseline_council_tax_calculated
+          equals: 1520
+          tolerance: 1
 
   - id: household_single_parent_two_children
     suite: tool_contract
@@ -105,6 +157,31 @@ cases:
         - benunit.0.baseline_child_benefit
         - benunit.0.baseline_universal_credit
         - household.0.baseline_total_benefits
+      numeric:
+        - path: person.0.baseline_income_tax
+          equals: 1886
+          tolerance: 1
+        - path: person.0.baseline_employee_ni
+          equals: 754.4
+          tolerance: 1
+        - path: benunit.0.baseline_child_benefit
+          equals: 2251.6
+          tolerance: 1
+        - path: benunit.0.baseline_universal_credit
+          equals: 6250.02
+          tolerance: 1
+        - path: benunit.0.baseline_total_benefits
+          equals: 8501.62
+          tolerance: 1
+        - path: household.0.baseline_net_income
+          equals: 27861.22
+          tolerance: 1
+        - path: household.0.baseline_total_tax
+          equals: 4899.21
+          tolerance: 1
+        - path: household.0.baseline_council_tax_calculated
+          equals: 1140
+          tolerance: 1
 
   - id: household_adult_child_separate_benunit
     suite: tool_contract
@@ -140,6 +217,37 @@ cases:
             benunit_id: 1
       required_paths:
         - household.0.baseline_net_income
+      numeric:
+        - path: person.0.baseline_income_tax
+          equals: 4486
+          tolerance: 1
+        - path: person.0.baseline_employee_ni
+          equals: 1794.4
+          tolerance: 1
+        - path: person.0.baseline_total_income
+          equals: 35000
+          tolerance: 0
+        - path: person.1.baseline_income_tax
+          equals: 0
+          tolerance: 0
+        - path: person.1.baseline_employee_ni
+          equals: 0
+          tolerance: 0
+        - path: person.1.baseline_total_income
+          equals: 6000
+          tolerance: 0
+        - path: benunit.0.baseline_total_benefits
+          equals: 0
+          tolerance: 0
+        - path: benunit.1.baseline_universal_credit
+          equals: 503.76
+          tolerance: 1
+        - path: household.0.baseline_net_income
+          equals: 35223.36
+          tolerance: 1
+        - path: household.0.baseline_total_tax
+          equals: 9073.53
+          tolerance: 1
 
   - id: household_scotland_location
     suite: tool_contract
@@ -172,6 +280,18 @@ cases:
         - path: person.0.baseline_income_tax
           equals: 9013.8
           tolerance: 1
+        - path: person.0.baseline_employee_ni
+          equals: 2994.4
+          tolerance: 1
+        - path: household.0.baseline_net_income
+          equals: 37991.8
+          tolerance: 1
+        - path: household.0.baseline_total_tax
+          equals: 14999.58
+          tolerance: 1
+        - path: household.0.baseline_council_tax_calculated
+          equals: 1140
+          tolerance: 1
 
   - id: household_mixed_employment_self_employment
     suite: tool_contract
@@ -202,6 +322,25 @@ cases:
         - person.0.baseline_total_income
         - person.0.baseline_income_tax
         - person.0.baseline_employee_ni
+      numeric:
+        - path: person.0.baseline_total_income
+          equals: 30000
+          tolerance: 0
+        - path: person.0.baseline_income_tax
+          equals: 3486
+          tolerance: 1
+        - path: person.0.baseline_employee_ni
+          equals: 434.4
+          tolerance: 1
+        - path: household.0.baseline_net_income
+          equals: 26079.6
+          tolerance: 1
+        - path: household.0.baseline_total_tax
+          equals: 6047.98
+          tolerance: 1
+        - path: household.0.baseline_council_tax_calculated
+          equals: 1140
+          tolerance: 1
 
   - id: household_reform_changes_reform_fields_only
     suite: tool_contract
@@ -232,8 +371,26 @@ cases:
         - path: person.0.baseline_income_tax
           equals: 3486
           tolerance: 1
+        - path: person.0.baseline_employee_ni
+          equals: 1394.4
+          tolerance: 1
         - path: person.0.reform_income_tax
           equals: 2994.2
+          tolerance: 1
+        - path: person.0.reform_employee_ni
+          equals: 1392.08
+          tolerance: 1
+        - path: household.0.baseline_net_income
+          equals: 25119.6
+          tolerance: 1
+        - path: household.0.baseline_total_tax
+          equals: 6936.89
+          tolerance: 1
+        - path: household.0.reform_net_income
+          equals: 25584.7
+          tolerance: 1
+        - path: household.0.reform_total_tax
+          equals: 6477.24
           tolerance: 1
 
   - id: household_invalid_benunit_reference_errors
