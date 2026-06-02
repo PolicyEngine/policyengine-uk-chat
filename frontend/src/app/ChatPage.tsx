@@ -193,6 +193,7 @@ export default function ChatPage() {
   const abortRef = useRef<AbortController | null>(null);
 
   const [modelBackends, setModelBackends] = useState<ModelBackendOption[]>([]);
+  const [backendsLoading, setBackendsLoading] = useState(true);
   const [selectedBackendId, setSelectedBackendId] = useState("uk_compiled");
   const [balance, setBalance] = useState<BalanceSummary | null>(null);
   const [topUpLoading, setTopUpLoading] = useState(false);
@@ -239,7 +240,8 @@ export default function ChatPage() {
         setModelBackends(options);
         setSelectedBackendId(nextBackend);
       })
-      .catch(() => {});
+      .catch(() => {})
+      .finally(() => setBackendsLoading(false));
     // Refresh balance after Stripe redirect
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("topup") === "success") {
       window.history.replaceState({}, "", window.location.pathname);
@@ -1067,7 +1069,13 @@ export default function ChatPage() {
                 {!hasMessages && <span>Press Enter to send · Shift+Enter for new line</span>}
               </div>
               <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
-                {modelBackends.length > 1 && (
+                {backendsLoading && (
+                  <div style={{ display: "inline-flex", alignItems: "center", gap: "6px", color: "#b5b1a9", fontSize: "11px" }}>
+                    <Loader size={10} color={THEME.primary} />
+                    <span style={{ color: "#d1cdc4" }}>Loading engines…</span>
+                  </div>
+                )}
+                {!backendsLoading && modelBackends.length > 1 && (
                   <div style={{ display: "inline-flex", alignItems: "center", gap: "4px", color: "#b5b1a9", fontSize: "11px" }}>
                     <span style={{ color: "#d1cdc4" }}>Engine</span>
                     <div style={{ display: "inline-flex", alignItems: "center", padding: "2px", border: `1px solid ${THEME.border}`, background: "#fbfaf8" }}>
