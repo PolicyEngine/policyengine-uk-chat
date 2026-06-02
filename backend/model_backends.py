@@ -219,6 +219,36 @@ class UKPolicyEnginePythonBackend(ModelBackend):
         return """CRITICAL - USE THE POLICYENGINE UK PYTHON MODEL INTERFACE:
 - The selected backend is `uk_python`, the Python `policyengine-uk` model package.
 - This is the detailed PolicyEngine Core/OpenFisca-style UK model, not the compiled Rust wrapper.
+
+PREFERRED TOOL FOR SOCIETY-WIDE REFORMS: `run_economy_simulation`
+- For ANY economy-wide / society-wide / population-level reform question,
+  CALL `run_economy_simulation` instead of writing Python via `run_python`.
+- This is the typed tool. It runs the same `policyengine_uk` Microsimulation
+  under the hood but pins methodology to match PE-API (`/uk/economy`)
+  exactly: gov_tax/gov_spending aggregates, household_income_decile
+  groupby, in_poverty mapped to person with age-band breakdowns
+  (child <18, adult 18-64, senior >=65).
+- One call replaces 20-40 trial-and-error `run_python` calls and returns
+  a structured result: budget, decile.{average,relative}, poverty.{all,
+  child,adult,senior}.
+- Reform shape is programme-and-field, not dotted paths. Examples:
+  - Raise PA to £15,000:
+    `{"reform": {"income_tax": {"personal_allowance": 15000}}}`
+  - Basic rate 20% to 21%:
+    `{"reform": {"income_tax": {"basic_rate": 0.21}}}`
+  - NI main rate 8% to 6%:
+    `{"reform": {"national_insurance": {"main_rate": 0.06}}}`
+  - Combined reforms (stacked):
+    `{"reform": {"income_tax": {"basic_rate": 0.22, "higher_rate": 0.42},
+                 "national_insurance": {"main_rate": 0.06}}}`
+- Currently mapped programmes/fields: income_tax.{personal_allowance,
+  basic_rate, higher_rate, additional_rate}, national_insurance.{main_rate,
+  primary_threshold}, child_benefit.{eldest_amount, additional_amount}.
+- If the reform you need is OUTSIDE this mapping (e.g. a structural reform
+  or a parameter not listed above), fall back to `run_python` and write
+  the Microsimulation code directly.
+
+PYTHON ENVIRONMENT (when you use `run_python` instead):
 - The Python environment preloads:
   `policyengine_uk` as `pe`
   `Simulation`
@@ -230,7 +260,7 @@ class UKPolicyEnginePythonBackend(ModelBackend):
 - If installed, the higher-level `policyengine` package is also preloaded as `policyengine`.
 - Prefer writing code against `policyengine_uk` objects and formulas rather than recreating policy logic.
 
-COMMON WORKFLOWS FOR THIS BACKEND:
+COMMON WORKFLOWS FOR `run_python` (FALLBACK ONLY):
 - First inspect backend details:
   `result = capabilities()`
 - Custom household/situation run:
@@ -239,8 +269,11 @@ COMMON WORKFLOWS FOR THIS BACKEND:
 - Microsimulation from published UK data:
   `sim = Microsimulation(dataset="hf://policyengine/policyengine-uk-data/enhanced_frs_2023_24.h5")`
   `result = sim.calculate("household_net_income", 2025).head().to_list()`
-- Parameter reform:
-  pass parameter changes through `Scenario` or mutate a simulation with documented `policyengine_uk` helpers.
+- Parameter reform (when not expressible via run_economy_simulation):
+  Pass a `reform=` dict to `Microsimulation(...)` directly, in the dotted-path
+  shape policyengine_uk accepts:
+  `reform = {"gov.hmrc.income_tax.allowances.personal_allowance.amount": {"2025-01-01.2025-12-31": 15000}}`
+  `sim = Microsimulation(dataset=..., reform=reform)`
 
 MODELLING SCOPE:
 - This backend exposes the Python `policyengine-uk` model surface. Its API, datasets, variables, and results can differ from `uk_compiled`.
