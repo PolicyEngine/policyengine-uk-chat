@@ -66,6 +66,27 @@ def test_grade_output_supports_collection_sum_numeric_paths():
     assert grade_output(actual, expectation) == []
 
 
+def test_grade_output_supports_chart_json_expectations():
+    actual = {
+        "status": "success",
+        "chart_markdown": (
+            "```chart\n"
+            '{"type": "bar", "x": {"field": "decile"}, "data": [{"decile": 1, "change": 10}]}\n'
+            "```"
+        ),
+    }
+    expectation = OutputExpectation(
+        contains={"status": "success"},
+        chart_contains={
+            "type": "bar",
+            "x": {"field": "decile"},
+            "data": [{"decile": 1}],
+        },
+    )
+
+    assert grade_output(actual, expectation) == []
+
+
 def test_grade_tool_calls_matches_ordered_semantic_expectations():
     actual = [
         ModelToolCall(name="validate_reform", input={"reform": {"income_tax": {"personal_allowance": 15000}}}),

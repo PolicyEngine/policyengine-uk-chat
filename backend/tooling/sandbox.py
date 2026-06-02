@@ -121,6 +121,62 @@ def build_structural_reform(structural_reform: Optional[Dict[str, Any]]):
     )
 
 
+def _safe_simulation_class(simulation_cls):
+    class SafeSimulation:
+        def __init__(self, *args, **kwargs):
+            object.__setattr__(self, "_dataset", (kwargs.get("dataset") or "frs").lower())
+            object.__setattr__(
+                self,
+                "_is_synthetic",
+                any(
+                    kwargs.get(key) is not None
+                    for key in ("persons", "benunits", "households")
+                ),
+            )
+            object.__setattr__(self, "_simulation", simulation_cls(*args, **kwargs))
+
+        @classmethod
+        def single_person(cls, *args, **kwargs):
+            return simulation_cls.single_person(*args, **kwargs)
+
+        def run_microdata(self, *args, **kwargs):
+            dataset = object.__getattribute__(self, "_dataset")
+            is_synthetic = object.__getattribute__(self, "_is_synthetic")
+            if dataset == "frs" and not is_synthetic:
+                raise PermissionError(
+                    "run_python cannot access FRS row-level microdata. "
+                    "Use run_economy_simulation for aggregate FRS outputs."
+                )
+            simulation = object.__getattribute__(self, "_simulation")
+            return simulation.run_microdata(*args, **kwargs)
+
+        def __getattribute__(self, name):
+            if name.startswith("_"):
+                raise AttributeError(name)
+            try:
+                return object.__getattribute__(self, name)
+            except AttributeError:
+                simulation = object.__getattribute__(self, "_simulation")
+                return getattr(simulation, name)
+
+    SafeSimulation.__name__ = simulation_cls.__name__
+    return SafeSimulation
+
+
+class SafeCompiledModule:
+    def __init__(self, module, simulation_cls):
+        object.__setattr__(self, "_module", module)
+        object.__setattr__(self, "_simulation_cls", simulation_cls)
+
+    def __getattribute__(self, name):
+        if name.startswith("_"):
+            raise AttributeError(name)
+        if name == "Simulation":
+            return object.__getattribute__(self, "_simulation_cls")
+        module = object.__getattribute__(self, "_module")
+        return getattr(module, name)
+
+
 def run_python_code(code: str) -> Dict[str, Any]:
     ensure_compiled_package_importable()
     import pandas as pd
@@ -134,6 +190,8 @@ def run_python_code(code: str) -> Dict[str, Any]:
         combine_microdata,
         ensure_dataset,
     )
+    SafeSimulation = _safe_simulation_class(Simulation)
+    safe_pe = SafeCompiledModule(pe, SafeSimulation)
 
     safe_names = (
         "range",
@@ -185,8 +243,8 @@ def run_python_code(code: str) -> Dict[str, Any]:
         "math": math,
         "json": json,
         "pd": pd,
-        "pe": pe,
-        "Simulation": Simulation,
+        "pe": safe_pe,
+        "Simulation": SafeSimulation,
         "StructuralReform": StructuralReform,
         "Parameters": Parameters,
         "aggregate_microdata": aggregate_microdata,
@@ -260,4 +318,3 @@ def run_generator(code: str) -> Dict[str, Any]:
     if not isinstance(result, dict):
         raise ValueError(f"generate() must return a dict, got {type(result).__name__}")
     return result
-

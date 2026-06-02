@@ -470,3 +470,228 @@ cases:
       Universal Credit variables required by this case through calculate_household.
     remove_when: policyengine-uk-compiled exposes this Universal Credit behavior through
       the chat household contract.
+- id: policyengine_uk_stamp_duty_first_time_buyer
+  suite: tool_contract
+  description: "Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml\
+    \ :: \xA3445k first-time buyer"
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml
+    name: "\xA3445k first-time buyer"
+  tool_name: calculate_household
+  input:
+    year: 2021
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      main_residential_property_purchased: 445000
+      main_residential_property_purchased_is_first_home: true
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled uses a different property-transaction-tax household
+      contract and does not currently expose this upstream SDLT case through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this upstream SDLT behavior through
+      the chat household contract.
+- id: policyengine_uk_stamp_duty_second_home
+  suite: tool_contract
+  description: "Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml\
+    \ :: \xA3350k second home"
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml
+    name: "\xA3350k second home"
+  tool_name: calculate_household
+  input:
+    year: 2022
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      additional_residential_property_purchased: 350000
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled uses a different property-transaction-tax household
+      contract and does not currently expose this upstream SDLT case through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this upstream SDLT behavior through
+      the chat household contract.
+- id: policyengine_uk_capital_gains_basic_rate
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
+    :: Basic rate capital gains tax'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
+    name: Basic rate capital gains tax
+  tool_name: calculate_household
+  input:
+    year: 2024
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      adjusted_net_income: 20000
+      capital_gains: 23000
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose the upstream capital-gains-tax
+      output through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this upstream capital-gains-tax
+      behavior through the chat household contract.
+- id: policyengine_uk_capital_gains_higher_rate
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
+    :: Higher rate capital gains tax'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
+    name: Higher rate capital gains tax
+  tool_name: calculate_household
+  input:
+    year: 2024
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      adjusted_net_income: 50000
+      capital_gains: 50000
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose the upstream capital-gains-tax
+      output through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this upstream capital-gains-tax
+      behavior through the chat household contract.
+- id: policyengine_uk_high_value_council_tax_surcharge
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/council_tax/high_value_council_tax_surcharge.yaml
+    :: High value council tax surcharge applies in England and flows into aggregates'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/council_tax/high_value_council_tax_surcharge.yaml
+    name: High value council tax surcharge applies in England and flows into aggregates
+  tool_name: calculate_household
+  input:
+    year: 2028
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      main_residence_value: 2554326.811538164
+      main_residential_property_purchased: 0
+      council_tax: 0
+      household_owns_tv: false
+      gov.hmrc.stamp_duty.property_sale_rate: 0
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+      region: LONDON
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose this upstream high-value
+      council-tax surcharge behavior through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this council-tax surcharge behavior
+      through the chat household contract.
+- id: policyengine_uk_council_tax_rebate_bands
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/treasury/energy_bills_rebate/council_tax_rebate.yaml
+    :: CT bands A-D get full rebate, others don''t.'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/treasury/energy_bills_rebate/council_tax_rebate.yaml
+    name: CT bands A-D get full rebate, others don't.
+  tool_name: calculate_household
+  input:
+    year: 2023
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      council_tax:
+      - 150
+      - 150
+      - 150
+      - 150
+      - 150
+      - 150
+      - 150
+      - 150
+      - 150
+      council_tax_band:
+      - A
+      - B
+      - C
+      - D
+      - E
+      - F
+      - G
+      - H
+      - I
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose this upstream council-tax
+      rebate behavior through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this council-tax rebate behavior
+      through the chat household contract.

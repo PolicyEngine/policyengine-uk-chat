@@ -32,6 +32,7 @@ class CaseSkip(StrictModel):
 
 class OutputExpectation(StrictModel):
     contains: Dict[str, Any] = Field(default_factory=dict)
+    chart_contains: Dict[str, Any] = Field(default_factory=dict)
     required_paths: List[str] = Field(default_factory=list)
     absent_paths: List[str] = Field(default_factory=list)
     error_contains: Optional[str] = None

@@ -1,0 +1,258 @@
+cases:
+  - id: household_couple_one_earner
+    suite: tool_contract
+    description: calculate_household handles a couple with one earner in one benefit unit.
+    requirements: [compiled]
+    tool_name: calculate_household
+    input:
+      year: 2025
+      person:
+        - person_id: 0
+          benunit_id: 0
+          household_id: 0
+          age: 35
+          employment_income: 38000
+        - person_id: 1
+          benunit_id: 0
+          household_id: 0
+          age: 35
+      benunit:
+        - benunit_id: 0
+          household_id: 0
+      household:
+        - household_id: 0
+    expect:
+      contains:
+        status: success
+        person:
+          - employment_income: 38000
+          - employment_income: 0
+      numeric:
+        - path: person.0.baseline_income_tax
+          equals: 5086
+          tolerance: 1
+        - path: person.1.baseline_income_tax
+          equals: 0
+          tolerance: 0
+
+  - id: household_flatmates_separate_benunits
+    suite: tool_contract
+    description: calculate_household preserves separate benefit units inside one household.
+    requirements: [compiled]
+    tool_name: calculate_household
+    input:
+      year: 2025
+      person:
+        - person_id: 0
+          benunit_id: 0
+          household_id: 0
+          age: 35
+          employment_income: 28000
+        - person_id: 1
+          benunit_id: 1
+          household_id: 0
+          age: 35
+          employment_income: 20000
+      benunit:
+        - benunit_id: 0
+          household_id: 0
+        - benunit_id: 1
+          household_id: 0
+      household:
+        - household_id: 0
+    expect:
+      contains:
+        status: success
+        person:
+          - benunit_id: 0
+            household_id: 0
+          - benunit_id: 1
+            household_id: 0
+      required_paths:
+        - benunit.1.baseline_total_benefits
+        - household.0.baseline_net_income
+
+  - id: household_single_parent_two_children
+    suite: tool_contract
+    description: calculate_household handles one adult and two children in a single benefit unit.
+    requirements: [compiled]
+    tool_name: calculate_household
+    input:
+      year: 2025
+      person:
+        - person_id: 0
+          benunit_id: 0
+          household_id: 0
+          age: 35
+          employment_income: 22000
+        - person_id: 1
+          benunit_id: 0
+          household_id: 0
+          age: 4
+        - person_id: 2
+          benunit_id: 0
+          household_id: 0
+          age: 9
+      benunit:
+        - benunit_id: 0
+          household_id: 0
+      household:
+        - household_id: 0
+    expect:
+      contains:
+        status: success
+      required_paths:
+        - benunit.0.baseline_child_benefit
+        - benunit.0.baseline_universal_credit
+        - household.0.baseline_total_benefits
+
+  - id: household_adult_child_separate_benunit
+    suite: tool_contract
+    description: calculate_household handles an adult child as a separate benefit unit in the same household.
+    requirements: [compiled]
+    tool_name: calculate_household
+    input:
+      year: 2025
+      person:
+        - person_id: 0
+          benunit_id: 0
+          household_id: 0
+          age: 52
+          employment_income: 35000
+        - person_id: 1
+          benunit_id: 1
+          household_id: 0
+          age: 19
+          employment_income: 6000
+      benunit:
+        - benunit_id: 0
+          household_id: 0
+        - benunit_id: 1
+          household_id: 0
+      household:
+        - household_id: 0
+    expect:
+      contains:
+        status: success
+        person:
+          - age: 52
+          - age: 19
+            benunit_id: 1
+      required_paths:
+        - household.0.baseline_net_income
+
+  - id: household_scotland_location
+    suite: tool_contract
+    description: calculate_household preserves Scottish location fields and returns Scottish-tax outputs.
+    requirements: [compiled]
+    tool_name: calculate_household
+    input:
+      year: 2025
+      person:
+        - person_id: 0
+          benunit_id: 0
+          household_id: 0
+          age: 35
+          employment_income: 50000
+          is_in_scotland: true
+      benunit:
+        - benunit_id: 0
+          household_id: 0
+      household:
+        - household_id: 0
+          region: Scotland
+    expect:
+      contains:
+        status: success
+        person:
+          - is_in_scotland: true
+        household:
+          - region: Scotland
+      numeric:
+        - path: person.0.baseline_income_tax
+          equals: 9013.8
+          tolerance: 1
+
+  - id: household_mixed_employment_self_employment
+    suite: tool_contract
+    description: calculate_household handles employment and self-employment income together.
+    requirements: [compiled]
+    tool_name: calculate_household
+    input:
+      year: 2025
+      person:
+        - person_id: 0
+          benunit_id: 0
+          household_id: 0
+          age: 35
+          employment_income: 18000
+          self_employment_income: 12000
+      benunit:
+        - benunit_id: 0
+          household_id: 0
+      household:
+        - household_id: 0
+    expect:
+      contains:
+        status: success
+        person:
+          - employment_income: 18000
+            self_employment_income: 12000
+      required_paths:
+        - person.0.baseline_total_income
+        - person.0.baseline_income_tax
+        - person.0.baseline_employee_ni
+
+  - id: household_reform_changes_reform_fields_only
+    suite: tool_contract
+    description: calculate_household returns baseline and reform fields for a parametric reform.
+    requirements: [compiled]
+    tool_name: calculate_household
+    input:
+      year: 2025
+      reform:
+        income_tax:
+          personal_allowance: 15000
+      person:
+        - person_id: 0
+          benunit_id: 0
+          household_id: 0
+          age: 35
+          employment_income: 30000
+      benunit:
+        - benunit_id: 0
+          household_id: 0
+      household:
+        - household_id: 0
+    expect:
+      contains:
+        status: success
+        reform_applied: true
+      numeric:
+        - path: person.0.baseline_income_tax
+          equals: 3486
+          tolerance: 1
+        - path: person.0.reform_income_tax
+          equals: 2994.2
+          tolerance: 1
+
+  - id: household_invalid_benunit_reference_errors
+    suite: tool_contract
+    description: calculate_household returns a tool error for invalid benefit-unit references.
+    requirements: [compiled]
+    tool_name: calculate_household
+    input:
+      year: 2025
+      person:
+        - person_id: 0
+          benunit_id: 999
+          household_id: 0
+          age: 35
+          employment_income: 10000
+      benunit:
+        - benunit_id: 0
+          household_id: 0
+      household:
+        - household_id: 0
+    expect:
+      error_contains: "999"

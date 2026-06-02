@@ -1,5 +1,6 @@
 """Deterministic graders shared by the manual AI evaluation suites."""
 
+import json
 import math
 import re
 from typing import Any, Dict, Iterable, List
@@ -13,6 +14,7 @@ from evaluation.schemas import (
 
 
 MISSING = object()
+CHART_BLOCK_RE = re.compile(r"```chart\s*(.*?)\s*```", re.DOTALL)
 
 
 def value_at_path(value: Any, path: str) -> Any:
@@ -84,10 +86,29 @@ def _compare_partial(actual: Any, expected: Any, path: str, errors: List[str]) -
         errors.append(f"{path}: expected {expected!r}, got {actual!r}")
 
 
+def chart_json_from_output(actual: Dict[str, Any]) -> Any:
+    chart_markdown = actual.get("chart_markdown")
+    if not isinstance(chart_markdown, str):
+        return MISSING
+    match = CHART_BLOCK_RE.search(chart_markdown)
+    if not match:
+        return MISSING
+    try:
+        return json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return MISSING
+
+
 def grade_output(actual: Dict[str, Any], expectation: OutputExpectation) -> List[str]:
     errors: List[str] = []
     if expectation.contains:
         _compare_partial(actual, expectation.contains, "$", errors)
+    if expectation.chart_contains:
+        chart_json = chart_json_from_output(actual)
+        if chart_json is MISSING:
+            errors.append("chart_markdown: missing parseable chart JSON")
+        else:
+            _compare_partial(chart_json, expectation.chart_contains, "chart", errors)
 
     for path in expectation.required_paths:
         if value_at_path(actual, path) is MISSING:

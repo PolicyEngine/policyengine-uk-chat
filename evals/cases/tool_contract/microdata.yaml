@@ -1,0 +1,128 @@
+cases:
+  - id: analyse_microdata_rejects_uppercase_frs
+    suite: tool_contract
+    description: analyse_microdata rejects FRS row-level access case-insensitively.
+    tool_name: analyse_microdata
+    input:
+      entity: households
+      operation: sample
+      dataset: FRS
+    expect:
+      error_contains: FRS
+
+  - id: analyse_microdata_rejects_frs_with_columns
+    suite: tool_contract
+    description: analyse_microdata rejects FRS access even when specific columns are requested.
+    tool_name: analyse_microdata
+    input:
+      entity: households
+      operation: sample
+      dataset: frs
+      columns: [baseline_net_income]
+    expect:
+      error_contains: FRS
+
+  - id: analyse_microdata_rejects_frs_with_filters_and_groups
+    suite: tool_contract
+    description: analyse_microdata rejects FRS access even when filters and grouping are supplied.
+    tool_name: analyse_microdata
+    input:
+      entity: households
+      operation: group_by
+      dataset: frs
+      filters:
+        region: London
+      group_by: [region]
+    expect:
+      error_contains: FRS
+
+  - id: analyse_microdata_non_frs_count
+    suite: tool_contract
+    description: analyse_microdata count works on allowed non-FRS data.
+    requirements: [compiled, data]
+    tool_name: analyse_microdata
+    input:
+      entity: households
+      operation: count
+      dataset: efrs
+    expect:
+      contains:
+        entity: households
+        operation: count
+        dataset: Enhanced FRS
+      required_paths:
+        - result.row_count
+        - result.weighted_population
+
+  - id: analyse_microdata_non_frs_mean
+    suite: tool_contract
+    description: analyse_microdata weighted mean works on allowed non-FRS data.
+    requirements: [compiled, data]
+    tool_name: analyse_microdata
+    input:
+      entity: households
+      operation: mean
+      dataset: efrs
+      columns: [baseline_net_income]
+    expect:
+      required_paths:
+        - result.baseline_net_income
+
+  - id: analyse_microdata_non_frs_sum
+    suite: tool_contract
+    description: analyse_microdata weighted sum works on allowed non-FRS data.
+    requirements: [compiled, data]
+    tool_name: analyse_microdata
+    input:
+      entity: households
+      operation: sum
+      dataset: efrs
+      columns: [baseline_total_tax]
+    expect:
+      required_paths:
+        - result.baseline_total_tax
+
+  - id: analyse_microdata_non_frs_group_by
+    suite: tool_contract
+    description: analyse_microdata group_by returns grouped aggregate rows.
+    requirements: [compiled, data]
+    tool_name: analyse_microdata
+    input:
+      entity: households
+      operation: group_by
+      dataset: efrs
+      group_by: [region]
+      columns: [baseline_net_income]
+    expect:
+      required_paths:
+        - result.0.region
+        - result.0.weighted_population
+
+  - id: analyse_microdata_missing_column_error
+    suite: tool_contract
+    description: analyse_microdata returns a stable error for missing columns.
+    requirements: [compiled, data]
+    tool_name: analyse_microdata
+    input:
+      entity: households
+      operation: mean
+      dataset: efrs
+      columns: [not_a_column]
+    expect:
+      error_contains: Columns not found
+
+  - id: analyse_microdata_sample_is_capped
+    suite: tool_contract
+    description: analyse_microdata sample caps requested rows and returns sample rows.
+    requirements: [compiled, data]
+    tool_name: analyse_microdata
+    input:
+      entity: households
+      operation: sample
+      dataset: efrs
+      n: 100
+      columns: [region, baseline_net_income]
+    expect:
+      required_paths:
+        - result.0.region
+        - result.0.baseline_net_income

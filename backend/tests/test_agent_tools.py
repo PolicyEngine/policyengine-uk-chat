@@ -552,6 +552,29 @@ result = [
         result = run_python("import json\nresult = json.loads('{\"ok\": true}')")
         assert result["result"] == {"ok": True}
 
+    def test_rejects_frs_row_level_microdata(self):
+        result = run_python("sim = Simulation(year=2025)\nresult = sim.run_microdata()")
+
+        assert "error" in result
+        assert "FRS row-level microdata" in result["error"]
+
+    def test_rejects_compiled_module_bypass_for_frs_microdata(self):
+        result = run_python("result = getattr(pe, '_module')")
+
+        assert "error" in result
+        assert "AttributeError" in result["error"]
+
+    def test_allows_synthetic_microdata(self):
+        code = """
+persons, benunits, households = Simulation.single_person(employment_income=30000)
+sim = Simulation(year=2025, persons=persons, benunits=benunits, households=households)
+md = sim.run_microdata()
+result = {"persons": len(md.persons), "households": len(md.households)}
+"""
+        result = run_python(code)
+
+        assert result["result"] == {"persons": 1, "households": 1}
+
 
 # ---------------------------------------------------------------------------
 # _build_compiled_policy

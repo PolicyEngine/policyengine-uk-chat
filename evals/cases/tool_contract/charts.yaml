@@ -1,0 +1,157 @@
+cases:
+  - id: chart_contract_bar_grouped
+    suite: tool_contract
+    description: generate_chart returns parseable grouped bar chart JSON.
+    tool_name: generate_chart
+    input:
+      chart_type: bar
+      title: Decile impact
+      data:
+        - decile: 1
+          change: 10
+        - decile: 2
+          change: 12
+      x_field: decile
+      y_fields: [change]
+      arrangement: grouped
+    expect:
+      contains:
+        status: success
+      chart_contains:
+        type: bar
+        arrangement: grouped
+        x:
+          field: decile
+        y:
+          field: change
+        data:
+          - decile: 1
+            change: 10
+
+  - id: chart_contract_multi_series_line
+    suite: tool_contract
+    description: generate_chart returns multi-series line chart JSON with legend enabled.
+    tool_name: generate_chart
+    input:
+      chart_type: line
+      title: Baseline and reform net income
+      data:
+        - income: 0
+          baseline: 0
+          reform: 0
+        - income: 30000
+          baseline: 25000
+          reform: 25200
+      x_field: income
+      y_fields: [baseline, reform]
+      series_labels: [Baseline, Reform]
+    expect:
+      chart_contains:
+        type: line
+        showLegend: true
+        series:
+          - field: baseline
+            label: Baseline
+          - field: reform
+            label: Reform
+
+  - id: chart_contract_line_styles_and_curves
+    suite: tool_contract
+    description: generate_chart preserves requested series line styles and curves.
+    tool_name: generate_chart
+    input:
+      chart_type: line
+      title: Schedule
+      data:
+        - income: 0
+          baseline: 0
+          reform: 10
+        - income: 10000
+          baseline: 100
+          reform: 120
+      x_field: income
+      y_fields: [baseline, reform]
+      series_styles: [solid, dashed]
+      series_curves: [linear, step]
+    expect:
+      chart_contains:
+        series:
+          - field: baseline
+            lineStyle: solid
+            curve: linear
+          - field: reform
+            lineStyle: dashed
+            curve: step
+
+  - id: chart_contract_formats_and_bounds
+    suite: tool_contract
+    description: generate_chart preserves axis formats and explicit bounds.
+    tool_name: generate_chart
+    input:
+      chart_type: scatter
+      title: Income and tax
+      data:
+        - income: 10000
+          tax: 0
+        - income: 50000
+          tax: 7500
+      x_field: income
+      y_fields: [tax]
+      x_format: currency
+      y_format: currency
+      x_min: 0
+      x_max: 60000
+      y_min: 0
+      y_max: 10000
+    expect:
+      chart_contains:
+        type: scatter
+        x:
+          format: currency
+          min: 0
+          max: 60000
+        y:
+          format: currency
+          min: 0
+          max: 10000
+
+  - id: chart_contract_subtitle_and_source
+    suite: tool_contract
+    description: generate_chart preserves subtitle and source fields.
+    tool_name: generate_chart
+    input:
+      chart_type: area
+      title: Programme composition
+      subtitle: Baseline modelled values
+      source: PolicyEngine UK compiled output
+      data:
+        - programme: Income tax
+          value: 100
+      x_field: programme
+      y_fields: [value]
+    expect:
+      chart_contains:
+        type: area
+        subtitle: Baseline modelled values
+        source: PolicyEngine UK compiled output
+
+  - id: chart_contract_markdown_contains_parseable_json
+    suite: tool_contract
+    description: generate_chart emits a fenced chart JSON block.
+    tool_name: generate_chart
+    input:
+      chart_type: line
+      title: Net income
+      data:
+        - income: 0
+          net_income: 0
+      x_field: income
+      y_fields: [net_income]
+    expect:
+      required_paths:
+        - chart_markdown
+      chart_contains:
+        type: line
+        data:
+          - income: 0
+            net_income: 0

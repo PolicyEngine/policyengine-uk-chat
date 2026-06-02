@@ -1,0 +1,117 @@
+cases:
+  - id: run_python_simple_result
+    suite: tool_contract
+    description: run_python returns a JSON-safe result value.
+    requirements: [compiled]
+    tool_name: run_python
+    input:
+      code: result = 2 + 2
+    expect:
+      contains:
+        result: 4
+
+  - id: run_python_print_only_output
+    suite: tool_contract
+    description: run_python captures printed output when no result is set.
+    requirements: [compiled]
+    tool_name: run_python
+    input:
+      code: print("hello")
+    expect:
+      contains:
+        output: hello
+
+  - id: run_python_allows_math_import
+    suite: tool_contract
+    description: run_python allows safe standard imports.
+    requirements: [compiled]
+    tool_name: run_python
+    input:
+      code: |
+        import math
+        result = math.sqrt(81)
+    expect:
+      numeric:
+        - path: result
+          equals: 9
+          tolerance: 0
+
+  - id: run_python_rejects_disallowed_import
+    suite: tool_contract
+    description: run_python rejects imports outside the allowlist.
+    requirements: [compiled]
+    tool_name: run_python
+    input:
+      code: |
+        import os
+        result = 1
+    expect:
+      error_contains: Import of 'os' is not allowed
+
+  - id: run_python_captures_exception
+    suite: tool_contract
+    description: run_python captures exceptions as tool errors.
+    requirements: [compiled]
+    tool_name: run_python
+    input:
+      code: raise ValueError("bad input")
+    expect:
+      error_contains: "ValueError: bad input"
+
+  - id: run_python_compiled_interface_available
+    suite: tool_contract
+    description: run_python exposes the compiled PolicyEngine interface.
+    requirements: [compiled]
+    tool_name: run_python
+    input:
+      code: |
+        params = Simulation(year=2025).get_baseline_params()
+        result = "income_tax" in params
+    expect:
+      contains:
+        result: true
+
+  - id: run_python_serializes_dataframe
+    suite: tool_contract
+    description: run_python serializes small DataFrame results to JSON-safe records.
+    requirements: [compiled]
+    tool_name: run_python
+    input:
+      code: |
+        result = pd.DataFrame({"x": [1, 2], "y": [3, 4]})
+    expect:
+      contains:
+        result:
+          - x: 1
+            y: 3
+          - x: 2
+            y: 4
+
+  - id: run_python_rejects_frs_row_microdata
+    suite: tool_contract
+    description: run_python cannot expose default FRS row-level microdata.
+    requirements: [compiled]
+    tool_name: run_python
+    input:
+      code: |
+        sim = Simulation(year=2025)
+        result = sim.run_microdata()
+    expect:
+      error_contains: FRS row-level microdata
+
+  - id: run_python_allows_synthetic_microdata
+    suite: tool_contract
+    description: run_python can run microdata on illustrative synthetic household inputs.
+    requirements: [compiled]
+    tool_name: run_python
+    input:
+      code: |
+        persons, benunits, households = Simulation.single_person(employment_income=30000)
+        sim = Simulation(year=2025, persons=persons, benunits=benunits, households=households)
+        md = sim.run_microdata()
+        result = {"persons": len(md.persons), "households": len(md.households)}
+    expect:
+      contains:
+        result:
+          persons: 1
+          households: 1
