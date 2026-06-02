@@ -729,6 +729,19 @@ def execute_tool(
         "compute": compute,
         "generate_chart": generate_chart,
     }
+    if tool_name == "run_economy_simulation":
+        from tooling.backends import get_backend as _get_typed_backend
+        try:
+            engine = _get_typed_backend(backend_id)
+        except ValueError as exc:
+            return {"error": f"{tool_name} not supported for backend={backend_id!r}", "detail": str(exc)}
+        if not hasattr(engine, "run_economy_simulation"):
+            return {"error": f"{tool_name} not implemented for backend={backend_id!r}"}
+        try:
+            return engine.run_economy_simulation(**tool_input)
+        except Exception as exc:
+            logger.exception(f"[TOOLS] {tool_name} failed")
+            return {"error": str(exc), "type": type(exc).__name__}
     if tool_name not in tools:
         return {"error": f"Unknown tool: {tool_name}"}
     try:
@@ -749,7 +762,7 @@ def execute_tool(
 
 def get_tool_definitions(backend_id: str = "uk_compiled") -> List[Dict[str, Any]]:
     backend = get_backend(backend_id)
-    return [
+    defs: List[Dict[str, Any]] = [
         {
             "name": "run_python",
             "description": backend.tool_description(),
@@ -768,6 +781,28 @@ def get_tool_definitions(backend_id: str = "uk_compiled") -> List[Dict[str, Any]
             },
         },
     ]
+    if backend_id == "uk_python":
+        from tool_definitions import RUN_ECONOMY_SIMULATION_INPUT_SCHEMA
+        defs.append(
+            {
+                "name": "run_economy_simulation",
+                "description": (
+                    "Run a UK economy-wide microsimulation comparing baseline "
+                    "current law to a parametric reform via policyengine_uk. "
+                    "Preferred over run_python for any society-wide reform "
+                    "analysis: removes the need to author Microsimulation+reform "
+                    "code, pins methodology, and returns identical numbers to "
+                    "PE-API's /uk/economy endpoint. Reform keys are programmes "
+                    "(income_tax, national_insurance, child_benefit, ...) with "
+                    "field/value subkeys (personal_allowance, basic_rate, "
+                    "main_rate, ...). Use run_python only for parameters this "
+                    "tool's mapping table does not yet cover, or for structural "
+                    "reforms."
+                ),
+                "input_schema": RUN_ECONOMY_SIMULATION_INPUT_SCHEMA,
+            }
+        )
+    return defs
 
 
 TOOL_DEFINITIONS = get_tool_definitions("uk_compiled")
