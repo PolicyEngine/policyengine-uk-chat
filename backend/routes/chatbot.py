@@ -109,6 +109,11 @@ TITLE_MODEL = os.environ.get("ANTHROPIC_TITLE_MODEL", DEFAULT_FAST_MODEL)
 SUGGESTION_MODEL = os.environ.get("ANTHROPIC_SUGGESTION_MODEL", DEFAULT_FAST_MODEL)
 SUGGESTION_TIMEOUT_SECS = float(os.environ.get("ANTHROPIC_SUGGESTION_TIMEOUT_SECS", "5"))
 FAST_MODEL_MAX_INPUT_TOKENS = int(os.environ.get("ANTHROPIC_FAST_MODEL_MAX_INPUT_TOKENS", "120000"))
+# Low temperature for the main chat call: this is an analytical product where the
+# numbers come from model-generated run_python code. A low temperature reduces
+# run-to-run variance in the code the model writes, so the same question yields
+# more consistent Python (and numbers). Overridable via env.
+CHAT_TEMPERATURE = float(os.environ.get("ANTHROPIC_CHAT_TEMPERATURE", "0.0"))
 
 _REFERENCE_PATH = Path(__file__).resolve().parent.parent / "reference.md"
 try:
@@ -460,6 +465,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                         stream_kwargs: Dict[str, Any] = {
                             "model": model,
                             "max_tokens": 16000,
+                            "temperature": CHAT_TEMPERATURE,
                             "system": system_blocks,
                             "messages": conversation,
                         }
