@@ -8,7 +8,6 @@ import pytest
 from agent_tools import (
     get_baseline_parameters,
     calculate_household,
-    compute,
     generate_chart,
     execute_tool,
     _build_compiled_policy,
@@ -181,56 +180,6 @@ class TestCalculateHousehold:
 
 
 # ---------------------------------------------------------------------------
-# compute
-# ---------------------------------------------------------------------------
-
-class TestCompute:
-    def test_diff(self):
-        result = compute("diff", [1, 3, 6, 10])
-        assert result["result"] == [2, 3, 4]
-
-    def test_pct_change(self):
-        result = compute("pct_change", [100, 110])
-        assert abs(result["result"][0] - 10.0) < 0.001
-
-    def test_mean(self):
-        result = compute("mean", [1, 2, 3, 4, 5])
-        assert result["result"] == 3.0
-
-    def test_sum(self):
-        result = compute("sum", [10, 20, 30])
-        assert result["result"] == 60
-
-    def test_marginal_rate(self):
-        # net incomes at £10k steps, gross incomes
-        net = [8000, 14800, 21600]
-        gross = [10000, 20000, 30000]
-        result = compute("marginal_rate", net, gross)
-        # (14800-8000)/(20000-10000)*100 = 68%
-        assert abs(result["result"][0] - 68.0) < 0.01
-
-    def test_subtract(self):
-        result = compute("subtract", [10, 20, 30], [1, 2, 3])
-        assert result["result"] == [9, 18, 27]
-
-    def test_divide_by_zero(self):
-        result = compute("divide", [10, 20], [0, 4])
-        assert result["result"][0] == 0  # safe division
-
-    def test_empty_data(self):
-        result = compute("sum", [])
-        assert "error" in result
-
-    def test_unknown_operation(self):
-        result = compute("nonexistent", [1, 2, 3])
-        assert "error" in result
-
-    def test_mismatched_lengths(self):
-        result = compute("subtract", [1, 2, 3], [1, 2])
-        assert "error" in result
-
-
-# ---------------------------------------------------------------------------
 # generate_chart
 # ---------------------------------------------------------------------------
 
@@ -318,10 +267,6 @@ class TestExecuteTool:
     def test_unknown_tool(self):
         result = execute_tool("nonexistent_tool", {})
         assert "error" in result
-
-    def test_dispatches_compute(self):
-        result = execute_tool("compute", {"operation": "sum", "data": [1, 2, 3]})
-        assert result["result"] == 6
 
     def test_dispatches_generate_chart(self):
         result = execute_tool("generate_chart", {
