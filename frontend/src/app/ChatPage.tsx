@@ -63,9 +63,10 @@ type SlashCommand = {
   fillText?: string;
 };
 
-// v1 slash commands. /charts intentionally omitted — no chartsMode state on main yet.
+// v1 slash commands.
 const SLASH_COMMANDS: SlashCommand[] = [
-  { name: "plan",  description: "Toggle Plan mode on/off",           kind: "action" },
+  { name: "plan",   description: "Toggle Plan mode on/off",           kind: "action" },
+  { name: "charts", description: "Toggle Charts mode on/off",         kind: "action" },
   { name: "new",   description: "Start a new chat",                  kind: "action" },
   { name: "clear", description: "Start a new chat (alias for /new)", kind: "action" },
   { name: "help",  description: "Insert a starter prompt",           kind: "fill", fillText: "Help me understand " },
@@ -1019,6 +1020,9 @@ export default function ChatPage() {
     if (cmd.kind === "action") {
       if (cmd.name === "plan") {
         setPlanMode((v) => !v);
+        closeSlash();
+      } else if (cmd.name === "charts") {
+        setChartsMode((v) => !v);
         closeSlash();
       } else if (cmd.name === "new" || cmd.name === "clear") {
         // startNewChat already clears input + refocuses, but call closeSlash
