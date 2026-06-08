@@ -1439,42 +1439,62 @@ export default function ChatPage() {
 
   return (
     <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+      <style>{`
+        [data-tip],[data-tip-right]{position:relative}
+        [data-tip]::after,[data-tip-right]::after{
+          position:absolute;
+          background:var(--text); color:var(--bg);
+          padding:4px 8px; border-radius:6px; font-size:11px; line-height:1.3;
+          white-space:normal; max-width:240px; width:max-content; text-align:center;
+          opacity:0; pointer-events:none; z-index:60;
+          transition:opacity 60ms ease;
+        }
+        [data-tip]::after{
+          content:attr(data-tip);
+          left:50%; top:calc(100% + 6px); transform:translateX(-50%);
+        }
+        [data-tip-right]::after{
+          content:attr(data-tip-right);
+          left:calc(100% + 8px); top:50%; transform:translateY(-50%);
+        }
+        [data-tip]:hover::after,[data-tip-right]:hover::after{opacity:1}
+      `}</style>
       {/* Body */}
       <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", minHeight: "100dvh" }}>
         {!isEmbed && !historyOpen && (
           /* Rail */
           <div data-pe-sidebar style={{ width: "60px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 0", position: "sticky", top: 0, height: "100dvh" }}>
-            <button onClick={() => setHistoryOpen(true)} title="Open sidebar" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "8px", borderRadius: "10px", display: "flex", color: "var(--text)", marginBottom: "4px" }}
+            <button onClick={() => setHistoryOpen(true)} data-tip-right="Open sidebar" aria-label="Open sidebar" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "8px", borderRadius: "10px", display: "flex", color: "var(--text)", marginBottom: "4px" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
             >
               <span role="img" aria-label="PolicyEngine" style={{ display: "inline-block", width: "24px", height: "24px", background: "var(--text)", WebkitMaskImage: "url(/favicon.svg)", maskImage: "url(/favicon.svg)", WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskSize: "contain", maskSize: "contain", WebkitMaskPosition: "center", maskPosition: "center" }} />
             </button>
-            <button onClick={startNewChat} title="New chat" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginTop: "4px" }}
+            <button onClick={startNewChat} data-tip-right="New chat" aria-label="New chat" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginTop: "4px" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
             >
               <IconEdit size={20} />
             </button>
-            <button onClick={() => setHistoryOpen(true)} title="Chats" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)" }}
+            <button onClick={() => setHistoryOpen(true)} data-tip-right="Chats" aria-label="Chats" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
             >
               <IconMessage size={20} />
             </button>
             <div style={{ flex: 1 }} />
-            <button onClick={toggleTheme} title={theme === "light" ? "Switch to dark" : "Switch to light"} style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginBottom: "6px" }}
+            <button onClick={toggleTheme} data-tip-right={theme === "light" ? "Switch to dark" : "Switch to light"} aria-label={theme === "light" ? "Switch to dark" : "Switch to light"} style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginBottom: "6px" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
             >
               {theme === "light" ? <IconMoon size={18} /> : <IconSun size={18} />}
             </button>
             {user ? (
-              <button onClick={signOut} title={`${user.email} — sign out`} style={{ background: "var(--accent)", color: "var(--accent-fg)", border: "none", cursor: "pointer", width: "32px", height: "32px", borderRadius: "999px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", fontWeight: 600, textTransform: "uppercase" }}>
+              <button onClick={signOut} data-tip-right={`${user.email} — sign out`} aria-label={`${user.email} — sign out`} style={{ background: "var(--accent)", color: "var(--accent-fg)", border: "none", cursor: "pointer", width: "32px", height: "32px", borderRadius: "999px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", fontWeight: 600, textTransform: "uppercase" }}>
                 {(user.email || "?").charAt(0)}
               </button>
             ) : (
-              <button onClick={() => { setShowAuth(true); setAuthError(null); }} title="Sign in" style={{ background: "transparent", border: "1px solid var(--border)", cursor: "pointer", padding: "8px", borderRadius: "999px", display: "flex", color: "var(--text-2)" }}>
+              <button onClick={() => { setShowAuth(true); setAuthError(null); }} data-tip-right="Sign in" aria-label="Sign in" style={{ background: "transparent", border: "1px solid var(--border)", cursor: "pointer", padding: "8px", borderRadius: "999px", display: "flex", color: "var(--text-2)" }}>
                 <IconUser size={16} />
               </button>
             )}
@@ -1490,14 +1510,14 @@ export default function ChatPage() {
               >
                 <IconPlus size={16} /> New chat
               </button>
-              <button onClick={() => setHistoryOpen(false)} title="Collapse sidebar" style={{ background: "transparent", border: "none", borderRadius: "8px", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "8px" }}
+              <button onClick={() => setHistoryOpen(false)} data-tip="Collapse sidebar" aria-label="Collapse sidebar" style={{ background: "transparent", border: "none", borderRadius: "8px", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "8px" }}
                 onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
                 onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
               >
                 <IconX size={16} />
               </button>
             </div>
-            <div style={{ flex: "0 1 auto", minHeight: 0, overflowY: "auto", paddingTop: "8px" }}>
+            <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingTop: "8px" }}>
               <div style={{ fontSize: "11px", color: "var(--muted)", letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600, marginBottom: "6px", paddingLeft: "10px" }}>Chats</div>
               {!user ? (
                 <div style={{ fontSize: "13px", color: "var(--muted)", padding: "8px 10px", lineHeight: 1.5 }}>
@@ -1519,13 +1539,13 @@ export default function ChatPage() {
                         <div style={{ fontSize: "14px", color: "var(--text)", lineHeight: 1.4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{conv.title}</div>
                       </div>
                       <div style={{ display: "flex", gap: "2px", flexShrink: 0, opacity: 0.6 }}>
-                        <button onClick={(e) => shareConversation(e, conv.id)} title={copiedShareId === conv.id ? "Link copied" : "Share"} style={{ background: "none", border: "none", color: copiedShareId === conv.id ? "var(--accent)" : "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "4px" }}
+                        <button onClick={(e) => shareConversation(e, conv.id)} data-tip={copiedShareId === conv.id ? "Link copied" : "Share"} aria-label="Share" style={{ background: "none", border: "none", color: copiedShareId === conv.id ? "var(--accent)" : "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "4px" }}
                           onMouseEnter={(e) => { if (copiedShareId !== conv.id) (e.currentTarget as HTMLElement).style.color = "var(--text)"; }}
                           onMouseLeave={(e) => { if (copiedShareId !== conv.id) (e.currentTarget as HTMLElement).style.color = "var(--muted)"; }}
                         >
                           <IconShare size={12} />
                         </button>
-                        <button onClick={(e) => deleteConversation(e, conv.id)} title="Delete" style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "4px" }}
+                        <button onClick={(e) => deleteConversation(e, conv.id)} data-tip="Delete" aria-label="Delete" style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "4px" }}
                           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#ef4444"; }}
                           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--muted)"; }}
                         >
@@ -1545,7 +1565,7 @@ export default function ChatPage() {
                     {(user.email || "?").slice(0, 1)}
                   </div>
                   <div style={{ flex: 1, minWidth: 0, fontSize: "13px", color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.email}</div>
-                  <button onClick={signOut} title="Sign out" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "4px" }}>
+                  <button onClick={signOut} data-tip="Sign out" aria-label="Sign out" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "4px" }}>
                     <IconLogout size={14} />
                   </button>
                 </div>
@@ -1558,18 +1578,23 @@ export default function ChatPage() {
                 </button>
               )}
             </div>
+            {modelVersion && (
+              <div style={{ paddingTop: "8px", textAlign: "center", color: "var(--faint)", fontSize: "11px" }}>
+                policyengine-uk v{modelVersion}
+              </div>
+            )}
           </div>
         )}
 
         {/* Chat area */}
-        <div data-pe-chat style={{ flex: 1, padding: "0 24px", paddingTop: "16px", minWidth: 0, minHeight: hasMessages ? "auto" : "calc(100vh - 120px)", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center", alignItems: "stretch" }}>
+        <div data-pe-chat style={{ flex: 1, padding: "0 24px", paddingTop: "16px", paddingBottom: "24px", minWidth: 0, minHeight: hasMessages ? "auto" : "calc(100vh - 120px)", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center", alignItems: "stretch" }}>
           {hasMessages && (
             <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", marginBottom: "8px", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px" }}>
               <button
                 onClick={() => { setReportError(null); setReportOpen(true); }}
                 disabled={isStreaming}
                 style={{ fontSize: "12px", color: isStreaming ? "var(--faint)" : "var(--muted)", background: "none", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", padding: "0", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "5px" }}
-                title="Report this thread"
+                data-tip="Report this thread"
               >
                 <IconBug size={12} />
                 Report issue
@@ -1578,7 +1603,7 @@ export default function ChatPage() {
                 onClick={downloadConversation}
                 disabled={isStreaming}
                 style={{ fontSize: "12px", color: isStreaming ? "var(--faint)" : "var(--muted)", background: "none", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", padding: "0", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "5px" }}
-                title="Download this conversation as Markdown"
+                data-tip="Download this conversation as Markdown"
               >
                 <IconDownload size={12} />
                 Download .md
@@ -1611,7 +1636,7 @@ export default function ChatPage() {
                             <button
                               type="button"
                               onClick={() => copyMessage(idx)}
-                              title={copiedMessageIdx === idx ? "Copied" : "Copy answer to clipboard"}
+                              data-tip={copiedMessageIdx === idx ? "Copied" : "Copy answer to clipboard"}
                               style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: copiedMessageIdx === idx ? "var(--accent)" : "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
                               onMouseEnter={(e) => { if (copiedMessageIdx !== idx) (e.currentTarget as HTMLElement).style.color = "var(--text)"; }}
                               onMouseLeave={(e) => { if (copiedMessageIdx !== idx) (e.currentTarget as HTMLElement).style.color = "var(--muted)"; }}
@@ -1631,7 +1656,7 @@ export default function ChatPage() {
                           <button
                             type="button"
                             onClick={() => continueMessage(idx)}
-                            title={msg.stop_reason === "max_tokens"
+                            data-tip={msg.stop_reason === "max_tokens"
                               ? "The answer hit the response length cap — continue from where it stopped."
                               : "Resume from where you stopped the answer."}
                             style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "var(--accent)", background: "transparent", border: "1px solid var(--accent)", borderRadius: "999px", padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}
@@ -1650,7 +1675,7 @@ export default function ChatPage() {
                               key={sIdx}
                               type="button"
                               onClick={() => useSuggestion(suggestion)}
-                              title="Use this follow-up — you can edit it before sending"
+                              data-tip="Use this follow-up — you can edit it before sending"
                               style={{
                                 fontSize: "12.5px",
                                 color: "var(--text-2)",
@@ -1730,7 +1755,7 @@ export default function ChatPage() {
                       type="button"
                       onClick={() => setAttachedImage(null)}
                       disabled={isStreaming}
-                      title="Remove image"
+                      data-tip="Remove image"
                       aria-label="Remove attached image"
                       style={{ position: "absolute", top: "-6px", right: "-6px", width: "18px", height: "18px", borderRadius: "999px", background: "var(--text)", color: "var(--surface)", border: "1px solid var(--surface)", cursor: isStreaming ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}
                     >
@@ -1779,7 +1804,7 @@ export default function ChatPage() {
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isStreaming}
-                    title="Attach an image (JPG, PNG, WEBP, or GIF, up to 5MB)"
+                    data-tip="Attach an image (JPG, PNG, WEBP, or GIF, up to 5MB)"
                     aria-label="Attach image"
                     style={{ width: "32px", height: "32px", borderRadius: "999px", background: "transparent", color: "var(--text-3)", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, opacity: isStreaming ? 0.5 : 1, transition: "background 120ms, color 120ms" }}
                   >
@@ -1789,7 +1814,7 @@ export default function ChatPage() {
                     type="button"
                     onClick={() => setPlanMode((v) => !v)}
                     disabled={isStreaming}
-                    title={planMode
+                    data-tip={planMode
                       ? "Plan mode on — the next message will get clarifying questions before the agent runs anything."
                       : "Plan mode off — turn on to have the agent ask 1–3 clarifying questions before answering."}
                     style={{
@@ -1813,7 +1838,7 @@ export default function ChatPage() {
                     type="button"
                     onClick={() => setChartsMode((v) => !v)}
                     disabled={isStreaming}
-                    title={chartsMode
+                    data-tip={chartsMode
                       ? "Charts mode on — the agent will prefer to include a chart when the question is plot-worthy."
                       : "Charts mode off — turn on to bias answers toward including a chart for distributions, comparisons, or trends."}
                     style={{
@@ -1851,7 +1876,7 @@ export default function ChatPage() {
                 {isStreaming ? (
                   <button
                     onClick={stopStreaming}
-                    title="Stop"
+                    data-tip="Stop" aria-label="Stop"
                     style={{ width: "32px", height: "32px", borderRadius: "999px", background: "var(--accent)", color: "var(--accent-fg)", border: "none", cursor: "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0 }}
                   >
                     <IconX size={16} />
@@ -1860,7 +1885,8 @@ export default function ChatPage() {
                   <button
                     onClick={sendMessage}
                     disabled={!input.trim() && !attachedImage}
-                    title="Send"
+                    data-tip="Send"
+                    aria-label="Send"
                     style={{ width: "32px", height: "32px", borderRadius: "999px", background: (input.trim() || attachedImage) ? "var(--accent)" : "var(--surface-hover)", color: (input.trim() || attachedImage) ? "var(--accent-fg)" : "var(--muted)", border: "none", cursor: (input.trim() || attachedImage) ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, transition: "background 120ms" }}
                   >
                     <IconArrowUp size={16} />
@@ -1955,11 +1981,6 @@ export default function ChatPage() {
                     {prompt}
                   </button>
                 ))}
-              </div>
-            )}
-            {!hasMessages && modelVersion && (
-              <div style={{ marginTop: "20px", display: "flex", justifyContent: "center", color: "var(--faint)", fontSize: "11px" }}>
-                policyengine-uk v{modelVersion}
               </div>
             )}
           </div>
