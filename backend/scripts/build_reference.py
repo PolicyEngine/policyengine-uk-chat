@@ -8,12 +8,21 @@ Run: `docker-compose exec backend python scripts/build_reference.py`
 
 import inspect
 import json
+import sys
 from pathlib import Path
 
 import policyengine_uk_compiled as pe
 from pydantic import BaseModel
 
-OUT = Path(__file__).resolve().parent.parent / "reference.md"
+# Run standalone (`python scripts/build_reference.py`) but still reach the
+# backend package so the engine-version stamp shares one resolver with the
+# load-time drift check in routes/chatbot.py.
+_BACKEND_DIR = Path(__file__).resolve().parent.parent
+if str(_BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_DIR))
+from tooling.simulations import get_engine_version
+
+OUT = _BACKEND_DIR / "reference.md"
 
 SKIP_NAMES = {"data", "engine", "models", "structural", "download_all", "print_guide"}
 PACKAGE_PREFIX = "policyengine_uk_compiled"
@@ -172,6 +181,12 @@ def render() -> str:
         "library at deploy time. Treat it as the authoritative source for function "
         "signatures, parameter schemas, and engine capabilities."
     )
+    lines.append("")
+    ver = get_engine_version() or "unknown"
+    lines.append(f"**Engine version:** `{ver}` (generated at build time).")
+    lines.append("")
+    # Machine-readable marker so the version can be parsed back out at load time.
+    lines.append(f"<!-- engine-version: {ver} -->")
     lines.append("")
 
     # --- capabilities() snapshot ---

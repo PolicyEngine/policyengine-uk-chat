@@ -76,6 +76,55 @@ except FileNotFoundError:
     logger.warning("[CHAT] reference.md not found — run scripts/build_reference.py")
 
 
+def _check_reference_engine_drift(doc: str) -> None:
+    """Best-effort warn if reference.md drifted from the installed engine.
+
+    Wrapped so any parsing/resolution failure simply skips the check; this
+    must never break reference loading or request handling.
+    """
+    try:
+        if not doc:
+            return
+        import re
+
+        match = re.search(r"<!--\s*engine-version:\s*(.+?)\s*-->", doc)
+        if not match:
+            logger.warning(
+                "[CHAT] reference.md has no engine-version stamp; "
+                "cannot verify it matches the installed engine"
+            )
+            return
+        stamped = match.group(1).strip()
+        # A doc built where the version couldn't be resolved stamps "unknown";
+        # treat that as unverifiable rather than warning about a phantom mismatch.
+        if not stamped or stamped == "unknown":
+            logger.warning(
+                "[CHAT] reference.md engine-version stamp is 'unknown'; "
+                "cannot verify it matches the installed engine"
+            )
+            return
+        from tooling.simulations import get_engine_version
+
+        installed = get_engine_version()
+        if installed is None:
+            return
+        if stamped != installed:
+            logger.warning(
+                f"[CHAT] reference.md was built against engine {stamped} "
+                f"but installed engine is {installed}; signatures/schemas may "
+                "be stale — rebuild with scripts/build_reference.py"
+            )
+        else:
+            logger.info(f"[CHAT] reference.md matches installed engine {installed}")
+    except Exception as exc:
+        # Drift check is purely advisory; never let it affect loading — but log
+        # at debug so "skipped due to a bug" is distinguishable from "ran clean".
+        logger.debug(f"[CHAT] reference drift check skipped: {exc}")
+
+
+_check_reference_engine_drift(REFERENCE_DOC)
+
+
 def _get_anthropic_client():
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:
