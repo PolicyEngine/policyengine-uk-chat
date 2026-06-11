@@ -1,22 +1,14 @@
 from pathlib import Path
-import importlib.util
-import os
 import sys
 from types import SimpleNamespace
 
-import pytest
+from conftest import requires_compiled
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "policyengine-uk-rust" / "interfaces" / "python"))
 
 import agent_tools
 from agent_tools import _build_structural_reform
-
-COMPILED_AVAILABLE = importlib.util.find_spec("policyengine_uk_compiled") is not None
-requires_compiled = pytest.mark.skipif(
-    os.environ.get("CI") != "true" and not COMPILED_AVAILABLE,
-    reason="policyengine_uk_compiled is not installed",
-)
 
 
 @requires_compiled
