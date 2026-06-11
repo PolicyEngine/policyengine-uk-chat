@@ -4,10 +4,9 @@ These call the compiled PolicyEngine UK engine directly — no mocking.
 Run inside the backend container: pytest tests/
 """
 
-import importlib.util
-import os
-
 import pytest
+
+from conftest import requires_compiled
 
 from agent_tools import (
     get_baseline_parameters,
@@ -17,12 +16,6 @@ from agent_tools import (
     _build_compiled_policy,
     _json_safe,
     run_python,
-)
-
-COMPILED_AVAILABLE = importlib.util.find_spec("policyengine_uk_compiled") is not None
-requires_compiled = pytest.mark.skipif(
-    os.environ.get("CI") != "true" and not COMPILED_AVAILABLE,
-    reason="policyengine_uk_compiled is not installed",
 )
 
 

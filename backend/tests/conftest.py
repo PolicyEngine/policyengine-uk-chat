@@ -7,6 +7,7 @@ production 5/minute limit since each class makes more than 5 POSTs to
 `/chat/message`.
 """
 
+import importlib.util
 import os
 from pathlib import Path
 
@@ -26,6 +27,16 @@ if not os.environ.get("DATABASE_URL"):
     except FileNotFoundError:
         pass
     os.environ["DATABASE_URL"] = f"sqlite:///{test_db}"
+
+COMPILED_AVAILABLE = importlib.util.find_spec("policyengine_uk_compiled") is not None
+
+# Tests needing the compiled engine skip locally when it is not installed, but
+# always run in CI so a broken engine install fails loudly instead of skipping
+# the suite green.
+requires_compiled = pytest.mark.skipif(
+    os.environ.get("CI") != "true" and not COMPILED_AVAILABLE,
+    reason="policyengine_uk_compiled is not installed",
+)
 
 
 @pytest.fixture
