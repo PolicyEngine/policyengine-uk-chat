@@ -1,0 +1,67 @@
+cases:
+  - id: economy_simulation_invalid_reform_errors_before_data
+    suite: tool_contract
+    description: run_economy_simulation returns a structured error for invalid reform JSON before loading data.
+    requirements: [compiled]
+    tool_name: run_economy_simulation
+    input:
+      year: 2025
+      dataset: frs
+      reform:
+        made_up_program:
+          threshold: 1
+    expect:
+      error_contains: Unknown reform program
+
+  - id: economy_simulation_rejects_structural_reform_input
+    suite: tool_contract
+    description: run_economy_simulation rejects structural_reform input before loading data; structural reforms are run_python-only.
+    tool_name: run_economy_simulation
+    input:
+      year: 2025
+      dataset: frs
+      structural_reform:
+        pre: "def hook(year, persons, benunits, households): return persons, benunits, households"
+    expect:
+      error_contains: structural_reform
+
+  - id: economy_simulation_baseline_aggregate_shape
+    suite: tool_contract
+    description: run_economy_simulation baseline aggregate run returns aggregate sections.
+    requirements: [compiled, data]
+    tool_name: run_economy_simulation
+    input:
+      year: 2025
+      dataset: frs
+    expect:
+      contains:
+        dataset: Family Resources Survey
+      required_paths:
+        - budgetary_impact
+        - program_breakdown_changes
+        - decile_impacts
+        - winners_losers
+        - baseline_poverty
+        - reform_poverty
+
+  - id: economy_simulation_personal_allowance_aggregate_shape
+    suite: tool_contract
+    description: run_economy_simulation reform run returns aggregate reform sections.
+    requirements: [compiled, data]
+    tool_name: run_economy_simulation
+    input:
+      year: 2025
+      dataset: frs
+      reform:
+        income_tax:
+          personal_allowance: 15000
+    expect:
+      contains:
+        dataset: Family Resources Survey
+      required_paths:
+        - budgetary_impact
+        - program_breakdown_changes.income_tax.change
+        - decile_impacts
+        - winners_losers
+        - baseline_hbai_incomes
+        - reform_hbai_incomes

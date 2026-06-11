@@ -9,6 +9,9 @@ AI tools.
 When adding, moving, or reviewing tests, read
 `docs/engineering/skills/testing.md`.
 
+When adding, moving, or reviewing manual AI eval cases or harness code, read
+`docs/engineering/skills/ai-evals.md`.
+
 When changing the chat model pathway, system prompts, tool definitions, or
 calculation boundaries, read `docs/engineering/skills/uk-chat-runtime.md`.
 

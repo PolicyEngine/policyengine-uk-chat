@@ -1,0 +1,75 @@
+cases:
+  - id: validate_reform_rejects_unknown_program
+    suite: tool_contract
+    description: validate_reform rejects unknown top-level programmes.
+    requirements: [compiled]
+    tool_name: validate_reform
+    input:
+      reform:
+        made_up_program:
+          threshold: 1
+    expect:
+      contains:
+        valid: false
+        errors:
+          - path: made_up_program
+      required_paths:
+        - valid_programs
+
+  - id: validate_reform_rejects_unknown_field
+    suite: tool_contract
+    description: validate_reform rejects unknown fields for a known programme.
+    requirements: [compiled]
+    tool_name: validate_reform
+    input:
+      reform:
+        income_tax:
+          made_up_field: 1
+    expect:
+      contains:
+        valid: false
+        errors:
+          - path: income_tax.made_up_field
+
+  - id: validate_reform_rejects_non_dict_reform
+    suite: tool_contract
+    description: validate_reform rejects a reform payload that is not an object.
+    requirements: [compiled]
+    tool_name: validate_reform
+    input:
+      reform:
+        - bad
+    expect:
+      contains:
+        valid: false
+        errors:
+          - path: reform
+
+  - id: validate_reform_rejects_non_dict_program_payload
+    suite: tool_contract
+    description: validate_reform rejects non-object programme payloads.
+    requirements: [compiled]
+    tool_name: validate_reform
+    input:
+      reform:
+        income_tax: 15000
+    expect:
+      contains:
+        valid: false
+        errors:
+          - path: income_tax
+
+  - id: validate_reform_strips_null_fields
+    suite: tool_contract
+    description: validate_reform strips null fields from otherwise valid reform payloads.
+    requirements: [compiled]
+    tool_name: validate_reform
+    input:
+      reform:
+        income_tax:
+          personal_allowance:
+    expect:
+      contains:
+        valid: true
+        normalized_reform: {}
+        programs: []

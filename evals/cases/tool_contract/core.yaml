@@ -1,0 +1,114 @@
+cases:
+  - id: chart_contract_line
+    suite: tool_contract
+    description: generate_chart returns frontend-renderable chart markdown.
+    tool_name: generate_chart
+    input:
+      chart_type: line
+      title: Baseline and reform net income
+      data:
+        - income: 0
+          baseline: 0
+          reform: 0
+        - income: 30000
+          baseline: 25000
+          reform: 25200
+      x_field: income
+      y_fields: [baseline, reform]
+      x_format: currency
+      y_format: currency
+    expect:
+      contains:
+        status: success
+      required_paths:
+        - chart_markdown
+
+  - id: analyse_microdata_rejects_frs
+    suite: tool_contract
+    description: analyse_microdata must not expose FRS row-level access.
+    tool_name: analyse_microdata
+    input:
+      entity: households
+      operation: sample
+      dataset: frs
+    expect:
+      error_contains: FRS
+
+  - id: validate_reform_accepts_personal_allowance
+    suite: tool_contract
+    description: validate_reform accepts a valid parametric reform.
+    requirements: [compiled]
+    tool_name: validate_reform
+    input:
+      reform:
+        income_tax:
+          personal_allowance: 15000
+    expect:
+      contains:
+        valid: true
+        normalized_reform:
+          income_tax:
+            personal_allowance: 15000
+
+  - id: calculate_household_single_adult
+    suite: tool_contract
+    description: calculate_household returns synthetic household tables.
+    requirements: [compiled]
+    tool_name: calculate_household
+    input:
+      year: 2025
+      person:
+        - person_id: 0
+          benunit_id: 0
+          household_id: 0
+          age: 35
+          employment_income: 30000
+      benunit:
+        - benunit_id: 0
+          household_id: 0
+      household:
+        - household_id: 0
+    expect:
+      contains:
+        status: success
+        year: 2025
+        reform_applied: false
+      required_paths:
+        - person.0.baseline_income_tax
+        - benunit.0.baseline_universal_credit
+        - household.0.baseline_net_income
+      numeric:
+        - path: person.0.baseline_income_tax
+          equals: 3486
+          tolerance: 1
+        - path: person.0.baseline_employee_ni
+          equals: 1394.4
+          tolerance: 1
+        - path: benunit.0.baseline_total_benefits
+          equals: 0
+          tolerance: 0
+        - path: household.0.baseline_net_income
+          equals: 25119.6
+          tolerance: 1
+        - path: household.0.baseline_total_tax
+          equals: 6936.89
+          tolerance: 1
+
+  - id: economy_simulation_smoke
+    suite: tool_contract
+    description: run_economy_simulation returns aggregate society-wide outputs.
+    requirements: [compiled, data]
+    tool_name: run_economy_simulation
+    input:
+      year: 2025
+      dataset: frs
+      reform:
+        income_tax:
+          personal_allowance: 15000
+    expect:
+      required_paths:
+        - budgetary_impact
+        - decile_impacts
+        - winners_losers
+        - baseline_poverty
+        - reform_poverty

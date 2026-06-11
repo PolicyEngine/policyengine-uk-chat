@@ -1298,7 +1298,13 @@ export default function ChatPage() {
         >
           {t.status === "pending" && <Loader size={10} color="#8e8e8e" />}
           {hasDetails && <IconChevronDown size={10} style={{ opacity: 0.4, transform: isExpanded ? "none" : "rotate(-90deg)", transition: "transform 0.15s" }} />}
-          <span style={{ color: THEME.text3 }}>{t.tool_name === "run_python" ? "python" : t.tool_name}</span>
+          <span style={{ color: THEME.text3 }}>{({
+            run_python: "python",
+            calculate_household: "household sim",
+            validate_reform: "reform validation",
+            run_economy_simulation: "economy sim",
+            analyse_microdata: "microdata analysis",
+          } as Record<string, string>)[t.tool_name] ?? t.tool_name}</span>
           {t.status !== "pending" && <span style={{ color: THEME.muted }}>✓</span>}
         </div>
         {isExpanded && hasDetails && renderToolDetails(t)}

@@ -1,0 +1,697 @@
+source:
+  generated_from: evals/sources/policyengine_uk.yaml
+  package: policyengine-uk
+  version: 2.88.32
+  compiled_package: policyengine-uk-compiled
+  compiled_version: 0.35.0
+cases:
+- id: policyengine_uk_tax_no_income
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/integration/tax.yaml ::
+    No income'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/integration/tax.yaml
+    name: No income
+  tool_name: calculate_household
+  input:
+    year: 2029
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  expect:
+    numeric:
+    - path: person[].baseline_income_tax
+      equals: 0.0
+      tolerance: 0.0
+    - path: person[].baseline_employee_ni
+      equals: 0.0
+      tolerance: 0.0
+- id: policyengine_uk_tax_some_employed_income
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/integration/tax.yaml ::
+    Some employed income'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/integration/tax.yaml
+    name: Some employed income
+  tool_name: calculate_household
+  input:
+    year: 2018
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      employment_income: 41223
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  expect:
+    numeric:
+    - path: person[].baseline_employee_ni
+      equals: 3935.0
+      tolerance: 30.0
+    - path: person[].baseline_income_tax
+      equals: 5875.0
+      tolerance: 30.0
+- id: policyengine_uk_income_tax_earner
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
+    :: Income Tax for earner'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
+    name: Income Tax for earner
+  tool_name: calculate_household
+  input:
+    year: 2019
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      employment_income: 34000
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  expect:
+    numeric:
+    - path: person[].baseline_income_tax
+      equals: 4298.0
+      tolerance: 10.0
+- id: policyengine_uk_income_tax_pension_contributions
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
+    :: Income Tax for earner with pension contributions'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
+    name: Income Tax for earner with pension contributions
+  tool_name: calculate_household
+  input:
+    year: 2019
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      employment_income: 34000
+      personal_pension_contributions: 1200
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently reproduce this upstream pension-contribution
+      treatment through calculate_household.
+    remove_when: policyengine-uk-compiled supports this upstream case through calculate_household.
+- id: policyengine_uk_ni_class_1_employee_below_pt
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
+    :: NI Class 1 employee contributions - below PT'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
+    name: NI Class 1 employee contributions - below PT
+  tool_name: calculate_household
+  input:
+    year: 2023
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      ni_class_1_income: 11000
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose the upstream intermediate
+      NI Class 1 input/output behavior through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this NI Class 1 behavior through
+      the chat household contract.
+- id: policyengine_uk_ni_class_1_employee_between_pt_and_uel
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
+    :: NI Class 1 employee contributions - between PT and UEL'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
+    name: NI Class 1 employee contributions - between PT and UEL
+  tool_name: calculate_household
+  input:
+    year: 2023
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      ni_class_1_income: 30000
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose the upstream intermediate
+      NI Class 1 input/output behavior through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this NI Class 1 behavior through
+      the chat household contract.
+- id: policyengine_uk_ni_class_1_employee_above_uel
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
+    :: NI Class 1 employee contributions - above UEL'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
+    name: NI Class 1 employee contributions - above UEL
+  tool_name: calculate_household
+  input:
+    year: 2023
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      ni_class_1_income: 70000
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose the upstream intermediate
+      NI Class 1 input/output behavior through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this NI Class 1 behavior through
+      the chat household contract.
+- id: policyengine_uk_ni_sums_non_employer_contributions
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/national_insurance/national_insurance.yaml
+    :: National Insurance sums non-employer-side contributions.'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/national_insurance/national_insurance.yaml
+    name: National Insurance sums non-employer-side contributions.
+  tool_name: calculate_household
+  input:
+    year: 2023
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      ni_class_1_employee: 1
+      ni_class_2: 2
+      ni_class_3: 4
+      ni_class_4: 8
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose the upstream intermediate
+      NI component inputs through calculate_household.
+    remove_when: policyengine-uk-compiled exposes NI component parity through the
+      chat household contract.
+- id: policyengine_uk_child_benefit_no_children
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
+    :: Child Benefit with no children'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
+    name: Child Benefit with no children
+  tool_name: calculate_household
+  input:
+    year: 2021
+    person:
+    - person_id: parent1
+      benunit_id: benunit
+      household_id: household
+      age: 41
+    - person_id: parent2
+      benunit_id: benunit
+      household_id: household
+      age: 42
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled has partial Child Benefit support, but this upstream
+      case is not yet parity-clean through calculate_household.
+    remove_when: policyengine-uk-compiled matches this upstream Child Benefit case
+      through calculate_household.
+- id: policyengine_uk_child_benefit_one_child
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
+    :: Child Benefit with one child'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
+    name: Child Benefit with one child
+  tool_name: calculate_household
+  input:
+    year: 2021
+    person:
+    - person_id: parent1
+      benunit_id: benunit
+      household_id: household
+      age: 41
+    - person_id: parent2
+      benunit_id: benunit
+      household_id: household
+      age: 42
+    - person_id: child1
+      benunit_id: benunit
+      household_id: household
+      age: 15
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+      would_claim_child_benefit: true
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled has partial Child Benefit support, but this upstream
+      case is not yet parity-clean through calculate_household.
+    remove_when: policyengine-uk-compiled matches this upstream Child Benefit case
+      through calculate_household.
+- id: policyengine_uk_child_benefit_two_children_one_over_16
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
+    :: Child Benefit with two children, one over 16'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
+    name: Child Benefit with two children, one over 16
+  tool_name: calculate_household
+  input:
+    year: 2020
+    person:
+    - person_id: parent1
+      benunit_id: benunit
+      household_id: household
+      age: 41
+    - person_id: parent2
+      benunit_id: benunit
+      household_id: household
+      age: 42
+    - person_id: child1
+      benunit_id: benunit
+      household_id: household
+      age: 14
+    - person_id: child2
+      benunit_id: benunit
+      household_id: household
+      age: 17
+      current_education: POST_SECONDARY
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+      would_claim_child_benefit: true
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled has partial Child Benefit support, but this upstream
+      case is not yet parity-clean through calculate_household.
+    remove_when: policyengine-uk-compiled matches this upstream Child Benefit case
+      through calculate_household.
+- id: policyengine_uk_uc_income_reduction_applies
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
+    :: Income reduction applies'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
+    name: Income reduction applies
+  tool_name: calculate_household
+  input:
+    year: 2020
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      uc_maximum_amount: 1000
+      uc_income_reduction: 100
+      is_uc_eligible: true
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+      would_claim_uc: true
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose the upstream intermediate
+      Universal Credit variables required by this case through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this Universal Credit behavior through
+      the chat household contract.
+- id: policyengine_uk_uc_capital_above_upper_limit
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
+    :: Capital above the upper limit removes Universal Credit entitlement'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
+    name: Capital above the upper limit removes Universal Credit entitlement
+  tool_name: calculate_household
+  input:
+    year: 2025
+    person:
+    - person_id: person
+      benunit_id: benunit
+      household_id: household
+      age: 30
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+      savings: 16001
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose the upstream intermediate
+      Universal Credit variables required by this case through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this Universal Credit behavior through
+      the chat household contract.
+- id: policyengine_uk_stamp_duty_first_time_buyer
+  suite: tool_contract
+  description: "Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml\
+    \ :: \xA3445k first-time buyer"
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml
+    name: "\xA3445k first-time buyer"
+  tool_name: calculate_household
+  input:
+    year: 2021
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      main_residential_property_purchased: 445000
+      main_residential_property_purchased_is_first_home: true
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled uses a different property-transaction-tax household
+      contract and does not currently expose this upstream SDLT case through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this upstream SDLT behavior through
+      the chat household contract.
+- id: policyengine_uk_stamp_duty_second_home
+  suite: tool_contract
+  description: "Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml\
+    \ :: \xA3350k second home"
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml
+    name: "\xA3350k second home"
+  tool_name: calculate_household
+  input:
+    year: 2022
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      additional_residential_property_purchased: 350000
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled uses a different property-transaction-tax household
+      contract and does not currently expose this upstream SDLT case through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this upstream SDLT behavior through
+      the chat household contract.
+- id: policyengine_uk_capital_gains_basic_rate
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
+    :: Basic rate capital gains tax'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
+    name: Basic rate capital gains tax
+  tool_name: calculate_household
+  input:
+    year: 2024
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      adjusted_net_income: 20000
+      capital_gains: 23000
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose the upstream capital-gains-tax
+      output through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this upstream capital-gains-tax
+      behavior through the chat household contract.
+- id: policyengine_uk_capital_gains_higher_rate
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
+    :: Higher rate capital gains tax'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
+    name: Higher rate capital gains tax
+  tool_name: calculate_household
+  input:
+    year: 2024
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      adjusted_net_income: 50000
+      capital_gains: 50000
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose the upstream capital-gains-tax
+      output through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this upstream capital-gains-tax
+      behavior through the chat household contract.
+- id: policyengine_uk_high_value_council_tax_surcharge
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/council_tax/high_value_council_tax_surcharge.yaml
+    :: High value council tax surcharge applies in England and flows into aggregates'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/hmrc/council_tax/high_value_council_tax_surcharge.yaml
+    name: High value council tax surcharge applies in England and flows into aggregates
+  tool_name: calculate_household
+  input:
+    year: 2028
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      main_residence_value: 2554326.811538164
+      main_residential_property_purchased: 0
+      council_tax: 0
+      household_owns_tv: false
+      gov.hmrc.stamp_duty.property_sale_rate: 0
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+      region: LONDON
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose this upstream high-value
+      council-tax surcharge behavior through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this council-tax surcharge behavior
+      through the chat household contract.
+- id: policyengine_uk_council_tax_rebate_bands
+  suite: tool_contract
+  description: 'Imported from policyengine-uk: tests/policy/baseline/gov/treasury/energy_bills_rebate/council_tax_rebate.yaml
+    :: CT bands A-D get full rebate, others don''t.'
+  tags:
+  - policyengine_uk
+  - source_synced
+  requirements:
+  - compiled
+  source:
+    package: policyengine-uk
+    version: 2.88.32
+    path: tests/policy/baseline/gov/treasury/energy_bills_rebate/council_tax_rebate.yaml
+    name: CT bands A-D get full rebate, others don't.
+  tool_name: calculate_household
+  input:
+    year: 2023
+    person:
+    - person_id: you
+      benunit_id: benunit
+      household_id: household
+      council_tax:
+      - 150
+      - 150
+      - 150
+      - 150
+      - 150
+      - 150
+      - 150
+      - 150
+      - 150
+      council_tax_band:
+      - A
+      - B
+      - C
+      - D
+      - E
+      - F
+      - G
+      - H
+      - I
+    benunit:
+    - benunit_id: benunit
+      household_id: household
+    household:
+    - household_id: household
+  skip:
+    code: compiled_coverage_gap
+    reason: policyengine-uk-compiled does not currently expose this upstream council-tax
+      rebate behavior through calculate_household.
+    remove_when: policyengine-uk-compiled exposes this council-tax rebate behavior
+      through the chat household contract.

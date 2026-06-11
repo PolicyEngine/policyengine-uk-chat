@@ -9,6 +9,8 @@ first, then keep adapters thin.
 
 Current skills:
 
+- `ai-evals.md`: manual model-agnostic eval harness structure, case authoring,
+  suite boundaries, and reporting commands.
 - `testing.md`: backend/frontend test lanes, fixture scope, live-model test
   gates, and verification commands.
 - `uk-chat-runtime.md`: UK chat AI pathway, prompt ownership, exposed tools,
