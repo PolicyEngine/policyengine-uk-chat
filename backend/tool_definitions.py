@@ -101,7 +101,14 @@ ANALYSE_MICRODATA_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
         "entity": {"type": "string", "enum": ["persons", "benunits", "households"]},
-        "operation": {"type": "string", "enum": ["sample", "mean", "sum", "count", "group_by", "describe"]},
+        "operation": {
+            "type": "string",
+            "enum": ["sample", "mean", "sum", "count", "group_by", "describe"],
+            "description": (
+                "`sample` is not available for the FRS-derived `efrs` dataset; "
+                "use aggregate operations for `efrs`."
+            ),
+        },
         "year": YEAR_SCHEMA,
         "reform": REFORM_PROPERTY,
         "filters": FILTERS_SCHEMA,
@@ -226,7 +233,8 @@ TOOL_DEFINITIONS = [
             "non-FRS microdata follow-ups such as subset means, counts, group "
             "breakdowns, descriptions, or small model-record samples. This tool "
             "explicitly does not support FRS; use run_economy_simulation for "
-            "aggregate FRS outputs."
+            "aggregate FRS outputs. Row-level `sample` is also not supported "
+            "for the FRS-derived `efrs` dataset; use aggregate operations there."
         ),
         "input_schema": ANALYSE_MICRODATA_INPUT_SCHEMA,
     },

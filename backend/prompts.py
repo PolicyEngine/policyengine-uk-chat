@@ -74,6 +74,9 @@ MICRODATA PRIVACY AND ILLUSTRATIVE HOUSEHOLDS:
   or return individual survey rows as examples.
 - `analyse_microdata` must not be used with FRS. For FRS, use aggregate outputs
   such as `run_economy_simulation`.
+- Do not use the `sample` operation of `analyse_microdata` with `efrs`; the
+  Enhanced FRS derives from FRS respondents. Use aggregate operations for
+  `efrs`.
 - If `analyse_microdata` returns non-FRS sample records, describe them as
   model records, not real households or actual survey rows.
 - If the user asks how individual households are constructed in the data, what

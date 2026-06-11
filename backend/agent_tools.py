@@ -15,14 +15,13 @@ from tooling.households import build_household_frames
 from tooling.microdata import analyse_microdata_result, get_cached_microdata, hash_reform
 from tooling.reforms import build_compiled_policy, validate_reform_dict
 from tooling.sandbox import (
-    build_structural_reform,
-    compile_structural_hook,
     run_generator,
     run_python_code,
     safe_import,
 )
 from tooling.serialization import dataframe_to_records, explore_tabular_data, json_safe
 from tooling.simulations import DATASET_LABELS, build_simulation, ensure_compiled_package_importable
+from tooling.simulations import get_capabilities as _engine_capabilities
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +34,6 @@ _hash_reform = hash_reform
 _get_cached_microdata = get_cached_microdata
 _build_compiled_policy = build_compiled_policy
 _build_simulation = build_simulation
-_compile_structural_hook = compile_structural_hook
-_build_structural_reform = build_structural_reform
 _run_generator = run_generator
 
 __all__ = [
@@ -56,10 +53,7 @@ __all__ = [
 
 def get_capabilities() -> Dict[str, Any]:
     try:
-        _ensure_compiled_package_importable()
-        from policyengine_uk_compiled import capabilities
-
-        return capabilities()
+        return _engine_capabilities()
     except Exception as exc:
         logger.error(f"Error getting capabilities: {exc}")
         return {"error": str(exc)}
@@ -118,27 +112,14 @@ def run_economy_simulation(
     year: int = 2025,
     reform: Optional[Dict[str, Any]] = None,
     dataset: str = "frs",
-    structural_reform: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    # Structural reforms are intentionally run_python-only; this tool covers
+    # parametric reforms.
     try:
         policy = _build_compiled_policy(reform)
-        structural = _build_structural_reform(structural_reform)
         sim = _build_simulation(year, dataset)
         baseline_result = sim.run()
-        if structural is not None:
-            from policyengine_uk_compiled import aggregate_microdata, combine_microdata
-
-            baseline_microdata = sim.run_microdata()
-            reform_microdata = sim.run_microdata(policy=policy, structural=structural)
-            combined_microdata = combine_microdata(baseline_microdata, reform_microdata)
-            reform_result = aggregate_microdata(
-                combined_microdata.persons,
-                combined_microdata.benunits,
-                combined_microdata.households,
-                year,
-            )
-        else:
-            reform_result = sim.run(policy=policy) if policy else baseline_result
+        reform_result = sim.run(policy=policy) if policy else baseline_result
 
         baseline_breakdown = baseline_result.program_breakdown.model_dump()
         reform_breakdown = reform_result.program_breakdown.model_dump()
@@ -163,7 +144,6 @@ def run_economy_simulation(
             "reform_hbai_incomes": reform_result.reform_hbai_incomes.model_dump(),
             "baseline_poverty": baseline_result.baseline_poverty.model_dump(),
             "reform_poverty": reform_result.reform_poverty.model_dump(),
-            "structural_reform_applied": structural is not None,
         }
     except FileNotFoundError as exc:
         return {
@@ -184,7 +164,6 @@ def analyse_microdata(
     operation: str,
     year: int = 2025,
     reform: Optional[Dict[str, Any]] = None,
-    structural_reform: Optional[Dict[str, Any]] = None,
     filters: Optional[Dict[str, Any]] = None,
     columns: Optional[List[str]] = None,
     group_by: Optional[List[str]] = None,
@@ -201,18 +180,18 @@ def analyse_microdata(
                     "a non-FRS dataset for analyse_microdata."
                 ),
             }
+        # Enhanced FRS rows derive from FRS respondents, so the FRS row-level
+        # restriction extends to sampling efrs.
+        if dataset_key == "efrs" and operation == "sample":
+            return {
+                "error": "analyse_microdata does not support row-level sampling of the Enhanced FRS",
+                "hint": (
+                    "Use aggregate operations (mean, sum, count, group_by, describe) "
+                    "on efrs, or sample a non-FRS-derived dataset (spi, lcfs, was)."
+                ),
+            }
 
-        policy = _build_compiled_policy(reform)
-        structural = _build_structural_reform(structural_reform)
-        if structural is not None:
-            from policyengine_uk_compiled import combine_microdata
-
-            sim = _build_simulation(year, dataset_key)
-            baseline_microdata = sim.run_microdata()
-            reform_microdata = sim.run_microdata(policy=policy, structural=structural)
-            microdata = combine_microdata(baseline_microdata, reform_microdata)
-        else:
-            microdata = _get_cached_microdata(year, reform, dataset_key)
+        microdata = _get_cached_microdata(year, reform, dataset_key)
 
         return analyse_microdata_result(
             microdata=microdata,
@@ -221,7 +200,6 @@ def analyse_microdata(
             year=year,
             dataset_key=dataset_key,
             reform_applied=reform is not None,
-            structural_reform_applied=structural is not None,
             filters=filters,
             columns=columns,
             group_by=group_by,

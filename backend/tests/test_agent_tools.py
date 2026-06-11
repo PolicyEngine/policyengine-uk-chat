@@ -300,6 +300,17 @@ class TestToolDefinitions:
         assert "frs" not in dataset_schema["enum"]
         assert "efrs" in dataset_schema["enum"]
 
+    def test_analyse_microdata_guidance_blocks_efrs_sample(self):
+        tool = _tool("analyse_microdata")
+        operation_schema = tool["input_schema"]["properties"]["operation"]
+        assert "efrs" in operation_schema["description"]
+        assert "efrs" in tool["description"]
+
+    def test_run_economy_simulation_schema_has_no_structural_reform(self):
+        properties = _tool("run_economy_simulation")["input_schema"]["properties"]
+        assert "structural_reform" not in properties
+        assert "structural_reform" not in _tool("analyse_microdata")["input_schema"]["properties"]
+
     def test_run_python_is_described_as_fallback(self):
         description = _tool("run_python")["description"]
         assert "fallback" in description.lower()
@@ -317,11 +328,24 @@ class TestAnalyseMicrodataContract:
         monkeypatch.setattr(agent_tools, "_get_cached_microdata", fail_if_called)
         monkeypatch.setattr(agent_tools, "_build_simulation", fail_if_called)
         monkeypatch.setattr(agent_tools, "_build_compiled_policy", fail_if_called)
-        monkeypatch.setattr(agent_tools, "_build_structural_reform", fail_if_called)
 
         result = analyse_microdata(entity="households", operation="count", dataset=dataset)
         assert "error" in result
         assert "FRS" in result["error"]
+
+    @pytest.mark.parametrize("dataset", ["efrs", "EFRS"])
+    def test_rejects_efrs_sample_before_loading_microdata(self, monkeypatch, dataset):
+        def fail_if_called(*args, **kwargs):
+            raise AssertionError("EFRS sample rejection must happen before loading or building simulations")
+
+        monkeypatch.setattr(agent_tools, "_get_cached_microdata", fail_if_called)
+        monkeypatch.setattr(agent_tools, "_build_simulation", fail_if_called)
+        monkeypatch.setattr(agent_tools, "_build_compiled_policy", fail_if_called)
+
+        result = analyse_microdata(entity="households", operation="sample", dataset=dataset)
+        assert "error" in result
+        assert "Enhanced FRS" in result["error"]
+        assert "aggregate" in result["hint"]
 
     def _install_mock_microdata(self, monkeypatch, row_count=4):
         import pandas as pd
@@ -428,13 +452,69 @@ class TestAnalyseMicrodataContract:
             "operation": "sample",
             "columns": ["household_id", "baseline_net_income"],
             "n": 100,
-            "dataset": "efrs",
+            "dataset": "spi",
         }
         first = analyse_microdata(**kwargs)
         second = analyse_microdata(**kwargs)
 
         assert len(first["result"]) == 20
         assert first["result"] == second["result"]
+
+
+class TestRunEconomySimulationContract:
+    def test_reports_true_baseline_hbai_alongside_reform(self, monkeypatch):
+        class DummyDump:
+            def __init__(self, value):
+                self.value = value
+
+            def model_dump(self):
+                return self.value
+
+        def make_result(hbai_mean, breakdown):
+            return SimpleNamespace(
+                fiscal_year="2025/26",
+                program_breakdown=DummyDump(breakdown),
+                budgetary_impact=DummyDump({"baseline_revenue": 1.0}),
+                decile_impacts=[],
+                winners_losers=DummyDump({"winners_pct": 0.0}),
+                caseloads=DummyDump({"income_tax_payers": 0.0}),
+                baseline_hbai_incomes=DummyDump({"mean_bhc": hbai_mean}),
+                reform_hbai_incomes=DummyDump({"mean_bhc": hbai_mean}),
+                baseline_poverty=DummyDump({"relative_bhc_children": 10.0}),
+                reform_poverty=DummyDump({"relative_bhc_children": 10.0}),
+            )
+
+        baseline = make_result(100.0, {"income_tax": 100.0})
+        reform = make_result(80.0, {"income_tax": 90.0})
+
+        class DummySimulation:
+            def __init__(self):
+                self.calls = 0
+
+            def run(self, policy=None):
+                self.calls += 1
+                return baseline if self.calls == 1 else reform
+
+        monkeypatch.setattr(agent_tools, "_build_simulation", lambda year, dataset: DummySimulation())
+        monkeypatch.setattr(agent_tools, "_build_compiled_policy", lambda reform: object())
+
+        result = agent_tools.run_economy_simulation(
+            year=2025,
+            reform={"income_tax": {"personal_allowance": 15000}},
+        )
+
+        assert result["baseline_hbai_incomes"]["mean_bhc"] == 100.0
+        assert result["reform_hbai_incomes"]["mean_bhc"] == 80.0
+        assert result["program_breakdown_changes"]["income_tax"]["change"] == -10.0
+        assert "structural_reform_applied" not in result
+
+    def test_rejects_structural_reform_input(self):
+        result = execute_tool(
+            "run_economy_simulation",
+            {"structural_reform": {"pre": "def hook(*args): return args"}},
+        )
+        assert "error" in result
+        assert "structural_reform" in result["error"]
 
 
 # ---------------------------------------------------------------------------

@@ -19,12 +19,8 @@ def hash_reform(reform: Optional[Dict[str, Any]]) -> str:
     return hashlib.md5(json.dumps(reform, sort_keys=True).encode()).hexdigest()
 
 
-def get_cached_microdata(year: int, reform: Optional[Dict[str, Any]], dataset: str, structural=None):
-    """Return cached MicrodataResult. Structural reforms always run fresh."""
-    if structural is not None:
-        policy = build_compiled_policy(reform)
-        sim = build_simulation(year, dataset)
-        return sim.run_microdata(policy=policy, structural=structural)
+def get_cached_microdata(year: int, reform: Optional[Dict[str, Any]], dataset: str):
+    """Return cached MicrodataResult."""
     key = (year, hash_reform(reform), dataset)
     if key not in _microdata_cache:
         policy = build_compiled_policy(reform)
@@ -42,7 +38,6 @@ def analyse_microdata_result(
     year: int,
     dataset_key: str,
     reform_applied: bool,
-    structural_reform_applied: bool,
     filters: Optional[Dict[str, Any]] = None,
     columns: Optional[List[str]] = None,
     group_by: Optional[List[str]] = None,
@@ -220,7 +215,6 @@ def analyse_microdata_result(
         "year": year,
         "dataset": DATASET_LABELS.get(dataset_key, dataset_key),
         "reform_applied": reform_applied,
-        "structural_reform_applied": structural_reform_applied,
         "filters_applied": filters_applied,
         "row_count": row_count,
         "weighted_count": weighted_count,

@@ -85,6 +85,9 @@ temperature to `0` to reduce sampling variance.
 - Use aggregate microdata interfaces only for aggregate outputs.
 - Do not use `analyse_microdata` with FRS. For FRS-backed questions, use
   aggregate outputs such as `run_economy_simulation`.
+- Do not row-sample the Enhanced FRS: the `sample` operation of
+  `analyse_microdata` is unavailable for `efrs` because its rows derive from
+  FRS respondents. Use aggregate operations for `efrs`.
 - If a user asks for household examples, construct illustrative synthetic
   households with the public `Simulation` API. Prefer
   `Simulation.single_person()` for single-person examples, and label examples as

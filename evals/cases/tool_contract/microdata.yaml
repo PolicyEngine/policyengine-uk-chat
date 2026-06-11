@@ -111,10 +111,9 @@ cases:
     expect:
       error_contains: Columns not found
 
-  - id: analyse_microdata_sample_is_capped
+  - id: analyse_microdata_rejects_efrs_sample
     suite: tool_contract
-    description: analyse_microdata sample caps requested rows and returns sample rows.
-    requirements: [compiled, data]
+    description: analyse_microdata rejects row-level sampling of the FRS-derived Enhanced FRS before loading data.
     tool_name: analyse_microdata
     input:
       entity: households
@@ -123,6 +122,4 @@ cases:
       n: 100
       columns: [region, baseline_net_income]
     expect:
-      required_paths:
-        - result.0.region
-        - result.0.baseline_net_income
+      error_contains: Enhanced FRS

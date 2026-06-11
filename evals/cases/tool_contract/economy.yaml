@@ -13,18 +13,17 @@ cases:
     expect:
       error_contains: Unknown reform program
 
-  - id: economy_simulation_invalid_structural_reform_errors_before_data
+  - id: economy_simulation_rejects_structural_reform_input
     suite: tool_contract
-    description: run_economy_simulation returns a structured error for invalid structural reform fields before loading data.
-    requirements: [compiled]
+    description: run_economy_simulation rejects structural_reform input before loading data; structural reforms are run_python-only.
     tool_name: run_economy_simulation
     input:
       year: 2025
       dataset: frs
       structural_reform:
-        during: "def hook(year, persons, benunits, households): return persons, benunits, households"
+        pre: "def hook(year, persons, benunits, households): return persons, benunits, households"
     expect:
-      error_contains: Unknown structural_reform
+      error_contains: structural_reform
 
   - id: economy_simulation_baseline_aggregate_shape
     suite: tool_contract
@@ -37,7 +36,6 @@ cases:
     expect:
       contains:
         dataset: Family Resources Survey
-        structural_reform_applied: false
       required_paths:
         - budgetary_impact
         - program_breakdown_changes
@@ -60,7 +58,6 @@ cases:
     expect:
       contains:
         dataset: Family Resources Survey
-        structural_reform_applied: false
       required_paths:
         - budgetary_impact
         - program_breakdown_changes.income_tax.change
