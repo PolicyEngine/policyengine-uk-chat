@@ -657,7 +657,11 @@ async def chat_message(request: Request, chat_request: ChatRequest):
 
                 conversation.append({"role": "user", "content": tool_results})
 
-            if iteration >= max_iterations:
+            else:
+                # `while…else`: only runs when the loop exhausts max_iterations
+                # *without* breaking. The convergence and infinite-loop branches
+                # both break (and emit their own `done`/`error`), so a turn that
+                # finishes on the cap iteration won't also trip this fallback.
                 logger.info(
                     f"[CHAT] Session {session_id}: iteration cap hit at {iteration} iterations"
                     f" — tool_counts={tool_call_counts}"
