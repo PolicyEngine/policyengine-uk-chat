@@ -130,7 +130,13 @@ class ToolLoopCase(CaseBase):
     offline_responses: List[ModelTurn] = Field(default_factory=list)
 
 
-EvalCase = ToolContractCase | TrajectoryCase | AnswerCase | ToolLoopCase
+class RoutingCase(CaseBase):
+    suite: Literal["routing"] = "routing"
+    prompt: str
+    expected_route: Literal["compute", "lightweight"]
+
+
+EvalCase = ToolContractCase | TrajectoryCase | AnswerCase | ToolLoopCase | RoutingCase
 
 
 class CaseResult(StrictModel):

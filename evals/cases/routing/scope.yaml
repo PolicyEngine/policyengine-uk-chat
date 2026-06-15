@@ -1,0 +1,49 @@
+cases:
+  # The canonical case from the design: a modelled reform (personal allowance)
+  # paired with an unmodelled dimension (inflation). It must route to "compute"
+  # — the modelled fiscal/distributional part needs the engine, and the
+  # macro caveat is the main loop's job. Routing it "lightweight" would answer
+  # the whole thing without the data, which is exactly the failure to avoid.
+  - id: routing_personal_allowance_inflation_needs_compute
+    suite: routing
+    description: A modelled reform asked alongside an unmodelled (inflation) effect routes to compute.
+    requirements: [live_model]
+    prompt: How would raising the income tax personal allowance to £15,000 affect inflation?
+    expected_route: compute
+
+  # Pure macroeconomic forecast with no modelled lever in the question — nothing
+  # to compute, so it routes lightweight and the model explains the limit.
+  - id: routing_pure_macro_forecast_is_lightweight
+    suite: routing
+    description: A pure macro forecast with no modelled lever routes to lightweight.
+    requirements: [live_model]
+    prompt: What will UK inflation be next year?
+    expected_route: lightweight
+
+  - id: routing_off_topic_is_lightweight
+    suite: routing
+    description: Clearly off-topic questions route to lightweight.
+    requirements: [live_model]
+    prompt: What's the capital of France?
+    expected_route: lightweight
+
+  - id: routing_capability_question_is_lightweight
+    suite: routing
+    description: A question about what the assistant can model needs no computation.
+    requirements: [live_model]
+    prompt: What kinds of UK tax and benefit policies can you model?
+    expected_route: lightweight
+
+  - id: routing_reform_cost_needs_compute
+    suite: routing
+    description: A budgetary-cost question about a modelled reform routes to compute.
+    requirements: [live_model]
+    prompt: What is the budgetary cost of raising the basic rate of income tax to 21%?
+    expected_route: compute
+
+  - id: routing_household_calculation_needs_compute
+    suite: routing
+    description: A household-level benefit calculation routes to compute.
+    requirements: [live_model]
+    prompt: What Universal Credit would a single parent with two children earning £20,000 receive?
+    expected_route: compute

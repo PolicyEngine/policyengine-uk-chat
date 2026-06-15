@@ -20,12 +20,13 @@ from pydantic_ai.settings import ModelSettings
 from agent_tools import execute_tool, TOOL_DEFINITIONS
 from prompts import (
     CHARTS_MODE_DIRECTIVE,
-    LIGHTWEIGHT_SYSTEM,
+    DEFAULT_SCOPE_DESCRIPTOR,
     PLAN_MODE_DIRECTIVE,
-    SCOPE_ROUTER_SYSTEM,
     SUGGESTION_SYSTEM,
     SYSTEM_PROMPT,
     TITLE_SYSTEM,
+    lightweight_system,
+    scope_router_system,
 )
 from rate_limit import limiter, chat_key_func, CHAT_USER_LIMIT, CHAT_IP_LIMIT
 
@@ -82,6 +83,22 @@ try:
 except FileNotFoundError:
     REFERENCE_DOC = ""
     logger.warning("[CHAT] reference.md not found — run scripts/build_reference.py")
+
+# Scope descriptor: regenerated from capabilities() by scripts/build_reference.py
+# (alongside reference.md) so it cannot drift from the engine. Fall back to the
+# curated default when the generated file is absent (e.g. local dev). The router
+# and lightweight prompts are built from whichever descriptor we end up with, so
+# they always agree on what is modelled.
+_SCOPE_DESCRIPTOR_PATH = Path(__file__).resolve().parent.parent / "scope_descriptor.md"
+try:
+    SCOPE_DESCRIPTOR = _SCOPE_DESCRIPTOR_PATH.read_text().strip()
+    logger.info(f"[CHAT] Loaded scope_descriptor.md ({len(SCOPE_DESCRIPTOR)} chars)")
+except FileNotFoundError:
+    SCOPE_DESCRIPTOR = DEFAULT_SCOPE_DESCRIPTOR
+    logger.info("[CHAT] scope_descriptor.md not found — using default scope descriptor")
+
+SCOPE_ROUTER_SYSTEM = scope_router_system(SCOPE_DESCRIPTOR)
+LIGHTWEIGHT_SYSTEM = lightweight_system(SCOPE_DESCRIPTOR)
 
 
 def _get_anthropic_client():

@@ -188,9 +188,11 @@ single-number lookups) - this is a preference, not a requirement.
 
 # Compact summary of what the engine models, used by the scope router and the
 # lightweight (no-computation) branch. Kept deliberately small — a few hundred
-# tokens, not the full reference doc. TODO: derive this from `capabilities()` at
-# build time (alongside reference.md) so it cannot drift from the engine.
-SCOPE_DESCRIPTOR = """
+# tokens, not the full reference doc. This is the FALLBACK: at deploy time
+# `scripts/build_reference.py` regenerates the descriptor from `capabilities()`
+# into `scope_descriptor.md`, and the route layer loads that, falling back to
+# this default when the generated file is absent (e.g. local dev).
+DEFAULT_SCOPE_DESCRIPTOR = """
 This assistant models UK taxes and benefits with a microsimulation engine.
 Modelled: income tax, National Insurance, Universal Credit, child benefit,
 pension credit, tax credits, and related UK tax-and-benefit programmes, over the
@@ -200,11 +202,10 @@ market reactions), behavioural response, non-UK policy, unannounced or future
 Budgets, and legal or individual tax-filing advice.
 """.strip()
 
-# Scope router: one cheap classification deciding whether a turn needs the full
-# computational background (engine + reference doc + tools) or can be answered
-# from a light background. Biased to fail safe toward "compute".
-SCOPE_ROUTER_SYSTEM = (
-    """
+# Static instruction halves of the scope prompts. The scope descriptor (default
+# above, or the engine-derived one) is appended by the builder functions below
+# so the router and the lightweight branch always agree on what is modelled.
+_SCOPE_ROUTER_INSTRUCTIONS = """
 You route a user's latest message for a UK tax-and-benefit policy assistant.
 Decide whether answering it requires running the microsimulation engine.
 
@@ -213,27 +214,23 @@ Reply with exactly one word: "compute" or "light".
 Reply "compute" when answering needs a fresh calculation or any specific
 modelled figure - a household calculation, an economy-wide reform or simulation,
 distributional or budgetary numbers, a current parameter or threshold value, or
-anything where the answer is a number the model must compute.
+anything where the answer is a number the model must compute. A question that
+names a modelled reform but also asks about an unmodelled effect (e.g. a tax
+change's effect on inflation) still needs "compute" for the modelled part.
 
 Reply "light" ONLY when the message can be handled with no calculation:
 - it is clearly not about tax or benefit policy at all (general knowledge,
   chit-chat, coding, news);
 - it asks what the assistant can do, or whether something is in scope; or
 - its subject is explicitly outside the model (macro forecasting such as
-  inflation, GDP, or employment as the sole ask; behavioural response; non-UK
-  policy; future Budgets; legal or filing advice).
+  inflation, GDP, or employment as the sole ask, with no modelled lever in the
+  question; behavioural response; non-UK policy; future Budgets; legal advice).
 
 When in doubt, reply "compute" - a wrong "compute" only costs a little, but a
 wrong "light" risks answering without the data.
 """.strip()
-    + "\n\n"
-    + SCOPE_DESCRIPTOR
-)
 
-# Lean system prompt for the lightweight branch: the model still answers the
-# user's actual message, but with no reference doc and no tools loaded.
-LIGHTWEIGHT_SYSTEM = (
-    """
+_LIGHTWEIGHT_INSTRUCTIONS = """
 You are an expert assistant for a UK tax and benefit microsimulation platform.
 This turn does not require running the model, so you have no tools and no live
 parameter data loaded. Respond briefly and directly to the user's message:
@@ -252,9 +249,16 @@ you can compute it if the user asks. Use British English and stay factually
 neutral: do not label policies good, bad, fair, regressive, progressive, or
 similar.
 """.strip()
-    + "\n\n"
-    + SCOPE_DESCRIPTOR
-)
+
+
+def scope_router_system(scope_descriptor: str) -> str:
+    """Router classifier prompt, parameterised by the scope descriptor."""
+    return _SCOPE_ROUTER_INSTRUCTIONS + "\n\n" + scope_descriptor.strip()
+
+
+def lightweight_system(scope_descriptor: str) -> str:
+    """Lean no-computation system prompt, parameterised by the scope descriptor."""
+    return _LIGHTWEIGHT_INSTRUCTIONS + "\n\n" + scope_descriptor.strip()
 
 SUGGESTION_SYSTEM = (
     "You suggest follow-up questions for a UK tax and benefit policy chatbot. "

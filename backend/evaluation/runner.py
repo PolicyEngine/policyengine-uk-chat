@@ -22,6 +22,7 @@ from evaluation.schemas import (
     EvalCase,
     EvalReport,
     ModelTurn,
+    RoutingCase,
     ToolContractCase,
     ToolLoopCase,
     TrajectoryCase,
@@ -37,6 +38,7 @@ SUITE_DIRS = {
     "trajectory": CASE_ROOT / "trajectory",
     "answer": CASE_ROOT / "answers",
     "tool_loop": CASE_ROOT / "tool_loop",
+    "routing": CASE_ROOT / "routing",
 }
 
 
@@ -294,6 +296,28 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
     )
 
 
+def _run_routing(case: RoutingCase) -> CaseResult:
+    # The scope router makes its own fast-model classification call (separate
+    # from the harness provider), so this only runs in live mode — routing
+    # cases carry requirements: [live_model] and skip offline. Lazy import so
+    # offline runs of other suites don't import the chat route module.
+    from routes.chatbot import _route_scope
+
+    try:
+        route = _route_scope(case.prompt)
+    except Exception as exc:
+        return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
+    if route != case.expected_route:
+        return _result(
+            case,
+            "failed",
+            0.0,
+            [f"expected route {case.expected_route!r}, got {route!r}"],
+            {"route": route},
+        )
+    return _result(case, "passed", 1.0, [], {"route": route})
+
+
 def run_eval(
     *,
     suites: List[str] | None = None,
@@ -339,6 +363,8 @@ def run_eval(
             results.append(_run_answer(case, client))
         elif isinstance(case, ToolLoopCase):
             results.append(_run_tool_loop(case, client))
+        elif isinstance(case, RoutingCase):
+            results.append(_run_routing(case))
 
     report = EvalReport(
         mode=mode,

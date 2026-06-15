@@ -9,9 +9,10 @@ node_modules/
 dist/
 
 # Generated at image build time by backend/scripts/build_reference.py.
-# Both backend/Dockerfile and modal_app.py regenerate this against the
-# installed policyengine-uk-compiled version, so it never lives in git.
+# Both backend/Dockerfile and modal_app.py regenerate these against the
+# installed policyengine-uk-compiled version, so they never live in git.
 backend/reference.md
+backend/scope_descriptor.md
 
 # Manual AI evaluation reports.
 evals/reports/
