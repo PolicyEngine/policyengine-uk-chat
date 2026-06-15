@@ -20,7 +20,9 @@ from pydantic_ai.settings import ModelSettings
 from agent_tools import execute_tool, TOOL_DEFINITIONS
 from prompts import (
     CHARTS_MODE_DIRECTIVE,
+    LIGHTWEIGHT_SYSTEM,
     PLAN_MODE_DIRECTIVE,
+    SCOPE_ROUTER_SYSTEM,
     SUGGESTION_SYSTEM,
     SYSTEM_PROMPT,
     TITLE_SYSTEM,
@@ -67,10 +69,11 @@ SUGGESTION_TIMEOUT_SECS = float(os.environ.get("ANTHROPIC_SUGGESTION_TIMEOUT_SEC
 FAST_MODEL_MAX_INPUT_TOKENS = int(os.environ.get("ANTHROPIC_FAST_MODEL_MAX_INPUT_TOKENS", "120000"))
 CHAT_TEMPERATURE = float(os.environ.get("ANTHROPIC_CHAT_TEMPERATURE", "0"))
 
-# Topic gate — short-circuits requests that are clearly off-topic before they
-# hit the main loop. Opt-in via env so rollout can be staged.
-TOPIC_GATE_ENABLED = os.environ.get("POLICYENGINE_CHAT_TOPIC_GATE_ENABLED", "false").lower() == "true"
-TOPIC_GATE_MODEL = os.environ.get("POLICYENGINE_CHAT_TOPIC_GATE_MODEL", DEFAULT_FAST_MODEL)
+# Scope router — a cheap pre-check that decides whether a turn needs the full
+# computational background (engine + reference doc + tools) or can be answered
+# from a light background. Opt-in via env so rollout can be staged.
+SCOPE_ROUTER_ENABLED = os.environ.get("POLICYENGINE_CHAT_SCOPE_ROUTER_ENABLED", "false").lower() == "true"
+SCOPE_ROUTER_MODEL = os.environ.get("POLICYENGINE_CHAT_SCOPE_ROUTER_MODEL", DEFAULT_FAST_MODEL)
 
 _REFERENCE_PATH = Path(__file__).resolve().parent.parent / "reference.md"
 try:
@@ -281,75 +284,70 @@ def generate_title(request: TitleRequest):
 
 
 # ---------------------------------------------------------------------------
-# Topic gate
+# Scope router
 # ---------------------------------------------------------------------------
-
-# Calibration for the boundary cases:
-#   - "Capital of France?"                          → no (reject)
-#   - "What did the chancellor say yesterday?"      → no (reject — news, not policy)
-#   - "How will the PA reform affect inflation?"    → yes (let through; the main
-#     loop's scope-refusal then explains microsim-vs-macro)
-#   - "What's the EITC?" / "How does UC taper?"     → yes (factual policy)
 #
-# Failure mode preference: false negatives (rejecting on-topic) are worse than
-# false positives (accepting off-topic). The latter wastes a few cents; the
-# former breaks the product. So the prompt biases toward letting things
-# through, and any classifier error short-circuits to "yes".
-_TOPIC_GATE_SYSTEM = """You are a strict classifier deciding whether to forward a user's question to a UK tax-and-benefit policy assistant.
-
-Reply with exactly one token: "yes" or "no".
-
-Reply "yes" when the question is, or could plausibly be, about:
-- UK or US tax, benefits, social-security, or public-finance policy
-- Specific programmes (Universal Credit, EITC, CTC, SNAP, NHS, state pension, etc.)
-- Household-level financial situations the assistant could simulate
-- Reforms, hypothetical policy changes, distributional or budgetary effects
-- Whether something is in scope for a microsimulation model (the assistant will explain limitations)
-- Follow-ups, clarifications, or chit-chat that names a policy topic
-
-Reply "no" only when the question is unambiguously NOT about policy — e.g.:
-- General knowledge (capitals, history, science, sports, weather)
-- News or current events not tied to a specific policy
-- Personal advice, emotional support, creative writing
-- Coding help unrelated to policy modelling
-
-When in doubt, reply "yes".
-"""
+# The router decides which *background* a turn needs, never what to say — the
+# model still answers the user's real message in every case. Two routes:
+#
+#   "compute"     full background: SYSTEM_PROMPT + REFERENCE_DOC + all tools.
+#                 Anything that needs a calculation or a grounded figure.
+#   "lightweight" lean background: LIGHTWEIGHT_SYSTEM only, no reference doc,
+#                 no tools. Off-topic, scope/capability, and explicitly
+#                 unmodelled questions — answered from a small prompt instead of
+#                 loading the ~20k-token reference doc and tool schemas.
+#
+# Fail-safe: any error, empty input, or ambiguous reply routes to "compute".
+# A wrong "compute" only wastes the background we'd have loaded anyway; a wrong
+# "lightweight" risks answering without the data, so we bias hard against it.
 
 
-def _classify_on_topic(last_user_message: str) -> bool:
-    """Single Haiku classification call. Fail-open on any error."""
+def _last_user_text(conversation: List[dict]) -> str:
+    """Latest user message as plain text (flattening image+text content)."""
+    for msg in reversed(conversation):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):  # [image block, text block, ...]
+            return " ".join(
+                str(b.get("text", "")) for b in content if isinstance(b, dict)
+            ).strip()
+    return ""
+
+
+def _route_scope(last_user_message: str) -> str:
+    """One cheap classification: "compute" or "lightweight". Fail-safe to
+    "compute" on empty input, any error, or an unrecognised reply."""
     if not last_user_message or not last_user_message.strip():
-        return True
+        return "compute"
     try:
         client = _get_sync_anthropic_client()
         response = client.messages.create(
-            model=TOPIC_GATE_MODEL,
-            max_tokens=4,
-            system=_TOPIC_GATE_SYSTEM,
+            model=SCOPE_ROUTER_MODEL,
+            max_tokens=8,
+            system=SCOPE_ROUTER_SYSTEM,
             messages=[{"role": "user", "content": last_user_message[:2000]}],
         )
-        text = response.content[0].text.strip().lower() if response.content else ""
-        return not text.startswith("no")
+        text = (response.content[0].text or "").strip().lower() if response.content else ""
+        return "lightweight" if text.startswith("light") else "compute"
     except Exception as e:
-        logger.warning(f"[CHAT] Topic gate classification failed; failing open: {e}")
-        return True
+        logger.warning(f"[CHAT] Scope router failed; defaulting to compute: {e}")
+        return "compute"
 
 
-_OFF_TOPIC_REFUSAL = (
-    "I'm built for UK tax and benefit policy questions — things like reform "
-    "impacts, eligibility, programme parameters, or distributional effects. "
-    "I can't help with this one. If you'd like, ask me about a UK policy or "
-    "household situation and I'll run the numbers."
-)
-
-
-def _off_topic_refusal_stream(session_id: str, model: str):
-    """Emit an SSE stream the frontend renders identically to a normal answer."""
-    async def gen():
-        yield f"data: {json.dumps({'type': 'chunk', 'content': _OFF_TOPIC_REFUSAL})}\n\n"
-        yield f"data: {json.dumps({'type': 'done', 'content': _OFF_TOPIC_REFUSAL, 'session_id': session_id, 'model': model, 'stop_reason': 'topic_gate', 'usage': {'input_tokens': 0, 'output_tokens': 0, 'cache_creation_input_tokens': 0, 'cache_read_input_tokens': 0}, 'cost_gbp': None, 'balance': None, 'refused_by_topic_gate': True})}\n\n"
-    return gen
+def _build_lightweight_system_blocks(charts_mode: bool = False) -> List[dict]:
+    """Lean system payload for the lightweight branch: no reference doc, no
+    tools. The model still answers the user's actual message."""
+    blocks: List[dict] = [{
+        "type": "text",
+        "text": LIGHTWEIGHT_SYSTEM,
+        "cache_control": {"type": "ephemeral"},
+    }]
+    if charts_mode:
+        blocks.append({"type": "text", "text": CHARTS_MODE_DIRECTIVE})
+    return blocks
 
 
 # ---------------------------------------------------------------------------
@@ -375,23 +373,6 @@ async def chat_message(request: Request, chat_request: ChatRequest):
             pass  # Supabase not configured — skip billing check
 
     session_id = chat_request.session_id or str(uuid.uuid4())
-
-    # Topic gate — short-circuit clearly off-topic messages before we load the
-    # system prompt, reference doc, or run any tools. Only checks the most
-    # recent user message; mid-conversation drift is left to the main loop's
-    # scope guidance. Off by default; opt in via env so rollout can be staged.
-    if TOPIC_GATE_ENABLED:
-        last_user = next(
-            (m.content for m in reversed(chat_request.messages) if m.role == "user"),
-            "",
-        )
-        if not _classify_on_topic(last_user):
-            logger.info(f"[CHAT] Topic gate rejected message in session {session_id}")
-            return StreamingResponse(
-                _off_topic_refusal_stream(session_id, TOPIC_GATE_MODEL)(),
-                media_type="text/event-stream",
-                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
-            )
 
     messages = [{"role": msg.role, "content": msg.content} for msg in chat_request.messages]
 
@@ -449,14 +430,29 @@ async def chat_message(request: Request, chat_request: ChatRequest):
             last_tool_error: str | None = None
 
             client = _get_anthropic_client()
-            model = _select_chat_model(conversation)
-            tools = _tool_defs_for_anthropic()
             plan_mode = chat_request.plan_mode
             charts_mode = chat_request.charts_mode
-            system_blocks = _build_system_blocks(plan_mode=plan_mode, charts_mode=charts_mode)
+
+            # Scope routing decides which background this turn loads. Plan mode
+            # is always "compute" — it asks clarifying questions about a real
+            # analysis, so it keeps the full prompt (and structurally drops
+            # tools below). Disabled by default; falls through to "compute".
+            route = "compute"
+            if SCOPE_ROUTER_ENABLED and not plan_mode:
+                route = _route_scope(_last_user_text(conversation))
+
+            if route == "lightweight":
+                model = SCOPE_ROUTER_MODEL
+                tools = []
+                system_blocks = _build_lightweight_system_blocks(charts_mode=charts_mode)
+            else:
+                model = _select_chat_model(conversation)
+                tools = _tool_defs_for_anthropic()
+                system_blocks = _build_system_blocks(plan_mode=plan_mode, charts_mode=charts_mode)
 
             logger.info(
                 f"[CHAT] Session {session_id}: {len(conversation)} messages"
+                f" [route={route}]"
                 f"{' [PLAN MODE]' if plan_mode else ''}"
                 f"{' [CHARTS MODE]' if charts_mode else ''}"
             )
@@ -487,7 +483,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                             "system": system_blocks,
                             "messages": conversation,
                         }
-                        if not plan_mode:
+                        if tools and not plan_mode:
                             stream_kwargs["tools"] = tools
                         async with client.messages.stream(**stream_kwargs) as stream:
                             announced_tools: set = set()
