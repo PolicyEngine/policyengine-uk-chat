@@ -47,6 +47,17 @@ import os
 from pathlib import Path
 import anthropic as anthropic_sdk
 
+# Soft cap on tool-use iterations within a single /chat/message stream.
+# An "iteration" is one round-trip to Anthropic that may include tool calls.
+# We lowered this from 60 to keep runaway agents from hanging the Vercel
+# proxy (which times out the SSE connection and surfaces as "Failed to fetch"
+# in the browser). When hit, we emit a user-facing fallback message and a
+# `done` event with stop_reason="iteration_cap" instead of cutting off mid-stream.
+# NOTE: this is per-request. The /chat/message "continue" flow re-enters this
+# loop with a fresh budget, but the prior tool transcript is already in the
+# conversation so the model resumes mid-thought rather than restarting.
+MAX_ITERATIONS = 30
+
 DEFAULT_FAST_MODEL = os.environ.get("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5")
 DEFAULT_COMPLEX_MODEL = os.environ.get("ANTHROPIC_COMPLEX_MODEL", "claude-sonnet-4-6")
 TITLE_MODEL = os.environ.get("ANTHROPIC_TITLE_MODEL", DEFAULT_FAST_MODEL)
@@ -331,12 +342,17 @@ async def chat_message(request: Request, chat_request: ChatRequest):
         try:
             conversation = deduplicated.copy()
             iteration = 0
-            max_iterations = 60
+            max_iterations = MAX_ITERATIONS
             total_input_tokens = 0
             total_output_tokens = 0
             total_cache_read_input_tokens = 0
             total_cache_creation_input_tokens = 0
             recent_tool_calls: List[str] = []
+            # Track every tool call across the turn so the cap-hit fallback can
+            # tell the user what was tried. Counts only (no inputs) keeps PII out
+            # of the summary and keeps it well under the 300-char target.
+            tool_call_counts: Dict[str, int] = {}
+            last_tool_error: str | None = None
 
             client = _get_anthropic_client()
             model = _select_chat_model(conversation)
@@ -443,6 +459,10 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'thinking_done'})}\n\n"
 
                 if not tool_uses:
+                    logger.info(
+                        f"[CHAT] Session {session_id}: converged at {iteration} iterations"
+                        f" stop_reason={last_stop_reason}"
+                    )
                     # Record token usage for billing
                     billing = None
                     try:
@@ -517,6 +537,15 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                     if await request.is_disconnected():
                         return
                     completed_tools[tu["id"]] = result
+                    tool_call_counts[tu["name"]] = tool_call_counts.get(tu["name"], 0) + 1
+                    # Capture the most recent tool error so the cap-hit fallback
+                    # can hint at what the agent was struggling with.
+                    if isinstance(result, dict):
+                        err = result.get("error") or result.get("stderr")
+                        if err:
+                            err_str = str(err).strip().splitlines()[-1] if str(err).strip() else ""
+                            if err_str:
+                                last_tool_error = err_str[:120]
                     result_str = _serialise_tool_result(result)
                     result_summary = result_str[:5000] + "..." if len(result_str) > 5000 else result_str
                     yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tu['name'], 'tool_id': tu['id'], 'status': 'success', 'result_summary': result_summary})}\n\n"
@@ -544,7 +573,37 @@ async def chat_message(request: Request, chat_request: ChatRequest):
 
                 conversation.append({"role": "user", "content": tool_results})
 
-            if iteration >= max_iterations:
+            else:
+                # `while…else`: only runs when the loop exhausts max_iterations
+                # *without* breaking. The convergence and infinite-loop branches
+                # both break (and emit their own `done`/`error`), so a turn that
+                # finishes on the cap iteration won't also trip this fallback.
+                logger.info(
+                    f"[CHAT] Session {session_id}: iteration cap hit at {iteration} iterations"
+                    f" — tool_counts={tool_call_counts}"
+                    f"{f' last_error={last_tool_error!r}' if last_tool_error else ''}"
+                )
+                # Build a short summary of what was tried. Kept under ~300 chars
+                # so it reads as a sentence, not a transcript.
+                if tool_call_counts:
+                    parts = [f"`{name}` {count}×" for name, count in tool_call_counts.items()]
+                    tried_clause = "ran " + ", ".join(parts)
+                else:
+                    tried_clause = "didn't complete any tool calls"
+                error_clause = (
+                    f", last attempt errored with \"{last_tool_error}\""
+                    if last_tool_error else ""
+                )
+                fallback_message = (
+                    "\n\nI'm spending more iterations than expected on this without converging. "
+                    f"Here's what I tried: {tried_clause}{error_clause}. "
+                    "Could you (a) rephrase the question, (b) enable Plan mode so I can ask "
+                    "clarifying questions first, or (c) try a more specific scenario?"
+                )
+                # Hard cap defensively in case tool names balloon the string.
+                if len(fallback_message) > 600:
+                    fallback_message = fallback_message[:597] + "..."
+
                 billing = None
                 try:
                     from routes.billing import record_usage
@@ -559,8 +618,9 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                     )
                 except Exception as e:
                     logger.warning(f"[CHAT] Failed to record usage: {e}")
-                yield f"data: {json.dumps({'type': 'chunk', 'content': '\\n\\n*[Reached maximum iterations]*'})}\n\n"
-                yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
+                yield f"data: {json.dumps({'type': 'chunk', 'content': fallback_message})}\n\n"
+                final_content = assistant_content + fallback_message
+                yield f"data: {json.dumps({'type': 'done', 'content': final_content, 'session_id': session_id, 'model': model, 'stop_reason': 'iteration_cap', 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
 
         except Exception as e:
             import traceback
