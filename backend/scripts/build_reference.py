@@ -25,6 +25,12 @@ _NOT_MODELLED = (
     "unannounced or future Budgets, and legal or individual tax-filing advice."
 )
 
+# Parameters-schema keys that are config knobs / simulation switches rather than
+# user-facing programmes, so they would read as noise in the scope descriptor.
+# `labour_supply` in particular is a behavioural-response control, which we
+# explicitly list as NOT modelled. Kept tiny and config-only to limit drift.
+_NON_PROGRAMME_KEYS = {"fiscal_year", "labour_supply", "uc_migration"}
+
 SKIP_NAMES = {"data", "engine", "models", "structural", "download_all", "print_guide"}
 PACKAGE_PREFIX = "policyengine_uk_compiled"
 _BASE_MODEL_DOC = inspect.getdoc(BaseModel) or ""
@@ -273,7 +279,10 @@ def build_scope_descriptor() -> str:
     authoritative list of reform keys); datasets/years from capabilities()."""
     caps = pe.capabilities()
     schema = pe.Parameters.model_json_schema()
-    programmes = sorted((schema.get("properties") or {}).keys())
+    programmes = sorted(
+        k for k in (schema.get("properties") or {}).keys()
+        if k not in _NON_PROGRAMME_KEYS
+    )
     datasets = _caps_values(caps, ("datasets", "dataset_names", "available_datasets"))
     years = _caps_values(caps, ("years", "periods", "available_years"))
 

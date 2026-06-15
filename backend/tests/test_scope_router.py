@@ -83,22 +83,35 @@ class TestLastUserText:
 
 
 class TestLightweightSystemBlocks:
-    """The lightweight branch must NOT load the reference doc, and must carry
-    the lean prompt."""
+    """The lightweight branch must NOT load the reference doc or a chart
+    directive, and must carry the lean prompt."""
 
     def test_excludes_reference_doc_and_carries_lean_prompt(self):
         blocks = chatbot._build_lightweight_system_blocks()
-        texts = [b["text"] for b in blocks]
-        assert any("do not require running the model" in t.lower()
-                   or "no live\nparameter data" in t.lower()
-                   or "no tools" in t.lower() for t in texts), texts
+        assert len(blocks) == 1  # just the lean prompt — no reference doc, no charts
+        text = blocks[0]["text"]
+        assert "no tools" in text.lower()
         # The full reference doc (if any) must not be present.
-        assert chatbot.REFERENCE_DOC == "" or all(chatbot.REFERENCE_DOC not in t for t in texts)
-        assert len(blocks) == 1  # just the lean prompt, no charts directive
+        assert chatbot.REFERENCE_DOC == "" or chatbot.REFERENCE_DOC not in text
 
-    def test_charts_mode_appends_directive(self):
-        blocks = chatbot._build_lightweight_system_blocks(charts_mode=True)
-        assert len(blocks) == 2
+
+class TestIsFollowup:
+    """The router only runs on the opening user turn; once an assistant turn is
+    present the request is a follow-up and takes the full background."""
+
+    def test_opening_turn_is_not_followup(self):
+        assert chatbot._is_followup([{"role": "user", "content": "hi"}]) is False
+
+    def test_after_assistant_reply_is_followup(self):
+        convo = [
+            {"role": "user", "content": "raise the PA to 15000"},
+            {"role": "assistant", "content": "Here is the impact..."},
+            {"role": "user", "content": "what if they were married?"},
+        ]
+        assert chatbot._is_followup(convo) is True
+
+    def test_empty_conversation_is_not_followup(self):
+        assert chatbot._is_followup([]) is False
 
 
 class TestRouterConfig:

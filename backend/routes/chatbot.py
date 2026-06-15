@@ -334,6 +334,13 @@ def _last_user_text(conversation: List[dict]) -> str:
     return ""
 
 
+def _is_followup(conversation: List[dict]) -> bool:
+    """True once the conversation contains an assistant turn — i.e. this is not
+    the opening user message. The router only runs on the opening turn, because
+    a single-message classifier can't see the context a follow-up depends on."""
+    return any(msg.get("role") == "assistant" for msg in conversation)
+
+
 def _route_scope(last_user_message: str) -> str:
     """One cheap classification: "compute" or "lightweight". Fail-safe to
     "compute" on empty input, any error, or an unrecognised reply."""
@@ -354,17 +361,15 @@ def _route_scope(last_user_message: str) -> str:
         return "compute"
 
 
-def _build_lightweight_system_blocks(charts_mode: bool = False) -> List[dict]:
+def _build_lightweight_system_blocks() -> List[dict]:
     """Lean system payload for the lightweight branch: no reference doc, no
-    tools. The model still answers the user's actual message."""
-    blocks: List[dict] = [{
+    tools, and no chart directive (there are no tools to draw a chart with).
+    The model still answers the user's actual message."""
+    return [{
         "type": "text",
         "text": LIGHTWEIGHT_SYSTEM,
         "cache_control": {"type": "ephemeral"},
     }]
-    if charts_mode:
-        blocks.append({"type": "text", "text": CHARTS_MODE_DIRECTIVE})
-    return blocks
 
 
 # ---------------------------------------------------------------------------
@@ -450,18 +455,26 @@ async def chat_message(request: Request, chat_request: ChatRequest):
             plan_mode = chat_request.plan_mode
             charts_mode = chat_request.charts_mode
 
-            # Scope routing decides which background this turn loads. Plan mode
-            # is always "compute" — it asks clarifying questions about a real
-            # analysis, so it keeps the full prompt (and structurally drops
-            # tools below). Disabled by default; falls through to "compute".
+            # Scope routing decides which background this turn loads. It runs
+            # only on the opening user turn: a follow-up depends on prior context
+            # the single-message classifier can't see, and misrouting a
+            # continuation to "lightweight" would answer it without the engine,
+            # so any turn with a prior assistant reply takes the full background.
+            # Plan mode is always "compute" (it asks clarifying questions about a
+            # real analysis). Disabled by default; falls through to "compute".
             route = "compute"
-            if SCOPE_ROUTER_ENABLED and not plan_mode:
-                route = _route_scope(_last_user_text(conversation))
+            if SCOPE_ROUTER_ENABLED and not plan_mode and not _is_followup(conversation):
+                # _route_scope makes a blocking sync API call; run it off the
+                # event loop so it doesn't stall other in-flight requests.
+                loop = asyncio.get_event_loop()
+                route = await loop.run_in_executor(
+                    None, _route_scope, _last_user_text(conversation)
+                )
 
             if route == "lightweight":
                 model = SCOPE_ROUTER_MODEL
                 tools = []
-                system_blocks = _build_lightweight_system_blocks(charts_mode=charts_mode)
+                system_blocks = _build_lightweight_system_blocks()
             else:
                 model = _select_chat_model(conversation)
                 tools = _tool_defs_for_anthropic()
@@ -585,7 +598,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                         )
                     except Exception as e:
                         logger.warning(f"[CHAT] Failed to record usage: {e}")
-                    yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'stop_reason': last_stop_reason, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
+                    yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'route': route, 'stop_reason': last_stop_reason, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
                     # Best-effort follow-up suggestions. Plan-mode answers are
                     # already clarifying questions, so don't suggest more on top.
                     # Truncated/error stops are skipped because the answer
@@ -727,7 +740,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                     logger.warning(f"[CHAT] Failed to record usage: {e}")
                 yield f"data: {json.dumps({'type': 'chunk', 'content': fallback_message})}\n\n"
                 final_content = assistant_content + fallback_message
-                yield f"data: {json.dumps({'type': 'done', 'content': final_content, 'session_id': session_id, 'model': model, 'stop_reason': 'iteration_cap', 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': final_content, 'session_id': session_id, 'model': model, 'route': route, 'stop_reason': 'iteration_cap', 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
 
         except Exception as e:
             import traceback
