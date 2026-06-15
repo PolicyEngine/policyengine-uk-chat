@@ -111,7 +111,7 @@ import anthropic as anthropic_sdk
 # NOTE: this is per-request. The /chat/message "continue" flow re-enters this
 # loop with a fresh budget, but the prior tool transcript is already in the
 # conversation so the model resumes mid-thought rather than restarting.
-MAX_ITERATIONS = 12
+MAX_ITERATIONS = 30
 
 DEFAULT_FAST_MODEL = os.environ.get("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5")
 DEFAULT_COMPLEX_MODEL = os.environ.get("ANTHROPIC_COMPLEX_MODEL", "claude-sonnet-4-6")
