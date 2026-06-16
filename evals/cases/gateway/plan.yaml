@@ -1,0 +1,124 @@
+cases:
+  # ---- irrelevant: off-domain entirely ----
+  - id: gw_irrelevant_chitchat
+    suite: gateway
+    description: General-knowledge chit-chat is off-domain.
+    requirements: [live_model]
+    prompt: What's the capital of France?
+    expected_outcome: irrelevant
+
+  - id: gw_irrelevant_coding
+    suite: gateway
+    description: A generic coding request is off-domain.
+    requirements: [live_model]
+    prompt: Write me a Python function that does quicksort.
+    expected_outcome: irrelevant
+
+  # ---- out_of_scope: on-topic but no modelled lever ----
+  - id: gw_oos_pure_macro
+    suite: gateway
+    description: A pure macro forecast has no modelled lever to compute.
+    requirements: [live_model]
+    prompt: What will UK inflation be next year?
+    expected_outcome: out_of_scope
+
+  - id: gw_oos_behavioural
+    suite: gateway
+    description: A behavioural-response question names a lever but asks an unmodelled effect.
+    requirements: [live_model]
+    prompt: How many people would stop working if we doubled Universal Credit?
+    expected_outcome: out_of_scope
+
+  # ---- partial: modelled lever + unmodelled rider, modelled part fully specified ----
+  - id: gw_partial_pa_inflation
+    suite: gateway
+    description: A fully-specified reform asked alongside an unmodelled inflation effect.
+    requirements: [live_model]
+    prompt: How would raising the income tax personal allowance to £15,000 affect inflation?
+    expected_outcome: partial
+    expected_tool: run_economy_simulation
+
+  - id: gw_partial_rate_growth
+    suite: gateway
+    description: A specified rate cut plus an unmodelled GDP question.
+    requirements: [live_model]
+    prompt: Cut the basic rate of income tax to 19% — what's the cost, and will it boost GDP?
+    expected_outcome: partial
+    expected_tool: run_economy_simulation
+
+  # ---- needs_plan: in scope but under-specified on a load-bearing slot ----
+  - id: gw_needsplan_compare_two_reforms
+    suite: gateway
+    description: No reforms named and no metric — both load-bearing slots are ungrounded.
+    requirements: [live_model]
+    prompt: Compare the two reforms.
+    expected_outcome: needs_plan
+
+  - id: gw_needsplan_uc_no_household
+    suite: gateway
+    description: A household benefit question with no household — person is ungrounded, but
+      benunit/household are model-inferable and must NOT trigger a question.
+    requirements: [live_model]
+    prompt: How much Universal Credit would I get?
+    expected_outcome: needs_plan
+    expected_tool: calculate_household
+    expected_slots:
+      - slot: benunit
+        gates: false
+      - slot: household
+        gates: false
+
+  - id: gw_needsplan_is_x_better
+    suite: gateway
+    description: "'Better' pins no metric — the deliverable is ungrounded."
+    requirements: [live_model]
+    prompt: Is a higher personal allowance better than a higher Universal Credit standard allowance?
+    expected_outcome: needs_plan
+
+  - id: gw_needsplan_wealth_tax_underspecified
+    suite: gateway
+    description: Wealth tax with no rate/threshold; dataset is promoted to high (needs WAS)
+      so an assumed dataset gates. Minimal pair with gw_ready_wealth_tax_specified.
+    requirements: [live_model]
+    prompt: Model a wealth tax.
+    expected_outcome: needs_plan
+    expected_tool: run_economy_simulation
+    expected_slots:
+      - slot: dataset
+        gates: true
+
+  # ---- ready: fully specified, admissible ----
+  - id: gw_ready_basic_rate_cost
+    suite: gateway
+    description: A budgetary-cost question about a fully-specified reform.
+    requirements: [live_model]
+    prompt: What is the budgetary cost of raising the basic rate of income tax to 21%?
+    expected_outcome: ready
+    expected_tool: run_economy_simulation
+
+  - id: gw_ready_household_full
+    suite: gateway
+    description: A fully-specified household calculation needs no clarification.
+    requirements: [live_model]
+    prompt: What Universal Credit would a single parent with two children aged 4 and 9 earning £20,000 receive in 2025?
+    expected_outcome: ready
+    expected_tool: calculate_household
+
+  - id: gw_ready_schedule_lookup
+    suite: gateway
+    description: A schedule lookup is fully determined by the prompt — no user input needed.
+    requirements: [live_model]
+    prompt: Plot the income tax schedule on employment income from £0 to £150,000.
+    expected_outcome: ready
+
+  - id: gw_ready_decile_distribution
+    suite: gateway
+    description: A fully-specified distributional ask; FRS/EFRS is the correct default
+      (dataset stays settled — confirms dataset is NOT over-promoted for income reforms).
+    requirements: [live_model]
+    prompt: Show the distributional impact by decile of raising the personal allowance to £15,000.
+    expected_outcome: ready
+    expected_tool: run_economy_simulation
+    expected_slots:
+      - slot: dataset
+        gates: false

@@ -18,12 +18,19 @@ from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.settings import ModelSettings
 
 from agent_tools import execute_tool, TOOL_DEFINITIONS
+from gateway import (
+    gateway_writer_directive,
+    run_gateway,
+    serialise_plan_for_system,
+)
 from prompts import (
     CHARTS_MODE_DIRECTIVE,
+    DEFAULT_SCOPE_DESCRIPTOR,
     PLAN_MODE_DIRECTIVE,
     SUGGESTION_SYSTEM,
     SYSTEM_PROMPT,
     TITLE_SYSTEM,
+    lightweight_system,
 )
 from rate_limit import limiter, chat_key_func, CHAT_USER_LIMIT, CHAT_IP_LIMIT
 
@@ -74,6 +81,18 @@ try:
 except FileNotFoundError:
     REFERENCE_DOC = ""
     logger.warning("[CHAT] reference.md not found — run scripts/build_reference.py")
+
+# Engine-derived scope descriptor (generated alongside reference.md). Loaded once
+# with a curated fallback for local dev. Drives the gateway's lightweight prompt.
+_SCOPE_DESCRIPTOR_PATH = Path(__file__).resolve().parent.parent / "scope_descriptor.md"
+try:
+    SCOPE_DESCRIPTOR = _SCOPE_DESCRIPTOR_PATH.read_text().strip()
+    logger.info(f"[CHAT] Loaded scope_descriptor.md ({len(SCOPE_DESCRIPTOR)} chars)")
+except FileNotFoundError:
+    SCOPE_DESCRIPTOR = DEFAULT_SCOPE_DESCRIPTOR
+    logger.info("[CHAT] scope_descriptor.md not found — using default scope descriptor")
+
+LIGHTWEIGHT_SYSTEM = lightweight_system(SCOPE_DESCRIPTOR)
 
 
 def _get_anthropic_client():
@@ -127,13 +146,42 @@ def _select_chat_model(messages: List[dict]) -> str:
     return DEFAULT_FAST_MODEL
 
 
-def _build_system_blocks(plan_mode: bool = False, charts_mode: bool = False) -> List[dict]:
+def _last_user_text(conversation: List[dict]) -> str:
+    """Latest user message as plain text (flattening any image+text content)."""
+    for msg in reversed(conversation):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content", "")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):  # [image block, text block, ...]
+            return " ".join(
+                str(b.get("text", "")) for b in content if isinstance(b, dict)
+            ).strip()
+    return ""
+
+
+def _is_followup(conversation: List[dict]) -> bool:
+    """True once the conversation contains an assistant turn — i.e. this is not
+    the opening user message. The gateway runs only on the opening turn; a
+    single-message classifier can't see the context a follow-up depends on, and
+    a user's reply to a partial/needs_plan prompt should flow straight to
+    compute (which it does, because that turn now has a prior assistant reply).
+    """
+    return any(msg.get("role") == "assistant" for msg in conversation)
+
+
+def _build_system_blocks(
+    plan_mode: bool = False,
+    charts_mode: bool = False,
+    gateway_plan: str | None = None,
+) -> List[dict]:
     """System prompt + cached library reference + optional per-turn directives.
 
     The system prompt and reference are each marked with cache_control so they
-    persist across requests. Per-turn directives (plan mode, charts mode) are
-    appended AFTER both cache breakpoints so toggling them never invalidates
-    cached blocks.
+    persist across requests. Per-turn directives (plan mode, charts mode, the
+    gateway plan) are appended AFTER both cache breakpoints so toggling them
+    never invalidates cached blocks.
     """
     blocks: List[dict] = [{
         "type": "text",
@@ -150,6 +198,24 @@ def _build_system_blocks(plan_mode: bool = False, charts_mode: bool = False) -> 
         blocks.append({"type": "text", "text": PLAN_MODE_DIRECTIVE})
     if charts_mode:
         blocks.append({"type": "text", "text": CHARTS_MODE_DIRECTIVE})
+    if gateway_plan:
+        blocks.append({"type": "text", "text": gateway_plan})
+    return blocks
+
+
+def _build_lightweight_system_blocks(verdict) -> List[dict]:
+    """Lean system payload for a non-`ready` gateway outcome: the lightweight
+    prompt (no reference doc, no tools) plus the per-outcome writer directive.
+    The model still writes the actual reply to the user's message.
+    """
+    blocks: List[dict] = [{
+        "type": "text",
+        "text": LIGHTWEIGHT_SYSTEM,
+        "cache_control": {"type": "ephemeral"},
+    }]
+    directive = gateway_writer_directive(verdict)
+    if directive:
+        blocks.append({"type": "text", "text": directive})
     return blocks
 
 
@@ -355,16 +421,42 @@ async def chat_message(request: Request, chat_request: ChatRequest):
             last_tool_error: str | None = None
 
             client = _get_anthropic_client()
-            model = _select_chat_model(conversation)
-            tools = _tool_defs_for_anthropic()
             plan_mode = chat_request.plan_mode
             charts_mode = chat_request.charts_mode
-            system_blocks = _build_system_blocks(plan_mode=plan_mode, charts_mode=charts_mode)
+
+            # Gateway pre-pass: build a structured plan and route the turn. It is
+            # skipped on follow-ups (a single-message classifier can't see the
+            # context they depend on, and a reply to a partial/needs_plan prompt
+            # must flow to compute) and in manual plan mode (which already asks
+            # clarifying questions). A non-`ready` outcome replies on the lean
+            # lightweight path; `ready` runs the full compute loop, seeded with
+            # the resolved plan. Any gateway error fails safe to compute.
+            verdict = None
+            route = "compute"
+            if not plan_mode and not _is_followup(conversation):
+                loop = asyncio.get_event_loop()
+                verdict = await loop.run_in_executor(
+                    None, run_gateway, _last_user_text(conversation)
+                )
+                route = verdict.route
+
+            if route == "lightweight":
+                model = DEFAULT_FAST_MODEL
+                tools = []
+                system_blocks = _build_lightweight_system_blocks(verdict)
+            else:
+                model = _select_chat_model(conversation)
+                tools = _tool_defs_for_anthropic()
+                gateway_plan = serialise_plan_for_system(verdict) if verdict is not None else None
+                system_blocks = _build_system_blocks(
+                    plan_mode=plan_mode, charts_mode=charts_mode, gateway_plan=gateway_plan
+                )
 
             logger.info(
                 f"[CHAT] Session {session_id}: {len(conversation)} messages"
                 f"{' [PLAN MODE]' if plan_mode else ''}"
                 f"{' [CHARTS MODE]' if charts_mode else ''}"
+                f"{f' [GATEWAY {verdict.outcome}]' if verdict is not None else ''}"
             )
 
             while iteration < max_iterations:
@@ -393,7 +485,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                             "system": system_blocks,
                             "messages": conversation,
                         }
-                        if not plan_mode:
+                        if tools and not plan_mode:
                             stream_kwargs["tools"] = tools
                         async with client.messages.stream(**stream_kwargs) as stream:
                             announced_tools: set = set()
@@ -478,12 +570,12 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                         )
                     except Exception as e:
                         logger.warning(f"[CHAT] Failed to record usage: {e}")
-                    yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'stop_reason': last_stop_reason, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
-                    # Best-effort follow-up suggestions. Plan-mode answers are
-                    # already clarifying questions, so don't suggest more on top.
-                    # Truncated/error stops are skipped because the answer
-                    # isn't really finished from the user's perspective.
-                    if not plan_mode and last_stop_reason in ("end_turn", "stop_sequence", None):
+                    yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'route': route, 'outcome': verdict.outcome if verdict else None, 'stop_reason': last_stop_reason, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
+                    # Best-effort follow-up suggestions. Only on the compute path
+                    # (a lightweight refusal/clarification shouldn't get chips),
+                    # never in plan mode (those answers are already clarifying
+                    # questions), and only on a clean stop.
+                    if route == "compute" and not plan_mode and last_stop_reason in ("end_turn", "stop_sequence", None):
                         last_user_msg = next(
                             (m["content"] for m in reversed(deduplicated) if m.get("role") == "user"),
                             "",
@@ -620,7 +712,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                     logger.warning(f"[CHAT] Failed to record usage: {e}")
                 yield f"data: {json.dumps({'type': 'chunk', 'content': fallback_message})}\n\n"
                 final_content = assistant_content + fallback_message
-                yield f"data: {json.dumps({'type': 'done', 'content': final_content, 'session_id': session_id, 'model': model, 'stop_reason': 'iteration_cap', 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
+                yield f"data: {json.dumps({'type': 'done', 'content': final_content, 'session_id': session_id, 'model': model, 'route': route, 'outcome': verdict.outcome if verdict else None, 'stop_reason': 'iteration_cap', 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
 
         except Exception as e:
             import traceback

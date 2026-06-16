@@ -14,10 +14,27 @@ import policyengine_uk_compiled as pe
 from pydantic import BaseModel
 
 OUT = Path(__file__).resolve().parent.parent / "reference.md"
+SCOPE_OUT = Path(__file__).resolve().parent.parent / "scope_descriptor.md"
 
 SKIP_NAMES = {"data", "engine", "models", "structural", "download_all", "print_guide"}
 PACKAGE_PREFIX = "policyengine_uk_compiled"
 _BASE_MODEL_DOC = inspect.getdoc(BaseModel) or ""
+
+# Curated boundary statement. capabilities() can tell us what IS modelled, but
+# "what is deliberately out of scope" is a product decision, not something the
+# engine reports — so this half stays hand-maintained. Used by the chat gateway
+# to decide whether a question is answerable before loading the heavy background.
+_NOT_MODELLED = (
+    "NOT modelled: macroeconomic / second-round effects (inflation, GDP, "
+    "employment, market reactions), behavioural response, non-UK policy, "
+    "unannounced or future Budgets, and legal or individual tax-filing advice."
+)
+
+# Parameters-schema keys that are config knobs / simulation switches rather than
+# user-facing programmes, so they would read as noise in the scope descriptor.
+# `labour_supply` in particular is a behavioural-response control, which we
+# explicitly list as NOT modelled. Kept tiny and config-only to limit drift.
+_NON_PROGRAMME_KEYS = {"fiscal_year", "labour_supply", "uc_migration"}
 
 
 # ---------------------------------------------------------------------------
@@ -242,8 +259,56 @@ def render() -> str:
     return "\n".join(lines)
 
 
+def _caps_values(caps, keys: tuple) -> list:
+    """Best-effort extraction of a list of names from a capabilities() dict for
+    any of the candidate keys (the value may be a list or a dict of names)."""
+    if not isinstance(caps, dict):
+        return []
+    for key in keys:
+        val = caps.get(key)
+        if isinstance(val, dict):
+            return list(val.keys())
+        if isinstance(val, (list, tuple)):
+            return list(val)
+    return []
+
+
+def build_scope_descriptor() -> str:
+    """Compact, engine-derived summary of what is modelled, plus the curated
+    not-modelled boundary. Loaded at runtime by the chat gateway so it cannot
+    drift from the engine. Programme names come from the Parameters schema (the
+    authoritative list of reform keys); datasets from capabilities().
+
+    This derive-live descriptor is the metadata-freshness mechanism: regenerated
+    from the installed engine at build time, it can never be stale relative to
+    the engine the chat actually runs against.
+    """
+    caps = pe.capabilities()
+    schema = pe.Parameters.model_json_schema()
+    programmes = sorted(
+        k for k in (schema.get("properties") or {}).keys()
+        if k not in _NON_PROGRAMME_KEYS
+    )
+    datasets = _caps_values(caps, ("datasets", "dataset_names", "available_datasets"))
+    years = _caps_values(caps, ("years", "periods", "available_years"))
+
+    lines = ["This assistant models UK taxes and benefits with a microsimulation engine."]
+    if programmes:
+        lines.append("Modelled programmes (reform keys): " + ", ".join(programmes) + ".")
+    if datasets:
+        lines.append("Datasets: " + ", ".join(str(d) for d in datasets) + ".")
+    if years:
+        lines.append("Years: " + ", ".join(str(y) for y in years) + ".")
+    lines.append(_NOT_MODELLED)
+    return "\n".join(lines)
+
+
 if __name__ == "__main__":
     text = render()
     OUT.write_text(text)
     size = len(text)
     print(f"wrote {OUT} — {size} chars (~{size // 4} tokens)")
+
+    descriptor = build_scope_descriptor()
+    SCOPE_OUT.write_text(descriptor)
+    print(f"wrote {SCOPE_OUT} — {len(descriptor)} chars")
