@@ -165,18 +165,6 @@ SYSTEM_PROMPT_SECTIONS = (
 
 SYSTEM_PROMPT = "\n\n".join(section.strip() for section in SYSTEM_PROMPT_SECTIONS)
 
-PLAN_MODE_DIRECTIVE = """
-PLAN MODE IS ACTIVE FOR THIS TURN:
-- Do NOT call any tools.
-- Identify 1-3 specific ambiguities in the user's question (e.g. which year,
-  dataset, reform parameters, metric, comparison baseline, population subset).
-- Ask those 1-3 questions concisely as a numbered list. No preamble beyond one
-  short lead-in sentence.
-- If the question is fully unambiguous, confirm your understanding in one
-  sentence and offer to proceed - still do not call tools.
-- You will continue without plan mode on the next turn once the user replies.
-""".strip()
-
 CHARTS_MODE_DIRECTIVE = """
 The user has enabled chart mode. When the question's answer would benefit from a
 visualization (distributions, comparisons across categories, trends over time,

@@ -95,10 +95,9 @@ def test_system_blocks_preserve_cache_breakpoints_after_prompt_refactor():
 
     from routes.chatbot import _build_system_blocks
 
-    on = _build_system_blocks(plan_mode=True, charts_mode=True)
-    off = _build_system_blocks(plan_mode=False, charts_mode=False)
+    on = _build_system_blocks(charts_mode=True)
+    off = _build_system_blocks(charts_mode=False)
     assert on[0] == off[0]
     assert on[0]["text"] == SYSTEM_PROMPT
     assert on[0]["cache_control"] == {"type": "ephemeral"}
-    assert "PLAN MODE IS ACTIVE" in on[-2]["text"]
     assert "chart mode" in on[-1]["text"]

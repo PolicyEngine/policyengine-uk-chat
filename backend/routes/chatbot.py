@@ -26,7 +26,6 @@ from gateway import (
 from prompts import (
     CHARTS_MODE_DIRECTIVE,
     DEFAULT_SCOPE_DESCRIPTOR,
-    PLAN_MODE_DIRECTIVE,
     SUGGESTION_SYSTEM,
     SYSTEM_PROMPT,
     TITLE_SYSTEM,
@@ -172,16 +171,15 @@ def _is_followup(conversation: List[dict]) -> bool:
 
 
 def _build_system_blocks(
-    plan_mode: bool = False,
     charts_mode: bool = False,
     gateway_plan: str | None = None,
 ) -> List[dict]:
     """System prompt + cached library reference + optional per-turn directives.
 
     The system prompt and reference are each marked with cache_control so they
-    persist across requests. Per-turn directives (plan mode, charts mode, the
-    gateway plan) are appended AFTER both cache breakpoints so toggling them
-    never invalidates cached blocks.
+    persist across requests. Per-turn directives (charts mode, the gateway plan)
+    are appended AFTER both cache breakpoints so toggling them never invalidates
+    cached blocks.
     """
     blocks: List[dict] = [{
         "type": "text",
@@ -194,8 +192,6 @@ def _build_system_blocks(
             "text": REFERENCE_DOC,
             "cache_control": {"type": "ephemeral"},
         })
-    if plan_mode:
-        blocks.append({"type": "text", "text": PLAN_MODE_DIRECTIVE})
     if charts_mode:
         blocks.append({"type": "text", "text": CHARTS_MODE_DIRECTIVE})
     if gateway_plan:
@@ -232,7 +228,6 @@ class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     session_id: str | None = None
     user_id: str | None = None
-    plan_mode: bool = False
     charts_mode: bool = False
     # Optional image attached to the latest user message. Sent as raw base64
     # (no `data:image/...;base64,` prefix) plus a media type like `image/png`.
@@ -421,19 +416,17 @@ async def chat_message(request: Request, chat_request: ChatRequest):
             last_tool_error: str | None = None
 
             client = _get_anthropic_client()
-            plan_mode = chat_request.plan_mode
             charts_mode = chat_request.charts_mode
 
             # Gateway pre-pass: build a structured plan and route the turn. It is
             # skipped on follow-ups (a single-message classifier can't see the
             # context they depend on, and a reply to a partial/needs_plan prompt
-            # must flow to compute) and in manual plan mode (which already asks
-            # clarifying questions). A non-`ready` outcome replies on the lean
+            # must flow to compute). A non-`ready` outcome replies on the lean
             # lightweight path; `ready` runs the full compute loop, seeded with
             # the resolved plan. Any gateway error fails safe to compute.
             verdict = None
             route = "compute"
-            if not plan_mode and not _is_followup(conversation):
+            if not _is_followup(conversation):
                 loop = asyncio.get_event_loop()
                 verdict = await loop.run_in_executor(
                     None, run_gateway, _last_user_text(conversation)
@@ -449,12 +442,11 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                 tools = _tool_defs_for_anthropic()
                 gateway_plan = serialise_plan_for_system(verdict) if verdict is not None else None
                 system_blocks = _build_system_blocks(
-                    plan_mode=plan_mode, charts_mode=charts_mode, gateway_plan=gateway_plan
+                    charts_mode=charts_mode, gateway_plan=gateway_plan
                 )
 
             logger.info(
                 f"[CHAT] Session {session_id}: {len(conversation)} messages"
-                f"{' [PLAN MODE]' if plan_mode else ''}"
                 f"{' [CHARTS MODE]' if charts_mode else ''}"
                 f"{f' [GATEWAY {verdict.outcome}]' if verdict is not None else ''}"
             )
@@ -473,11 +465,10 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                 max_retries = 2
                 for attempt in range(max_retries + 1):
                     try:
-                        # Plan mode is enforced structurally: omit tools from the
-                        # request so the API cannot emit tool_use blocks. The
-                        # directive in system_blocks shapes the response; this
-                        # makes "no tool calls in plan mode" a code-level invariant
-                        # rather than a prompt-level promise.
+                        # A non-`ready` gateway outcome runs with no tools, so the
+                        # API cannot emit tool_use blocks — making "no tool calls
+                        # on the lightweight path" a code-level invariant rather
+                        # than a prompt-level promise.
                         stream_kwargs: Dict[str, Any] = {
                             "model": model,
                             "max_tokens": 16000,
@@ -485,7 +476,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                             "system": system_blocks,
                             "messages": conversation,
                         }
-                        if tools and not plan_mode:
+                        if tools:
                             stream_kwargs["tools"] = tools
                         async with client.messages.stream(**stream_kwargs) as stream:
                             announced_tools: set = set()
@@ -526,13 +517,12 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                             last_stop_reason = getattr(final, "stop_reason", None)
                             for block in final.content:
                                 if block.type == "tool_use":
-                                    if plan_mode:
-                                        # Defence-in-depth: tools weren't sent, so this
-                                        # path should be unreachable. If the API ever
-                                        # returns a tool_use anyway, drop it silently
-                                        # rather than executing — plan mode guarantees
-                                        # no tool execution.
-                                        logger.warning(f"[CHAT] Dropping unexpected tool_use in plan mode: {block.name}")
+                                    if not tools:
+                                        # Defence-in-depth: tools weren't sent (lightweight
+                                        # path), so this should be unreachable. If the API
+                                        # ever returns a tool_use anyway, drop it silently
+                                        # rather than executing.
+                                        logger.warning(f"[CHAT] Dropping unexpected tool_use with no tools sent: {block.name}")
                                         continue
                                     tool_input = block.input if isinstance(block.input, dict) else {}
                                     tool_uses.append({"id": block.id, "name": block.name, "input": tool_input})
@@ -573,9 +563,8 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                     yield f"data: {json.dumps({'type': 'done', 'content': assistant_content, 'session_id': session_id, 'model': model, 'route': route, 'outcome': verdict.outcome if verdict else None, 'stop_reason': last_stop_reason, 'usage': {'input_tokens': total_input_tokens, 'output_tokens': total_output_tokens, 'cache_creation_input_tokens': total_cache_creation_input_tokens, 'cache_read_input_tokens': total_cache_read_input_tokens}, 'cost_gbp': billing['cost_gbp'] if billing else None, 'balance': billing['balance'] if billing else None})}\n\n"
                     # Best-effort follow-up suggestions. Only on the compute path
                     # (a lightweight refusal/clarification shouldn't get chips),
-                    # never in plan mode (those answers are already clarifying
-                    # questions), and only on a clean stop.
-                    if route == "compute" and not plan_mode and last_stop_reason in ("end_turn", "stop_sequence", None):
+                    # and only on a clean stop.
+                    if route == "compute" and last_stop_reason in ("end_turn", "stop_sequence", None):
                         last_user_msg = next(
                             (m["content"] for m in reversed(deduplicated) if m.get("role") == "user"),
                             "",
@@ -689,8 +678,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                 fallback_message = (
                     "\n\nI'm spending more iterations than expected on this without converging. "
                     f"Here's what I tried: {tried_clause}{error_clause}. "
-                    "Could you (a) rephrase the question, (b) enable Plan mode so I can ask "
-                    "clarifying questions first, or (c) try a more specific scenario?"
+                    "Could you (a) rephrase the question or (b) try a more specific scenario?"
                 )
                 # Hard cap defensively in case tool names balloon the string.
                 if len(fallback_message) > 600:

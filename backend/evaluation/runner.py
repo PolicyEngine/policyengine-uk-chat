@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from agent_tools import execute_tool
-from prompts import CHARTS_MODE_DIRECTIVE, PLAN_MODE_DIRECTIVE, SYSTEM_PROMPT
+from prompts import CHARTS_MODE_DIRECTIVE, SYSTEM_PROMPT
 from tool_definitions import TOOL_DEFINITIONS
 
 from evaluation.graders import grade_output, grade_text, grade_tool_calls
@@ -139,16 +139,12 @@ def _messages_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, An
 
 def _system_for_case(case: TrajectoryCase | ToolLoopCase) -> str:
     sections = [SYSTEM_PROMPT]
-    if case.plan_mode:
-        sections.append(PLAN_MODE_DIRECTIVE)
     if case.charts_mode:
         sections.append(CHARTS_MODE_DIRECTIVE)
     return "\n\n".join(sections)
 
 
 def _tools_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, Any]] | None:
-    if case.plan_mode:
-        return None
     return _tool_specs_for_model()
 
 
