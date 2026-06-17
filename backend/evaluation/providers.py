@@ -4,6 +4,7 @@ import os
 from typing import Any, Dict, List, Protocol
 
 from evaluation.schemas import ModelToolCall, ModelTurn
+from model_config import DEFAULT_TEMPERATURE
 
 
 class ModelClient(Protocol):
@@ -69,7 +70,7 @@ class AnthropicModelClient:
         kwargs: Dict[str, Any] = {
             "model": self.model,
             "max_tokens": self.max_tokens,
-            "temperature": 0,
+            "temperature": DEFAULT_TEMPERATURE,
             "system": system,
             "messages": messages,
         }

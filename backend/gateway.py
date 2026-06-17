@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from gateway_config import SlotFact, gate
+from model_config import DEFAULT_TEMPERATURE
 from prompts import (
     DEFAULT_SCOPE_DESCRIPTOR,
     GATEWAY_IRRELEVANT_DIRECTIVE,
@@ -179,6 +180,7 @@ def run_gateway(last_user_message: str) -> GatewayVerdict:
         response = client.messages.create(
             model=GATEWAY_MODEL,
             max_tokens=GATEWAY_MAX_TOKENS,
+            temperature=DEFAULT_TEMPERATURE,
             system=GATEWAY_SYSTEM,
             tools=[_emit_plan_tool()],
             tool_choice={"type": "tool", "name": "emit_plan"},

@@ -67,8 +67,10 @@ model not to call tools.
 
 Tool choice is model-mediated unless the route layer deliberately forces a
 specific tool. Prompt and schema guidance improve selection consistency, but
-they are not deterministic controls. The chat route defaults the model
-temperature to `0` to reduce sampling variance.
+they are not deterministic controls. Every model call sets its temperature from
+`backend/model_config.py`: `DEFAULT_TEMPERATURE` (0, deterministic) for the
+compute loop, titling, the gateway classifier, and evals; `SUGGESTION_TEMPERATURE`
+for follow-up suggestion chips, which deliberately sample with variety.
 
 ## Policy Analysis Rules
 
