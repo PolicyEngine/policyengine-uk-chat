@@ -18,8 +18,8 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from gateway.policy import OUTPUT_VOCAB, SlotFact, gate
 from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_sync_client, load_scope_descriptor
+from gateway.policy import OUTPUT_VOCAB, SlotFact, gate
 from prompts import (
     DEFAULT_SCOPE_DESCRIPTOR,
     GATEWAY_IRRELEVANT_DIRECTIVE,

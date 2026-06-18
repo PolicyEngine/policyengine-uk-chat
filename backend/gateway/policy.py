@@ -6,7 +6,7 @@ The chat gateway splits responsibility deliberately: the *model grounds*, the
 NOT judge importance. This module owns the importance policy — a per-slot
 ``criticality`` — and the pure, deterministic ``gate()`` that turns a grounded
 plan into one of five outcomes. Keeping this out of the model (and out of
-``prompts.py``/``chatbot.py``) makes the gate auditable and unit-testable
+``prompts/``/``chat/``) makes the gate auditable and unit-testable
 offline, and lets the eval grader import it without dragging in the runtime.
 
 Gate rule: a slot *gates* (forces a clarifying question) iff its ``source`` is
