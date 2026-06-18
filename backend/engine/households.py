@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Tuple
 
-from tooling.simulations import ensure_compiled_package_importable
+from engine.simulations import ensure_compiled_package_importable
 
 
 def build_household_frames(

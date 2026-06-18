@@ -84,7 +84,7 @@ try:
     logger.info(f"[CHAT] Loaded reference.md ({len(REFERENCE_DOC)} chars)")
 except FileNotFoundError:
     REFERENCE_DOC = ""
-    logger.warning("[CHAT] reference.md not found — run scripts/build_reference.py")
+    logger.warning("[CHAT] reference.md not found — run engine/reference.py")
 
 # Engine-derived scope descriptor (generated alongside reference.md), with a
 # curated fallback for local dev. Drives the gateway's lightweight prompt.

@@ -3,7 +3,7 @@ Agent tools for the microsim chatbot.
 
 This module owns the public LLM-facing tool functions and dispatcher.
 Tool schemas live in backend/tool_definitions.py; shared deterministic helpers
-live under backend/tooling.
+live under backend/engine.
 """
 
 import json
@@ -12,17 +12,17 @@ from typing import Any, Dict, List, Optional
 
 from model_config import DEFAULT_SIMULATION_YEAR
 from tool_definitions import TOOL_DEFINITIONS
-from tooling.households import build_household_frames
-from tooling.microdata import analyse_microdata_result, get_cached_microdata, hash_reform
-from tooling.reforms import build_compiled_policy, validate_reform_dict
-from tooling.sandbox import (
+from engine.households import build_household_frames
+from engine.microdata import analyse_microdata_result, get_cached_microdata, hash_reform
+from engine.reforms import build_compiled_policy, validate_reform_dict
+from engine.sandbox import (
     run_generator,
     run_python_code,
     safe_import,
 )
-from tooling.serialization import dataframe_to_records, explore_tabular_data, json_safe
-from tooling.simulations import DATASET_LABELS, build_simulation, ensure_compiled_package_importable
-from tooling.simulations import get_capabilities as _engine_capabilities
+from engine.serialization import dataframe_to_records, explore_tabular_data, json_safe
+from engine.simulations import DATASET_LABELS, build_simulation, ensure_compiled_package_importable
+from engine.simulations import get_capabilities as _engine_capabilities
 
 logger = logging.getLogger(__name__)
 

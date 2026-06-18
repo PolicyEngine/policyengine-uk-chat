@@ -524,7 +524,7 @@ class TestRunEconomySimulationContract:
 class TestValidateReform:
     @pytest.fixture(autouse=True)
     def mock_parameter_classes(self, monkeypatch):
-        import tooling.reforms as reform_helpers
+        import engine.reforms as reform_helpers
 
         class DummyIncomeTaxParams:
             model_fields = {"personal_allowance": None, "higher_rate": None}
@@ -590,7 +590,7 @@ class TestValidateReformCompiledPath:
         assert result["normalized_reform"] == {"income_tax": {"personal_allowance": 15000}}
 
     def test_valid_programs_match_compiled_parameter_classes(self):
-        from tooling.reforms import _parameter_classes, get_valid_programs
+        from engine.reforms import _parameter_classes, get_valid_programs
 
         param_cls_map, _, _ = _parameter_classes()
 

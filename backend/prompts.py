@@ -178,7 +178,7 @@ single-number lookups) - this is a preference, not a requirement.
 # Scope descriptor + lightweight ("no computation this turn") prompt
 # ---------------------------------------------------------------------------
 # The scope descriptor is normally generated from the engine by
-# `scripts/build_reference.py` (written to `scope_descriptor.md`). This curated
+# `engine/reference.py` (written to `scope_descriptor.md`). This curated
 # constant is the fallback used in local dev when that file is absent, and the
 # baseline the gateway/lightweight prompts are parameterised by. Keep it compact
 # — it is loaded into a cheap classifier prompt, not the full reference doc.

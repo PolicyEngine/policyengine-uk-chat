@@ -2,7 +2,7 @@
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from tooling.simulations import ensure_compiled_package_importable
+from engine.simulations import ensure_compiled_package_importable
 
 
 DEFAULT_VALID_PROGRAMS = [

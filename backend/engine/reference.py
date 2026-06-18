@@ -3,7 +3,7 @@
 Output is a single markdown file loaded into the chat system prompt with
 prompt caching, so the agent has up-to-date API knowledge without retraining.
 
-Run: `docker-compose exec backend python scripts/build_reference.py`
+Run: `docker-compose exec backend python engine/reference.py`
 """
 
 import inspect
