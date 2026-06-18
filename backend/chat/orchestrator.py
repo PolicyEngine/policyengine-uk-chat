@@ -1,5 +1,9 @@
-"""
-Chatbot router — SSE streaming with pydantic-ai tool use.
+"""Chat orchestration: the SSE streaming tool loop for /chat/message.
+
+Builds the per-turn plan (gateway), selects the model, streams from Anthropic,
+runs tools in parallel, records usage, and emits SSE events. The thin route
+wrapper lives in routes.py; the reusable helpers live in the sibling chat/
+modules (schemas, system_blocks, model_selection, suggestions).
 """
 
 import asyncio
@@ -9,62 +13,24 @@ import uuid
 from typing import Any, Dict, List
 
 import httpx
-
-from fastapi import APIRouter, Request
+from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel
-from pydantic_ai import Agent
-from pydantic_ai.models.anthropic import AnthropicModel
-from pydantic_ai.settings import ModelSettings
 
-from tools.definitions import TOOL_DEFINITIONS
+from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_async_client
+from gateway import run_gateway, serialise_plan_for_system
 from tools.dispatch import execute_tool
-from gateway import (
-    gateway_writer_directive,
-    run_gateway,
-    serialise_plan_for_system,
+
+from chat.model_selection import _is_followup, _last_user_text, _select_chat_model
+from chat.schemas import ChatRequest
+from chat.suggestions import _generate_followup_suggestions
+from chat.system_blocks import (
+    _build_lightweight_system_blocks,
+    _build_system_blocks,
+    _serialise_tool_result,
+    _tool_defs_for_anthropic,
 )
-from config import (
-    DEFAULT_COMPLEX_MODEL,
-    DEFAULT_FAST_MODEL,
-    DEFAULT_TEMPERATURE,
-    FAST_MODEL_MAX_INPUT_TOKENS,
-    SUGGESTION_MODEL,
-    SUGGESTION_TEMPERATURE,
-    SUGGESTION_TIMEOUT_SECS,
-    TITLE_MODEL,
-    get_sync_client,
-    load_scope_descriptor,
-)
-from prompts import (
-    CHARTS_MODE_DIRECTIVE,
-    DEFAULT_SCOPE_DESCRIPTOR,
-    SUGGESTION_SYSTEM,
-    SYSTEM_PROMPT,
-    TITLE_SYSTEM,
-    lightweight_system,
-)
-from rate_limit import limiter, chat_key_func, CHAT_USER_LIMIT, CHAT_IP_LIMIT
 
 logger = logging.getLogger(__name__)
-
-router = APIRouter(prefix="/chat", tags=["chatbot"])
-
-
-# ---------------------------------------------------------------------------
-# Pydantic-AI agent setup
-# ---------------------------------------------------------------------------
-
-# We build the agent with tools dynamically from TOOL_DEFINITIONS
-# pydantic-ai uses its own tool registration, but we'll drive it through
-# our own SSE loop using the underlying model API directly for streaming.
-
-# For now we use the AnthropicModel directly to keep full SSE control.
-# pydantic-ai's streaming API is used for text + tool call events.
-
-import os
-from pathlib import Path
-import anthropic as anthropic_sdk
 
 # Soft cap on tool-use iterations within a single /chat/message stream.
 # An "iteration" is one round-trip to Anthropic that may include tool calls.
@@ -77,265 +43,8 @@ import anthropic as anthropic_sdk
 # conversation so the model resumes mid-thought rather than restarting.
 MAX_ITERATIONS = 30
 
-_REFERENCE_PATH = Path(__file__).resolve().parent.parent / "reference.md"
-try:
-    REFERENCE_DOC = _REFERENCE_PATH.read_text()
-    logger.info(f"[CHAT] Loaded reference.md ({len(REFERENCE_DOC)} chars)")
-except FileNotFoundError:
-    REFERENCE_DOC = ""
-    logger.warning("[CHAT] reference.md not found — run engine/reference.py")
 
-# Engine-derived scope descriptor (generated alongside reference.md), with a
-# curated fallback for local dev. Drives the gateway's lightweight prompt.
-SCOPE_DESCRIPTOR = load_scope_descriptor(DEFAULT_SCOPE_DESCRIPTOR)
-LIGHTWEIGHT_SYSTEM = lightweight_system(SCOPE_DESCRIPTOR)
-
-
-def _get_anthropic_client():
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY environment variable not set")
-    return anthropic_sdk.AsyncAnthropic(api_key=api_key)
-
-
-def _tool_defs_for_anthropic():
-    """Convert our TOOL_DEFINITIONS to Anthropic SDK format.
-    Mark the last tool with cache_control so the system prompt + all tools
-    are cached across requests (prompt caching)."""
-    defs = []
-    for i, t in enumerate(TOOL_DEFINITIONS):
-        d = {
-            "name": t["name"],
-            "description": t["description"],
-            "input_schema": t["input_schema"],
-        }
-        if i == len(TOOL_DEFINITIONS) - 1:
-            d["cache_control"] = {"type": "ephemeral"}
-        defs.append(d)
-    return defs
-
-
-def _serialise_tool_result(result: Any) -> str:
-    return json.dumps(result, ensure_ascii=False, default=str)
-
-
-def _estimate_message_tokens(messages: List[dict]) -> int:
-    char_count = sum(len(str(block.get("content", ""))) for block in messages)
-    return char_count // 4
-
-
-def _select_chat_model(messages: List[dict]) -> str:
-    estimated_input_tokens = (
-        _estimate_message_tokens(messages)
-        + len(SYSTEM_PROMPT) // 4
-        + len(REFERENCE_DOC) // 4
-    )
-    if estimated_input_tokens > FAST_MODEL_MAX_INPUT_TOKENS:
-        return DEFAULT_COMPLEX_MODEL
-    return DEFAULT_FAST_MODEL
-
-
-def _last_user_text(conversation: List[dict]) -> str:
-    """Latest user message as plain text (flattening any image+text content)."""
-    for msg in reversed(conversation):
-        if msg.get("role") != "user":
-            continue
-        content = msg.get("content", "")
-        if isinstance(content, str):
-            return content
-        if isinstance(content, list):  # [image block, text block, ...]
-            return " ".join(
-                str(b.get("text", "")) for b in content if isinstance(b, dict)
-            ).strip()
-    return ""
-
-
-def _is_followup(conversation: List[dict]) -> bool:
-    """True once the conversation contains an assistant turn — i.e. this is not
-    the opening user message. The gateway runs only on the opening turn; a
-    single-message classifier can't see the context a follow-up depends on, and
-    a user's reply to a partial/needs_plan prompt should flow straight to
-    compute (which it does, because that turn now has a prior assistant reply).
-    """
-    return any(msg.get("role") == "assistant" for msg in conversation)
-
-
-def _build_system_blocks(
-    charts_mode: bool = False,
-    gateway_plan: str | None = None,
-) -> List[dict]:
-    """System prompt + cached library reference + optional per-turn directives.
-
-    The system prompt and reference are each marked with cache_control so they
-    persist across requests. Per-turn directives (charts mode, the gateway plan)
-    are appended AFTER both cache breakpoints so toggling them never invalidates
-    cached blocks.
-    """
-    blocks: List[dict] = [{
-        "type": "text",
-        "text": SYSTEM_PROMPT,
-        "cache_control": {"type": "ephemeral"},
-    }]
-    if REFERENCE_DOC:
-        blocks.append({
-            "type": "text",
-            "text": REFERENCE_DOC,
-            "cache_control": {"type": "ephemeral"},
-        })
-    if charts_mode:
-        blocks.append({"type": "text", "text": CHARTS_MODE_DIRECTIVE})
-    if gateway_plan:
-        blocks.append({"type": "text", "text": gateway_plan})
-    return blocks
-
-
-def _build_lightweight_system_blocks(verdict) -> List[dict]:
-    """Lean system payload for a non-`ready` gateway outcome: the lightweight
-    prompt (no reference doc, no tools) plus the per-outcome writer directive.
-    The model still writes the actual reply to the user's message.
-    """
-    blocks: List[dict] = [{
-        "type": "text",
-        "text": LIGHTWEIGHT_SYSTEM,
-        "cache_control": {"type": "ephemeral"},
-    }]
-    directive = gateway_writer_directive(verdict)
-    if directive:
-        blocks.append({"type": "text", "text": directive})
-    return blocks
-
-
-# ---------------------------------------------------------------------------
-# Models
-# ---------------------------------------------------------------------------
-
-class ChatMessage(BaseModel):
-    role: str
-    content: str
-
-
-class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
-    session_id: str | None = None
-    user_id: str | None = None
-    charts_mode: bool = False
-    # Optional image attached to the latest user message. Sent as raw base64
-    # (no `data:image/...;base64,` prefix) plus a media type like `image/png`.
-    # When present, the backend converts the latest user message into a
-    # multi-block content list with an Anthropic vision image block + the
-    # original text block before calling the Messages API.
-    image_base64: str | None = None
-    image_media_type: str | None = None
-
-
-class TitleRequest(BaseModel):
-    first_user_message: str
-    first_assistant_message: str | None = None
-
-
-# ---------------------------------------------------------------------------
-# Follow-up suggestion chips
-# ---------------------------------------------------------------------------
-
-async def _generate_followup_suggestions(
-    last_user_message: str,
-    assistant_answer: str,
-) -> List[str]:
-    """Best-effort follow-up question generation.
-
-    Returns up to 3 short follow-up strings. ANY failure (timeout, API error,
-    malformed JSON, empty result) returns []. Never raises — callers must be
-    able to drop the suggestions silently without surfacing an error.
-    """
-    if not assistant_answer.strip():
-        return []
-    try:
-        client = _get_anthropic_client()
-        # Trim to keep input small: the helper sees the last user turn and the
-        # assistant answer, both capped. Long tool transcripts aren't needed —
-        # the answer text is what the user is reading.
-        user_block = (
-            "Latest user question:\n"
-            + last_user_message.strip()[:1500]
-            + "\n\nAssistant answer:\n"
-            + assistant_answer.strip()[:4000]
-        )
-        response = await asyncio.wait_for(
-            client.messages.create(
-                model=SUGGESTION_MODEL,
-                max_tokens=200,
-                temperature=SUGGESTION_TEMPERATURE,
-                system=SUGGESTION_SYSTEM,
-                messages=[{"role": "user", "content": user_block}],
-            ),
-            timeout=SUGGESTION_TIMEOUT_SECS,
-        )
-        text_parts = [b.text for b in response.content if getattr(b, "type", None) == "text"]
-        raw = "".join(text_parts).strip()
-        if not raw:
-            return []
-        # Strip optional code fences just in case the model ignored instructions.
-        if raw.startswith("```"):
-            raw = raw.strip("`")
-            if raw.lower().startswith("json"):
-                raw = raw[4:]
-            raw = raw.strip()
-        # Allow either {"suggestions":[...]} or a bare JSON list.
-        parsed = json.loads(raw)
-        if isinstance(parsed, dict):
-            items = parsed.get("suggestions") or parsed.get("questions") or []
-        elif isinstance(parsed, list):
-            items = parsed
-        else:
-            return []
-        cleaned: List[str] = []
-        for item in items:
-            if not isinstance(item, str):
-                continue
-            s = item.strip().strip('"').strip()
-            if not s:
-                continue
-            # Hard cap length and dedupe.
-            if len(s) > 120:
-                s = s[:117].rstrip() + "..."
-            if s not in cleaned:
-                cleaned.append(s)
-            if len(cleaned) == 3:
-                break
-        return cleaned
-    except Exception as e:  # noqa: BLE001 — best-effort, swallow everything
-        logger.info(f"[CHAT] Follow-up suggestion generation failed (silent): {e}")
-        return []
-
-
-# ---------------------------------------------------------------------------
-# Title endpoint
-# ---------------------------------------------------------------------------
-
-@router.post("/title")
-def generate_title(request: TitleRequest):
-    client = get_sync_client()
-    content = request.first_user_message
-    if request.first_assistant_message:
-        content += "\n\nAssistant: " + request.first_assistant_message[:500]
-    response = client.messages.create(
-        model=TITLE_MODEL,
-        max_tokens=32,
-        temperature=DEFAULT_TEMPERATURE,
-        system=TITLE_SYSTEM,
-        messages=[{"role": "user", "content": content}],
-    )
-    return {"title": response.content[0].text.strip()}
-
-
-# ---------------------------------------------------------------------------
-# Chat endpoint — SSE streaming
-# ---------------------------------------------------------------------------
-
-@router.post("/message")
-@limiter.limit(CHAT_USER_LIMIT, key_func=chat_key_func)
-@limiter.limit(CHAT_IP_LIMIT)
-async def chat_message(request: Request, chat_request: ChatRequest):
+def stream_chat(request: Request, chat_request: ChatRequest):
     # `request` is the Starlette Request (slowapi's @limiter.limit decorators
     # require the endpoint parameter named `request` to be that type); the
     # parsed body is `chat_request`.
@@ -407,7 +116,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
             tool_call_counts: Dict[str, int] = {}
             last_tool_error: str | None = None
 
-            client = _get_anthropic_client()
+            client = get_async_client()
             charts_mode = chat_request.charts_mode
 
             # Gateway pre-pass: build a structured plan and route the turn. It is

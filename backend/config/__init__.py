@@ -7,7 +7,7 @@ owns one concern, but this package re-exports the public surface so callers do
 dragging in the chat route.
 """
 
-from config.clients import get_sync_client
+from config.clients import get_async_client, get_sync_client
 from config.models import (
     DEFAULT_COMPLEX_MODEL,
     DEFAULT_FAST_MODEL,
@@ -29,5 +29,6 @@ __all__ = [
     "SUGGESTION_TIMEOUT_SECS",
     "FAST_MODEL_MAX_INPUT_TOKENS",
     "get_sync_client",
+    "get_async_client",
     "load_scope_descriptor",
 ]

@@ -327,7 +327,7 @@ class TestChatMessage:
 
 class TestChatRouteWithMockedAnthropic:
     def test_chat_route_executes_tool_loop_and_returns_final_answer(self, monkeypatch):
-        import routes.chatbot as chatbot
+        import chat.orchestrator as chatbot
 
         async def no_suggestions(*_args, **_kwargs):
             return []
@@ -368,7 +368,7 @@ class TestChatRouteWithMockedAnthropic:
                 "household": [{"baseline_net_income": 25119.60}],
             }
 
-        monkeypatch.setattr(chatbot, "_get_anthropic_client", lambda: fake_client)
+        monkeypatch.setattr(chatbot, "get_async_client", lambda: fake_client)
         monkeypatch.setattr(chatbot, "_generate_followup_suggestions", no_suggestions)
         monkeypatch.setattr(chatbot, "execute_tool", fake_execute_tool)
 
@@ -480,7 +480,7 @@ class TestRateLimitConfig:
         """
         import inspect
         from starlette.requests import Request as StarletteRequest
-        from routes.chatbot import chat_message
+        from chat.routes import chat_message
         params = inspect.signature(chat_message).parameters
         assert "request" in params, "endpoint needs a `request` parameter for slowapi"
         assert params["request"].annotation is StarletteRequest, (

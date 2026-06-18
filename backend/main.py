@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
 import billing
-import routes.chatbot as chatbot
+import chat
 import conversations
 from rate_limit import limiter
 
@@ -82,7 +82,7 @@ app.add_middleware(
 )
 
 app.include_router(billing.router)
-app.include_router(chatbot.router)
+app.include_router(chat.router)
 app.include_router(conversations.router)
 
 
