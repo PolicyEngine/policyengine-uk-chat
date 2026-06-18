@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Request
 
-from rate_limit import CHAT_IP_LIMIT, CHAT_USER_LIMIT, chat_key_func, limiter
+from api.rate_limit import CHAT_IP_LIMIT, CHAT_USER_LIMIT, chat_key_func, limiter
 
 from chat.orchestrator import stream_chat
 from chat.schemas import ChatRequest, TitleRequest

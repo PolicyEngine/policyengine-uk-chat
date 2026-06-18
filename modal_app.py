@@ -70,5 +70,5 @@ def web():
     sys.path.insert(0, "/app/backend")
     os.chdir("/app/backend")
 
-    from main import app as fastapi_app
+    from api.main import app as fastapi_app
     return fastapi_app

@@ -1,25 +1,8 @@
-"""
-FastAPI entrypoint for the microsim public chatbot.
-"""
+"""Custom response class and exception handlers for the API surface."""
 
-import logging
-import os
-
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
-
-import billing
-import chat
-import conversations
-from rate_limit import limiter
-
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-_hostnames_env = os.environ.get("HOSTNAMES", "")
-HOSTNAMES = _hostnames_env.split(",") if _hostnames_env else ["*"]
 
 
 class NaNSafeJSONResponse(JSONResponse):
@@ -37,16 +20,6 @@ class NaNSafeJSONResponse(JSONResponse):
         return json.dumps(convert(content)).encode("utf-8")
 
 
-app = FastAPI(
-    title="Microsim Public Chatbot API",
-    version="1.0.0",
-    default_response_class=NaNSafeJSONResponse,
-)
-
-app.state.limiter = limiter
-
-
-@app.exception_handler(RateLimitExceeded)
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
     """Return 429 with a `Retry-After` header for the slowapi limiter.
 
@@ -71,36 +44,3 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
         },
         headers={"Retry-After": str(retry_after_seconds)},
     )
-
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=HOSTNAMES,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(billing.router)
-app.include_router(chat.router)
-app.include_router(conversations.router)
-
-
-@app.on_event("startup")
-def startup():
-    conversations.ensure_table()
-
-
-@app.get("/health")
-def health():
-    return {"status": "ok"}
-
-
-@app.get("/version")
-def version():
-    try:
-        from importlib.metadata import version as pkg_version
-        compiled_version = pkg_version("policyengine-uk-compiled")
-    except Exception:
-        compiled_version = "unknown"
-    return {"policyengine_uk_compiled": compiled_version}
