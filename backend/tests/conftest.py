@@ -43,7 +43,7 @@ requires_compiled = pytest.mark.skipif(
 def isolated_conversations_table(tmp_path, monkeypatch):
     """Give every test a fresh conversations table without touching Postgres."""
     from sqlmodel import SQLModel, create_engine
-    import routes.conversations as conversations
+    from conversations import models as conversations
 
     engine = create_engine(
         f"sqlite:///{tmp_path / 'conversations.sqlite'}",

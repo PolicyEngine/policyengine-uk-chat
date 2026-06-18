@@ -12,7 +12,7 @@ from slowapi.errors import RateLimitExceeded
 
 import billing
 import routes.chatbot as chatbot
-import routes.conversations as conversations
+import conversations
 from rate_limit import limiter
 
 logging.basicConfig(level=logging.INFO)
