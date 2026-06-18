@@ -6,7 +6,7 @@ the UK chat pathway.
 ## Scope
 
 - AI eval cases live under `evals/`.
-- The reusable harness lives under `backend/evaluation/`.
+- The reusable harness lives under `backend/eval/`.
 - Production chat code must not import evaluation modules.
 - Evals are manual for now; do not add them to PR CI unless that product
   decision changes.

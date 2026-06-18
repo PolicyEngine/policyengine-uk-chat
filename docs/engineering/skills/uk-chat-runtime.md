@@ -5,22 +5,32 @@ tools, calculation behavior, or AI-facing runtime boundaries.
 
 ## Source Boundaries
 
-- `backend/prompts.py` owns product runtime prompt text. Keep prompts modular and
-  declarative there.
-- `backend/routes/chatbot.py` owns application orchestration: request parsing,
-  system block assembly, model calls, SSE streaming, tool-loop handling,
-  usage/billing, title generation, and follow-up suggestions.
-- `backend/agent_tools.py` owns the model-facing tool functions, dispatcher,
-  and compatibility exports.
-- `backend/tool_definitions.py` owns model-facing tool schemas and
-  descriptions. Reuse shared schema fragments there rather than duplicating
+The backend is organized by topic — one package per concern:
+
+- `backend/chat/` owns the chat turn: `orchestrator.py` (request parsing, SSE
+  streaming, the tool loop), `system_blocks.py` (system-block assembly + the
+  reference doc), `model_selection.py`, `schemas.py`, `titles.py`,
+  `suggestions.py`, and `routes.py` (the `/chat` router).
+- `backend/gateway/` owns the opening-turn pre-pass: `runtime.py` (the
+  forced-tool classifier) and `policy.py` (the deterministic criticality + gate).
+- `backend/prompts/` owns all product prompt text: `system.py` (the compute
+  system prompt), `gateway.py` (gateway + lightweight prompts), `meta.py` (title
+  + suggestion prompts). Keep prompts modular and declarative there.
+- `backend/tools/` owns the model-facing tool seam: `definitions.py` (schemas)
+  and `dispatch.py` (the `execute_tool` dispatcher + tool functions). Reuse
+  shared schema fragments in `definitions.py` rather than duplicating
   object/array/dataset/format shapes.
-- Shared deterministic tool helpers live under `backend/tooling/`.
-- `backend/scripts/build_reference.py` builds the API reference that is attached
-  to the chat system prompt.
+- `backend/engine/` owns the deterministic PolicyEngine compute helpers
+  (households, microdata, reforms, simulations, sandbox, serialization);
+  `backend/engine/reference.py` builds the API reference attached to the chat
+  system prompt.
+- `backend/config/` owns model-call configuration (model ids, temperatures, the
+  Anthropic client factories, the scope-descriptor loader).
+- `backend/api/` owns the HTTP surface (`main.py` app + router mounting,
+  `errors.py`, `rate_limit.py`).
 
 Do not spread prompt strings back into route handlers. If runtime prompt rules
-change, update `backend/prompts.py` and the prompt contract tests together.
+change, update `backend/prompts/` and the prompt contract tests together.
 
 ## Model Harness
 
@@ -31,7 +41,7 @@ orchestration layer unless the code is deliberately refactored.
 
 Keep model/provider-specific code at the orchestration edge. Durable guidance
 for agents belongs in `docs/engineering/skills/`; product behavior prompts
-belong in `backend/prompts.py`.
+belong in `backend/prompts/`.
 
 ## Tool Boundary
 
@@ -49,7 +59,7 @@ exposed to the model. At present, the exposed tools are:
   cases that do not fit the typed tools.
 - `generate_chart`: return frontend-renderable chart JSON markdown.
 
-Helper functions in `backend/tooling/` are implementation details unless they
+Helper functions in `backend/engine/` are implementation details unless they
 are added to both the tool definitions and dispatcher.
 
 ## Deterministic And Non-Deterministic Segments
@@ -68,7 +78,7 @@ model not to call tools.
 Tool choice is model-mediated unless the route layer deliberately forces a
 specific tool. Prompt and schema guidance improve selection consistency, but
 they are not deterministic controls. Every model call sets its temperature from
-`backend/model_config.py`: `DEFAULT_TEMPERATURE` (0, deterministic) for the
+`backend/config/`: `DEFAULT_TEMPERATURE` (0, deterministic) for the
 compute loop, titling, the gateway classifier, and evals; `SUGGESTION_TEMPERATURE`
 for follow-up suggestion chips, which deliberately sample with variety.
 
