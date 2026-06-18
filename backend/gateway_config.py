@@ -95,9 +95,10 @@ INFERABLE: set = {
     ("generate_chart", "data"),  # comes from an upstream tool, not the user
 }
 
-# Closed vocabulary for the synthetic "output" (deliverable) slot, so output
-# criticality is deterministic rather than free-text. The gateway prompt asks
-# the model to use these labels.
+# Closed vocabulary for the synthetic "output" (deliverable) slot. The single
+# source of truth for the output labels: the gateway runtime injects these into
+# the classifier prompt (via gateway_system) so the model and this module can't
+# drift apart on the label set.
 OUTPUT_VOCAB = (
     "budgetary_impact",
     "tax_revenue",

@@ -16,11 +16,10 @@ from __future__ import annotations
 import logging
 import os
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import List, Optional
 
-from gateway_config import SlotFact, gate
-from model_config import DEFAULT_TEMPERATURE
+from gateway_config import OUTPUT_VOCAB, SlotFact, gate
+from model_config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_sync_client, load_scope_descriptor
 from prompts import (
     DEFAULT_SCOPE_DESCRIPTOR,
     GATEWAY_IRRELEVANT_DIRECTIVE,
@@ -33,10 +32,7 @@ from tool_definitions import TOOL_DEFINITIONS
 
 logger = logging.getLogger(__name__)
 
-GATEWAY_MODEL = os.environ.get(
-    "POLICYENGINE_CHAT_GATEWAY_MODEL",
-    os.environ.get("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5"),
-)
+GATEWAY_MODEL = os.environ.get("POLICYENGINE_CHAT_GATEWAY_MODEL", DEFAULT_FAST_MODEL)
 GATEWAY_MAX_TOKENS = int(os.environ.get("POLICYENGINE_CHAT_GATEWAY_MAX_TOKENS", "1024"))
 
 _TOOL_NAMES = [t["name"] for t in TOOL_DEFINITIONS]
@@ -55,18 +51,8 @@ def _build_tool_summary() -> str:
 
 
 TOOL_SUMMARY = _build_tool_summary()
-
-
-def _load_scope_descriptor() -> str:
-    path = Path(__file__).resolve().parent / "scope_descriptor.md"
-    try:
-        return path.read_text().strip()
-    except FileNotFoundError:
-        return DEFAULT_SCOPE_DESCRIPTOR
-
-
-SCOPE_DESCRIPTOR = _load_scope_descriptor()
-GATEWAY_SYSTEM = gateway_system(SCOPE_DESCRIPTOR, TOOL_SUMMARY)
+SCOPE_DESCRIPTOR = load_scope_descriptor(DEFAULT_SCOPE_DESCRIPTOR)
+GATEWAY_SYSTEM = gateway_system(SCOPE_DESCRIPTOR, TOOL_SUMMARY, ", ".join(OUTPUT_VOCAB))
 
 
 @dataclass
@@ -86,52 +72,42 @@ def _fail_safe() -> GatewayVerdict:
     return GatewayVerdict(outcome="ready", route="compute", rationale="gateway fail-safe")
 
 
-def _emit_plan_tool() -> dict:
-    """Forced-use tool that carries the structured plan. Local to the gateway —
-    must NOT be added to TOOL_DEFINITIONS or it would leak into the compute loop."""
-    return {
-        "name": "emit_plan",
-        "description": "Emit the structured execution plan for the user's message.",
-        "input_schema": {
-            "type": "object",
-            "properties": {
-                "in_domain": {
-                    "type": "boolean",
-                    "description": "Is the message about UK tax or benefit policy at all?",
-                },
-                "tool": {
-                    "type": "string",
-                    "enum": _TOOL_NAMES + ["none"],
-                    "description": "Best-fitting tool for the modelled part, or 'none'.",
-                },
-                "slots": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "kind": {"type": "string", "enum": ["tool_input", "output"]},
-                            "value": {"type": "string"},
-                            "source": {"type": "string", "enum": ["prompt", "default", "assumed"]},
-                        },
-                        "required": ["name", "kind", "source"],
-                    },
-                },
-                "unmodellable_outputs": {"type": "array", "items": {"type": "string"}},
-                "rationale": {"type": "string"},
+# Forced-use tool that carries the structured plan. Local to the gateway — must
+# NOT be added to TOOL_DEFINITIONS or it would leak into the compute loop.
+_EMIT_PLAN_TOOL = {
+    "name": "emit_plan",
+    "description": "Emit the structured execution plan for the user's message.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "in_domain": {
+                "type": "boolean",
+                "description": "Is the message about UK tax or benefit policy at all?",
             },
-            "required": ["in_domain", "tool", "slots"],
+            "tool": {
+                "type": "string",
+                "enum": _TOOL_NAMES + ["none"],
+                "description": "Best-fitting tool for the modelled part, or 'none'.",
+            },
+            "slots": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string"},
+                        "kind": {"type": "string", "enum": ["tool_input", "output"]},
+                        "value": {"type": "string"},
+                        "source": {"type": "string", "enum": ["prompt", "default", "assumed"]},
+                    },
+                    "required": ["name", "kind", "source"],
+                },
+            },
+            "unmodellable_outputs": {"type": "array", "items": {"type": "string"}},
+            "rationale": {"type": "string"},
         },
-    }
-
-
-def _get_sync_client():
-    import anthropic as anthropic_sdk
-
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY environment variable not set")
-    return anthropic_sdk.Anthropic(api_key=api_key)
+        "required": ["in_domain", "tool", "slots"],
+    },
+}
 
 
 def _verdict_from_plan(plan: dict, prompt: str) -> GatewayVerdict:
@@ -176,13 +152,13 @@ def run_gateway(last_user_message: str) -> GatewayVerdict:
     if not last_user_message or not last_user_message.strip():
         return _fail_safe()
     try:
-        client = _get_sync_client()
+        client = get_sync_client()
         response = client.messages.create(
             model=GATEWAY_MODEL,
             max_tokens=GATEWAY_MAX_TOKENS,
             temperature=DEFAULT_TEMPERATURE,
             system=GATEWAY_SYSTEM,
-            tools=[_emit_plan_tool()],
+            tools=[_EMIT_PLAN_TOOL],
             tool_choice={"type": "tool", "name": "emit_plan"},
             messages=[{"role": "user", "content": last_user_message[:4000]}],
         )

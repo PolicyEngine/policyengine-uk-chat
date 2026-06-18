@@ -23,7 +23,13 @@ from gateway import (
     run_gateway,
     serialise_plan_for_system,
 )
-from model_config import DEFAULT_TEMPERATURE, SUGGESTION_TEMPERATURE
+from model_config import (
+    DEFAULT_FAST_MODEL,
+    DEFAULT_TEMPERATURE,
+    SUGGESTION_TEMPERATURE,
+    get_sync_client,
+    load_scope_descriptor,
+)
 from prompts import (
     CHARTS_MODE_DIRECTIVE,
     DEFAULT_SCOPE_DESCRIPTOR,
@@ -65,7 +71,6 @@ import anthropic as anthropic_sdk
 # conversation so the model resumes mid-thought rather than restarting.
 MAX_ITERATIONS = 30
 
-DEFAULT_FAST_MODEL = os.environ.get("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5")
 DEFAULT_COMPLEX_MODEL = os.environ.get("ANTHROPIC_COMPLEX_MODEL", "claude-sonnet-4-6")
 TITLE_MODEL = os.environ.get("ANTHROPIC_TITLE_MODEL", DEFAULT_FAST_MODEL)
 # Follow-up suggestion chips run on the same fast model — cheap, latency-tolerant.
@@ -81,16 +86,9 @@ except FileNotFoundError:
     REFERENCE_DOC = ""
     logger.warning("[CHAT] reference.md not found — run scripts/build_reference.py")
 
-# Engine-derived scope descriptor (generated alongside reference.md). Loaded once
-# with a curated fallback for local dev. Drives the gateway's lightweight prompt.
-_SCOPE_DESCRIPTOR_PATH = Path(__file__).resolve().parent.parent / "scope_descriptor.md"
-try:
-    SCOPE_DESCRIPTOR = _SCOPE_DESCRIPTOR_PATH.read_text().strip()
-    logger.info(f"[CHAT] Loaded scope_descriptor.md ({len(SCOPE_DESCRIPTOR)} chars)")
-except FileNotFoundError:
-    SCOPE_DESCRIPTOR = DEFAULT_SCOPE_DESCRIPTOR
-    logger.info("[CHAT] scope_descriptor.md not found — using default scope descriptor")
-
+# Engine-derived scope descriptor (generated alongside reference.md), with a
+# curated fallback for local dev. Drives the gateway's lightweight prompt.
+SCOPE_DESCRIPTOR = load_scope_descriptor(DEFAULT_SCOPE_DESCRIPTOR)
 LIGHTWEIGHT_SYSTEM = lightweight_system(SCOPE_DESCRIPTOR)
 
 
@@ -99,13 +97,6 @@ def _get_anthropic_client():
     if not api_key:
         raise RuntimeError("ANTHROPIC_API_KEY environment variable not set")
     return anthropic_sdk.AsyncAnthropic(api_key=api_key)
-
-
-def _get_sync_anthropic_client():
-    api_key = os.environ.get("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise RuntimeError("ANTHROPIC_API_KEY environment variable not set")
-    return anthropic_sdk.Anthropic(api_key=api_key)
 
 
 def _tool_defs_for_anthropic():
@@ -324,7 +315,7 @@ async def _generate_followup_suggestions(
 
 @router.post("/title")
 def generate_title(request: TitleRequest):
-    client = _get_sync_anthropic_client()
+    client = get_sync_client()
     content = request.first_user_message
     if request.first_assistant_message:
         content += "\n\nAssistant: " + request.first_assistant_message[:500]
@@ -429,7 +420,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
             verdict = None
             route = "compute"
             if not _is_followup(conversation):
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 verdict = await loop.run_in_executor(
                     None, run_gateway, _last_user_text(conversation)
                 )

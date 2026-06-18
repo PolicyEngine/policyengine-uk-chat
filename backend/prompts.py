@@ -236,10 +236,9 @@ Steps:
    or "none" if nothing the engine computes applies (e.g. a pure macro/
    behavioural question). Use the tool list below.
 3. `slots`: for the chosen tool, list its required and defaultable input slots,
-   plus one or more `output` slots naming what the user wants reported (use a
-   short label like budgetary_impact, poverty_impact, decile_impact,
-   winners_losers, net_income, marginal_rate, benefit_entitlement,
-   parameter_lookup). For each slot set `value` and tag `source`:
+   plus one or more `output` slots naming what the user wants reported (use one
+   of the output labels listed below). For each slot set `value` and tag
+   `source`:
    - "prompt": the user stated it or clearly implied it.
    - "default": a documented safe default applies (year 2025; dataset FRS/EFRS
      for general income/benefit work; baseline is current law).
@@ -260,11 +259,14 @@ Two fail-safe biases — apply them:
 """.strip()
 
 
-def gateway_system(scope_descriptor: str, tool_summary: str) -> str:
-    """Gateway classifier prompt, parameterised by the scope descriptor and a
-    compact tool summary (both derived from the engine so they can't drift)."""
+def gateway_system(scope_descriptor: str, tool_summary: str, output_labels: str) -> str:
+    """Gateway classifier prompt, parameterised by the scope descriptor, a
+    compact tool summary, and the output-slot labels — all derived from the
+    engine / config so they can't drift from a hardcoded copy."""
     return (
         _GATEWAY_INSTRUCTIONS
+        + "\n\nOutput labels (use one per `output` slot): "
+        + output_labels
         + "\n\nTools available (name — purpose; required params):\n"
         + tool_summary.strip()
         + "\n\nScope:\n"

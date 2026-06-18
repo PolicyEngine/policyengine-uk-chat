@@ -161,7 +161,7 @@ class TestRunGateway:
             ],
             "unmodellable_outputs": [],
         }
-        with patch.object(gateway, "_get_sync_client", lambda: _stub_client(plan)):
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             v = gateway.run_gateway("cost of raising the PA to 15000?")
         assert v.outcome == "ready" and v.route == "compute"
         assert v.tool == "run_economy_simulation"
@@ -176,7 +176,7 @@ class TestRunGateway:
             ],
             "unmodellable_outputs": [],
         }
-        with patch.object(gateway, "_get_sync_client", lambda: _stub_client(plan)):
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             v = gateway.run_gateway("compare the two reforms")
         assert v.outcome == "needs_plan" and v.route == "lightweight"
         assert set(v.gating_slots) == {"reform", "output"}
@@ -184,20 +184,20 @@ class TestRunGateway:
     def test_unknown_tool_becomes_none(self):
         import gateway
         plan = {"in_domain": True, "tool": "none", "slots": [], "unmodellable_outputs": ["inflation"]}
-        with patch.object(gateway, "_get_sync_client", lambda: _stub_client(plan)):
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             v = gateway.run_gateway("what will inflation be?")
         assert v.tool is None and v.outcome == "out_of_scope"
 
     def test_empty_input_fail_safe(self):
         import gateway
         # The client must not be called for empty input.
-        with patch.object(gateway, "_get_sync_client", _raises):
+        with patch.object(gateway, "get_sync_client", _raises):
             assert gateway.run_gateway("").outcome == "ready"
             assert gateway.run_gateway("   ").outcome == "ready"
 
     def test_api_error_fail_safe(self):
         import gateway
-        with patch.object(gateway, "_get_sync_client", _raises):
+        with patch.object(gateway, "get_sync_client", _raises):
             v = gateway.run_gateway("anything at all")
         assert v.outcome == "ready" and v.route == "compute"
 
@@ -205,14 +205,14 @@ class TestRunGateway:
         import gateway
         resp = SimpleNamespace(content=[SimpleNamespace(type="text", text="oops")])
         client = SimpleNamespace(messages=SimpleNamespace(create=lambda **k: resp))
-        with patch.object(gateway, "_get_sync_client", lambda: client):
+        with patch.object(gateway, "get_sync_client", lambda: client):
             assert gateway.run_gateway("anything").outcome == "ready"
 
     def test_empty_plan_dict_fail_safe(self):
         # A degenerate emit_plan with empty input must fall back to compute, NOT
         # be read as an out_of_scope refusal of a genuinely in-scope question.
         import gateway
-        with patch.object(gateway, "_get_sync_client", lambda: _stub_client({})):
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client({})):
             v = gateway.run_gateway("What is the budgetary cost of raising the PA to 15000?")
         assert v.outcome == "ready" and v.route == "compute"
 
@@ -220,7 +220,7 @@ class TestRunGateway:
         # A plan missing the routing decision is a parse failure → fail-safe.
         import gateway
         plan = {"in_domain": True, "rationale": "partial output only"}
-        with patch.object(gateway, "_get_sync_client", lambda: _stub_client(plan)):
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             assert gateway.run_gateway("anything in scope").outcome == "ready"
 
     def test_bad_source_coerced_to_assumed(self):
@@ -230,7 +230,7 @@ class TestRunGateway:
             "slots": [{"name": "reform", "kind": "tool_input", "source": "garbage"}],
             "unmodellable_outputs": [],
         }
-        with patch.object(gateway, "_get_sync_client", lambda: _stub_client(plan)):
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             v = gateway.run_gateway("do a reform")
         # garbage source → assumed → reform (high) gates → needs_plan
         assert v.outcome == "needs_plan" and v.gating_slots == ["reform"]
