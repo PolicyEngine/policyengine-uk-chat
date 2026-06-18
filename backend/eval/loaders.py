@@ -5,7 +5,7 @@ from typing import Iterable, List
 
 import yaml
 
-from evaluation.schemas import (
+from eval.schemas import (
     AnswerCase,
     EvalCase,
     GatewayCase,

@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from evaluation.runner import SUITE_DIRS, run_eval
+from eval.runner import SUITE_DIRS, run_eval
 
 
 def parse_args() -> argparse.Namespace:

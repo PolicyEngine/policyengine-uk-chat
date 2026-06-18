@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from evaluation.schemas import EvalReport
+from eval.schemas import EvalReport
 
 
 def write_report(report: EvalReport, report_dir: Path) -> tuple[Path, Path]:

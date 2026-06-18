@@ -4,7 +4,7 @@ import os
 from typing import Any, Dict, List, Protocol
 
 from config import DEFAULT_TEMPERATURE
-from evaluation.schemas import ModelToolCall, ModelTurn
+from eval.schemas import ModelToolCall, ModelTurn
 
 
 class ModelClient(Protocol):

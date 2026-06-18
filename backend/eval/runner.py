@@ -12,11 +12,11 @@ from prompts import CHARTS_MODE_DIRECTIVE, SYSTEM_PROMPT
 from tools.definitions import TOOL_DEFINITIONS
 from tools.dispatch import execute_tool
 
-from evaluation.graders import grade_output, grade_text, grade_tool_calls
-from evaluation.loaders import load_cases
-from evaluation.providers import AnthropicModelClient, FakeModelClient, ModelClient
-from evaluation.reporting import write_report
-from evaluation.schemas import (
+from eval.graders import grade_output, grade_text, grade_tool_calls
+from eval.loaders import load_cases
+from eval.providers import AnthropicModelClient, FakeModelClient, ModelClient
+from eval.reporting import write_report
+from eval.schemas import (
     AnswerCase,
     CaseResult,
     EvalCase,

@@ -5,7 +5,7 @@ import math
 import re
 from typing import Any, Dict, Iterable, List
 
-from evaluation.schemas import (
+from eval.schemas import (
     ModelToolCall,
     OutputExpectation,
     TextExpectation,
