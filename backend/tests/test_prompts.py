@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent_tools import TOOL_DEFINITIONS
+from tools.definitions import TOOL_DEFINITIONS
 from prompts import (
     SYSTEM_PROMPT,
     SUGGESTION_SYSTEM,

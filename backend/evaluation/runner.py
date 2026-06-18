@@ -8,9 +8,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
-from agent_tools import execute_tool
 from prompts import CHARTS_MODE_DIRECTIVE, SYSTEM_PROMPT
-from tool_definitions import TOOL_DEFINITIONS
+from tools.definitions import TOOL_DEFINITIONS
+from tools.dispatch import execute_tool
 
 from evaluation.graders import grade_output, grade_text, grade_tool_calls
 from evaluation.loaders import load_cases

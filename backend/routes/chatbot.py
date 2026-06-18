@@ -17,7 +17,8 @@ from pydantic_ai import Agent
 from pydantic_ai.models.anthropic import AnthropicModel
 from pydantic_ai.settings import ModelSettings
 
-from agent_tools import execute_tool, TOOL_DEFINITIONS
+from tools.definitions import TOOL_DEFINITIONS
+from tools.dispatch import execute_tool
 from gateway import (
     gateway_writer_directive,
     run_gateway,
@@ -628,7 +629,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                 for tu in tool_uses:
                     result_json = _serialise_tool_result(completed_tools[tu["id"]])
                     if len(result_json) > MAX_RESULT_CHARS:
-                        from agent_tools import explore_tabular_data
+                        from tools.dispatch import explore_tabular_data
                         tool_result = completed_tools[tu["id"]]
                         # Try to find and summarise large arrays
                         data_key = next((k for k in tool_result if isinstance(tool_result.get(k), list) and len(tool_result[k]) > 5), None)

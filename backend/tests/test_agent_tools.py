@@ -1,5 +1,5 @@
 """
-Integration tests for agent_tools.py.
+Integration tests for tools/dispatch.py.
 These call the compiled PolicyEngine UK engine directly — no mocking.
 Run inside the backend container: pytest tests/
 """
@@ -10,9 +10,9 @@ import pytest
 
 from conftest import requires_compiled
 
-import agent_tools
-import tool_definitions
-from agent_tools import (
+import tools.dispatch as agent_tools
+import tools.definitions as tool_definitions
+from tools.dispatch import (
     get_baseline_parameters,
     validate_reform,
     calculate_household,

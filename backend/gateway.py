@@ -28,7 +28,7 @@ from prompts import (
     GATEWAY_PARTIAL_DIRECTIVE,
     gateway_system,
 )
-from tool_definitions import TOOL_DEFINITIONS
+from tools.definitions import TOOL_DEFINITIONS
 
 logger = logging.getLogger(__name__)
 

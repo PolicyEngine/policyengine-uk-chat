@@ -20,14 +20,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional
 
-from model_config import DEFAULT_SIMULATION_YEAR
-from tool_definitions import TOOL_DEFINITIONS
+from tools.definitions import TOOL_DEFINITIONS
 
-# The default simulation year as a string, for comparison against years parsed
-# out of the prompt. Sourced from the single shared constant (which also feeds
-# YEAR_SCHEMA) so it can't drift from the schema default. Only used to decide
-# whether the prompt names a *non-default* year.
-_DEFAULT_YEAR = str(DEFAULT_SIMULATION_YEAR)
+# Mirrors the schema default year (YEAR_SCHEMA in tools/definitions.py). Only used
+# to decide whether the prompt names a *non-default* year; kept as one constant
+# so it has a single point of change if the engine's default year rolls.
+_DEFAULT_YEAR = "2025"
 
 Criticality = Literal["high", "medium", "low"]
 Source = Literal["prompt", "default", "assumed"]
