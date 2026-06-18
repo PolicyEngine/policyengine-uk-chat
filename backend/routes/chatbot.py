@@ -23,10 +23,15 @@ from gateway import (
     run_gateway,
     serialise_plan_for_system,
 )
-from model_config import (
+from config import (
+    DEFAULT_COMPLEX_MODEL,
     DEFAULT_FAST_MODEL,
     DEFAULT_TEMPERATURE,
+    FAST_MODEL_MAX_INPUT_TOKENS,
+    SUGGESTION_MODEL,
     SUGGESTION_TEMPERATURE,
+    SUGGESTION_TIMEOUT_SECS,
+    TITLE_MODEL,
     get_sync_client,
     load_scope_descriptor,
 )
@@ -70,13 +75,6 @@ import anthropic as anthropic_sdk
 # loop with a fresh budget, but the prior tool transcript is already in the
 # conversation so the model resumes mid-thought rather than restarting.
 MAX_ITERATIONS = 30
-
-DEFAULT_COMPLEX_MODEL = os.environ.get("ANTHROPIC_COMPLEX_MODEL", "claude-sonnet-4-6")
-TITLE_MODEL = os.environ.get("ANTHROPIC_TITLE_MODEL", DEFAULT_FAST_MODEL)
-# Follow-up suggestion chips run on the same fast model — cheap, latency-tolerant.
-SUGGESTION_MODEL = os.environ.get("ANTHROPIC_SUGGESTION_MODEL", DEFAULT_FAST_MODEL)
-SUGGESTION_TIMEOUT_SECS = float(os.environ.get("ANTHROPIC_SUGGESTION_TIMEOUT_SECS", "5"))
-FAST_MODEL_MAX_INPUT_TOKENS = int(os.environ.get("ANTHROPIC_FAST_MODEL_MAX_INPUT_TOKENS", "120000"))
 
 _REFERENCE_PATH = Path(__file__).resolve().parent.parent / "reference.md"
 try:
