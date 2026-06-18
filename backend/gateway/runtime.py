@@ -2,7 +2,7 @@
 
 One cheap forced-tool call asks a fast model to fill an execution plan (which
 tool, which slots, each tagged with a grounding `source`). The deterministic
-`gate()` in `gateway_config` then maps that plan to one of five outcomes. Only
+`gate()` in `gateway.policy` then maps that plan to one of five outcomes. Only
 `ready` runs the full compute loop; the other four reply on the lean lightweight
 path. Fail-safe to `ready`/compute on any error, matching the chat's existing
 "when in doubt, load the full background" bias.
@@ -18,7 +18,7 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from gateway_config import OUTPUT_VOCAB, SlotFact, gate
+from gateway.policy import OUTPUT_VOCAB, SlotFact, gate
 from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_sync_client, load_scope_descriptor
 from prompts import (
     DEFAULT_SCOPE_DESCRIPTOR,
