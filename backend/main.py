@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
-import routes.billing as billing
+import billing
 import routes.chatbot as chatbot
 import routes.conversations as conversations
 from rate_limit import limiter

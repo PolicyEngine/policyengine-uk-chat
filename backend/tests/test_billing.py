@@ -3,7 +3,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from routes.billing import calculate_cost_gbp
+from billing.pricing import calculate_cost_gbp
 
 
 def test_haiku_is_cheaper_than_sonnet_for_same_usage():

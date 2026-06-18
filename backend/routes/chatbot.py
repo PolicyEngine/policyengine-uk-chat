@@ -343,7 +343,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
     user_id = chat_request.user_id
     if user_id:
         try:
-            from routes.billing import check_balance
+            from billing import check_balance
             has_credit, _ = check_balance(user_id)
             if not has_credit:
                 return JSONResponse(status_code=402, content={"error": "No credit remaining. Please top up to continue."})
@@ -540,7 +540,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
                     # Record token usage for billing
                     billing = None
                     try:
-                        from routes.billing import record_usage
+                        from billing import record_usage
                         billing = record_usage(
                             user_id=user_id,
                             session_id=session_id,
@@ -678,7 +678,7 @@ async def chat_message(request: Request, chat_request: ChatRequest):
 
                 billing = None
                 try:
-                    from routes.billing import record_usage
+                    from billing import record_usage
                     billing = record_usage(
                         user_id=user_id,
                         session_id=session_id,
