@@ -46,9 +46,8 @@ through `make eval-ai-live`.
 - `tool_loop`: prompt through model tool calls, deterministic tool execution,
   and final prose.
 
-Trajectory and tool-loop cases can set `messages` for multi-turn transcripts,
-`plan_mode: true` to test tool omission, and `charts_mode: true` to test the
-chart-mode directive.
+Trajectory and tool-loop cases can set `messages` for multi-turn transcripts
+and `charts_mode: true` to test the chart-mode directive.
 
 Source-synced `policyengine-uk` cases with `compiled_coverage_gap` skips are
 kept in the suite as visible compiled-backlog markers. Remove the skip only

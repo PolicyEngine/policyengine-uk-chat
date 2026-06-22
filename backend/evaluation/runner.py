@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from agent_tools import execute_tool
-from prompts import CHARTS_MODE_DIRECTIVE, PLAN_MODE_DIRECTIVE, SYSTEM_PROMPT
+from prompts import CHARTS_MODE_DIRECTIVE, SYSTEM_PROMPT
 from tool_definitions import TOOL_DEFINITIONS
 
 from evaluation.graders import grade_output, grade_text, grade_tool_calls
@@ -21,6 +21,7 @@ from evaluation.schemas import (
     CaseResult,
     EvalCase,
     EvalReport,
+    GatewayCase,
     ModelTurn,
     ToolContractCase,
     ToolLoopCase,
@@ -37,6 +38,7 @@ SUITE_DIRS = {
     "trajectory": CASE_ROOT / "trajectory",
     "answer": CASE_ROOT / "answers",
     "tool_loop": CASE_ROOT / "tool_loop",
+    "gateway": CASE_ROOT / "gateway",
 }
 
 
@@ -137,16 +139,12 @@ def _messages_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, An
 
 def _system_for_case(case: TrajectoryCase | ToolLoopCase) -> str:
     sections = [SYSTEM_PROMPT]
-    if case.plan_mode:
-        sections.append(PLAN_MODE_DIRECTIVE)
     if case.charts_mode:
         sections.append(CHARTS_MODE_DIRECTIVE)
     return "\n\n".join(sections)
 
 
 def _tools_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, Any]] | None:
-    if case.plan_mode:
-        return None
     return _tool_specs_for_model()
 
 
@@ -294,6 +292,55 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
     )
 
 
+def _run_gateway(case: GatewayCase) -> CaseResult:
+    """Live-only: run the gateway pre-pass and grade the verdict. Outcome is the
+    primary assertion; tool/forbidden_tool and per-slot expectations are
+    secondary (graded only when the case declares them). Binary 0/1 score to
+    match the other suites, with the full plan stashed in details for tuning."""
+    from gateway import run_gateway
+
+    try:
+        verdict = run_gateway(case.prompt)
+    except Exception as exc:
+        return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
+
+    errors: List[str] = []
+    if verdict.outcome != case.expected_outcome:
+        errors.append(f"expected outcome {case.expected_outcome!r}, got {verdict.outcome!r}")
+    if case.expected_tool and verdict.tool != case.expected_tool:
+        errors.append(f"expected tool {case.expected_tool!r}, got {verdict.tool!r}")
+    if case.forbidden_tool and verdict.tool == case.forbidden_tool:
+        errors.append(f"forbidden tool {case.forbidden_tool!r} was selected")
+    if case.expected_gating_slots:
+        got = set(verdict.gating_slots)
+        want = set(case.expected_gating_slots)
+        if got != want:
+            errors.append(f"gating slots: expected {sorted(want)}, got {sorted(got)}")
+
+    by_name = {s.name: s for s in verdict.slots}
+    for exp in case.expected_slots:
+        got_slot = by_name.get(exp.slot)
+        if got_slot is None:
+            errors.append(f"slot {exp.slot!r} missing from plan")
+            continue
+        if exp.source is not None and got_slot.source != exp.source:
+            errors.append(f"slot {exp.slot!r} source: expected {exp.source!r}, got {got_slot.source!r}")
+        if exp.gates is not None and (exp.slot in verdict.gating_slots) != exp.gates:
+            errors.append(f"slot {exp.slot!r} gates: expected {exp.gates}, got {exp.slot in verdict.gating_slots}")
+
+    details = {
+        "outcome": verdict.outcome,
+        "tool": verdict.tool,
+        "gating_slots": verdict.gating_slots,
+        "unmodellable_outputs": verdict.unmodellable_outputs,
+        "slots": [
+            {"name": s.name, "kind": s.kind, "source": s.source, "value": s.value}
+            for s in verdict.slots
+        ],
+    }
+    return _result(case, "failed" if errors else "passed", 0.0 if errors else 1.0, errors, details)
+
+
 def run_eval(
     *,
     suites: List[str] | None = None,
@@ -339,6 +386,8 @@ def run_eval(
             results.append(_run_answer(case, client))
         elif isinstance(case, ToolLoopCase):
             results.append(_run_tool_loop(case, client))
+        elif isinstance(case, GatewayCase):
+            results.append(_run_gateway(case))
 
     report = EvalReport(
         mode=mode,

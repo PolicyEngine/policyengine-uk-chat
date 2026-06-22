@@ -210,30 +210,6 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
     assert calls == [("calculate_household", {"year": 2025})]
 
 
-def test_plan_mode_trajectory_omits_tools_and_adds_directive():
-    class RecordingClient:
-        def __init__(self):
-            self.calls = []
-
-        def generate(self, **kwargs):
-            self.calls.append(kwargs)
-            return ModelTurn(text="I would ask for inputs first.")
-
-    case = TrajectoryCase(
-        id="plan_case",
-        description="Plan mode omits tools.",
-        prompt="Plan a calculation.",
-        plan_mode=True,
-    )
-    client = RecordingClient()
-
-    result = runner._run_trajectory(case, client)
-
-    assert result.status == "passed"
-    assert client.calls[0]["tools"] is None
-    assert "PLAN MODE IS ACTIVE" in client.calls[0]["system"]
-
-
 def test_charts_mode_trajectory_adds_directive_and_keeps_tools():
     class RecordingClient:
         def __init__(self):

@@ -1,0 +1,235 @@
+"""Gateway policy: per-slot criticality and the deterministic gate.
+
+The chat gateway splits responsibility deliberately: the *model grounds*, the
+*server gates*. The gateway model call emits, per plan slot, only a value and a
+``source`` (the grounding flag: ``prompt`` / ``default`` / ``assumed``). It does
+NOT judge importance. This module owns the importance policy — a per-slot
+``criticality`` — and the pure, deterministic ``gate()`` that turns a grounded
+plan into one of five outcomes. Keeping this out of the model (and out of
+``prompts.py``/``chatbot.py``) makes the gate auditable and unit-testable
+offline, and lets the eval grader import it without dragging in the runtime.
+
+Gate rule: a slot *gates* (forces a clarifying question) iff its ``source`` is
+``assumed`` AND its criticality is high/medium AND it is not model-inferable.
+``needs_plan`` iff any slot gates; otherwise ``ready`` (once admissibility —
+irrelevant / out_of_scope / partial — is decided).
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass, field
+from typing import List, Literal, Optional
+
+from model_config import DEFAULT_SIMULATION_YEAR
+from tool_definitions import TOOL_DEFINITIONS
+
+# The default simulation year as a string, for comparison against years parsed
+# out of the prompt. Sourced from the single shared constant (which also feeds
+# YEAR_SCHEMA) so it can't drift from the schema default. Only used to decide
+# whether the prompt names a *non-default* year.
+_DEFAULT_YEAR = str(DEFAULT_SIMULATION_YEAR)
+
+Criticality = Literal["high", "medium", "low"]
+Source = Literal["prompt", "default", "assumed"]
+Outcome = Literal["irrelevant", "out_of_scope", "partial", "needs_plan", "ready"]
+SlotKind = Literal["tool_input", "output"]
+
+
+@dataclass(frozen=True)
+class SlotFact:
+    """One slot of the execution plan, as grounded by the gateway model."""
+
+    name: str
+    source: str  # "prompt" | "default" | "assumed"
+    kind: str = "tool_input"  # "tool_input" | "output"
+    value: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class GateResult:
+    outcome: str
+    gating_slots: List[str] = field(default_factory=list)
+
+
+# ---------------------------------------------------------------------------
+# Slot inventory, derived from TOOL_DEFINITIONS so it can't drift from the
+# schemas. Each (tool, slot) is classified required / defaulted / optional.
+# ---------------------------------------------------------------------------
+
+def _build_slot_kinds() -> dict:
+    kinds: dict = {}
+    for tool in TOOL_DEFINITIONS:
+        name = tool["name"]
+        schema = tool.get("input_schema", {})
+        required = set(schema.get("required", []))
+        props = schema.get("properties", {}) or {}
+        for slot, spec in props.items():
+            if slot in required:
+                kinds[(name, slot)] = "required"
+            elif isinstance(spec, dict) and "default" in spec:
+                kinds[(name, slot)] = "defaulted"
+            else:
+                kinds[(name, slot)] = "optional"
+    return kinds
+
+
+TOOL_SLOT_KIND = _build_slot_kinds()
+
+# Curated overrides where the schema's required/default flags don't match the
+# real importance. Kept tiny and commented to limit drift.
+_CRITICALITY_OVERRIDES: dict = {
+    # run_economy_simulation has required=[] in the schema, but a society-wide
+    # simulation with no reform is just a baseline snapshot — almost never the
+    # intent. Treat the reform as load-bearing.
+    ("run_economy_simulation", "reform"): "high",
+}
+
+# Schema-required (or otherwise high) slots that the model can reliably INFER
+# rather than ask the user about. Without this, every household calc would ask
+# "which benefit unit?" — this is the primary bound on over-asking.
+INFERABLE: set = {
+    ("calculate_household", "benunit"),
+    ("calculate_household", "household"),
+    ("generate_chart", "chart_type"),
+    ("generate_chart", "title"),
+    ("generate_chart", "x_field"),
+    ("generate_chart", "y_fields"),
+    ("generate_chart", "data"),  # comes from an upstream tool, not the user
+}
+
+# Closed vocabulary for the synthetic "output" (deliverable) slot. The single
+# source of truth for the output labels: the gateway runtime injects these into
+# the classifier prompt (via gateway_system) so the model and this module can't
+# drift apart on the label set.
+OUTPUT_VOCAB = (
+    "budgetary_impact",
+    "tax_revenue",
+    "benefit_spending",
+    "poverty_impact",
+    "decile_impact",
+    "winners_losers",
+    "caseload",
+    "marginal_rate",
+    "net_income",
+    "benefit_entitlement",
+    "parameter_lookup",
+    "reform_validity",
+)
+
+
+# ---------------------------------------------------------------------------
+# Context promotions: raise criticality when a default would be *actively
+# wrong*, not merely absent. Deterministic keyword scans over the prompt.
+# ---------------------------------------------------------------------------
+
+# A non-default survey is required when the question is about a dimension the
+# default datasets (FRS/EFRS) don't carry. Silently keeping the default here
+# yields a wrong number, not a defaulted one — so dataset becomes load-bearing.
+#
+# These must be SPECIFIC to the non-default dimension. Bare "spending" was
+# dropped deliberately: ordinary in-scope questions ("how does this affect
+# benefit/welfare/government spending?") contain it, so it caused false LCFS
+# promotions. The consumption signal is carried by the more specific phrases
+# below (consumer/household spending, expenditure, VAT, living costs).
+_DATASET_SIGNAL_KEYWORDS = (
+    "wealth", "net worth", "net wealth", "assets", "estate", "inheritance",  # WAS
+    "consumption", "expenditure", "vat", "living costs",                      # LCFS
+    "consumer spending", "household spending", "spending patterns",           # LCFS
+    "top income", "additional rate", "very high earner", "highest earner",    # SPI
+)
+
+_REFORM_INTENT_KEYWORDS = (
+    "reform", "raise", "cut", "increase", "decrease", "abolish", "scrap",
+    "introduce", "freeze", "uprate", "replace", "change the", "set the",
+)
+
+
+def _prompt_implies_special_dataset(prompt: str) -> bool:
+    p = prompt.lower()
+    return any(kw in p for kw in _DATASET_SIGNAL_KEYWORDS)
+
+
+def _prompt_names_reform(prompt: str) -> bool:
+    p = prompt.lower()
+    return any(kw in p for kw in _REFORM_INTENT_KEYWORDS)
+
+
+def _prompt_implies_nondefault_year(prompt: str) -> bool:
+    import re
+
+    years = re.findall(r"\b(?:19|20)\d{2}\b", prompt)
+    return any(y != _DEFAULT_YEAR for y in years)
+
+
+def _base_criticality(tool: Optional[str], slot: SlotFact) -> Criticality:
+    if slot.kind == "output":
+        return "high"
+    key = (tool, slot.name)
+    if key in _CRITICALITY_OVERRIDES:
+        return _CRITICALITY_OVERRIDES[key]
+    kind = TOOL_SLOT_KIND.get(key)
+    if kind == "required":
+        return "high"
+    # defaulted, optional, or an unrecognised (possibly hallucinated) slot.
+    return "low"
+
+
+def criticality(tool: Optional[str], slot: SlotFact, prompt: str = "") -> Criticality:
+    """Resolved criticality for a slot: static base + context promotions."""
+    base = _base_criticality(tool, slot)
+    if slot.kind == "output":
+        return base
+    if slot.name == "dataset" and _prompt_implies_special_dataset(prompt):
+        return "high"
+    if slot.name == "reform" and _prompt_names_reform(prompt):
+        return "high"
+    if slot.name == "year" and base == "low" and _prompt_implies_nondefault_year(prompt):
+        return "medium"
+    return base
+
+
+def is_inferable(tool: Optional[str], slot_name: str) -> bool:
+    return (tool, slot_name) in INFERABLE
+
+
+def slot_gates(tool: Optional[str], slot: SlotFact, prompt: str = "") -> bool:
+    """True if this slot should force a clarifying question."""
+    if slot.source != "assumed":
+        return False
+    if is_inferable(tool, slot.name):
+        return False
+    return criticality(tool, slot, prompt) in ("high", "medium")
+
+
+def gate(
+    in_domain: bool,
+    tool: Optional[str],
+    slots: List[SlotFact],
+    unmodellable_outputs: List[str],
+    prompt: str = "",
+) -> GateResult:
+    """Deterministically map a grounded plan to one of the five outcomes.
+
+    Admissibility is decided first (irrelevant / out_of_scope / partial); only an
+    admissible, fully-grounded plan reaches ``ready``. Fail-safe directions are
+    the caller's job (run_gateway defaults to ``ready`` on any error); this
+    function is pure.
+    """
+    if not in_domain:
+        return GateResult("irrelevant")
+
+    has_modellable = tool is not None
+    if not has_modellable:
+        # In domain but nothing the engine can compute for this ask.
+        return GateResult("out_of_scope")
+    if unmodellable_outputs:
+        # Some of the ask is modellable, some isn't → confirm-first partial.
+        # Deliberately takes precedence over needs_plan: resolve scope first;
+        # under-specified inputs get clarified on the next turn if the user
+        # proceeds. Both are lightweight, so neither wrongly refuses.
+        return GateResult("partial")
+
+    gating = [s.name for s in slots if slot_gates(tool, s, prompt)]
+    if gating:
+        return GateResult("needs_plan", gating)
+    return GateResult("ready")

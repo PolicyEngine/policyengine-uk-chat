@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconBulb, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -65,7 +65,6 @@ type SlashCommand = {
 
 // v1 slash commands.
 const SLASH_COMMANDS: SlashCommand[] = [
-  { name: "plan",   description: "Toggle Plan mode on/off",           kind: "action" },
   { name: "charts", description: "Toggle Charts mode on/off",         kind: "action" },
   { name: "new",   description: "Start a new chat",                  kind: "action" },
   { name: "clear", description: "Start a new chat (alias for /new)", kind: "action" },
@@ -280,7 +279,6 @@ export default function ChatPage() {
   const [reportNote, setReportNote] = useState("");
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSubmitting, setReportSubmitting] = useState(false);
-  const [planMode, setPlanMode] = useState(false);
   const [chartsMode, setChartsMode] = useState(false);
   const [slashIndex, setSlashIndex] = useState(0);
   const slashMenuRef = useRef<HTMLDivElement>(null);
@@ -570,7 +568,6 @@ export default function ChatPage() {
     if (typeof window !== "undefined") {
       try { localStorage.removeItem("policyengine-uk-chat:draft"); } catch {}
     }
-    setPlanMode(false);
     setIsStreaming(true);
     setIsWaiting(true);
     debugLog.current = [];
@@ -648,7 +645,7 @@ export default function ChatPage() {
       const response = await fetch(getBackendEndpoint("chat/message"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, plan_mode: planMode, charts_mode: chartsMode, ...imagePayload }),
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, charts_mode: chartsMode, ...imagePayload }),
         signal: controller.signal,
       });
       if (response.status === 402) {
@@ -869,7 +866,7 @@ export default function ChatPage() {
       const response = await fetch(getBackendEndpoint("chat/message"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, plan_mode: false, charts_mode: chartsMode }),
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, charts_mode: chartsMode }),
         signal: controller.signal,
       });
       if (response.status === 402) {
@@ -1018,10 +1015,7 @@ export default function ChatPage() {
 
   const selectSlashCommand = useCallback((cmd: SlashCommand) => {
     if (cmd.kind === "action") {
-      if (cmd.name === "plan") {
-        setPlanMode((v) => !v);
-        closeSlash();
-      } else if (cmd.name === "charts") {
+      if (cmd.name === "charts") {
         setChartsMode((v) => !v);
         closeSlash();
       } else if (cmd.name === "new" || cmd.name === "clear") {
@@ -1819,30 +1813,6 @@ export default function ChatPage() {
                     style={{ width: "32px", height: "32px", borderRadius: "999px", background: "transparent", color: "var(--text-3)", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, opacity: isStreaming ? 0.5 : 1, transition: "background 120ms, color 120ms" }}
                   >
                     <IconPaperclip size={18} />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPlanMode((v) => !v)}
-                    disabled={isStreaming}
-                    data-tip={planMode
-                      ? "Plan mode on — the next message will get clarifying questions before the agent runs anything."
-                      : "Plan mode off — turn on to have the agent ask 1–3 clarifying questions before answering."}
-                    style={{
-                      display: "inline-flex", alignItems: "center", gap: "6px",
-                      padding: "5px 11px",
-                      background: planMode ? "var(--accent-15)" : "transparent",
-                      color: planMode ? "var(--accent)" : "var(--text-3)",
-                      border: `1px solid ${planMode ? "var(--accent)" : "var(--border)"}`,
-                      borderRadius: "999px",
-                      fontSize: "12px",
-                      fontFamily: "inherit",
-                      cursor: isStreaming ? "not-allowed" : "pointer",
-                      fontWeight: 500,
-                      opacity: isStreaming ? 0.5 : 1,
-                      transition: "background 120ms, color 120ms, border-color 120ms",
-                    }}
-                  >
-                    <IconBulb size={12} /> Plan {planMode ? "on" : "off"}
                   </button>
                   <button
                     type="button"

@@ -1,9 +1,10 @@
 """Model-facing tool definitions for the UK chat runtime."""
 
+from model_config import DEFAULT_SIMULATION_YEAR
 from tooling.reforms import REFORM_SCHEMA
 
 
-YEAR_SCHEMA = {"type": "integer", "default": 2025}
+YEAR_SCHEMA = {"type": "integer", "default": DEFAULT_SIMULATION_YEAR}
 
 REFORM_PROPERTY = REFORM_SCHEMA
 

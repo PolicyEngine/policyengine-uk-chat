@@ -325,45 +325,6 @@ class TestChatMessage:
         assert done["usage"]["input_tokens"] > 0
 
 
-# ---------------------------------------------------------------------------
-# Plan mode contract
-# ---------------------------------------------------------------------------
-
-class TestPlanMode:
-    """Plan mode promises: no tools execute on the plan-mode turn.
-
-    Structural enforcement: when plan_mode=True the request to Anthropic
-    omits `tools` entirely, so tool_use blocks cannot be emitted. The
-    directive in the system blocks shapes the clarifying-question reply.
-    These are unit checks against the helper and request shape; they don't
-    hit Anthropic.
-    """
-
-    def test_directive_present_when_plan_mode_on(self):
-        from routes.chatbot import _build_system_blocks, PLAN_MODE_DIRECTIVE
-        blocks = _build_system_blocks(plan_mode=True)
-        assert any(PLAN_MODE_DIRECTIVE in b.get("text", "") for b in blocks)
-
-    def test_directive_absent_when_plan_mode_off(self):
-        from routes.chatbot import _build_system_blocks, PLAN_MODE_DIRECTIVE
-        blocks = _build_system_blocks(plan_mode=False)
-        assert not any(PLAN_MODE_DIRECTIVE in b.get("text", "") for b in blocks)
-
-    def test_base_prompt_cache_breakpoint_unchanged(self):
-        from routes.chatbot import _build_system_blocks
-        on = _build_system_blocks(plan_mode=True)
-        off = _build_system_blocks(plan_mode=False)
-        assert on[0] == off[0]
-        assert "cache_control" in on[0]
-
-    def test_request_accepts_plan_mode_field(self):
-        from routes.chatbot import ChatRequest
-        req = ChatRequest(messages=[{"role": "user", "content": "hi"}], plan_mode=True)
-        assert req.plan_mode is True
-        req2 = ChatRequest(messages=[{"role": "user", "content": "hi"}])
-        assert req2.plan_mode is False
-
-
 class TestChatRouteWithMockedAnthropic:
     def test_chat_route_executes_tool_loop_and_returns_final_answer(self, monkeypatch):
         import routes.chatbot as chatbot
@@ -431,43 +392,6 @@ class TestChatRouteWithMockedAnthropic:
         assert "tools" in fake_client.messages.calls[0]
         second_messages = fake_client.messages.calls[1]["messages"]
         assert second_messages[-1]["content"][0]["type"] == "tool_result"
-
-    def test_plan_mode_omits_tools_and_drops_unexpected_tool_use(self, monkeypatch):
-        import routes.chatbot as chatbot
-
-        fake_client = _FakeAnthropicClient(
-            [
-                _FakeAnthropicStream(
-                    chunks=["I would first identify the household inputs."],
-                    final_content=[
-                        _tool_use_block("calculate_household", {"year": 2025}),
-                    ],
-                )
-            ]
-        )
-
-        def fail_if_tool_executes(*_args, **_kwargs):
-            raise AssertionError("plan mode must not execute tools")
-
-        monkeypatch.setattr(chatbot, "_get_anthropic_client", lambda: fake_client)
-        monkeypatch.setattr(chatbot, "execute_tool", fail_if_tool_executes)
-
-        with client.stream(
-            "POST",
-            "/chat/message",
-            json={
-                "plan_mode": True,
-                "messages": [{"role": "user", "content": "Plan this calculation."}],
-            },
-        ) as response:
-            assert response.status_code == 200
-            text = response.read().decode()
-
-        events = parse_sse(text)
-        assert "tools" not in fake_client.messages.calls[0]
-        assert not [event for event in events if event["type"] in {"tool_use", "tool_result"}]
-        done = next(event for event in events if event["type"] == "done")
-        assert "identify the household inputs" in done["content"]
 
 
 # ---------------------------------------------------------------------------

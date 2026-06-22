@@ -56,18 +56,21 @@ are added to both the tool definitions and dispatcher.
 
 - Non-deterministic: user text interpretation, model planning, tool selection,
   prose generation, follow-up suggestions, and title generation.
-- Deterministic: request validation, plan-mode tool omission, tool dispatch,
-  typed tool execution after selection, Python execution, chart JSON
-  construction, result truncation/summarisation, billing calculation, and
-  database writes.
+- Deterministic: request validation, the gateway gate (criticality + outcome),
+  lightweight-route tool omission, tool dispatch, typed tool execution after
+  selection, Python execution, chart JSON construction,
+  result truncation/summarisation, billing calculation, and database writes.
 
-Plan mode must remain structurally enforced by omitting tools from the model
-request, not only by prompting the model not to call tools.
+The gateway's non-`ready` (lightweight) outcomes must remain structurally
+enforced by omitting tools from the model request, not only by prompting the
+model not to call tools.
 
 Tool choice is model-mediated unless the route layer deliberately forces a
 specific tool. Prompt and schema guidance improve selection consistency, but
-they are not deterministic controls. The chat route defaults the model
-temperature to `0` to reduce sampling variance.
+they are not deterministic controls. Every model call sets its temperature from
+`backend/model_config.py`: `DEFAULT_TEMPERATURE` (0, deterministic) for the
+compute loop, titling, the gateway classifier, and evals; `SUGGESTION_TEMPERATURE`
+for follow-up suggestion chips, which deliberately sample with variety.
 
 ## Policy Analysis Rules
 

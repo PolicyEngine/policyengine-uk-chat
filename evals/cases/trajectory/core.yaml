@@ -794,27 +794,6 @@ cases:
     offline_response:
       text: To calculate this, I need the tax year, household structure, income, and the new personal allowance amount.
 
-  - id: trajectory_plan_mode_explains_without_tools
-    suite: trajectory
-    description: Plan mode should omit tools and return an explanation path rather than executing.
-    tags: [plan_mode]
-    plan_mode: true
-    prompt: >
-      Plan how you would calculate the effect of increasing the personal
-      allowance to GBP 15k for a single adult earning GBP 30k in 2025.
-    expected_tools: []
-    forbidden_tools:
-      - validate_reform
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - run_python
-      - generate_chart
-    offline_response:
-      text: >
-        I would construct an illustrative single-adult household, apply the
-        personal allowance reform, then compare baseline and reform outputs.
-
   - id: trajectory_charts_mode_supplied_values
     suite: trajectory
     description: Charts mode should route chartable supplied values to generate_chart.

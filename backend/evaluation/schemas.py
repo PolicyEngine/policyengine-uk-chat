@@ -102,7 +102,6 @@ class TrajectoryCase(CaseBase):
     suite: Literal["trajectory"] = "trajectory"
     prompt: str
     messages: List[Dict[str, Any]] = Field(default_factory=list)
-    plan_mode: bool = False
     charts_mode: bool = False
     expected_tools: List[ToolCallExpectation] = Field(default_factory=list)
     forbidden_tools: List[str] = Field(default_factory=list)
@@ -121,7 +120,6 @@ class ToolLoopCase(CaseBase):
     suite: Literal["tool_loop"] = "tool_loop"
     prompt: str
     messages: List[Dict[str, Any]] = Field(default_factory=list)
-    plan_mode: bool = False
     charts_mode: bool = False
     expected_tools: List[ToolCallExpectation] = Field(default_factory=list)
     forbidden_tools: List[str] = Field(default_factory=list)
@@ -130,7 +128,25 @@ class ToolLoopCase(CaseBase):
     offline_responses: List[ModelTurn] = Field(default_factory=list)
 
 
-EvalCase = ToolContractCase | TrajectoryCase | AnswerCase | ToolLoopCase
+class SlotExpectation(StrictModel):
+    slot: str
+    source: Optional[Literal["prompt", "default", "assumed"]] = None
+    gates: Optional[bool] = None  # whether this slot should trigger a question
+
+
+class GatewayCase(CaseBase):
+    suite: Literal["gateway"] = "gateway"
+    prompt: str
+    expected_outcome: Literal[
+        "irrelevant", "out_of_scope", "partial", "needs_plan", "ready"
+    ]
+    expected_tool: Optional[str] = None
+    forbidden_tool: Optional[str] = None
+    expected_gating_slots: List[str] = Field(default_factory=list)
+    expected_slots: List[SlotExpectation] = Field(default_factory=list)
+
+
+EvalCase = ToolContractCase | TrajectoryCase | AnswerCase | ToolLoopCase | GatewayCase
 
 
 class CaseResult(StrictModel):
