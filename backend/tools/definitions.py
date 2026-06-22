@@ -3,6 +3,14 @@
 from engine.reforms import REFORM_SCHEMA
 
 
+# Default simulation/policy year — the single source of truth for the year the
+# engine models when a request doesn't name one. Referenced by YEAR_SCHEMA (so
+# the tool schemas advertise it), the tool implementations' defaults in
+# dispatch.py, and the gateway's non-default-year detection (gateway/policy.py),
+# so they can't drift apart. NB this is the modelled policy year, which
+# deliberately lags the calendar year.
+DEFAULT_SIMULATION_YEAR = 2025
+
 YEAR_SCHEMA = {"type": "integer", "default": DEFAULT_SIMULATION_YEAR}
 
 REFORM_PROPERTY = REFORM_SCHEMA
