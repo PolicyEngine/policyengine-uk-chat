@@ -1,7 +1,7 @@
 """Offline tests for the chat gateway.
 
 Two layers, both network-free: the deterministic gate/criticality policy
-(`gateway_config`, pure) and the `run_gateway` parser (exercised with a stubbed
+(`gateway.policy`, pure) and the `run_gateway` parser (exercised with a stubbed
 Anthropic client). The live classifier itself is covered by the `gateway` eval
 suite, not here.
 """
@@ -9,7 +9,7 @@ suite, not here.
 from types import SimpleNamespace
 from unittest.mock import patch
 
-from gateway_config import (
+from gateway.policy import (
     TOOL_SLOT_KIND,
     SlotFact,
     criticality,
@@ -164,7 +164,7 @@ def _raises(*_a, **_k):
 
 class TestRunGateway:
     def test_parses_ready(self):
-        import gateway
+        from gateway import runtime as gateway
         plan = {
             "in_domain": True, "tool": "run_economy_simulation",
             "slots": [
@@ -179,7 +179,7 @@ class TestRunGateway:
         assert v.tool == "run_economy_simulation"
 
     def test_parses_needs_plan(self):
-        import gateway
+        from gateway import runtime as gateway
         plan = {
             "in_domain": True, "tool": "run_economy_simulation",
             "slots": [
@@ -194,27 +194,27 @@ class TestRunGateway:
         assert set(v.gating_slots) == {"reform", "output"}
 
     def test_unknown_tool_becomes_none(self):
-        import gateway
+        from gateway import runtime as gateway
         plan = {"in_domain": True, "tool": "none", "slots": [], "unmodellable_outputs": ["inflation"]}
         with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             v = gateway.run_gateway("what will inflation be?")
         assert v.tool is None and v.outcome == "out_of_scope"
 
     def test_empty_input_fail_safe(self):
-        import gateway
+        from gateway import runtime as gateway
         # The client must not be called for empty input.
         with patch.object(gateway, "get_sync_client", _raises):
             assert gateway.run_gateway("").outcome == "ready"
             assert gateway.run_gateway("   ").outcome == "ready"
 
     def test_api_error_fail_safe(self):
-        import gateway
+        from gateway import runtime as gateway
         with patch.object(gateway, "get_sync_client", _raises):
             v = gateway.run_gateway("anything at all")
         assert v.outcome == "ready" and v.route == "compute"
 
     def test_missing_plan_block_fail_safe(self):
-        import gateway
+        from gateway import runtime as gateway
         resp = SimpleNamespace(content=[SimpleNamespace(type="text", text="oops")])
         client = SimpleNamespace(messages=SimpleNamespace(create=lambda **k: resp))
         with patch.object(gateway, "get_sync_client", lambda: client):
@@ -223,20 +223,20 @@ class TestRunGateway:
     def test_empty_plan_dict_fail_safe(self):
         # A degenerate emit_plan with empty input must fall back to compute, NOT
         # be read as an out_of_scope refusal of a genuinely in-scope question.
-        import gateway
+        from gateway import runtime as gateway
         with patch.object(gateway, "get_sync_client", lambda: _stub_client({})):
             v = gateway.run_gateway("What is the budgetary cost of raising the PA to 15000?")
         assert v.outcome == "ready" and v.route == "compute"
 
     def test_plan_missing_tool_fail_safe(self):
         # A plan missing the routing decision is a parse failure → fail-safe.
-        import gateway
+        from gateway import runtime as gateway
         plan = {"in_domain": True, "rationale": "partial output only"}
         with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             assert gateway.run_gateway("anything in scope").outcome == "ready"
 
     def test_bad_source_coerced_to_assumed(self):
-        import gateway
+        from gateway import runtime as gateway
         plan = {
             "in_domain": True, "tool": "run_economy_simulation",
             "slots": [{"name": "reform", "kind": "tool_input", "source": "garbage"}],
@@ -250,18 +250,18 @@ class TestRunGateway:
 
 class TestWriterDirective:
     def test_needs_plan_lists_slots(self):
-        import gateway
+        from gateway import runtime as gateway
         v = gateway.GatewayVerdict(outcome="needs_plan", route="lightweight", gating_slots=["reform", "output"])
         d = gateway.gateway_writer_directive(v)
         assert "reform" in d and "output" in d
 
     def test_partial_lists_unmodellable(self):
-        import gateway
+        from gateway import runtime as gateway
         v = gateway.GatewayVerdict(outcome="partial", route="lightweight", unmodellable_outputs=["inflation"])
         assert "inflation" in gateway.gateway_writer_directive(v)
 
     def test_serialise_plan_for_ready(self):
-        import gateway
+        from gateway import runtime as gateway
         v = gateway.GatewayVerdict(
             outcome="ready", route="compute", tool="run_economy_simulation",
             slots=[gateway.SlotFact("reform", "prompt", value="PA 15k")],

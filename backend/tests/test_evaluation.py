@@ -4,12 +4,12 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-import evaluation.runner as runner
-from evaluation.graders import grade_output, grade_text, grade_tool_calls
-from evaluation.loaders import load_case_file
-from evaluation.reporting import render_markdown
-from evaluation.runner import run_eval
-from evaluation.schemas import (
+import eval.runner as runner
+from eval.graders import grade_output, grade_text, grade_tool_calls
+from eval.loaders import load_case_file
+from eval.reporting import render_markdown
+from eval.runner import run_eval
+from eval.schemas import (
     CaseResult,
     CaseSkip,
     EvalReport,
@@ -22,7 +22,7 @@ from evaluation.schemas import (
     ToolCallExpectation,
     TrajectoryCase,
 )
-from evaluation.sync_policyengine_uk import render_generated_cases
+from eval.sync_policyengine_uk import render_generated_cases
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

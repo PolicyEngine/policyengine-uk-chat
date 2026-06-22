@@ -2,7 +2,7 @@
 
 import pytest
 
-from agent_tools import TOOL_DEFINITIONS
+from tools.definitions import TOOL_DEFINITIONS
 from prompts import (
     SYSTEM_PROMPT,
     SUGGESTION_SYSTEM,
@@ -93,7 +93,7 @@ def test_system_blocks_preserve_cache_breakpoints_after_prompt_refactor():
     pytest.importorskip("pydantic_ai")
     pytest.importorskip("anthropic")
 
-    from routes.chatbot import _build_system_blocks
+    from chat.system_blocks import _build_system_blocks
 
     on = _build_system_blocks(charts_mode=True)
     off = _build_system_blocks(charts_mode=False)

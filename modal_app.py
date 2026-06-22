@@ -46,7 +46,7 @@ image = (
     # Regenerate reference.md against the Modal-installed
     # policyengine-uk-compiled version so the deployed backend always serves a
     # fresh API reference. This mirrors the equivalent step in backend/Dockerfile.
-    .run_commands("cd /app/backend && python scripts/build_reference.py")
+    .run_commands("cd /app/backend && python engine/reference.py")
 )
 
 chat_secrets = modal.Secret.from_name(SECRET_NAME)
@@ -70,5 +70,5 @@ def web():
     sys.path.insert(0, "/app/backend")
     os.chdir("/app/backend")
 
-    from main import app as fastapi_app
+    from api.main import app as fastapi_app
     return fastapi_app

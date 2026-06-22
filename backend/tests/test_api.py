@@ -10,7 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
-from main import app
+from api.main import app
 
 client = TestClient(app)
 
@@ -327,7 +327,7 @@ class TestChatMessage:
 
 class TestChatRouteWithMockedAnthropic:
     def test_chat_route_executes_tool_loop_and_returns_final_answer(self, monkeypatch):
-        import routes.chatbot as chatbot
+        import chat.orchestrator as chatbot
 
         async def no_suggestions(*_args, **_kwargs):
             return []
@@ -368,7 +368,7 @@ class TestChatRouteWithMockedAnthropic:
                 "household": [{"baseline_net_income": 25119.60}],
             }
 
-        monkeypatch.setattr(chatbot, "_get_anthropic_client", lambda: fake_client)
+        monkeypatch.setattr(chatbot, "get_async_client", lambda: fake_client)
         monkeypatch.setattr(chatbot, "_generate_followup_suggestions", no_suggestions)
         monkeypatch.setattr(chatbot, "execute_tool", fake_execute_tool)
 
@@ -417,33 +417,33 @@ class TestRateLimitConfig:
         return Request(scope)
 
     def test_key_func_uses_user_id_header(self):
-        from rate_limit import chat_key_func
+        from api.rate_limit import chat_key_func
         req = self._request(headers={"x-user-id": "abc-123"})
         assert chat_key_func(req) == "user:abc-123"
 
     def test_key_func_falls_back_to_ip(self):
-        from rate_limit import chat_key_func
+        from api.rate_limit import chat_key_func
         req = self._request(client_host="198.51.100.7")
         assert chat_key_func(req) == "ip:198.51.100.7"
 
     def test_key_func_user_id_takes_precedence_over_ip(self):
-        from rate_limit import chat_key_func
+        from api.rate_limit import chat_key_func
         req = self._request(headers={"x-user-id": "u1"}, client_host="198.51.100.7")
         assert chat_key_func(req) == "user:u1"
 
     def test_empty_user_id_header_falls_back_to_ip(self):
-        from rate_limit import chat_key_func
+        from api.rate_limit import chat_key_func
         req = self._request(headers={"x-user-id": ""}, client_host="198.51.100.7")
         assert chat_key_func(req) == "ip:198.51.100.7"
 
     def test_limit_strings_compose_per_min_and_per_hour(self):
-        from rate_limit import CHAT_USER_LIMIT
+        from api.rate_limit import CHAT_USER_LIMIT
         assert "/minute" in CHAT_USER_LIMIT and "/hour" in CHAT_USER_LIMIT
 
     def test_env_overrides_take_effect_at_import(self):
         # conftest.py sets these to test values; verify rate_limit picked them up.
         import os
-        from rate_limit import CHAT_PER_MIN, CHAT_PER_HOUR, CHAT_IP_PER_MIN
+        from api.rate_limit import CHAT_PER_MIN, CHAT_PER_HOUR, CHAT_IP_PER_MIN
         assert CHAT_PER_MIN == int(os.environ["RATE_LIMIT_CHAT_PER_MIN"])
         assert CHAT_PER_HOUR == int(os.environ["RATE_LIMIT_CHAT_PER_HOUR"])
         assert CHAT_IP_PER_MIN == int(os.environ["RATE_LIMIT_CHAT_IP_PER_MIN"])
@@ -451,22 +451,22 @@ class TestRateLimitConfig:
     def test_client_ip_prefers_x_forwarded_for(self):
         # Behind a proxy, request.client.host is the proxy — X-Forwarded-For
         # carries the real client. The limiter must key on the latter.
-        from rate_limit import client_ip
+        from api.rate_limit import client_ip
         req = self._request(headers={"x-forwarded-for": "1.2.3.4"}, client_host="10.0.0.1")
         assert client_ip(req) == "1.2.3.4"
 
     def test_client_ip_takes_first_forwarded_entry(self):
-        from rate_limit import client_ip
+        from api.rate_limit import client_ip
         req = self._request(headers={"x-forwarded-for": "1.2.3.4, 10.0.0.1, 10.0.0.2"})
         assert client_ip(req) == "1.2.3.4"
 
     def test_client_ip_falls_back_to_socket_peer(self):
-        from rate_limit import client_ip
+        from api.rate_limit import client_ip
         req = self._request(client_host="198.51.100.7")
         assert client_ip(req) == "198.51.100.7"
 
     def test_chat_key_func_uses_forwarded_ip_for_anonymous(self):
-        from rate_limit import chat_key_func
+        from api.rate_limit import chat_key_func
         req = self._request(headers={"x-forwarded-for": "1.2.3.4"}, client_host="10.0.0.1")
         assert chat_key_func(req) == "ip:1.2.3.4"
 
@@ -480,7 +480,7 @@ class TestRateLimitConfig:
         """
         import inspect
         from starlette.requests import Request as StarletteRequest
-        from routes.chatbot import chat_message
+        from chat.routes import chat_message
         params = inspect.signature(chat_message).parameters
         assert "request" in params, "endpoint needs a `request` parameter for slowapi"
         assert params["request"].annotation is StarletteRequest, (
