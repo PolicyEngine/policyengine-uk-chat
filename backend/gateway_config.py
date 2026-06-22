@@ -20,12 +20,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import List, Literal, Optional
 
+from model_config import DEFAULT_SIMULATION_YEAR
 from tool_definitions import TOOL_DEFINITIONS
 
-# Mirrors the schema default year (YEAR_SCHEMA in tool_definitions.py). Only used
-# to decide whether the prompt names a *non-default* year; kept as one constant
-# so it has a single point of change if the engine's default year rolls.
-_DEFAULT_YEAR = "2025"
+# The default simulation year as a string, for comparison against years parsed
+# out of the prompt. Sourced from the single shared constant (which also feeds
+# YEAR_SCHEMA) so it can't drift from the schema default. Only used to decide
+# whether the prompt names a *non-default* year.
+_DEFAULT_YEAR = str(DEFAULT_SIMULATION_YEAR)
 
 Criticality = Literal["high", "medium", "low"]
 Source = Literal["prompt", "default", "assumed"]
@@ -123,9 +125,16 @@ OUTPUT_VOCAB = (
 # A non-default survey is required when the question is about a dimension the
 # default datasets (FRS/EFRS) don't carry. Silently keeping the default here
 # yields a wrong number, not a defaulted one — so dataset becomes load-bearing.
+#
+# These must be SPECIFIC to the non-default dimension. Bare "spending" was
+# dropped deliberately: ordinary in-scope questions ("how does this affect
+# benefit/welfare/government spending?") contain it, so it caused false LCFS
+# promotions. The consumption signal is carried by the more specific phrases
+# below (consumer/household spending, expenditure, VAT, living costs).
 _DATASET_SIGNAL_KEYWORDS = (
     "wealth", "net worth", "net wealth", "assets", "estate", "inheritance",  # WAS
-    "consumption", "expenditure", "spending", "vat", "living costs",          # LCFS
+    "consumption", "expenditure", "vat", "living costs",                      # LCFS
+    "consumer spending", "household spending", "spending patterns",           # LCFS
     "top income", "additional rate", "very high earner", "highest earner",    # SPI
 )
 

@@ -132,6 +132,18 @@ class TestGate:
         r = gate(True, "run_economy_simulation", [sf("reform", "prompt")], ["inflation"])
         assert r.outcome == "partial"
 
+    def test_partial_precedes_needs_plan(self):
+        # When a plan has BOTH an unmodellable output AND a slot that would gate,
+        # `partial` must win (resolve scope first), not `needs_plan`. Locks the
+        # documented precedence in gate() so reordering the checks can't silently
+        # regress it — test_partial alone wouldn't catch that, since its grounded
+        # ("prompt") slot never gates regardless of ordering.
+        slots = [sf("reform", "assumed")]  # assumed + high (override) + not inferable → gates
+        # Sanity: that slot really does gate on its own → needs_plan.
+        assert gate(True, "run_economy_simulation", slots, []).outcome == "needs_plan"
+        # With an unmodellable output also present, partial takes precedence.
+        assert gate(True, "run_economy_simulation", slots, ["inflation"]).outcome == "partial"
+
     def test_out_of_scope_no_tool_in_domain(self):
         assert gate(True, None, [], []).outcome == "out_of_scope"
         assert gate(True, None, [], ["inflation"]).outcome == "out_of_scope"

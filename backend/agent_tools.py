@@ -10,6 +10,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from model_config import DEFAULT_SIMULATION_YEAR
 from tool_definitions import TOOL_DEFINITIONS
 from tooling.households import build_household_frames
 from tooling.microdata import analyse_microdata_result, get_cached_microdata, hash_reform
@@ -59,7 +60,7 @@ def get_capabilities() -> Dict[str, Any]:
         return {"error": str(exc)}
 
 
-def get_baseline_parameters(year: int = 2025) -> Dict[str, Any]:
+def get_baseline_parameters(year: int = DEFAULT_SIMULATION_YEAR) -> Dict[str, Any]:
     try:
         _ensure_compiled_package_importable()
         from policyengine_uk_compiled import Simulation
@@ -80,7 +81,7 @@ def calculate_household(
     person: List[Dict[str, Any]],
     benunit: List[Dict[str, Any]],
     household: List[Dict[str, Any]],
-    year: int = 2025,
+    year: int = DEFAULT_SIMULATION_YEAR,
     reform: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     try:
@@ -109,7 +110,7 @@ def calculate_household(
 
 
 def run_economy_simulation(
-    year: int = 2025,
+    year: int = DEFAULT_SIMULATION_YEAR,
     reform: Optional[Dict[str, Any]] = None,
     dataset: str = "frs",
 ) -> Dict[str, Any]:
@@ -162,7 +163,7 @@ def run_economy_simulation(
 def analyse_microdata(
     entity: str,
     operation: str,
-    year: int = 2025,
+    year: int = DEFAULT_SIMULATION_YEAR,
     reform: Optional[Dict[str, Any]] = None,
     filters: Optional[Dict[str, Any]] = None,
     columns: Optional[List[str]] = None,

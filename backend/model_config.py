@@ -20,6 +20,13 @@ SUGGESTION_TEMPERATURE = float(os.environ.get("ANTHROPIC_SUGGESTION_TEMPERATURE"
 # Default fast model, shared by the chat route and the gateway classifier.
 DEFAULT_FAST_MODEL = os.environ.get("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5")
 
+# Default simulation/policy year — the single source of truth for the year the
+# engine models when a request doesn't name one. Referenced by the tool schemas
+# (YEAR_SCHEMA), the tool implementations' defaults, and the gateway's
+# non-default-year detection, so they can't drift apart. NB this is the modelled
+# policy year, which deliberately lags the calendar year.
+DEFAULT_SIMULATION_YEAR = 2025
+
 _SCOPE_DESCRIPTOR_PATH = Path(__file__).resolve().parent / "scope_descriptor.md"
 
 
