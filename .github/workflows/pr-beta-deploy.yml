@@ -87,6 +87,8 @@ jobs:
             SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
             STRIPE_SECRET_KEY="$STRIPE_SECRET_KEY" \
             STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
+            OBSERVABILITY_ENVIRONMENT="preview" \
+            OBSERVABILITY_PLATFORM="modal" \
             HOSTNAMES="https://policyengine-uk-chat.vercel.app" \
             PUBLIC_BASE_URL="https://policyengine-uk-chat.vercel.app" \
             --force
@@ -131,6 +133,8 @@ jobs:
             SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
             STRIPE_SECRET_KEY="$STRIPE_SECRET_KEY" \
             STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
+            OBSERVABILITY_ENVIRONMENT="preview" \
+            OBSERVABILITY_PLATFORM="modal" \
             HOSTNAMES="$FRONTEND_URL" \
             PUBLIC_BASE_URL="$FRONTEND_URL" \
             --force
