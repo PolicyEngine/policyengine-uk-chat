@@ -14,9 +14,14 @@ MAX_LOOKUP_LIMIT = 10
 DEFAULT_LOOKUP_LIMIT = 5
 MAX_FORMULAS_PER_VARIABLE = 4
 MAX_FORMULA_SOURCE_CHARS = 4000
+# Match certainty is a deterministic string parsing score for how well the
+# user's query matched parameter/variable names, labels, aliases, or docs. It
+# is not factual confidence in the underlying policy value or formula.
 MIN_MATCH_CERTAINTY = 0.72
 MIN_MATCH_MARGIN = 0.14
 MIN_PLAUSIBLE_MATCH_CERTAINTY = 0.35
+LOW_CERTAINTY_CONFIRMATION_REASON = "low_string_match_certainty"
+LOW_MARGIN_CONFIRMATION_REASON = "close_string_match_certainty_margin"
 
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {
@@ -161,8 +166,8 @@ def _best_field_score(
     return sorted(
         scores,
         key=lambda score: (
-            not score.exact,
             -score.certainty,
+            not score.exact,
             score.field_priority,
             score.extra_tokens,
             score.matched_on,
@@ -174,8 +179,8 @@ def _sort_ranked(ranked: Iterable[_RankedCandidate]) -> List[_RankedCandidate]:
     return sorted(
         ranked,
         key=lambda item: (
-            not item.exact,
             -item.certainty,
+            not item.exact,
             item.field_priority,
             item.extra_tokens,
             item.stable_key,
@@ -195,6 +200,16 @@ def _needs_confirmation(ranked: List[_RankedCandidate]) -> bool:
     if top.exact and not runner_up.exact:
         return False
     return top.certainty - runner_up.certainty < MIN_MATCH_MARGIN
+
+
+def _confirmation_reason(ranked: List[_RankedCandidate]) -> str:
+    top = ranked[0]
+    if top.certainty < MIN_MATCH_CERTAINTY:
+        return LOW_CERTAINTY_CONFIRMATION_REASON
+    runner_up = ranked[1]
+    if top.exact and not runner_up.exact:
+        return LOW_CERTAINTY_CONFIRMATION_REASON
+    return LOW_MARGIN_CONFIRMATION_REASON
 
 
 def _truncate_source(source: str) -> tuple[str, bool]:
@@ -418,8 +433,11 @@ def lookup_parameter_metadata(
             "suggestions": suggestions,
         }
 
-    matches = [_parameter_match_item(item, parameters) for item in plausible[:limit]]
     if _needs_confirmation(plausible):
+        matches = [
+            _parameter_match_item(item, parameters)
+            for item in plausible[:MAX_LOOKUP_LIMIT]
+        ]
         return {
             "status": "needs_confirmation",
             "needs_confirmation": True,
@@ -427,10 +445,12 @@ def lookup_parameter_metadata(
             "year": year,
             "query": query,
             "match_certainty": matches[0]["match_certainty"],
+            "confirmation_reason": _confirmation_reason(plausible),
             "message": "Multiple parameter matches are plausible. Ask the user which option they mean before answering.",
             "options": matches,
         }
 
+    matches = [_parameter_match_item(item, parameters) for item in plausible[:limit]]
     return {
         "status": "success",
         "needs_confirmation": False,
@@ -581,21 +601,26 @@ def lookup_variable_metadata(
             "suggestions": suggestions,
         }
 
-    matches = [
-        _variable_record(item, include_formula=include_formula)
-        for item in plausible[:limit]
-    ]
     if _needs_confirmation(plausible):
+        matches = [
+            _variable_record(item, include_formula=include_formula)
+            for item in plausible[:MAX_LOOKUP_LIMIT]
+        ]
         return {
             "status": "needs_confirmation",
             "needs_confirmation": True,
             "source": "policyengine_uk.CountryTaxBenefitSystem.variables",
             "query": query,
             "match_certainty": matches[0]["match_certainty"],
+            "confirmation_reason": _confirmation_reason(plausible),
             "message": "Multiple variable matches are plausible. Ask the user which option they mean before answering.",
             "options": matches,
         }
 
+    matches = [
+        _variable_record(item, include_formula=include_formula)
+        for item in plausible[:limit]
+    ]
     return {
         "status": "success",
         "needs_confirmation": False,
