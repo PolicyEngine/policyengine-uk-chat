@@ -15,6 +15,8 @@ import tools.definitions as tool_definitions
 import tools.registry as tool_registry
 from tools.dispatch import (
     get_baseline_parameters,
+    lookup_parameter,
+    lookup_variable,
     validate_reform,
     calculate_household,
     run_economy_simulation,
@@ -76,6 +78,144 @@ class TestGetBaselineParameters:
     def test_invalid_year_returns_error(self):
         result = get_baseline_parameters(year=9999)
         assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# lookup_parameter
+# ---------------------------------------------------------------------------
+
+@requires_compiled
+class TestLookupParameter:
+    def test_exact_path_returns_value(self):
+        result = lookup_parameter(query="income_tax.personal_allowance", year=2025)
+        assert result["status"] == "success"
+        assert result["needs_confirmation"] is False
+        assert result["match_certainty"] >= 0.98
+        assert result["primary_match"]["path"] == "income_tax.personal_allowance"
+        assert result["primary_match"]["value"] == 12570.0
+
+    def test_basic_rate_threshold_returns_context(self):
+        result = lookup_parameter(query="basic rate threshold", year=2025)
+        match = result["primary_match"]
+        assert match["path"] == "income_tax.uk_brackets.1.threshold"
+        assert match["value"] == 37700.0
+        assert match["context"]["personal_allowance"] == 12570.0
+        assert match["context"]["standard_gross_income_threshold"] == 50270.0
+
+    def test_standard_rate_of_vat_returns_standard_rate(self):
+        result = lookup_parameter(query="standard rate of VAT", year=2025)
+        assert result["status"] == "success"
+        assert result["needs_confirmation"] is False
+        assert result["primary_match"]["path"] == "vat.standard_rate"
+        assert result["primary_match"]["value"] == 0.2
+
+    def test_ambiguous_standard_allowance_needs_confirmation(self):
+        result = lookup_parameter(query="universal credit standard allowance", year=2025)
+        assert result["status"] == "needs_confirmation"
+        assert result["needs_confirmation"] is True
+        assert "primary_match" not in result
+        assert result["options"][0]["path"].startswith("universal_credit.standard_allowance")
+        assert len([
+            option
+            for option in result["options"]
+            if option["path"].startswith("universal_credit.standard_allowance")
+        ]) >= 4
+
+    def test_unknown_query_returns_error_with_suggestions(self):
+        result = lookup_parameter(query="zzzxqv not a known parameter", year=2025)
+        assert result["status"] == "error"
+        assert result["needs_confirmation"] is False
+        assert "error" in result
+        assert result["query"] == "zzzxqv not a known parameter"
+        assert result["suggestions"]
+
+    def test_invalid_year_returns_error(self):
+        result = lookup_parameter(query="personal allowance", year=9999)
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# lookup_variable
+# ---------------------------------------------------------------------------
+
+class TestLookupVariable:
+    def test_exact_variable_returns_formula_source(self):
+        pytest.importorskip("policyengine_uk")
+        result = lookup_variable(query="income_tax", limit=1)
+        match = result["primary_match"]
+        assert result["status"] == "success"
+        assert result["needs_confirmation"] is False
+        assert match["name"] == "income_tax"
+        assert match["label"] == "Income Tax"
+        assert match["documentation"] == "Total Income Tax liability"
+        assert match["entity"] == "person"
+        assert match["definition_period"] == "year"
+        assert match["has_formula"] is True
+        assert match["formula_status"] == "available"
+        assert "def formula" in match["formulas"][0]["source"]
+
+    def test_input_variable_has_no_formula(self):
+        pytest.importorskip("policyengine_uk")
+        result = lookup_variable(query="employment_income", limit=1)
+        match = result["primary_match"]
+        assert match["name"] == "employment_income"
+        assert match["has_formula"] is False
+        assert match["formula_status"] == "input_variable"
+        assert match["formulas"] == []
+
+    def test_natural_language_query_finds_variable(self):
+        pytest.importorskip("policyengine_uk")
+        result = lookup_variable(query="income tax liability", limit=1)
+        assert result["status"] == "success"
+        assert result["primary_match"]["name"] == "income_tax"
+
+    def test_natural_language_employment_income_prefers_input_variable(self):
+        pytest.importorskip("policyengine_uk")
+        result = lookup_variable(query="employment income", include_formula=False)
+        assert result["status"] == "success"
+        assert result["primary_match"]["name"] == "employment_income"
+
+    def test_natural_language_child_benefit_prefers_amount_variable(self):
+        pytest.importorskip("policyengine_uk")
+        result = lookup_variable(query="child benefit", include_formula=False)
+        assert result["status"] == "success"
+        assert result["primary_match"]["name"] == "child_benefit"
+
+    def test_formula_source_failure_is_marked_unavailable(self, monkeypatch):
+        pytest.importorskip("policyengine_uk")
+        import engine.lookups as lookups
+
+        fake_variable = SimpleNamespace(
+            name="fake_formula",
+            label="Fake formula",
+            documentation=None,
+            entity=SimpleNamespace(key="person"),
+            definition_period="year",
+            value_type=float,
+            default_value=0,
+            unit=None,
+            category=None,
+            formulas={"0001-01-01": lambda: None},
+        )
+
+        def fail_getsource(_formula):
+            raise OSError("source unavailable")
+
+        monkeypatch.setattr(lookups, "_variable_registry", lambda: {"fake_formula": fake_variable})
+        monkeypatch.setattr(lookups.inspect, "getsource", fail_getsource)
+        result = lookup_variable(query="fake_formula", include_formula=True)
+        assert result["status"] == "success"
+        assert result["primary_match"]["has_formula"] is True
+        assert result["primary_match"]["formula_status"] == "source_unavailable"
+
+    def test_unknown_query_returns_error_with_suggestions(self):
+        pytest.importorskip("policyengine_uk")
+        result = lookup_variable(query="zzzxqv not a policyengine variable")
+        assert result["status"] == "error"
+        assert result["needs_confirmation"] is False
+        assert "error" in result
+        assert result["query"] == "zzzxqv not a policyengine variable"
+        assert result["suggestions"]
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +438,8 @@ class TestToolDefinitions:
             "calculate_household",
             "run_economy_simulation",
             "analyse_microdata",
+            "lookup_parameter",
+            "lookup_variable",
             "run_python",
             "generate_chart",
         ]
@@ -412,11 +554,13 @@ class TestToolDefinitions:
         household_schema = _tool("calculate_household")["input_schema"]
         economy_schema = _tool("run_economy_simulation")["input_schema"]
         microdata_schema = _tool("analyse_microdata")["input_schema"]
+        parameter_schema = _tool("lookup_parameter")["input_schema"]
         chart_schema = _tool("generate_chart")["input_schema"]
 
         assert household_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
         assert economy_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
         assert microdata_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
+        assert parameter_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
         assert economy_schema["properties"]["reform"] == tool_definitions.REFORM_PROPERTY
         assert microdata_schema["properties"]["reform"] == tool_definitions.REFORM_PROPERTY
         assert microdata_schema["properties"]["columns"] == tool_definitions.STRING_ARRAY_SCHEMA
@@ -451,6 +595,9 @@ class TestToolDefinitions:
         assert "calculate_household" in description
         assert "run_economy_simulation" in description
         assert "analyse_microdata" in description
+        assert "lookup_parameter" in description
+        assert "lookup_variable" in description
+        assert "parameter introspection" not in description
 
 
 class TestAnalyseMicrodataContract:
@@ -961,6 +1108,16 @@ class TestExecuteTool:
         )
         result = execute_tool("analyse_microdata", {"entity": "households", "operation": "count"})
         assert result["tool"] == "microdata"
+
+    def test_dispatches_lookup_parameter(self, monkeypatch):
+        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "lookup_parameter", lambda **kwargs: {"tool": "parameter", "input": kwargs})
+        result = execute_tool("lookup_parameter", {"query": "personal allowance", "year": 2025})
+        assert result["tool"] == "parameter"
+
+    def test_dispatches_lookup_variable(self, monkeypatch):
+        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "lookup_variable", lambda **kwargs: {"tool": "variable", "input": kwargs})
+        result = execute_tool("lookup_variable", {"query": "income_tax"})
+        assert result["tool"] == "variable"
 
     def test_dispatches_generate_chart(self):
         result = execute_tool("generate_chart", {

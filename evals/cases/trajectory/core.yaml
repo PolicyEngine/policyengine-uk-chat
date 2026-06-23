@@ -72,17 +72,83 @@ cases:
   - id: trajectory_no_tool_for_definition
     suite: trajectory
     description: Conceptual questions should not trigger calculation tools.
-    prompt: What is the UK personal allowance?
+    prompt: What does the UK personal allowance mean conceptually?
     expected_tools: []
     forbidden_tools:
       - validate_reform
       - calculate_household
       - run_economy_simulation
       - analyse_microdata
+      - lookup_parameter
+      - lookup_variable
       - run_python
       - generate_chart
     offline_response:
       text: The personal allowance is the amount of income that can be received before income tax is due.
+
+  - id: trajectory_parameter_lookup_personal_allowance
+    suite: trajectory
+    description: Current parameter value questions should select lookup_parameter, not Python or simulations.
+    prompt: What is the current UK personal allowance?
+    expected_tools:
+      - name: lookup_parameter
+    forbidden_tools:
+      - validate_reform
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - lookup_variable
+      - run_python
+      - generate_chart
+    offline_response:
+      tool_calls:
+        - name: lookup_parameter
+          input:
+            query: personal allowance
+
+  - id: trajectory_parameter_lookup_basic_rate_threshold
+    suite: trajectory
+    description: Threshold value questions should select lookup_parameter with the requested year.
+    prompt: What is the basic rate threshold in 2025?
+    expected_tools:
+      - name: lookup_parameter
+        input_contains:
+          year: 2025
+    forbidden_tools:
+      - validate_reform
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - lookup_variable
+      - run_python
+      - generate_chart
+    offline_response:
+      tool_calls:
+        - name: lookup_parameter
+          input:
+            query: basic rate threshold
+            year: 2025
+
+  - id: trajectory_variable_definition_income_tax
+    suite: trajectory
+    description: Variable definition and formula questions should select lookup_variable.
+    prompt: What does the income_tax variable calculate? Please show the formula if available.
+    expected_tools:
+      - name: lookup_variable
+    forbidden_tools:
+      - validate_reform
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - lookup_parameter
+      - run_python
+      - generate_chart
+    offline_response:
+      tool_calls:
+        - name: lookup_variable
+          input:
+            query: income_tax
+            include_formula: true
 
   - id: trajectory_validate_reform_debugging
     suite: trajectory

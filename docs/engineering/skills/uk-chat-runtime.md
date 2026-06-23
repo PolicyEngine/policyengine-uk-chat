@@ -57,6 +57,10 @@ dispatched by `execute_tool()`. At present, the exposed tools are:
   parametric reforms.
 - `analyse_microdata`: analyse allowed non-FRS model microdata through bounded
   filtering, sampling, grouping, and aggregation operations.
+- `lookup_parameter`: look up baseline model parameter values by exact path or
+  natural-language query.
+- `lookup_variable`: look up PolicyEngine UK variable metadata and formula
+  source where available.
 - `run_python`: execute reproducible PolicyEngine UK Python code for fallback
   cases that do not fit the typed tools.
 - `generate_chart`: return frontend-renderable chart JSON markdown.
@@ -111,6 +115,11 @@ for follow-up suggestion chips, which deliberately sample with variety.
   tools when they fit the request, or with `run_python` as a fallback; do not
   answer tax, benefit, reform, poverty, decile, or distributional questions from
   memory.
+- Static parameter questions should use `lookup_parameter`; variable definition
+  or formula questions should use `lookup_variable`. Do not run household or
+  economy simulations just to infer a parameter value.
+- If a lookup tool returns `status: "needs_confirmation"`, ask the user to pick
+  one of the returned options before presenting a value or formula.
 - Use `validate_reform` only when the user is drafting, debugging, or asking
   whether reform JSON is valid. Do not use it as a routine preflight before
   every simulation.

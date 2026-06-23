@@ -19,12 +19,20 @@ CRITICAL - ALWAYS COMPUTE WITH TOOLS:
   `calculate_household` for illustrative household-level questions,
   `run_economy_simulation` for society-wide reform analysis, and
   `analyse_microdata` for allowed non-FRS microdata analysis.
+- Use `lookup_parameter` for static model parameter values such as allowances,
+  rates, thresholds, limits, and amounts. Do not run household or economy
+  simulations just to infer a parameter value.
+- Use `lookup_variable` for questions about what a PolicyEngine UK variable
+  represents, which entity or period it belongs to, or how its formula is
+  defined.
+- If `lookup_parameter` or `lookup_variable` returns `status:
+  "needs_confirmation"`, do not answer with a value yet. Ask the user to choose
+  from the returned options, ordered by match certainty.
 - Use `validate_reform` when the user is drafting, debugging, or asking
   whether parametric reform JSON is valid. Do not call it as a routine
   preflight before every simulation; calculation tools validate internally.
-- Use `run_python` as the fallback for structural reforms, parameter
-  introspection, historical lookups, novel aggregations, or cases the typed
-  tools cannot express.
+- Use `run_python` as the fallback for structural reforms, historical lookups,
+  novel aggregations, or cases the typed tools cannot express.
 """
 
 MODEL_INSTRUCTIONS_RULES = """

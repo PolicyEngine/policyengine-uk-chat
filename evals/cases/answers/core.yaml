@@ -91,6 +91,176 @@ cases:
         position by £1.2 billion. The reported decile impacts range up to £120
         per year in decile 10.
 
+  - id: answer_parameter_lookup_basic_rate_threshold
+    suite: answer
+    description: Parameter lookup answers should distinguish raw taxable-income thresholds from standard gross-income thresholds.
+    prompt: What is the basic rate threshold in 2025?
+    tool_calls:
+      - name: lookup_parameter
+        input:
+          query: basic rate threshold
+          year: 2025
+        output:
+          status: success
+          year: 2025
+          query: basic rate threshold
+          primary_match:
+            path: income_tax.uk_brackets.1.threshold
+            value: 37700.0
+            label: income tax uk brackets 1 threshold
+            program: income_tax
+            context:
+              threshold_basis: taxable_income_after_personal_allowance
+              personal_allowance: 12570.0
+              standard_gross_income_threshold: 50270.0
+          matches: []
+    expect:
+      required:
+        - "2025"
+        - £37,700
+        - taxable income
+        - £50,270
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+        - simulated household
+      grounded_numbers: true
+      allowed_numbers: [2025, 37700, 12570, 50270]
+      number_tolerance: 0.01
+    offline_response:
+      text: >
+        In 2025, the model parameter for the basic-rate upper threshold is
+        £37,700 of taxable income after the personal allowance. For someone
+        receiving the full £12,570 personal allowance, that corresponds to a
+        standard gross-income threshold of £50,270.
+
+  - id: answer_parameter_lookup_needs_confirmation
+    suite: answer
+    description: Ambiguous lookup results should ask the user to choose an option rather than answer with a value.
+    prompt: What is the Universal Credit standard allowance?
+    tool_calls:
+      - name: lookup_parameter
+        input:
+          query: universal credit standard allowance
+          year: 2025
+        output:
+          status: needs_confirmation
+          needs_confirmation: true
+          year: 2025
+          query: universal credit standard allowance
+          match_certainty: 1.0
+          message: Multiple parameter matches are plausible. Ask the user which option they mean before answering.
+          options:
+            - path: universal_credit.standard_allowance_couple_over25
+              value: 628.1
+              label: universal credit standard allowance couple over25
+              program: universal_credit
+              match_certainty: 1.0
+            - path: universal_credit.standard_allowance_couple_under25
+              value: 497.55
+              label: universal credit standard allowance couple under25
+              program: universal_credit
+              match_certainty: 1.0
+            - path: universal_credit.standard_allowance_single_over25
+              value: 400.14
+              label: universal credit standard allowance single over25
+              program: universal_credit
+              match_certainty: 1.0
+            - path: universal_credit.standard_allowance_single_under25
+              value: 316.98
+              label: universal credit standard allowance single under25
+              program: universal_credit
+              match_certainty: 1.0
+    expect:
+      required:
+        - choose
+        - single over 25
+        - single under 25
+        - couple over 25
+        - couple under 25
+      forbidden:
+        - £628.10
+        - £497.55
+        - £400.14
+        - £316.98
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+    offline_response:
+      text: >
+        I found several Universal Credit standard allowance parameters for
+        2025. Please choose which one you mean: single under 25, single over
+        25, couple under 25, or couple over 25.
+
+  - id: answer_variable_lookup_income_tax_formula
+    suite: answer
+    description: Variable lookup answers should explain metadata and formula source without inventing extra calculations.
+    prompt: What does income_tax calculate?
+    tool_calls:
+      - name: lookup_variable
+        input:
+          query: income_tax
+          include_formula: true
+        output:
+          status: success
+          query: income_tax
+          primary_match:
+            name: income_tax
+            label: Income Tax
+            documentation: Total Income Tax liability
+            entity: person
+            definition_period: year
+            value_type: float
+            default_value: 0
+            unit: currency-GBP
+            category: tax
+            has_formula: true
+            formula_status: available
+            formulas:
+              - effective_date: "0001-01-01"
+                source: |
+                      def formula(person, period, parameters):
+                          p = parameters(period).gov.hmrc.income_tax
+
+                          additions = add(person, period, p.income_tax_additions)
+                          subtractions = add(person, period, p.income_tax_subtractions)
+
+                          return max_(0, additions - subtractions)
+                truncated: false
+          matches: []
+    expect:
+      required:
+        - Total Income Tax liability
+        - person
+        - year
+        - additions
+        - subtractions
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+    offline_response:
+      text: >
+        income_tax is the person-level yearly variable for Total Income Tax
+        liability. Its formula takes income tax additions, subtracts income tax
+        subtractions, and floors the result at zero.
+
   - id: answer_household_current_policy_only
     suite: answer
     description: Current-policy household answers should stay illustrative and grounded.

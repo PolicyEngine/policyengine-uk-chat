@@ -128,6 +128,50 @@ ANALYSE_MICRODATA_INPUT_SCHEMA = {
     "required": ["entity", "operation"],
 }
 
+LOOKUP_LIMIT_SCHEMA = {
+    "type": "integer",
+    "default": 5,
+    "minimum": 1,
+    "maximum": 10,
+    "description": "Maximum number of matches to return.",
+}
+
+LOOKUP_PARAMETER_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {
+            "type": "string",
+            "description": (
+                "Parameter path or natural-language query, for example "
+                "`income_tax.personal_allowance` or `basic rate threshold`."
+            ),
+        },
+        "year": YEAR_SCHEMA,
+        "limit": LOOKUP_LIMIT_SCHEMA,
+    },
+    "required": ["query"],
+}
+
+LOOKUP_VARIABLE_INPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "query": {
+            "type": "string",
+            "description": (
+                "Variable name, label, or natural-language query, for example "
+                "`income_tax`, `employment_income`, or `income tax liability`."
+            ),
+        },
+        "include_formula": {
+            "type": "boolean",
+            "default": True,
+            "description": "Whether to include formula source when the variable has formulas.",
+        },
+        "limit": LOOKUP_LIMIT_SCHEMA,
+    },
+    "required": ["query"],
+}
+
 RUN_PYTHON_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -239,11 +283,34 @@ ANALYSE_MICRODATA_DESCRIPTION = (
     "baseline_* and reform_* comparison columns."
 )
 
+LOOKUP_PARAMETER_DESCRIPTION = (
+    "Look up baseline UK model parameter values for a year by exact path "
+    "or natural-language query. Use this for static parameter questions "
+    "such as the personal allowance, tax rates, thresholds, limits, and "
+    "amounts. Prefer this over run_python for parameter introspection, "
+    "and do not run household or economy simulations just to infer a "
+    "parameter value. Returns canonical model paths and values, plus "
+    "context for common threshold interpretations when deterministic. "
+    "If several matches are plausible, returns status `needs_confirmation`; "
+    "ask the user to choose before answering."
+)
+
+LOOKUP_VARIABLE_DESCRIPTION = (
+    "Look up PolicyEngine UK variable definitions, metadata, and formula "
+    "source when available. Use this for questions about what a model "
+    "variable represents, which entity or period it belongs to, or how "
+    "it is calculated. Prefer this over run_python for variable "
+    "definition and formula lookups. If several matches are plausible, "
+    "returns status `needs_confirmation`; ask the user to choose before "
+    "answering."
+)
+
 RUN_PYTHON_DESCRIPTION = (
     "Execute reproducible Python code using the official PolicyEngine UK compiled interface. "
-    "Prefer the typed tools (`calculate_household`, `run_economy_simulation`, `analyse_microdata`) "
+    "Prefer the typed tools (`calculate_household`, `run_economy_simulation`, `analyse_microdata`, "
+    "`lookup_parameter`, `lookup_variable`) "
     "when the question fits their shape; use `run_python` as a fallback for structural reforms, "
-    "novel aggregations, parameter introspection, historical lookups, or unsupported cases. "
+    "novel aggregations, historical lookups, or unsupported cases. "
     "The environment preloads `policyengine_uk_compiled` as `pe`, plus `Simulation`, `Parameters`, "
     "`StructuralReform`, `aggregate_microdata`, `combine_microdata`, `capabilities`, "
     "`ensure_dataset`, `pd`, `np`, `json`, and `math`. Assign the final answer to `result` and "

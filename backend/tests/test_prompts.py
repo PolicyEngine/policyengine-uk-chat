@@ -43,9 +43,14 @@ def test_main_prompt_prefers_typed_tools_before_python():
     assert "calculate_household" in SYSTEM_PROMPT
     assert "run_economy_simulation" in SYSTEM_PROMPT
     assert "analyse_microdata" in SYSTEM_PROMPT
+    assert "lookup_parameter" in SYSTEM_PROMPT
+    assert "lookup_variable" in SYSTEM_PROMPT
     assert "validate_reform" in SYSTEM_PROMPT
     assert "routine" in SYSTEM_PROMPT
     assert "preflight" in SYSTEM_PROMPT
+    assert "Do not run household or economy" in SYSTEM_PROMPT
+    assert "needs_confirmation" in SYSTEM_PROMPT
+    assert "choose" in SYSTEM_PROMPT
     assert "Use `run_python` as the fallback" in SYSTEM_PROMPT
 
 
@@ -62,6 +67,21 @@ def test_run_python_tool_repeats_microdata_contract():
     assert "Simulation.single_person()" in description
     assert "rather than real households" in description
     assert "fallback" in description.lower()
+    assert "lookup_parameter" in description
+    assert "lookup_variable" in description
+    assert "parameter introspection" not in description
+
+
+def test_lookup_tools_describe_metadata_contracts():
+    parameter = _tool("lookup_parameter")
+    variable = _tool("lookup_variable")
+    assert "static parameter questions" in parameter["description"]
+    assert "do not run household or economy simulations" in parameter["description"].lower()
+    assert "needs_confirmation" in parameter["description"]
+    assert parameter["input_schema"]["properties"]["year"]["default"] == 2025
+    assert "formula source" in variable["description"]
+    assert "needs_confirmation" in variable["description"]
+    assert variable["input_schema"]["properties"]["include_formula"]["default"] is True
 
 
 def test_analyse_microdata_tool_excludes_frs():

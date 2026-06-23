@@ -18,6 +18,10 @@ from tools.definitions import (
     DEFAULT_SIMULATION_YEAR,
     GENERATE_CHART_DESCRIPTION,
     GENERATE_CHART_INPUT_SCHEMA,
+    LOOKUP_PARAMETER_DESCRIPTION,
+    LOOKUP_PARAMETER_INPUT_SCHEMA,
+    LOOKUP_VARIABLE_DESCRIPTION,
+    LOOKUP_VARIABLE_INPUT_SCHEMA,
     RUN_ECONOMY_SIMULATION_DESCRIPTION,
     RUN_ECONOMY_SIMULATION_INPUT_SCHEMA,
     RUN_PYTHON_DESCRIPTION,
@@ -26,6 +30,7 @@ from tools.definitions import (
     VALIDATE_REFORM_INPUT_SCHEMA,
 )
 from engine.households import build_household_frames
+from engine.lookups import lookup_parameter_metadata, lookup_variable_metadata
 from engine.microdata import analyse_microdata_result, get_cached_microdata, hash_reform
 from engine.reforms import build_compiled_policy, validate_reform_dict
 from engine.sandbox import (
@@ -61,6 +66,8 @@ __all__ = [
     "generate_chart",
     "get_baseline_parameters",
     "get_capabilities",
+    "lookup_parameter",
+    "lookup_variable",
     "run_economy_simulation",
     "run_python",
     "validate_reform",
@@ -246,6 +253,55 @@ def analyse_microdata(
         import traceback
 
         logger.error(traceback.format_exc())
+        return {"error": str(exc)}
+
+
+@register_tool(
+    name="lookup_parameter",
+    description=LOOKUP_PARAMETER_DESCRIPTION,
+    input_schema=LOOKUP_PARAMETER_INPUT_SCHEMA,
+)
+def lookup_parameter(
+    query: str,
+    year: int = DEFAULT_SIMULATION_YEAR,
+    limit: int = 5,
+) -> Dict[str, Any]:
+    """Look up baseline model parameter values by path or natural query."""
+    try:
+        _ensure_compiled_package_importable()
+        from policyengine_uk_compiled import Simulation
+
+        sim = Simulation(year=year)
+        return lookup_parameter_metadata(
+            parameters=sim.get_baseline_params(),
+            query=query,
+            year=year,
+            limit=limit,
+        )
+    except Exception as exc:
+        logger.error(f"Error looking up parameter: {exc}")
+        return {"error": str(exc)}
+
+
+@register_tool(
+    name="lookup_variable",
+    description=LOOKUP_VARIABLE_DESCRIPTION,
+    input_schema=LOOKUP_VARIABLE_INPUT_SCHEMA,
+)
+def lookup_variable(
+    query: str,
+    include_formula: bool = True,
+    limit: int = 5,
+) -> Dict[str, Any]:
+    """Look up PolicyEngine UK variable metadata and formula source."""
+    try:
+        return lookup_variable_metadata(
+            query=query,
+            include_formula=include_formula,
+            limit=limit,
+        )
+    except Exception as exc:
+        logger.error(f"Error looking up variable: {exc}")
         return {"error": str(exc)}
 
 
