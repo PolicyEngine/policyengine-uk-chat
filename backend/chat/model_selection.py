@@ -1,11 +1,63 @@
 """Chat model selection and small turn-classification helpers."""
 
-from typing import List
+import logging
+import re
+from typing import Any, List
 
-from config import DEFAULT_COMPLEX_MODEL, DEFAULT_FAST_MODEL, FAST_MODEL_MAX_INPUT_TOKENS
+from config import (
+    DEFAULT_COMPLEX_MODEL,
+    DEFAULT_FAST_MODEL,
+    DEFAULT_REASONING_MODEL,
+    FAST_MODEL_MAX_INPUT_TOKENS,
+)
 from prompts import SYSTEM_PROMPT
 
 from chat.system_blocks import REFERENCE_DOC
+
+logger = logging.getLogger(__name__)
+
+
+_REFORM_CAPABLE_TOOLS = {
+    "analyse_microdata",
+    "calculate_household",
+    "run_economy_simulation",
+}
+
+_DISTRIBUTIONAL_OUTPUTS = {
+    "decile_impact",
+    "marginal_rate",
+    "poverty_impact",
+    "winners_losers",
+}
+
+_DISTRIBUTIONAL_TEXT_RE = re.compile(
+    r"\b(?:deciles?|quintiles?|distributional|winners?|losers?|poverty|"
+    r"inequality|gini|marginal tax|effective tax|marginal rate|effective rate)\b",
+    re.IGNORECASE,
+)
+
+_POLICY_CONTEXT_RE = re.compile(
+    r"\b(?:income tax|tax(?:es)?|taxable|national insurance|ni|universal credit|"
+    r"uc|child benefit|pension credit|housing benefit|council tax|vat|"
+    r"capital gains tax|inheritance tax|benefit(?:s)?|allowance(?:s)?|"
+    r"personal allowance|threshold(?:s)?|basic rate|higher rate|"
+    r"additional rate|tax rate|marginal rate|effective rate|taper rate|"
+    r"band(?:s)?|taper(?:s)?|lha)\b",
+    re.IGNORECASE,
+)
+
+_REFORM_INTENT_RE = re.compile(
+    r"\b(?:reform|raise|increase|decrease|cut|reduce|lower|change|replace|"
+    r"freeze|uprate|abolish|scrap|introduce|set)\b",
+    re.IGNORECASE,
+)
+
+_POLICY_NUMERIC_CHANGE_RE = re.compile(
+    r"(?:\bby\s+\d+(?:\.\d+)?\s*%)"
+    r"|(?:\bfrom\s+\d+(?:\.\d+)?\s*%\s*to\s+\d+(?:\.\d+)?\s*%)"
+    r"|(?:\b\d+\s*pp\b)",
+    re.IGNORECASE,
+)
 
 
 def _estimate_message_tokens(messages: List[dict]) -> int:
@@ -13,7 +65,77 @@ def _estimate_message_tokens(messages: List[dict]) -> int:
     return char_count // 4
 
 
-def _select_chat_model(messages: List[dict]) -> str:
+def _slot_value(slot: Any, attr: str) -> Any:
+    if isinstance(slot, dict):
+        return slot.get(attr)
+    return getattr(slot, attr, None)
+
+
+def _detect_gateway_reasoning_signal(verdict: Any) -> str | None:
+    """Return a structured reform/distributional signal from the gateway."""
+    if verdict is None:
+        return None
+    tool = getattr(verdict, "tool", None)
+    slots = getattr(verdict, "slots", []) or []
+    for slot in slots:
+        name = str(_slot_value(slot, "name") or "")
+        kind = str(_slot_value(slot, "kind") or "tool_input")
+        source = str(_slot_value(slot, "source") or "")
+        if (
+            tool in _REFORM_CAPABLE_TOOLS
+            and name == "reform"
+            and source in {"prompt", "default"}
+        ):
+            return f"gateway:{tool}:reform"
+        if kind == "output" and name in _DISTRIBUTIONAL_OUTPUTS:
+            return f"gateway:{tool}:output:{name}"
+    return None
+
+
+def _detect_reform_signal(text: str) -> str | None:
+    """Return a narrow text reform/distributional signal, if any.
+
+    Opening turns should prefer the gateway's structured plan. This text check
+    is a fallback for follow-ups and gateway fail-safe turns, so it requires
+    policy context before generic change language can trigger the reasoning
+    model.
+    """
+    if not text:
+        return None
+    distributional = _DISTRIBUTIONAL_TEXT_RE.search(text)
+    if distributional:
+        return distributional.group(0)
+
+    if not _POLICY_CONTEXT_RE.search(text):
+        return None
+
+    reform_intent = _REFORM_INTENT_RE.search(text)
+    if reform_intent:
+        return reform_intent.group(0)
+
+    numeric_change = _POLICY_NUMERIC_CHANGE_RE.search(text)
+    if numeric_change:
+        return numeric_change.group(0)
+    return None
+
+
+def _select_chat_model(
+    messages: List[dict],
+    *,
+    charts_mode: bool = False,
+    gateway_verdict: Any = None,
+) -> str:
+    signal = _detect_gateway_reasoning_signal(gateway_verdict)
+    if signal is None:
+        signal = _detect_reform_signal(_last_user_text(messages))
+    if signal:
+        logger.info("[MODEL] Routed to reasoning model (signal=%r)", signal)
+        return DEFAULT_REASONING_MODEL
+
+    if charts_mode:
+        logger.info("[MODEL] Routed to reasoning model (charts_mode=True)")
+        return DEFAULT_REASONING_MODEL
+
     estimated_input_tokens = (
         _estimate_message_tokens(messages)
         + len(SYSTEM_PROMPT) // 4
