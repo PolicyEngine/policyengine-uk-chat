@@ -201,7 +201,7 @@ class TestLookupVariable:
 
     def test_formula_source_failure_is_marked_unavailable(self, monkeypatch):
         pytest.importorskip("policyengine_uk")
-        import engine.lookups as lookups
+        import engine.lookup.variables as variable_lookups
 
         fake_variable = SimpleNamespace(
             name="fake_formula",
@@ -219,8 +219,8 @@ class TestLookupVariable:
         def fail_getsource(_formula):
             raise OSError("source unavailable")
 
-        monkeypatch.setattr(lookups, "_variable_registry", lambda: {"fake_formula": fake_variable})
-        monkeypatch.setattr(lookups.inspect, "getsource", fail_getsource)
+        monkeypatch.setattr(variable_lookups, "_variable_registry", lambda: {"fake_formula": fake_variable})
+        monkeypatch.setattr(variable_lookups.inspect, "getsource", fail_getsource)
         result = lookup_variable(query="fake_formula", include_formula=True)
         assert result["status"] == "success"
         assert result["primary_match"]["has_formula"] is True

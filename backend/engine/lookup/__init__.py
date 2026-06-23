@@ -1,4 +1,4 @@
-"""Compatibility facade for deterministic metadata lookup helpers."""
+"""Deterministic metadata lookup helpers for model-facing tools."""
 
 from engine.lookup.parameters import lookup_parameter_metadata
 from engine.lookup.variables import lookup_variable_metadata
