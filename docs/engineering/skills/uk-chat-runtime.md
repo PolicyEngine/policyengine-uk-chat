@@ -119,7 +119,11 @@ for follow-up suggestion chips, which deliberately sample with variety.
   or formula questions should use `lookup_variable`. Do not run household or
   economy simulations just to infer a parameter value.
 - If a lookup tool returns `status: "needs_confirmation"`, ask the user to pick
-  one of the returned options before presenting a value or formula.
+  one of the returned options before presenting a value or formula. Treat
+  `match_certainty` as deterministic string parsing certainty only, not factual
+  confidence in the policy value, variable metadata, or formula. Use
+  `confirmation_reason` to explain whether the parsed query is low-certainty or
+  closely tied between options.
 - Use `validate_reform` only when the user is drafting, debugging, or asking
   whether reform JSON is valid. Do not use it as a routine preflight before
   every simulation.

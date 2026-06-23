@@ -46,6 +46,11 @@ def isolated_tool_registry():
         tool_registry._TOOL_SPECS[:] = original_specs
 
 
+def _assert_match_certainties_descending(options: list[dict]) -> None:
+    certainties = [option["match_certainty"] for option in options]
+    assert certainties == sorted(certainties, reverse=True)
+
+
 # ---------------------------------------------------------------------------
 # policyengine_uk_compiled interface
 # ---------------------------------------------------------------------------
@@ -110,11 +115,14 @@ class TestLookupParameter:
         assert result["primary_match"]["value"] == 0.2
 
     def test_ambiguous_standard_allowance_needs_confirmation(self):
-        result = lookup_parameter(query="universal credit standard allowance", year=2025)
+        result = lookup_parameter(query="universal credit standard allowance", year=2025, limit=1)
         assert result["status"] == "needs_confirmation"
         assert result["needs_confirmation"] is True
+        assert result["confirmation_reason"] == "close_string_match_certainty_margin"
         assert "primary_match" not in result
         assert result["options"][0]["path"].startswith("universal_credit.standard_allowance")
+        assert len(result["options"]) > 1
+        _assert_match_certainties_descending(result["options"])
         assert len([
             option
             for option in result["options"]
@@ -180,6 +188,16 @@ class TestLookupVariable:
         result = lookup_variable(query="child benefit", include_formula=False)
         assert result["status"] == "success"
         assert result["primary_match"]["name"] == "child_benefit"
+
+    def test_ambiguous_variable_query_ignores_limit_for_confirmation_options(self):
+        pytest.importorskip("policyengine_uk")
+        result = lookup_variable(query="benefit", include_formula=False, limit=1)
+        assert result["status"] == "needs_confirmation"
+        assert result["needs_confirmation"] is True
+        assert result["confirmation_reason"] == "close_string_match_certainty_margin"
+        assert len(result["options"]) > 1
+        _assert_match_certainties_descending(result["options"])
+        assert "primary_match" not in result
 
     def test_formula_source_failure_is_marked_unavailable(self, monkeypatch):
         pytest.importorskip("policyengine_uk")
@@ -598,6 +616,14 @@ class TestToolDefinitions:
         assert "lookup_parameter" in description
         assert "lookup_variable" in description
         assert "parameter introspection" not in description
+
+    def test_lookup_certainty_is_documented_as_string_parsing_certainty(self):
+        parameter_description = _tool("lookup_parameter")["description"]
+        variable_description = _tool("lookup_variable")["description"]
+        assert "string parsing certainty" in parameter_description
+        assert "confirmation_reason" in parameter_description
+        assert "string parsing certainty" in variable_description
+        assert "confirmation_reason" in variable_description
 
 
 class TestAnalyseMicrodataContract:

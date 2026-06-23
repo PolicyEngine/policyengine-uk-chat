@@ -155,6 +155,7 @@ cases:
           year: 2025
           query: universal credit standard allowance
           match_certainty: 1.0
+          confirmation_reason: close_string_match_certainty_margin
           message: Multiple parameter matches are plausible. Ask the user which option they mean before answering.
           options:
             - path: universal_credit.standard_allowance_couple_over25

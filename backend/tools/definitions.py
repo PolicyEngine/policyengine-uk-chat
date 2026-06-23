@@ -133,7 +133,11 @@ LOOKUP_LIMIT_SCHEMA = {
     "default": 5,
     "minimum": 1,
     "maximum": 10,
-    "description": "Maximum number of matches to return.",
+    "description": (
+        "Maximum number of success matches or error suggestions to return. "
+        "Confirmation responses return the full bounded option set even when "
+        "this limit is lower."
+    ),
 }
 
 LOOKUP_PARAMETER_INPUT_SCHEMA = {
@@ -291,8 +295,11 @@ LOOKUP_PARAMETER_DESCRIPTION = (
     "and do not run household or economy simulations just to infer a "
     "parameter value. Returns canonical model paths and values, plus "
     "context for common threshold interpretations when deterministic. "
+    "`match_certainty` is deterministic string parsing certainty, not "
+    "factual confidence in the parameter value. "
     "If several matches are plausible, returns status `needs_confirmation`; "
-    "ask the user to choose before answering."
+    "ask the user to choose before answering, using `confirmation_reason` "
+    "to explain whether the string match is low-certainty or closely tied."
 )
 
 LOOKUP_VARIABLE_DESCRIPTION = (
@@ -300,9 +307,12 @@ LOOKUP_VARIABLE_DESCRIPTION = (
     "source when available. Use this for questions about what a model "
     "variable represents, which entity or period it belongs to, or how "
     "it is calculated. Prefer this over run_python for variable "
-    "definition and formula lookups. If several matches are plausible, "
-    "returns status `needs_confirmation`; ask the user to choose before "
-    "answering."
+    "definition and formula lookups. `match_certainty` is deterministic "
+    "string parsing certainty, not factual confidence in the variable "
+    "metadata or formula. If several matches are plausible, returns "
+    "status `needs_confirmation`; ask the user to choose before answering, "
+    "using `confirmation_reason` to explain whether the string match is "
+    "low-certainty or closely tied."
 )
 
 RUN_PYTHON_DESCRIPTION = (

@@ -78,10 +78,12 @@ cases:
     input:
       query: universal credit standard allowance
       year: 2025
+      limit: 1
     expect:
       contains:
         status: needs_confirmation
         needs_confirmation: true
+        confirmation_reason: close_string_match_certainty_margin
         options:
           - program: universal_credit
       required_paths:
@@ -162,3 +164,22 @@ cases:
         primary_match:
           name: child_benefit
           label: Child Benefit
+
+  - id: lookup_variable_benefit_confirmation_ignores_limit
+    suite: tool_contract
+    description: lookup_variable returns multiple confirmation options even when the caller asks for one match.
+    tool_name: lookup_variable
+    input:
+      query: benefit
+      include_formula: false
+      limit: 1
+    expect:
+      contains:
+        status: needs_confirmation
+        needs_confirmation: true
+        confirmation_reason: close_string_match_certainty_margin
+      required_paths:
+        - options.0.name
+        - options.1.name
+      absent_paths:
+        - primary_match

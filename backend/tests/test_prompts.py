@@ -51,6 +51,8 @@ def test_main_prompt_prefers_typed_tools_before_python():
     assert "Do not run household or economy" in SYSTEM_PROMPT
     assert "needs_confirmation" in SYSTEM_PROMPT
     assert "choose" in SYSTEM_PROMPT
+    assert "string parsing certainty" in SYSTEM_PROMPT
+    assert "confirmation_reason" in SYSTEM_PROMPT
     assert "Use `run_python` as the fallback" in SYSTEM_PROMPT
 
 
@@ -78,9 +80,14 @@ def test_lookup_tools_describe_metadata_contracts():
     assert "static parameter questions" in parameter["description"]
     assert "do not run household or economy simulations" in parameter["description"].lower()
     assert "needs_confirmation" in parameter["description"]
+    assert "string parsing certainty" in parameter["description"]
+    assert "confirmation_reason" in parameter["description"]
     assert parameter["input_schema"]["properties"]["year"]["default"] == 2025
+    assert "Confirmation responses return the full bounded option set" in parameter["input_schema"]["properties"]["limit"]["description"]
     assert "formula source" in variable["description"]
     assert "needs_confirmation" in variable["description"]
+    assert "string parsing certainty" in variable["description"]
+    assert "confirmation_reason" in variable["description"]
     assert variable["input_schema"]["properties"]["include_formula"]["default"] is True
 
 
