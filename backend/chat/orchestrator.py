@@ -139,7 +139,11 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                 tools = []
                 system_blocks = _build_lightweight_system_blocks(verdict)
             else:
-                model = _select_chat_model(conversation, charts_mode=charts_mode)
+                model = _select_chat_model(
+                    conversation,
+                    charts_mode=charts_mode,
+                    gateway_verdict=verdict,
+                )
                 tools = _tool_defs_for_anthropic()
                 gateway_plan = serialise_plan_for_system(verdict) if verdict is not None else None
                 system_blocks = _build_system_blocks(
