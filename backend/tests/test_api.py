@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from policyengine_observability.runtime import OPERATION_LOGGER
 from api.main import app
 
 client = TestClient(app)
@@ -329,6 +330,8 @@ class TestChatRouteWithMockedAnthropic:
     def test_chat_route_executes_tool_loop_and_returns_final_answer(self, monkeypatch):
         import chat.orchestrator as chatbot
 
+        operation_records = []
+
         async def no_suggestions(*_args, **_kwargs):
             return []
 
@@ -371,6 +374,7 @@ class TestChatRouteWithMockedAnthropic:
         monkeypatch.setattr(chatbot, "get_async_client", lambda: fake_client)
         monkeypatch.setattr(chatbot, "_generate_followup_suggestions", no_suggestions)
         monkeypatch.setattr(chatbot, "execute_tool", fake_execute_tool)
+        monkeypatch.setattr(OPERATION_LOGGER, "info", operation_records.append)
 
         with client.stream(
             "POST",
@@ -388,10 +392,26 @@ class TestChatRouteWithMockedAnthropic:
         ]
         done = next(event for event in events if event["type"] == "done")
         assert "£25119.60" in done["content"]
+        assert "timings" not in done
         assert executed == [("calculate_household", tool_input)]
         assert "tools" in fake_client.messages.calls[0]
         second_messages = fake_client.messages.calls[1]["messages"]
         assert second_messages[-1]["content"][0]["type"] == "tool_result"
+        turn_log = next(
+            payload
+            for payload in map(json.loads, operation_records)
+            if payload.get("operation") == "chat.turn"
+        )
+        assert turn_log["event"] == "operation_completed"
+        assert turn_log["gateway_route"] == "compute"
+        assert turn_log["gateway_outcome"] == "ready"
+        assert turn_log["model"]
+        assert turn_log["ttft_ms"] >= 0
+        assert turn_log["timings_ms"]["gateway.classify"] >= 0
+        assert turn_log["timings_ms"]["model.iteration"] >= 0
+        assert turn_log["timings_ms"]["model.stream"] >= 0
+        assert turn_log["timings_ms"]["tool.execute"] >= 0
+        assert turn_log["timings_ms"]["billing.record_usage"] >= 0
 
 
 # ---------------------------------------------------------------------------

@@ -1,9 +1,10 @@
 import json
+from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from policyengine_observability import REQUEST_ID_HEADER, segment
-from policyengine_observability.runtime import REQUEST_LOGGER
+from policyengine_observability.runtime import OPERATION_LOGGER, REQUEST_LOGGER
 
 from observability.fastapi import UK_CHAT_METRIC_ATTRIBUTE_KEYS
 from observability.fastapi import init_observability
@@ -110,3 +111,38 @@ def test_metadata_middleware_failure_does_not_break_request(monkeypatch):
     response = TestClient(_observed_app()).get("/ok")
 
     assert response.status_code == 200
+
+
+def test_title_generation_logs_standalone_segment(monkeypatch):
+    import chat.titles as titles
+    from chat.schemas import TitleRequest
+
+    class FakeMessages:
+        def create(self, **kwargs):
+            assert kwargs["model"] == titles.TITLE_MODEL
+            assert kwargs["max_tokens"] == 32
+            return SimpleNamespace(
+                content=[SimpleNamespace(text="Tax credits")]
+            )
+
+    operation_records = []
+    monkeypatch.setattr(OPERATION_LOGGER, "info", operation_records.append)
+    monkeypatch.setattr(
+        titles,
+        "get_sync_client",
+        lambda: SimpleNamespace(messages=FakeMessages()),
+    )
+
+    response = titles.make_title(
+        TitleRequest(first_user_message="Can you title this?")
+    )
+
+    assert response == {"title": "Tax credits"}
+    payload = next(
+        payload
+        for payload in map(json.loads, operation_records)
+        if payload.get("operation") == "title.generate"
+    )
+    assert payload["event"] == "operation_completed"
+    assert payload["model"] == titles.TITLE_MODEL
+    assert payload["timings_ms"]["title.generate"] >= 0
