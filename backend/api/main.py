@@ -7,6 +7,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from policyengine_observability import shutdown_observability
 from slowapi.errors import RateLimitExceeded
 
 import billing
@@ -14,6 +15,7 @@ import chat
 import conversations
 from api.errors import NaNSafeJSONResponse, rate_limit_handler
 from api.rate_limit import limiter
+from observability.fastapi import init_observability
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -45,10 +47,17 @@ app.include_router(billing.router)
 app.include_router(chat.router)
 app.include_router(conversations.router)
 
+init_observability(app, service_role="api")
+
 
 @app.on_event("startup")
 def startup():
     conversations.ensure_table()
+
+
+@app.on_event("shutdown")
+def shutdown():
+    shutdown_observability()
 
 
 @app.get("/health")

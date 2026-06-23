@@ -55,5 +55,15 @@ def web():
     sys.path.insert(0, "/app/backend")
     os.chdir("/app/backend")
 
+    from observability.fastapi import configure_process_observability
+
+    configure_process_observability(
+        platform="modal",
+        service_role="api",
+        runtime_role="modal_web",
+        modal_app_name=APP_NAME,
+        modal_function_name="web",
+    )
+
     from api.main import app as fastapi_app
     return fastapi_app
