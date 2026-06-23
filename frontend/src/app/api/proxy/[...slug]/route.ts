@@ -56,7 +56,11 @@ async function handleRequest(
   const url = new URL(`${backendUrl}/${slug.join("/")}`);
   request.nextUrl.searchParams.forEach((value, key) => url.searchParams.append(key, value));
 
-  const fetchOptions: RequestInit = { method, headers: { "Content-Type": "application/json" }, redirect: "follow" };
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const authorization = request.headers.get("authorization");
+  if (authorization) headers.Authorization = authorization;
+
+  const fetchOptions: RequestInit = { method, headers, redirect: "follow" };
   if (["POST", "PUT", "PATCH"].includes(method)) {
     try {
       const body = await request.text();

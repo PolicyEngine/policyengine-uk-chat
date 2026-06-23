@@ -12,6 +12,7 @@ from slowapi.errors import RateLimitExceeded
 import billing
 import chat
 import conversations
+import eval_runs
 from api.errors import NaNSafeJSONResponse, rate_limit_handler
 from api.rate_limit import limiter
 
@@ -44,6 +45,7 @@ app.add_middleware(
 app.include_router(billing.router)
 app.include_router(chat.router)
 app.include_router(conversations.router)
+app.include_router(eval_runs.router)
 
 
 @app.on_event("startup")

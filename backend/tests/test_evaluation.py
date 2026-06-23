@@ -151,6 +151,43 @@ def test_offline_eval_runs_tool_loop_cases_without_reports():
     assert report.passed == expected_cases
 
 
+def test_eval_report_records_case_and_suite_timings(tmp_path, monkeypatch):
+    case_file = tmp_path / "trajectory.yaml"
+    case_file.write_text(
+        yaml.safe_dump(
+            {
+                "cases": [
+                    {
+                        "id": "timed_case",
+                        "suite": "trajectory",
+                        "description": "Timing smoke case.",
+                        "prompt": "No tool needed.",
+                        "offline_response": {"text": "ok"},
+                    }
+                ]
+            },
+            sort_keys=False,
+        )
+    )
+    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+
+    report = runner.run_eval(
+        suites=["trajectory"],
+        mode="offline",
+        write_reports=False,
+        run_label="timing-smoke",
+    )
+
+    assert report.duration_ms > 0
+    assert report.metadata["run_label"] == "timing-smoke"
+    assert report.timing_summary["trajectory"].count == 1
+    assert report.results[0].duration_ms > 0
+    assert {event.name for event in report.results[0].timings} == {
+        "model.generate",
+        "grade.tool_calls",
+    }
+
+
 def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
     case_file = tmp_path / "tool_loop.yaml"
     case_file.write_text(
@@ -290,6 +327,8 @@ def test_report_markdown_exposes_counts_and_case_status_for_regression_review():
     assert "Model: `claude-haiku-4-5`" in markdown
     assert "Passed: `1`" in markdown
     assert "Failed: `1`" in markdown
+    assert "Duration:" in markdown
+    assert "## Cases" in markdown
     assert "`failed_case`" in markdown
     assert "expected tool" in markdown
 

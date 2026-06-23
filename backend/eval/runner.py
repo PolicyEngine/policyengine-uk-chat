@@ -6,6 +6,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from time import perf_counter_ns
 from typing import Any, Dict, Iterable, List
 
 from prompts import CHARTS_MODE_DIRECTIVE, SYSTEM_PROMPT
@@ -27,6 +28,7 @@ from eval.schemas import (
     ToolLoopCase,
     TrajectoryCase,
 )
+from eval.timing import TimingRecorder, elapsed_ms, summarize_suite_timings
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EVAL_ROOT = REPO_ROOT / "evals"
@@ -91,6 +93,8 @@ def _result(
     score: float,
     errors: List[str] | None = None,
     details: Dict[str, Any] | None = None,
+    timings: List[Any] | None = None,
+    duration_ms: float = 0.0,
 ) -> CaseResult:
     return CaseResult(
         id=case.id,
@@ -99,6 +103,8 @@ def _result(
         score=score,
         errors=errors or [],
         details=details or {},
+        duration_ms=duration_ms,
+        timings=timings or [],
     )
 
 
@@ -149,37 +155,61 @@ def _tools_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, Any]]
 
 
 def _run_tool_contract(case: ToolContractCase) -> CaseResult:
+    recorder = TimingRecorder()
     try:
-        output = execute_tool(case.tool_name, case.input)
+        with recorder.record("tool.execute", {"tool_name": case.tool_name}):
+            output = execute_tool(case.tool_name, case.input)
     except Exception as exc:
-        return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
-    errors = grade_output(output, case.expect)
+        return _result(
+            case,
+            "failed",
+            0.0,
+            [f"{type(exc).__name__}: {exc}"],
+            timings=recorder.events,
+        )
+    with recorder.record("grade.output"):
+        errors = grade_output(output, case.expect)
     return _result(
         case,
         "failed" if errors else "passed",
         0.0 if errors else 1.0,
         errors,
         {"output": output},
+        timings=recorder.events,
     )
 
 
 def _run_trajectory(case: TrajectoryCase, client: ModelClient) -> CaseResult:
+    recorder = TimingRecorder()
     try:
-        turn = client.generate(
-            case_id=case.id,
-            messages=_messages_for_case(case),
-            system=_system_for_case(case),
-            tools=_tools_for_case(case),
-        )
+        with recorder.record("model.generate"):
+            turn = client.generate(
+                case_id=case.id,
+                messages=_messages_for_case(case),
+                system=_system_for_case(case),
+                tools=_tools_for_case(case),
+            )
     except Exception as exc:
-        return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
-    errors = grade_tool_calls(turn.tool_calls, case.expected_tools, case.forbidden_tools)
+        return _result(
+            case,
+            "failed",
+            0.0,
+            [f"{type(exc).__name__}: {exc}"],
+            timings=recorder.events,
+        )
+    with recorder.record("grade.tool_calls"):
+        errors = grade_tool_calls(turn.tool_calls, case.expected_tools, case.forbidden_tools)
     return _result(
         case,
         "failed" if errors else "passed",
         0.0 if errors else 1.0,
         errors,
-        {"text": turn.text, "tool_calls": [call.model_dump() for call in turn.tool_calls]},
+        {
+            "text": turn.text,
+            "tool_calls": [call.model_dump() for call in turn.tool_calls],
+            "usage": turn.usage,
+        },
+        timings=recorder.events,
     )
 
 
@@ -203,25 +233,35 @@ def _tool_result_text(case: AnswerCase) -> str:
 
 
 def _run_answer(case: AnswerCase, client: ModelClient) -> CaseResult:
+    recorder = TimingRecorder()
     try:
-        turn = client.generate(
-            case_id=case.id,
-            messages=[
-                {"role": "user", "content": case.prompt},
-                {"role": "user", "content": _tool_result_text(case)},
-            ],
-            system=SYSTEM_PROMPT,
-            tools=None,
-        )
+        with recorder.record("model.generate"):
+            turn = client.generate(
+                case_id=case.id,
+                messages=[
+                    {"role": "user", "content": case.prompt},
+                    {"role": "user", "content": _tool_result_text(case)},
+                ],
+                system=SYSTEM_PROMPT,
+                tools=None,
+            )
     except Exception as exc:
-        return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
-    errors = grade_text(turn.text, case.expect)
+        return _result(
+            case,
+            "failed",
+            0.0,
+            [f"{type(exc).__name__}: {exc}"],
+            timings=recorder.events,
+        )
+    with recorder.record("grade.text"):
+        errors = grade_text(turn.text, case.expect)
     return _result(
         case,
         "failed" if errors else "passed",
         0.0 if errors else 1.0,
         errors,
-        {"text": turn.text},
+        {"text": turn.text, "usage": turn.usage},
+        timings=recorder.events,
     )
 
 
@@ -230,24 +270,35 @@ def _tool_use_id(case: ToolLoopCase, iteration: int, index: int, call_id: str) -
 
 
 def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
+    recorder = TimingRecorder()
     messages: List[Dict[str, Any]] = _messages_for_case(case)
     tool_calls = []
     final_text = ""
     errors: List[str] = []
+    usage: List[Dict[str, Any]] = []
 
     for iteration in range(1, case.max_iterations + 1):
         try:
-            turn = client.generate(
-                case_id=case.id,
-                messages=messages,
-                system=_system_for_case(case),
-                tools=_tools_for_case(case),
-            )
+            with recorder.record("model.generate", {"iteration": iteration}):
+                turn = client.generate(
+                    case_id=case.id,
+                    messages=messages,
+                    system=_system_for_case(case),
+                    tools=_tools_for_case(case),
+                )
         except Exception as exc:
-            return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
+            return _result(
+                case,
+                "failed",
+                0.0,
+                [f"{type(exc).__name__}: {exc}"],
+                timings=recorder.events,
+            )
 
         if turn.text:
             final_text += turn.text
+        if turn.usage:
+            usage.append({"iteration": iteration, **turn.usage})
         if not turn.tool_calls:
             break
 
@@ -267,7 +318,11 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
                     "input": call.input,
                 }
             )
-            output = execute_tool(call.name, call.input)
+            with recorder.record(
+                "tool.execute",
+                {"iteration": iteration, "tool_name": call.name},
+            ):
+                output = execute_tool(call.name, call.input)
             tool_results.append(
                 {
                     "type": "tool_result",
@@ -281,14 +336,21 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
     else:
         errors.append("max iterations reached before final answer")
 
-    errors.extend(grade_tool_calls(tool_calls, case.expected_tools, case.forbidden_tools))
-    errors.extend(grade_text(final_text, case.expect))
+    with recorder.record("grade.tool_calls"):
+        errors.extend(grade_tool_calls(tool_calls, case.expected_tools, case.forbidden_tools))
+    with recorder.record("grade.text"):
+        errors.extend(grade_text(final_text, case.expect))
     return _result(
         case,
         "failed" if errors else "passed",
         0.0 if errors else 1.0,
         errors,
-        {"text": final_text, "tool_calls": [call.model_dump() for call in tool_calls]},
+        {
+            "text": final_text,
+            "tool_calls": [call.model_dump() for call in tool_calls],
+            "usage": usage,
+        },
+        timings=recorder.events,
     )
 
 
@@ -299,34 +361,43 @@ def _run_gateway(case: GatewayCase) -> CaseResult:
     match the other suites, with the full plan stashed in details for tuning."""
     from gateway import run_gateway
 
+    recorder = TimingRecorder()
     try:
-        verdict = run_gateway(case.prompt)
+        with recorder.record("gateway.run"):
+            verdict = run_gateway(case.prompt)
     except Exception as exc:
-        return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
+        return _result(
+            case,
+            "failed",
+            0.0,
+            [f"{type(exc).__name__}: {exc}"],
+            timings=recorder.events,
+        )
 
     errors: List[str] = []
-    if verdict.outcome != case.expected_outcome:
-        errors.append(f"expected outcome {case.expected_outcome!r}, got {verdict.outcome!r}")
-    if case.expected_tool and verdict.tool != case.expected_tool:
-        errors.append(f"expected tool {case.expected_tool!r}, got {verdict.tool!r}")
-    if case.forbidden_tool and verdict.tool == case.forbidden_tool:
-        errors.append(f"forbidden tool {case.forbidden_tool!r} was selected")
-    if case.expected_gating_slots:
-        got = set(verdict.gating_slots)
-        want = set(case.expected_gating_slots)
-        if got != want:
-            errors.append(f"gating slots: expected {sorted(want)}, got {sorted(got)}")
+    with recorder.record("grade.gateway"):
+        if verdict.outcome != case.expected_outcome:
+            errors.append(f"expected outcome {case.expected_outcome!r}, got {verdict.outcome!r}")
+        if case.expected_tool and verdict.tool != case.expected_tool:
+            errors.append(f"expected tool {case.expected_tool!r}, got {verdict.tool!r}")
+        if case.forbidden_tool and verdict.tool == case.forbidden_tool:
+            errors.append(f"forbidden tool {case.forbidden_tool!r} was selected")
+        if case.expected_gating_slots:
+            got = set(verdict.gating_slots)
+            want = set(case.expected_gating_slots)
+            if got != want:
+                errors.append(f"gating slots: expected {sorted(want)}, got {sorted(got)}")
 
-    by_name = {s.name: s for s in verdict.slots}
-    for exp in case.expected_slots:
-        got_slot = by_name.get(exp.slot)
-        if got_slot is None:
-            errors.append(f"slot {exp.slot!r} missing from plan")
-            continue
-        if exp.source is not None and got_slot.source != exp.source:
-            errors.append(f"slot {exp.slot!r} source: expected {exp.source!r}, got {got_slot.source!r}")
-        if exp.gates is not None and (exp.slot in verdict.gating_slots) != exp.gates:
-            errors.append(f"slot {exp.slot!r} gates: expected {exp.gates}, got {exp.slot in verdict.gating_slots}")
+        by_name = {s.name: s for s in verdict.slots}
+        for exp in case.expected_slots:
+            got_slot = by_name.get(exp.slot)
+            if got_slot is None:
+                errors.append(f"slot {exp.slot!r} missing from plan")
+                continue
+            if exp.source is not None and got_slot.source != exp.source:
+                errors.append(f"slot {exp.slot!r} source: expected {exp.source!r}, got {got_slot.source!r}")
+            if exp.gates is not None and (exp.slot in verdict.gating_slots) != exp.gates:
+                errors.append(f"slot {exp.slot!r} gates: expected {exp.gates}, got {exp.slot in verdict.gating_slots}")
 
     details = {
         "outcome": verdict.outcome,
@@ -338,7 +409,50 @@ def _run_gateway(case: GatewayCase) -> CaseResult:
             for s in verdict.slots
         ],
     }
-    return _result(case, "failed" if errors else "passed", 0.0 if errors else 1.0, errors, details)
+    return _result(
+        case,
+        "failed" if errors else "passed",
+        0.0 if errors else 1.0,
+        errors,
+        details,
+        timings=recorder.events,
+    )
+
+
+def _finish_case_result(result: CaseResult, started_ns: int) -> CaseResult:
+    return result.model_copy(update={"duration_ms": elapsed_ms(started_ns)})
+
+
+def _metadata(run_label: str | None) -> Dict[str, str]:
+    metadata: Dict[str, str] = {}
+    if run_label:
+        metadata["run_label"] = run_label
+
+    env_map = {
+        "repository": "GITHUB_REPOSITORY",
+        "sha": "GITHUB_SHA",
+        "ref_name": "GITHUB_REF_NAME",
+        "head_ref": "GITHUB_HEAD_REF",
+        "base_ref": "GITHUB_BASE_REF",
+        "run_id": "GITHUB_RUN_ID",
+        "run_attempt": "GITHUB_RUN_ATTEMPT",
+        "workflow": "GITHUB_WORKFLOW",
+    }
+    for key, env_name in env_map.items():
+        value = os.environ.get(env_name)
+        if value:
+            metadata[key] = value
+
+    if metadata.get("repository") and metadata.get("run_id"):
+        server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com")
+        metadata["workflow_url"] = (
+            f"{server_url}/{metadata['repository']}/actions/runs/{metadata['run_id']}"
+        )
+    return metadata
+
+
+def _run_id(started_at: str, mode: str) -> str:
+    return f"{started_at.replace(':', '').replace('-', '').replace('+', '')}-{mode}"
 
 
 def run_eval(
@@ -349,10 +463,12 @@ def run_eval(
     model: str | None = None,
     report_dir: Path | None = None,
     write_reports: bool = True,
+    run_label: str | None = None,
 ) -> EvalReport:
     selected_suites = suites or list(SUITE_DIRS)
     cases = load_cases(_case_paths(selected_suites))
     started_at = _utc_now()
+    run_started_ns = perf_counter_ns()
 
     if mode == "live":
         if provider not in (None, "anthropic"):
@@ -367,38 +483,69 @@ def run_eval(
 
     results: List[CaseResult] = []
     for case in cases:
+        case_started_ns = perf_counter_ns()
         skip_reason = _skip_reason(case, mode)
         if skip_reason:
-            results.append(_result(case, "skipped", 0.0, [skip_reason]))
+            results.append(
+                _finish_case_result(
+                    _result(case, "skipped", 0.0, [skip_reason]),
+                    case_started_ns,
+                )
+            )
             continue
         if case.suite in {"trajectory", "answer"} and mode == "offline" and getattr(case, "offline_response", None) is None:
-            results.append(_result(case, "skipped", 0.0, ["offline_response is required for offline model evals"]))
+            results.append(
+                _finish_case_result(
+                    _result(case, "skipped", 0.0, ["offline_response is required for offline model evals"]),
+                    case_started_ns,
+                )
+            )
             continue
         if isinstance(case, ToolLoopCase) and mode == "offline" and not case.offline_responses:
-            results.append(_result(case, "skipped", 0.0, ["offline_responses are required for offline tool-loop evals"]))
+            results.append(
+                _finish_case_result(
+                    _result(case, "skipped", 0.0, ["offline_responses are required for offline tool-loop evals"]),
+                    case_started_ns,
+                )
+            )
             continue
 
         if isinstance(case, ToolContractCase):
-            results.append(_run_tool_contract(case))
+            result = _run_tool_contract(case)
         elif isinstance(case, TrajectoryCase):
-            results.append(_run_trajectory(case, client))
+            result = _run_trajectory(case, client)
         elif isinstance(case, AnswerCase):
-            results.append(_run_answer(case, client))
+            result = _run_answer(case, client)
         elif isinstance(case, ToolLoopCase):
-            results.append(_run_tool_loop(case, client))
+            result = _run_tool_loop(case, client)
         elif isinstance(case, GatewayCase):
-            results.append(_run_gateway(case))
+            result = _run_gateway(case)
+        else:
+            continue
+        results.append(_finish_case_result(result, case_started_ns))
+
+    finished_at = _utc_now()
+    duration_ms = elapsed_ms(run_started_ns)
 
     report = EvalReport(
+        run_id=_run_id(started_at, mode),
         mode=mode,
         suites=selected_suites,
         provider=provider_name,
         model=model_name,
         git_sha=_git_sha(),
         started_at=started_at,
-        finished_at=_utc_now(),
+        finished_at=finished_at,
+        duration_ms=duration_ms,
+        timing_summary=summarize_suite_timings(results),
+        metadata=_metadata(run_label or os.environ.get("EVAL_RUN_LABEL")),
         results=results,
     )
     if write_reports:
-        write_report(report, report_dir or EVAL_ROOT / "reports")
+        default_report_dir = (
+            Path(os.environ["EVAL_REPORT_DIR"])
+            if os.environ.get("EVAL_REPORT_DIR")
+            else EVAL_ROOT / "reports"
+        )
+        write_report(report, report_dir or default_report_dir)
     return report

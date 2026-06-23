@@ -20,6 +20,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--provider", choices=["anthropic"], default=None)
     parser.add_argument("--model", default=None)
     parser.add_argument("--report-dir", type=Path, default=None)
+    parser.add_argument("--run-label", default=None)
     parser.add_argument("--no-report", action="store_true")
     return parser.parse_args()
 
@@ -38,6 +39,7 @@ def main() -> int:
         model=args.model,
         report_dir=args.report_dir,
         write_reports=not args.no_report,
+        run_label=args.run_label,
     )
     print(
         f"AI evals: {report.passed} passed, {report.failed} failed, "

@@ -10,6 +10,9 @@ the UK chat pathway.
 - Production chat code must not import evaluation modules.
 - Evals are manual for now; do not add them to PR CI unless that product
   decision changes.
+- Eval report JSON files are the canonical record for manual run history. The
+  read-only eval-run API and dashboard must inspect stored reports; they must
+  not execute evals.
 
 ## Suite Boundaries
 
@@ -54,6 +57,9 @@ validate-then-calculate flows.
 - Do not delete source-synced skipped cases just because they currently fail
   against compiled. If a case is no longer relevant upstream, update the source
   manifest with the reason.
+- Eval reports include informational timing. Treat timing as observability and
+  comparison data, not as a pass/fail gate unless a product decision explicitly
+  adds latency thresholds.
 
 ## Commands
 
@@ -84,3 +90,7 @@ ANTHROPIC_API_KEY=... make eval-ai-live
 
 Runs the same suite through the live provider and writes reports under
 `evals/reports/`.
+
+Set `EVAL_REPORT_DIR` to write or read reports from a different directory. The
+internal dashboard routes require `EVAL_DASHBOARD_TOKEN` and read existing
+reports only.

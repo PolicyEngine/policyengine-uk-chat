@@ -34,6 +34,9 @@ ANTHROPIC_API_KEY=... make eval-ai-live
 Runs the same cases against the configured live provider. Reports are written to
 `evals/reports/`, which is ignored by git.
 
+Set `EVAL_REPORT_DIR` to write reports somewhere else, such as a persistent
+volume used by the internal dashboard.
+
 Set `RUN_DATA_EVALS=1` to include cases that require local microdata.
 Cases marked `requirements: [live_model]` are skipped offline and run only
 through `make eval-ai-live`.
@@ -53,3 +56,10 @@ Source-synced `policyengine-uk` cases with `compiled_coverage_gap` skips are
 kept in the suite as visible compiled-backlog markers. Remove the skip only
 after `policyengine-uk-compiled` supports the upstream case through the chat
 tool contract.
+
+Reports include run-level, suite-level, case-level, and phase-level timing.
+Timing is informational in this framework; it is intended for comparison and
+regression review rather than pass/fail gating.
+
+The `/evals` frontend page reads stored report JSON through the protected
+`/eval-runs` API. Set `EVAL_DASHBOARD_TOKEN` on the backend to enable that API.

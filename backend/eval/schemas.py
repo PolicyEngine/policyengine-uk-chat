@@ -149,6 +149,21 @@ class GatewayCase(CaseBase):
 EvalCase = ToolContractCase | TrajectoryCase | AnswerCase | ToolLoopCase | GatewayCase
 
 
+class TimingEvent(StrictModel):
+    name: str
+    duration_ms: float = 0.0
+    attributes: Dict[str, Any] = Field(default_factory=dict)
+
+
+class SuiteTimingSummary(StrictModel):
+    count: int = 0
+    total_ms: float = 0.0
+    avg_ms: float = 0.0
+    p50_ms: float = 0.0
+    p95_ms: float = 0.0
+    max_ms: float = 0.0
+
+
 class CaseResult(StrictModel):
     id: str
     suite: str
@@ -156,9 +171,12 @@ class CaseResult(StrictModel):
     score: float
     errors: List[str] = Field(default_factory=list)
     details: Dict[str, Any] = Field(default_factory=dict)
+    duration_ms: float = 0.0
+    timings: List[TimingEvent] = Field(default_factory=list)
 
 
 class EvalReport(StrictModel):
+    run_id: Optional[str] = None
     mode: Literal["offline", "live"]
     suites: List[str]
     provider: str
@@ -166,6 +184,9 @@ class EvalReport(StrictModel):
     git_sha: Optional[str] = None
     started_at: str
     finished_at: str
+    duration_ms: float = 0.0
+    timing_summary: Dict[str, SuiteTimingSummary] = Field(default_factory=dict)
+    metadata: Dict[str, str] = Field(default_factory=dict)
     results: List[CaseResult]
 
     @property
