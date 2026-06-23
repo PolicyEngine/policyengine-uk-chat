@@ -13,4 +13,4 @@ supabase
 stripe
 slowapi
 python-dateutil
-policyengine-observability[fastapi,httpx]==0.4.0
+policyengine-observability[fastapi,httpx]==0.4.1
