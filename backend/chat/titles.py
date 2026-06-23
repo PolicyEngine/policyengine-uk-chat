@@ -1,7 +1,7 @@
 """Conversation title generation."""
 
+from policyengine_observability import annotate
 from policyengine_observability import segment
-from policyengine_observability import set_attribute
 
 from config import DEFAULT_TEMPERATURE, TITLE_MODEL, get_sync_client
 from observability.segments import SegmentName
@@ -15,7 +15,7 @@ def make_title(request: TitleRequest) -> dict:
     content = request.first_user_message
     if request.first_assistant_message:
         content += "\n\nAssistant: " + request.first_assistant_message[:500]
-    set_attribute("model", TITLE_MODEL)
+    annotate(model=TITLE_MODEL)
     with segment(SegmentName.TITLE_GENERATE, model=TITLE_MODEL):
         response = client.messages.create(
             model=TITLE_MODEL,

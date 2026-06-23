@@ -1,15 +1,25 @@
 import json
+import os
 from types import SimpleNamespace
 
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from policyengine_observability import REQUEST_ID_HEADER, segment
 from policyengine_observability.runtime import OPERATION_LOGGER, REQUEST_LOGGER
 
 from observability.fastapi import UK_CHAT_METRIC_ATTRIBUTE_KEYS
+from observability.fastapi import configure_process_observability
 from observability.fastapi import init_observability
 from observability.segments import SegmentName
 from observability.segments import coerce_segment_name
+
+
+@pytest.fixture(autouse=True)
+def reset_process_metadata(monkeypatch):
+    import observability.fastapi as uk_chat_observability
+
+    monkeypatch.setattr(uk_chat_observability, "_PROCESS_METADATA", {})
 
 
 def _observed_app() -> FastAPI:
@@ -48,15 +58,20 @@ def test_request_log_contains_metadata_and_timings(monkeypatch):
     assert "value" not in records[0]
     assert payload["client_ip"] == "203.0.113.1"
     assert payload["timings_ms"]["model.stream"] >= 0
+    assert payload["timing_counts"]["model.stream"] == 1
     assert payload["platform"] == "local"
     assert payload["runtime_role"] == "test_api"
 
 
 def test_request_log_contains_modal_metadata(monkeypatch):
-    monkeypatch.setenv("OBSERVABILITY_PLATFORM", "modal")
-    monkeypatch.setenv("OBSERVABILITY_RUNTIME_ROLE", "modal_web")
-    monkeypatch.setenv("OBSERVABILITY_MODAL_APP_NAME", "peukchat-preview")
-    monkeypatch.setenv("OBSERVABILITY_MODAL_FUNCTION_NAME", "web")
+    monkeypatch.setenv("MODAL_ENVIRONMENT", "preview")
+    configure_process_observability(
+        platform="modal",
+        service_role="api",
+        runtime_role="modal_web",
+        modal_app_name="peukchat-preview",
+        modal_function_name="web",
+    )
 
     records = []
     monkeypatch.setattr(REQUEST_LOGGER, "info", records.append)
@@ -67,6 +82,7 @@ def test_request_log_contains_modal_metadata(monkeypatch):
     payload = json.loads(records[0])
     assert payload["platform"] == "modal"
     assert payload["runtime_role"] == "modal_web"
+    assert payload["modal_environment"] == "preview"
     assert payload["modal_app_name"] == "peukchat-preview"
     assert payload["modal_function_name"] == "web"
 
@@ -96,21 +112,32 @@ def test_metric_attribute_keys_include_uk_chat_dimensions():
         assert key in runtime.config.metric_attribute_keys
 
 
-def test_metadata_middleware_failure_does_not_break_request(monkeypatch):
-    import observability.fastapi as uk_chat_observability
+def test_process_observability_does_not_mutate_env(monkeypatch):
+    for key in (
+        "OBSERVABILITY_PLATFORM",
+        "OBSERVABILITY_SERVICE_ROLE",
+        "OBSERVABILITY_RUNTIME_ROLE",
+        "OBSERVABILITY_MODAL_APP_NAME",
+        "OBSERVABILITY_MODAL_FUNCTION_NAME",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
-    def broken_set_attribute(*_args, **_kwargs):
-        raise RuntimeError("metadata failed")
-
-    monkeypatch.setattr(
-        uk_chat_observability,
-        "set_attribute",
-        broken_set_attribute,
+    configure_process_observability(
+        platform="modal",
+        service_role="api",
+        runtime_role="modal_web",
+        modal_app_name="peukchat-preview",
+        modal_function_name="web",
     )
 
-    response = TestClient(_observed_app()).get("/ok")
-
-    assert response.status_code == 200
+    for key in (
+        "OBSERVABILITY_PLATFORM",
+        "OBSERVABILITY_SERVICE_ROLE",
+        "OBSERVABILITY_RUNTIME_ROLE",
+        "OBSERVABILITY_MODAL_APP_NAME",
+        "OBSERVABILITY_MODAL_FUNCTION_NAME",
+    ):
+        assert key not in os.environ
 
 
 def test_title_generation_logs_standalone_segment(monkeypatch):
@@ -121,9 +148,7 @@ def test_title_generation_logs_standalone_segment(monkeypatch):
         def create(self, **kwargs):
             assert kwargs["model"] == titles.TITLE_MODEL
             assert kwargs["max_tokens"] == 32
-            return SimpleNamespace(
-                content=[SimpleNamespace(text="Tax credits")]
-            )
+            return SimpleNamespace(content=[SimpleNamespace(text="Tax credits")])
 
     operation_records = []
     monkeypatch.setattr(OPERATION_LOGGER, "info", operation_records.append)
@@ -133,9 +158,7 @@ def test_title_generation_logs_standalone_segment(monkeypatch):
         lambda: SimpleNamespace(messages=FakeMessages()),
     )
 
-    response = titles.make_title(
-        TitleRequest(first_user_message="Can you title this?")
-    )
+    response = titles.make_title(TitleRequest(first_user_message="Can you title this?"))
 
     assert response == {"title": "Tax credits"}
     payload = next(
@@ -146,3 +169,4 @@ def test_title_generation_logs_standalone_segment(monkeypatch):
     assert payload["event"] == "operation_completed"
     assert payload["model"] == titles.TITLE_MODEL
     assert payload["timings_ms"]["title.generate"] >= 0
+    assert payload["timing_counts"]["title.generate"] == 1

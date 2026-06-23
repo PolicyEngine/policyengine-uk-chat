@@ -2,12 +2,10 @@ from __future__ import annotations
 
 from dataclasses import replace
 import os
-from typing import Any
 
 from fastapi import FastAPI
 from policyengine_observability import ObservabilityConfig
 from policyengine_observability import ObservabilityRuntime
-from policyengine_observability import set_attribute
 from policyengine_observability.adapters.fastapi import (
     init_fastapi_observability,
 )
@@ -27,6 +25,7 @@ UK_CHAT_METRIC_ATTRIBUTE_KEYS = (
     "platform",
     "runtime_role",
 )
+_PROCESS_METADATA: dict[str, str] = {}
 
 
 def _environment() -> str:
@@ -41,20 +40,19 @@ def _environment() -> str:
 
 def _service_role(default: str) -> str:
     return (
-        os.getenv("OBSERVABILITY_SERVICE_ROLE")
-        or os.getenv("OBSERVABILITY_RUNTIME_ROLE")
+        _PROCESS_METADATA.get("service_role")
+        or _PROCESS_METADATA.get("runtime_role")
         or default
     )
 
 
 def _platform() -> str:
-    configured = os.getenv("OBSERVABILITY_PLATFORM")
-    if configured:
-        return configured
+    if platform := _PROCESS_METADATA.get("platform"):
+        return platform
     if (
         os.getenv("MODAL_ENVIRONMENT")
         or os.getenv("MODAL_TASK_ID")
-        or os.getenv("OBSERVABILITY_MODAL_APP_NAME")
+        or _PROCESS_METADATA.get("modal_app_name")
     ):
         return "modal"
     return "local"
@@ -63,11 +61,10 @@ def _platform() -> str:
 def _metadata(service_role: str) -> dict[str, str]:
     values = {
         "platform": _platform(),
-        "runtime_role": os.getenv("OBSERVABILITY_RUNTIME_ROLE")
-        or service_role,
+        "runtime_role": _PROCESS_METADATA.get("runtime_role") or service_role,
         "modal_environment": os.getenv("MODAL_ENVIRONMENT"),
-        "modal_app_name": os.getenv("OBSERVABILITY_MODAL_APP_NAME"),
-        "modal_function_name": os.getenv("OBSERVABILITY_MODAL_FUNCTION_NAME"),
+        "modal_app_name": _PROCESS_METADATA.get("modal_app_name"),
+        "modal_function_name": _PROCESS_METADATA.get("modal_function_name"),
     }
     return {key: value for key, value in values.items() if value}
 
@@ -80,34 +77,17 @@ def configure_process_observability(
     modal_app_name: str | None = None,
     modal_function_name: str | None = None,
 ) -> None:
-    os.environ.setdefault("OBSERVABILITY_PLATFORM", platform)
-    os.environ.setdefault("OBSERVABILITY_SERVICE_ROLE", service_role)
-    os.environ.setdefault(
-        "OBSERVABILITY_RUNTIME_ROLE",
-        runtime_role or service_role,
-    )
+    _PROCESS_METADATA["platform"] = platform
+    _PROCESS_METADATA["service_role"] = service_role
+    _PROCESS_METADATA["runtime_role"] = runtime_role or service_role
     if modal_app_name:
-        os.environ.setdefault("OBSERVABILITY_MODAL_APP_NAME", modal_app_name)
+        _PROCESS_METADATA["modal_app_name"] = modal_app_name
+    else:
+        _PROCESS_METADATA.pop("modal_app_name", None)
     if modal_function_name:
-        os.environ.setdefault(
-            "OBSERVABILITY_MODAL_FUNCTION_NAME",
-            modal_function_name,
-        )
-
-
-class ObservabilityMetadataMiddleware:
-    def __init__(self, app: Any, *, metadata: dict[str, str]) -> None:
-        self.app = app
-        self.metadata = metadata
-
-    async def __call__(self, scope, receive, send) -> None:
-        if scope.get("type") == "http":
-            try:
-                for key, value in self.metadata.items():
-                    set_attribute(key, value)
-            except BaseException:
-                pass
-        await self.app(scope, receive, send)
+        _PROCESS_METADATA["modal_function_name"] = modal_function_name
+    else:
+        _PROCESS_METADATA.pop("modal_function_name", None)
 
 
 def init_observability(
@@ -131,16 +111,6 @@ def init_observability(
         ),
         environment=_environment(),
     )
-    if not getattr(
-        app.state,
-        "policyengine_observability_metadata_middleware",
-        False,
-    ):
-        app.add_middleware(
-            ObservabilityMetadataMiddleware,
-            metadata=_metadata(service_role),
-        )
-        app.state.policyengine_observability_metadata_middleware = True
     return init_fastapi_observability(
         app,
         config=config,
@@ -149,4 +119,5 @@ def init_observability(
         service_role=service_role,
         span_prefix=SPAN_PREFIX,
         segment_registry=SegmentName,
+        static_attributes=_metadata(service_role),
     )

@@ -26,6 +26,7 @@ requires_live_anthropic = pytest.mark.skipif(
 # Health
 # ---------------------------------------------------------------------------
 
+
 class TestHealth:
     def test_health(self):
         r = client.get("/health")
@@ -37,15 +38,21 @@ class TestHealth:
 # Conversations CRUD
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.usefixtures("isolated_conversations_table")
 class TestConversations:
-    def _save(self, session_id="test-session-1", title="Test", messages=None, user_id=None):
-        return client.post("/conversations", json={
-            "session_id": session_id,
-            "title": title,
-            "messages": messages or [{"role": "user", "content": "hello"}],
-            "user_id": user_id,
-        })
+    def _save(
+        self, session_id="test-session-1", title="Test", messages=None, user_id=None
+    ):
+        return client.post(
+            "/conversations",
+            json={
+                "session_id": session_id,
+                "title": title,
+                "messages": messages or [{"role": "user", "content": "hello"}],
+                "user_id": user_id,
+            },
+        )
 
     def test_save_conversation(self):
         r = self._save(session_id="crud-test-1")
@@ -96,7 +103,11 @@ class TestConversations:
     def test_messages_roundtrip(self):
         messages = [
             {"role": "user", "content": "hello"},
-            {"role": "assistant", "content": "hi there", "events": [{"type": "text", "content": "hi there"}]},
+            {
+                "role": "assistant",
+                "content": "hi there",
+                "events": [{"type": "text", "content": "hi there"}],
+            },
         ]
         save_r = self._save(session_id="msg-roundtrip-1", messages=messages)
         conv_id = save_r.json()["id"]
@@ -124,13 +135,15 @@ class TestConversations:
                             "tool_id": "tool-1",
                             "status": "success",
                             "input": {"code": "result = 1 + 1"},
-                            "result_summary": "{\"result\": 2, \"output\": \"done\"}",
+                            "result_summary": '{"result": 2, "output": "done"}',
                         },
                     }
                 ],
             },
         ]
-        save_r = self._save(session_id="report-test-1", messages=messages, user_id="user-1")
+        save_r = self._save(
+            session_id="report-test-1", messages=messages, user_id="user-1"
+        )
         conv_id = save_r.json()["id"]
         report_r = client.post(
             f"/conversations/{conv_id}/report",
@@ -139,19 +152,23 @@ class TestConversations:
         assert report_r.status_code == 200
         issue_body = report_r.json()["issue_body"]
         assert "result = 1 + 1" in issue_body
-        assert "\"result\": 2" in issue_body
+        assert '"result": 2' in issue_body
 
 
 # ---------------------------------------------------------------------------
 # Title generation
 # ---------------------------------------------------------------------------
 
+
 @requires_live_anthropic
 class TestTitle:
     def test_generates_title(self):
-        r = client.post("/chat/title", json={
-            "first_user_message": "What is the personal allowance for 2025?",
-        })
+        r = client.post(
+            "/chat/title",
+            json={
+                "first_user_message": "What is the personal allowance for 2025?",
+            },
+        )
         assert r.status_code == 200
         title = r.json()["title"]
         assert isinstance(title, str)
@@ -159,10 +176,13 @@ class TestTitle:
         assert len(title) < 100
 
     def test_title_with_assistant_message(self):
-        r = client.post("/chat/title", json={
-            "first_user_message": "How much child benefit do I get for two children?",
-            "first_assistant_message": "Child benefit for two children is £XXX per week.",
-        })
+        r = client.post(
+            "/chat/title",
+            json={
+                "first_user_message": "How much child benefit do I get for two children?",
+                "first_assistant_message": "Child benefit for two children is £XXX per week.",
+            },
+        )
         assert r.status_code == 200
         assert "title" in r.json()
 
@@ -170,6 +190,7 @@ class TestTitle:
 # ---------------------------------------------------------------------------
 # Chat streaming
 # ---------------------------------------------------------------------------
+
 
 def parse_sse(response_text: str) -> list[dict]:
     """Parse SSE response into list of event dicts."""
@@ -248,9 +269,13 @@ def _tool_use_block(name: str, tool_input: dict, tool_id: str = "tool-1"):
 @requires_live_anthropic
 class TestChatMessage:
     def test_simple_chat_returns_sse(self):
-        with client.stream("POST", "/chat/message", json={
-            "messages": [{"role": "user", "content": "Say exactly: hello"}],
-        }) as r:
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "messages": [{"role": "user", "content": "Say exactly: hello"}],
+            },
+        ) as r:
             assert r.status_code == 200
             assert "text/event-stream" in r.headers["content-type"]
             text = r.read().decode()
@@ -258,18 +283,26 @@ class TestChatMessage:
         assert len(events) > 0
 
     def test_done_event_present(self):
-        with client.stream("POST", "/chat/message", json={
-            "messages": [{"role": "user", "content": "Reply with one word: yes"}],
-        }) as r:
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "messages": [{"role": "user", "content": "Reply with one word: yes"}],
+            },
+        ) as r:
             text = r.read().decode()
         events = parse_sse(text)
         types = [e["type"] for e in events]
         assert "done" in types
 
     def test_session_id_returned(self):
-        with client.stream("POST", "/chat/message", json={
-            "messages": [{"role": "user", "content": "Reply with one word: yes"}],
-        }) as r:
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "messages": [{"role": "user", "content": "Reply with one word: yes"}],
+            },
+        ) as r:
             text = r.read().decode()
         events = parse_sse(text)
         done = next(e for e in events if e["type"] == "done")
@@ -277,19 +310,29 @@ class TestChatMessage:
         assert len(done["session_id"]) > 0
 
     def test_provided_session_id_echoed(self):
-        with client.stream("POST", "/chat/message", json={
-            "messages": [{"role": "user", "content": "Reply with one word: yes"}],
-            "session_id": "my-fixed-session",
-        }) as r:
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "messages": [{"role": "user", "content": "Reply with one word: yes"}],
+                "session_id": "my-fixed-session",
+            },
+        ) as r:
             text = r.read().decode()
         events = parse_sse(text)
         done = next(e for e in events if e["type"] == "done")
         assert done["session_id"] == "my-fixed-session"
 
     def test_chunk_events_contain_text(self):
-        with client.stream("POST", "/chat/message", json={
-            "messages": [{"role": "user", "content": "Write a single sentence about the UK."}],
-        }) as r:
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "messages": [
+                    {"role": "user", "content": "Write a single sentence about the UK."}
+                ],
+            },
+        ) as r:
             text = r.read().decode()
         events = parse_sse(text)
         chunks = [e for e in events if e["type"] == "chunk"]
@@ -298,27 +341,44 @@ class TestChatMessage:
         assert len(full_text) > 5
 
     def test_tool_use_for_simulation_query(self):
-        with client.stream("POST", "/chat/message", json={
-            "messages": [{"role": "user", "content": "What is the current personal allowance? Use get_baseline_parameters."}],
-        }) as r:
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": "What is the current personal allowance? Use get_baseline_parameters.",
+                    }
+                ],
+            },
+        ) as r:
             text = r.read().decode()
         events = parse_sse(text)
         types = [e["type"] for e in events]
         assert "tool_start" in types or "tool_use" in types
 
     def test_no_error_event_on_simple_query(self):
-        with client.stream("POST", "/chat/message", json={
-            "messages": [{"role": "user", "content": "Reply with one word: yes"}],
-        }) as r:
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "messages": [{"role": "user", "content": "Reply with one word: yes"}],
+            },
+        ) as r:
             text = r.read().decode()
         events = parse_sse(text)
         errors = [e for e in events if e["type"] == "error"]
         assert len(errors) == 0
 
     def test_usage_in_done_event(self):
-        with client.stream("POST", "/chat/message", json={
-            "messages": [{"role": "user", "content": "Reply with one word: yes"}],
-        }) as r:
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "messages": [{"role": "user", "content": "Reply with one word: yes"}],
+            },
+        ) as r:
             text = r.read().decode()
         events = parse_sse(text)
         done = next(e for e in events if e["type"] == "done")
@@ -357,7 +417,9 @@ class TestChatRouteWithMockedAnthropic:
                     ],
                 ),
                 _FakeAnthropicStream(
-                    chunks=["For this illustrative household, net income is £25119.60."],
+                    chunks=[
+                        "For this illustrative household, net income is £25119.60."
+                    ],
                     final_content=[],
                 ),
             ]
@@ -375,17 +437,30 @@ class TestChatRouteWithMockedAnthropic:
         monkeypatch.setattr(chatbot, "_generate_followup_suggestions", no_suggestions)
         monkeypatch.setattr(chatbot, "execute_tool", fake_execute_tool)
         monkeypatch.setattr(OPERATION_LOGGER, "info", operation_records.append)
+        usage_calls = []
+
+        def fake_record_usage(**kwargs):
+            usage_calls.append(kwargs)
+            return {"cost_gbp": 0.0, "balance": 10.0}
+
+        monkeypatch.setattr("billing.record_usage", fake_record_usage)
 
         with client.stream(
             "POST",
             "/chat/message",
-            json={"messages": [{"role": "user", "content": "Calculate this household."}]},
+            json={
+                "messages": [{"role": "user", "content": "Calculate this household."}]
+            },
         ) as response:
             assert response.status_code == 200
             text = response.read().decode()
 
         events = parse_sse(text)
-        assert [event["type"] for event in events if event["type"] in {"tool_use", "tool_result", "done"}] == [
+        assert [
+            event["type"]
+            for event in events
+            if event["type"] in {"tool_use", "tool_result", "done"}
+        ] == [
             "tool_use",
             "tool_result",
             "done",
@@ -393,6 +468,10 @@ class TestChatRouteWithMockedAnthropic:
         done = next(event for event in events if event["type"] == "done")
         assert "£25119.60" in done["content"]
         assert "timings" not in done
+        assert usage_calls
+        assert "timings" not in usage_calls[0]
+        assert "timings_ms" not in usage_calls[0]
+        assert "timing_counts" not in usage_calls[0]
         assert executed == [("calculate_household", tool_input)]
         assert "tools" in fake_client.messages.calls[0]
         second_messages = fake_client.messages.calls[1]["messages"]
@@ -412,11 +491,17 @@ class TestChatRouteWithMockedAnthropic:
         assert turn_log["timings_ms"]["model.stream"] >= 0
         assert turn_log["timings_ms"]["tool.execute"] >= 0
         assert turn_log["timings_ms"]["billing.record_usage"] >= 0
+        assert turn_log["timing_counts"]["gateway.classify"] == 1
+        assert turn_log["timing_counts"]["model.iteration"] == 2
+        assert turn_log["timing_counts"]["model.stream"] == 2
+        assert turn_log["timing_counts"]["tool.execute"] == 1
+        assert turn_log["timing_counts"]["billing.record_usage"] == 1
 
 
 # ---------------------------------------------------------------------------
 # Rate limiting
 # ---------------------------------------------------------------------------
+
 
 class TestRateLimitConfig:
     """Unit checks on the rate-limit key function and configuration.
@@ -429,41 +514,50 @@ class TestRateLimitConfig:
 
     def _request(self, headers=None, client_host="203.0.113.1"):
         from starlette.requests import Request
+
         scope = {
             "type": "http",
-            "headers": [(k.lower().encode(), v.encode()) for k, v in (headers or {}).items()],
+            "headers": [
+                (k.lower().encode(), v.encode()) for k, v in (headers or {}).items()
+            ],
             "client": (client_host, 12345),
         }
         return Request(scope)
 
     def test_key_func_uses_user_id_header(self):
         from api.rate_limit import chat_key_func
+
         req = self._request(headers={"x-user-id": "abc-123"})
         assert chat_key_func(req) == "user:abc-123"
 
     def test_key_func_falls_back_to_ip(self):
         from api.rate_limit import chat_key_func
+
         req = self._request(client_host="198.51.100.7")
         assert chat_key_func(req) == "ip:198.51.100.7"
 
     def test_key_func_user_id_takes_precedence_over_ip(self):
         from api.rate_limit import chat_key_func
+
         req = self._request(headers={"x-user-id": "u1"}, client_host="198.51.100.7")
         assert chat_key_func(req) == "user:u1"
 
     def test_empty_user_id_header_falls_back_to_ip(self):
         from api.rate_limit import chat_key_func
+
         req = self._request(headers={"x-user-id": ""}, client_host="198.51.100.7")
         assert chat_key_func(req) == "ip:198.51.100.7"
 
     def test_limit_strings_compose_per_min_and_per_hour(self):
         from api.rate_limit import CHAT_USER_LIMIT
+
         assert "/minute" in CHAT_USER_LIMIT and "/hour" in CHAT_USER_LIMIT
 
     def test_env_overrides_take_effect_at_import(self):
         # conftest.py sets these to test values; verify rate_limit picked them up.
         import os
         from api.rate_limit import CHAT_PER_MIN, CHAT_PER_HOUR, CHAT_IP_PER_MIN
+
         assert CHAT_PER_MIN == int(os.environ["RATE_LIMIT_CHAT_PER_MIN"])
         assert CHAT_PER_HOUR == int(os.environ["RATE_LIMIT_CHAT_PER_HOUR"])
         assert CHAT_IP_PER_MIN == int(os.environ["RATE_LIMIT_CHAT_IP_PER_MIN"])
@@ -472,22 +566,30 @@ class TestRateLimitConfig:
         # Behind a proxy, request.client.host is the proxy — X-Forwarded-For
         # carries the real client. The limiter must key on the latter.
         from api.rate_limit import client_ip
-        req = self._request(headers={"x-forwarded-for": "1.2.3.4"}, client_host="10.0.0.1")
+
+        req = self._request(
+            headers={"x-forwarded-for": "1.2.3.4"}, client_host="10.0.0.1"
+        )
         assert client_ip(req) == "1.2.3.4"
 
     def test_client_ip_takes_first_forwarded_entry(self):
         from api.rate_limit import client_ip
+
         req = self._request(headers={"x-forwarded-for": "1.2.3.4, 10.0.0.1, 10.0.0.2"})
         assert client_ip(req) == "1.2.3.4"
 
     def test_client_ip_falls_back_to_socket_peer(self):
         from api.rate_limit import client_ip
+
         req = self._request(client_host="198.51.100.7")
         assert client_ip(req) == "198.51.100.7"
 
     def test_chat_key_func_uses_forwarded_ip_for_anonymous(self):
         from api.rate_limit import chat_key_func
-        req = self._request(headers={"x-forwarded-for": "1.2.3.4"}, client_host="10.0.0.1")
+
+        req = self._request(
+            headers={"x-forwarded-for": "1.2.3.4"}, client_host="10.0.0.1"
+        )
         assert chat_key_func(req) == "ip:1.2.3.4"
 
     def test_chat_endpoint_exposes_starlette_request_to_slowapi(self):
@@ -501,6 +603,7 @@ class TestRateLimitConfig:
         import inspect
         from starlette.requests import Request as StarletteRequest
         from chat.routes import chat_message
+
         params = inspect.signature(chat_message).parameters
         assert "request" in params, "endpoint needs a `request` parameter for slowapi"
         assert params["request"].annotation is StarletteRequest, (
@@ -514,7 +617,11 @@ class TestRateLimitConfig:
         thing that can fail here is the rate-limit decorator itself — which
         is exactly the regression this guards.
         """
-        with client.stream("POST", "/chat/message", json={
-            "messages": [{"role": "user", "content": "Say exactly: hi"}],
-        }) as r:
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "messages": [{"role": "user", "content": "Say exactly: hi"}],
+            },
+        ) as r:
             assert r.status_code != 500

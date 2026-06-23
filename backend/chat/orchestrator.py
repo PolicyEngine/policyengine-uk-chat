@@ -9,19 +9,18 @@ modules (schemas, system_blocks, model_selection, suggestions).
 import asyncio
 import json
 import logging
-import time
 import uuid
 from typing import Any, Dict, List
 
 import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse, StreamingResponse
+from policyengine_observability import annotate
 from policyengine_observability import asegment
-from policyengine_observability import current_operation
+from policyengine_observability import mark_ttft_attribute
 from policyengine_observability import operation
 from policyengine_observability import record_error
 from policyengine_observability import segment
-from policyengine_observability import set_attribute
 
 from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_async_client
 from gateway import run_gateway, serialise_plan_for_system
@@ -61,16 +60,24 @@ def stream_chat(request: Request, chat_request: ChatRequest):
     if user_id:
         try:
             from billing import check_balance
+
             with segment(SegmentName.BILLING_CHECK_BALANCE):
                 has_credit, _ = check_balance(user_id)
             if not has_credit:
-                return JSONResponse(status_code=402, content={"error": "No credit remaining. Please top up to continue."})
+                return JSONResponse(
+                    status_code=402,
+                    content={
+                        "error": "No credit remaining. Please top up to continue."
+                    },
+                )
         except RuntimeError:
             pass  # Supabase not configured — skip billing check
 
     session_id = chat_request.session_id or str(uuid.uuid4())
 
-    messages = [{"role": msg.role, "content": msg.content} for msg in chat_request.messages]
+    messages = [
+        {"role": msg.role, "content": msg.content} for msg in chat_request.messages
+    ]
 
     # Deduplicate consecutive same-role messages
     deduplicated = []
@@ -89,7 +96,10 @@ def stream_chat(request: Request, chat_request: ChatRequest):
     if chat_request.image_base64 and chat_request.image_media_type:
         media_type = chat_request.image_media_type
         if media_type not in _ALLOWED_IMAGE_MEDIA_TYPES:
-            return JSONResponse(status_code=400, content={"error": f"Unsupported image media type: {media_type}"})
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Unsupported image media type: {media_type}"},
+            )
         # Find the last user message — that's the one the image belongs to.
         for i in range(len(deduplicated) - 1, -1, -1):
             if deduplicated[i]["role"] == "user":
@@ -118,18 +128,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                 flavor="chat",
                 session_id=session_id,
             ):
-                turn_started_at = time.perf_counter()
-
-                def set_turn_attribute(key: str, value) -> None:
-                    set_attribute(key, value)
-                    try:
-                        active_operation = current_operation()
-                        if active_operation is not None:
-                            active_operation.set_attribute(key, value)
-                    except BaseException:
-                        return
-
-                set_turn_attribute("session_id", session_id)
+                annotate(session_id=session_id)
                 conversation = deduplicated.copy()
                 iteration = 0
                 max_iterations = MAX_ITERATIONS
@@ -146,7 +145,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
 
                 client = get_async_client()
                 charts_mode = chat_request.charts_mode
-                set_turn_attribute("charts_mode", charts_mode)
+                annotate(charts_mode=charts_mode)
 
                 def usage_payload() -> dict:
                     return {
@@ -176,19 +175,15 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                     }
 
                 def annotate_turn(stop_reason: str | None) -> None:
-                    set_turn_attribute("model", model)
-                    set_turn_attribute("stop_reason", stop_reason)
-                    set_turn_attribute("iterations", iteration)
-                    set_turn_attribute("tool_calls", sum(tool_call_counts.values()))
-                    set_turn_attribute("input_tokens", total_input_tokens)
-                    set_turn_attribute("output_tokens", total_output_tokens)
-                    set_turn_attribute(
-                        "cache_read_input_tokens",
-                        total_cache_read_input_tokens,
-                    )
-                    set_turn_attribute(
-                        "cache_creation_input_tokens",
-                        total_cache_creation_input_tokens,
+                    annotate(
+                        model=model,
+                        stop_reason=stop_reason,
+                        iterations=iteration,
+                        tool_calls=sum(tool_call_counts.values()),
+                        input_tokens=total_input_tokens,
+                        output_tokens=total_output_tokens,
+                        cache_read_input_tokens=total_cache_read_input_tokens,
+                        cache_creation_input_tokens=total_cache_creation_input_tokens,
                     )
 
                 def record_usage_for_turn() -> dict | None:
@@ -225,10 +220,12 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                         )
                     route = verdict.route
 
-                set_turn_attribute("gateway_route", route)
+                annotate(gateway_route=route)
                 if verdict is not None:
-                    set_turn_attribute("gateway_outcome", verdict.outcome)
-                    set_turn_attribute("gateway_tool", verdict.tool)
+                    annotate(
+                        gateway_outcome=verdict.outcome,
+                        gateway_tool=verdict.tool,
+                    )
 
                 if route == "lightweight":
                     model = DEFAULT_FAST_MODEL
@@ -241,11 +238,15 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                         gateway_verdict=verdict,
                     )
                     tools = _tool_defs_for_anthropic()
-                    gateway_plan = serialise_plan_for_system(verdict) if verdict is not None else None
+                    gateway_plan = (
+                        serialise_plan_for_system(verdict)
+                        if verdict is not None
+                        else None
+                    )
                     system_blocks = _build_system_blocks(
                         charts_mode=charts_mode, gateway_plan=gateway_plan
                     )
-                set_turn_attribute("model", model)
+                annotate(model=model)
 
                 logger.info(
                     f"[CHAT] Session {session_id}: {len(conversation)} messages"
@@ -267,7 +268,9 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                         assistant_content = ""
                         last_stop_reason: str | None = None
 
-                        logger.info(f"[CHAT] Iteration {iteration}: calling Anthropic, {len(conversation)} messages")
+                        logger.info(
+                            f"[CHAT] Iteration {iteration}: calling Anthropic, {len(conversation)} messages"
+                        )
                         # Stream from Anthropic with retry on transient errors
                         max_retries = 2
                         for attempt in range(max_retries + 1):
@@ -300,48 +303,64 @@ def stream_chat(request: Request, chat_request: ChatRequest):
 
                                         if event_type == "RawContentBlockStartEvent":
                                             block = event.content_block
-                                            if block.type == "tool_use" and block.id not in announced_tools:
+                                            if (
+                                                block.type == "tool_use"
+                                                and block.id not in announced_tools
+                                            ):
                                                 announced_tools.add(block.id)
                                                 yield f"data: {json.dumps({'type': 'tool_start', 'tool_name': block.name, 'tool_id': block.id})}\n\n"
 
                                         elif event_type == "RawContentBlockDeltaEvent":
                                             delta = event.delta
-                                            if delta.type == "text_delta" and delta.text:
+                                            if (
+                                                delta.type == "text_delta"
+                                                and delta.text
+                                            ):
                                                 if not ttft_recorded:
-                                                    set_turn_attribute(
-                                                        "ttft_ms",
-                                                        round(
-                                                            (
-                                                                time.perf_counter()
-                                                                - turn_started_at
-                                                            )
-                                                            * 1000,
-                                                            1,
-                                                        ),
-                                                    )
+                                                    mark_ttft_attribute()
                                                     ttft_recorded = True
                                                 assistant_content += delta.text
                                                 yield f"data: {json.dumps({'type': 'chunk', 'content': delta.text})}\n\n"
 
                                         elif event_type == "RawMessageStartEvent":
-                                            usage = getattr(event.message, "usage", None)
+                                            usage = getattr(
+                                                event.message, "usage", None
+                                            )
                                             if usage:
-                                                total_input_tokens += getattr(usage, "input_tokens", 0)
-                                                cache_read = getattr(usage, "cache_read_input_tokens", 0)
-                                                cache_create = getattr(usage, "cache_creation_input_tokens", 0)
-                                                total_cache_read_input_tokens += cache_read
-                                                total_cache_creation_input_tokens += cache_create
+                                                total_input_tokens += getattr(
+                                                    usage, "input_tokens", 0
+                                                )
+                                                cache_read = getattr(
+                                                    usage, "cache_read_input_tokens", 0
+                                                )
+                                                cache_create = getattr(
+                                                    usage,
+                                                    "cache_creation_input_tokens",
+                                                    0,
+                                                )
+                                                total_cache_read_input_tokens += (
+                                                    cache_read
+                                                )
+                                                total_cache_creation_input_tokens += (
+                                                    cache_create
+                                                )
                                                 if cache_read or cache_create:
-                                                    logger.info(f"[CHAT] Cache: {cache_read} read, {cache_create} creation tokens")
+                                                    logger.info(
+                                                        f"[CHAT] Cache: {cache_read} read, {cache_create} creation tokens"
+                                                    )
 
                                         elif event_type == "RawMessageDeltaEvent":
                                             usage = getattr(event, "usage", None)
                                             if usage:
-                                                total_output_tokens += getattr(usage, "output_tokens", 0)
+                                                total_output_tokens += getattr(
+                                                    usage, "output_tokens", 0
+                                                )
 
                                     # Use final message for complete, parsed tool inputs
                                     final = await stream.get_final_message()
-                                    last_stop_reason = getattr(final, "stop_reason", None)
+                                    last_stop_reason = getattr(
+                                        final, "stop_reason", None
+                                    )
                                     for block in final.content:
                                         if block.type == "tool_use":
                                             if not tools:
@@ -349,14 +368,32 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                                                 # path), so this should be unreachable. If the API
                                                 # ever returns a tool_use anyway, drop it silently
                                                 # rather than executing.
-                                                logger.warning(f"[CHAT] Dropping unexpected tool_use with no tools sent: {block.name}")
+                                                logger.warning(
+                                                    f"[CHAT] Dropping unexpected tool_use with no tools sent: {block.name}"
+                                                )
                                                 continue
-                                            tool_input = block.input if isinstance(block.input, dict) else {}
-                                            tool_uses.append({"id": block.id, "name": block.name, "input": tool_input})
+                                            tool_input = (
+                                                block.input
+                                                if isinstance(block.input, dict)
+                                                else {}
+                                            )
+                                            tool_uses.append(
+                                                {
+                                                    "id": block.id,
+                                                    "name": block.name,
+                                                    "input": tool_input,
+                                                }
+                                            )
                                             yield f"data: {json.dumps({'type': 'tool_use', 'tool_name': block.name, 'tool_id': block.id, 'tool_input': tool_input, 'status': 'pending'})}\n\n"
                                 break  # success — exit retry loop
-                            except (httpx.ReadError, httpx.RemoteProtocolError, httpx.ConnectError) as e:
-                                logger.warning(f"[CHAT] Anthropic stream error (attempt {attempt+1}/{max_retries+1}): {e}")
+                            except (
+                                httpx.ReadError,
+                                httpx.RemoteProtocolError,
+                                httpx.ConnectError,
+                            ) as e:
+                                logger.warning(
+                                    f"[CHAT] Anthropic stream error (attempt {attempt + 1}/{max_retries + 1}): {e}"
+                                )
                                 if attempt == max_retries:
                                     raise
                                 tool_uses = []
@@ -379,14 +416,26 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                             # Best-effort follow-up suggestions. Only on the compute path
                             # (a lightweight refusal/clarification shouldn't get chips),
                             # and only on a clean stop.
-                            if route == "compute" and last_stop_reason in ("end_turn", "stop_sequence", None):
+                            if route == "compute" and last_stop_reason in (
+                                "end_turn",
+                                "stop_sequence",
+                                None,
+                            ):
                                 last_user_msg = next(
-                                    (m["content"] for m in reversed(deduplicated) if m.get("role") == "user"),
+                                    (
+                                        m["content"]
+                                        for m in reversed(deduplicated)
+                                        if m.get("role") == "user"
+                                    ),
                                     "",
                                 )
-                                if isinstance(last_user_msg, list):  # defensive: structured content
+                                if isinstance(
+                                    last_user_msg, list
+                                ):  # defensive: structured content
                                     last_user_msg = " ".join(
-                                        str(b.get("text", "")) for b in last_user_msg if isinstance(b, dict)
+                                        str(b.get("text", ""))
+                                        for b in last_user_msg
+                                        if isinstance(b, dict)
                                     )
                                 async with asegment(SegmentName.SUGGESTIONS):
                                     suggestions = await _generate_followup_suggestions(
@@ -398,7 +447,12 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                             break
 
                         # Detect infinite loops
-                        sig = ",".join(sorted(f"{t['name']}:{json.dumps(t['input'], sort_keys=True)}" for t in tool_uses))
+                        sig = ",".join(
+                            sorted(
+                                f"{t['name']}:{json.dumps(t['input'], sort_keys=True)}"
+                                for t in tool_uses
+                            )
+                        )
                         recent_tool_calls.append(sig)
                         if len(recent_tool_calls) > 3:
                             recent_tool_calls.pop(0)
@@ -409,31 +463,54 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                                 break
 
                         # Build assistant message
-                        assistant_message: Dict[str, Any] = {"role": "assistant", "content": []}
+                        assistant_message: Dict[str, Any] = {
+                            "role": "assistant",
+                            "content": [],
+                        }
                         if assistant_content:
-                            assistant_message["content"].append({"type": "text", "text": assistant_content})
+                            assistant_message["content"].append(
+                                {"type": "text", "text": assistant_content}
+                            )
                         for tu in tool_uses:
-                            assistant_message["content"].append({"type": "tool_use", "id": tu["id"], "name": tu["name"], "input": tu["input"]})
+                            assistant_message["content"].append(
+                                {
+                                    "type": "tool_use",
+                                    "id": tu["id"],
+                                    "name": tu["name"],
+                                    "input": tu["input"],
+                                }
+                            )
                         conversation.append(assistant_message)
 
                         # Execute tools in parallel and stream results as each finishes.
                         # The model-facing transcript below remains deterministic because
                         # it appends tool results in the original tool-call order.
-                        logger.info(f"[CHAT] Executing {len(tool_uses)} tools: {[t['name'] for t in tool_uses]}")
+                        logger.info(
+                            f"[CHAT] Executing {len(tool_uses)} tools: {[t['name'] for t in tool_uses]}"
+                        )
 
                         async def execute_tool_async(tu):
                             loop = asyncio.get_event_loop()
-                            logger.info(f"[CHAT] Starting tool: {tu['name']} input={tu['input']}")
+                            logger.info(
+                                f"[CHAT] Starting tool: {tu['name']} input={tu['input']}"
+                            )
                             async with asegment(
                                 SegmentName.TOOL_EXECUTE,
                                 iteration=iteration,
                                 tool=tu["name"],
                             ):
-                                result = await loop.run_in_executor(None, execute_tool, tu["name"], tu["input"])
-                            logger.info(f"[CHAT] Finished tool: {tu['name']} result_keys={list(result.keys()) if isinstance(result, dict) else type(result)}")
+                                result = await loop.run_in_executor(
+                                    None, execute_tool, tu["name"], tu["input"]
+                                )
+                            logger.info(
+                                f"[CHAT] Finished tool: {tu['name']} result_keys={list(result.keys()) if isinstance(result, dict) else type(result)}"
+                            )
                             return tu, result
 
-                        tasks = [asyncio.ensure_future(execute_tool_async(tu)) for tu in tool_uses]
+                        tasks = [
+                            asyncio.ensure_future(execute_tool_async(tu))
+                            for tu in tool_uses
+                        ]
                         completed_tools = {}
 
                         for fut in asyncio.as_completed(tasks):
@@ -441,39 +518,77 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                             if await request.is_disconnected():
                                 return
                             completed_tools[tu["id"]] = result
-                            tool_call_counts[tu["name"]] = tool_call_counts.get(tu["name"], 0) + 1
+                            tool_call_counts[tu["name"]] = (
+                                tool_call_counts.get(tu["name"], 0) + 1
+                            )
                             # Capture the most recent tool error so the cap-hit fallback
                             # can hint at what the agent was struggling with.
                             if isinstance(result, dict):
                                 err = result.get("error") or result.get("stderr")
                                 if err:
-                                    err_str = str(err).strip().splitlines()[-1] if str(err).strip() else ""
+                                    err_str = (
+                                        str(err).strip().splitlines()[-1]
+                                        if str(err).strip()
+                                        else ""
+                                    )
                                     if err_str:
                                         last_tool_error = err_str[:120]
                             result_str = _serialise_tool_result(result)
-                            result_summary = result_str[:5000] + "..." if len(result_str) > 5000 else result_str
+                            result_summary = (
+                                result_str[:5000] + "..."
+                                if len(result_str) > 5000
+                                else result_str
+                            )
                             yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tu['name'], 'tool_id': tu['id'], 'status': 'success', 'result_summary': result_summary})}\n\n"
 
                         # Add tool results (truncate aggressively to avoid context blowup)
                         MAX_RESULT_CHARS = 15000
                         tool_results = []
                         for tu in tool_uses:
-                            result_json = _serialise_tool_result(completed_tools[tu["id"]])
+                            result_json = _serialise_tool_result(
+                                completed_tools[tu["id"]]
+                            )
                             if len(result_json) > MAX_RESULT_CHARS:
                                 from tools.dispatch import explore_tabular_data
+
                                 tool_result = completed_tools[tu["id"]]
                                 # Try to find and summarise large arrays
-                                data_key = next((k for k in tool_result if isinstance(tool_result.get(k), list) and len(tool_result[k]) > 5), None)
+                                data_key = next(
+                                    (
+                                        k
+                                        for k in tool_result
+                                        if isinstance(tool_result.get(k), list)
+                                        and len(tool_result[k]) > 5
+                                    ),
+                                    None,
+                                )
                                 if data_key:
                                     data_array = tool_result[data_key]
                                     exploration = explore_tabular_data(data_array)
-                                    remaining = {k: v for k, v in tool_result.items() if k != data_key}
-                                    processed = {**remaining, "note": f"Large '{data_key}' array ({len(data_array)} rows) - showing first 20 with column metadata", "exploration": exploration, data_key: data_array[:20]}
+                                    remaining = {
+                                        k: v
+                                        for k, v in tool_result.items()
+                                        if k != data_key
+                                    }
+                                    processed = {
+                                        **remaining,
+                                        "note": f"Large '{data_key}' array ({len(data_array)} rows) - showing first 20 with column metadata",
+                                        "exploration": exploration,
+                                        data_key: data_array[:20],
+                                    }
                                     result_json = _serialise_tool_result(processed)
                                 # Hard cap: if still too large, truncate the JSON string
                                 if len(result_json) > MAX_RESULT_CHARS:
-                                    result_json = result_json[:MAX_RESULT_CHARS] + '..."}'
-                            tool_results.append({"type": "tool_result", "tool_use_id": tu["id"], "content": result_json})
+                                    result_json = (
+                                        result_json[:MAX_RESULT_CHARS] + '..."}'
+                                    )
+                            tool_results.append(
+                                {
+                                    "type": "tool_result",
+                                    "tool_use_id": tu["id"],
+                                    "content": result_json,
+                                }
+                            )
 
                         conversation.append({"role": "user", "content": tool_results})
 
@@ -490,13 +605,17 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                     # Build a short summary of what was tried. Kept under ~300 chars
                     # so it reads as a sentence, not a transcript.
                     if tool_call_counts:
-                        parts = [f"`{name}` {count}×" for name, count in tool_call_counts.items()]
+                        parts = [
+                            f"`{name}` {count}×"
+                            for name, count in tool_call_counts.items()
+                        ]
                         tried_clause = "ran " + ", ".join(parts)
                     else:
                         tried_clause = "didn't complete any tool calls"
                     error_clause = (
-                        f", last attempt errored with \"{last_tool_error}\""
-                        if last_tool_error else ""
+                        f', last attempt errored with "{last_tool_error}"'
+                        if last_tool_error
+                        else ""
                     )
                     fallback_message = (
                         "\n\nI'm spending more iterations than expected on this without converging. "
@@ -516,9 +635,10 @@ def stream_chat(request: Request, chat_request: ChatRequest):
 
         except Exception as e:
             import traceback
+
             record_error(e, handled=True, status_code=500)
             if terminal_stop_reason is None:
-                set_attribute("stop_reason", "error")
+                annotate(stop_reason="error")
             logger.error(f"[CHAT] Exception: {e}\n{traceback.format_exc()}")
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
 

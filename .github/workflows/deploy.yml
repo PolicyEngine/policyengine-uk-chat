@@ -52,7 +52,6 @@ jobs:
             STRIPE_SECRET_KEY="$STRIPE_SECRET_KEY" \
             STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
             OBSERVABILITY_ENVIRONMENT="production" \
-            OBSERVABILITY_PLATFORM="modal" \
             HOSTNAMES="https://policyengine-uk-chat.vercel.app,https://policyengine-uk-chat-bmxyy36r1-policy-engine.vercel.app" \
             PUBLIC_BASE_URL="https://policyengine-uk-chat.vercel.app" \
             --force
