@@ -166,7 +166,9 @@ async function evalRequest<T>(token: string, endpoint: string): Promise<T> {
       const body = await response.json();
       detail = body.detail || body.details || body.error || "";
     } catch {}
-    throw new Error(`API error ${response.status}${detail ? `: ${detail}` : ""}`);
+    const error = new Error(`API error ${response.status}${detail ? `: ${detail}` : ""}`);
+    error.name = response.status === 401 ? "UnauthorizedError" : "EvalRequestError";
+    throw error;
   }
   return response.json();
 }
@@ -184,13 +186,15 @@ export default function EvalDashboardPage() {
   const [status, setStatus] = useState("");
   const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
+  const [authSubmitting, setAuthSubmitting] = useState(false);
+  const [authError, setAuthError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = sessionStorage.getItem("evalDashboardToken");
     if (stored) {
-      setToken(stored);
       setTokenInput(stored);
+      void activateToken(stored);
     }
   }, []);
 
@@ -222,7 +226,11 @@ export default function EvalDashboardPage() {
       if (!headId && data[0]) setHeadId(data[0].run_id);
       if (!detail && data[0]) void loadDetail(data[0].run_id, activeToken);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load eval runs");
+      if (err instanceof Error && err.name === "UnauthorizedError") {
+        lockDashboard("That dashboard token is wrong.");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to load eval runs");
+      }
     } finally {
       setLoading(false);
     }
@@ -238,7 +246,11 @@ export default function EvalDashboardPage() {
       );
       setDetail(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load eval run");
+      if (err instanceof Error && err.name === "UnauthorizedError") {
+        lockDashboard("That dashboard token is wrong.");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to load eval run");
+      }
     }
   }
 
@@ -253,19 +265,58 @@ export default function EvalDashboardPage() {
       );
       setComparison(data);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to compare eval runs");
+      if (err instanceof Error && err.name === "UnauthorizedError") {
+        lockDashboard("That dashboard token is wrong.");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to compare eval runs");
+      }
     }
   }
 
-  useEffect(() => {
-    if (token) void loadRuns(token);
-  }, [token]);
+  function lockDashboard(message?: string) {
+    sessionStorage.removeItem("evalDashboardToken");
+    setToken("");
+    setRuns([]);
+    setDetail(null);
+    setComparison(null);
+    setBaseId("");
+    setHeadId("");
+    setError(null);
+    setAuthError(message || null);
+  }
 
-  function activateToken() {
-    const trimmed = tokenInput.trim();
+  async function activateToken(candidate = tokenInput) {
+    const trimmed = candidate.trim();
     if (!trimmed) return;
-    sessionStorage.setItem("evalDashboardToken", trimmed);
-    setToken(trimmed);
+    setAuthSubmitting(true);
+    setAuthError(null);
+    try {
+      const params = new URLSearchParams({ limit: "100" });
+      const data = await evalRequest<EvalRunSummary[]>(
+        trimmed,
+        `eval-runs?${params.toString()}`,
+      );
+      sessionStorage.setItem("evalDashboardToken", trimmed);
+      setToken(trimmed);
+      setRuns(data);
+      if (data[1]) setBaseId(data[1].run_id);
+      if (data[0]) {
+        setHeadId(data[0].run_id);
+        await loadDetail(data[0].run_id, trimmed);
+      }
+    } catch (err) {
+      sessionStorage.removeItem("evalDashboardToken");
+      setToken("");
+      setAuthError(
+        err instanceof Error && err.name === "UnauthorizedError"
+          ? "That dashboard token is wrong."
+          : err instanceof Error
+            ? err.message
+            : "Could not open eval dashboard.",
+      );
+    } finally {
+      setAuthSubmitting(false);
+    }
   }
 
   if (!token) {
@@ -277,12 +328,24 @@ export default function EvalDashboardPage() {
           <input
             value={tokenInput}
             onChange={(event) => setTokenInput(event.target.value)}
-            onKeyDown={(event) => { if (event.key === "Enter") activateToken(); }}
-            placeholder="Dashboard token"
+            onKeyDown={(event) => { if (event.key === "Enter") void activateToken(); }}
+            placeholder="Internal eval dashboard token"
             type="password"
             style={styles.tokenInput}
           />
-          <button onClick={activateToken} style={styles.primaryButton}>Open dashboard</button>
+          {authError && (
+            <div style={styles.authError}>
+              <IconAlertCircle size={16} />
+              {authError}
+            </div>
+          )}
+          <button
+            onClick={() => void activateToken()}
+            style={styles.primaryButton}
+            disabled={authSubmitting}
+          >
+            {authSubmitting ? "Checking..." : "Open dashboard"}
+          </button>
         </section>
       </main>
     );
@@ -302,12 +365,8 @@ export default function EvalDashboardPage() {
           </button>
           <button
             onClick={() => {
-              sessionStorage.removeItem("evalDashboardToken");
-              setToken("");
               setTokenInput("");
-              setRuns([]);
-              setDetail(null);
-              setComparison(null);
+              lockDashboard();
             }}
             style={styles.secondaryButton}
           >
@@ -734,6 +793,17 @@ const styles: Record<string, CSSProperties> = {
     padding: "10px 12px",
     marginBottom: "16px",
     fontSize: "14px",
+  },
+  authError: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    border: "1px solid #b91c1c33",
+    background: "#b91c1c12",
+    color: "#b91c1c",
+    borderRadius: "6px",
+    padding: "9px 10px",
+    fontSize: "13px",
   },
   grid: {
     display: "grid",
