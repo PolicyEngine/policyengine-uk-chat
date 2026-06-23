@@ -20,6 +20,7 @@ from policyengine_observability import asegment
 from policyengine_observability import mark_ttft_attribute
 from policyengine_observability import operation
 from policyengine_observability import record_error
+from policyengine_observability import record_event
 from policyengine_observability import segment
 
 from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_async_client
@@ -186,6 +187,20 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                         cache_creation_input_tokens=total_cache_creation_input_tokens,
                     )
 
+                def annotate_client_disconnected() -> None:
+                    nonlocal terminal_stop_reason
+
+                    terminal_stop_reason = "client_disconnected"
+                    annotate_turn(terminal_stop_reason)
+                    record_event(
+                        "chat.client_disconnected",
+                        session_id=session_id,
+                        route=route,
+                        model=model,
+                        iterations=iteration,
+                        tool_calls=sum(tool_call_counts.values()),
+                    )
+
                 def record_usage_for_turn() -> dict | None:
                     try:
                         from billing import record_usage
@@ -227,25 +242,39 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                         gateway_tool=verdict.tool,
                     )
 
+                with segment(
+                    SegmentName.MODEL_SELECT,
+                    route=route,
+                    charts_mode=charts_mode,
+                ):
+                    if route == "lightweight":
+                        model = DEFAULT_FAST_MODEL
+                    else:
+                        model = _select_chat_model(
+                            conversation,
+                            charts_mode=charts_mode,
+                            gateway_verdict=verdict,
+                        )
+
                 if route == "lightweight":
-                    model = DEFAULT_FAST_MODEL
                     tools = []
-                    system_blocks = _build_lightweight_system_blocks(verdict)
+                    with segment(SegmentName.SYSTEM_BUILD, route=route):
+                        system_blocks = _build_lightweight_system_blocks(verdict)
                 else:
-                    model = _select_chat_model(
-                        conversation,
+                    with segment(SegmentName.TOOL_SCHEMA_BUILD):
+                        tools = _tool_defs_for_anthropic()
+                    gateway_plan = None
+                    if verdict is not None:
+                        with segment(SegmentName.GATEWAY_PLAN_SERIALIZE):
+                            gateway_plan = serialise_plan_for_system(verdict)
+                    with segment(
+                        SegmentName.SYSTEM_BUILD,
+                        route=route,
                         charts_mode=charts_mode,
-                        gateway_verdict=verdict,
-                    )
-                    tools = _tool_defs_for_anthropic()
-                    gateway_plan = (
-                        serialise_plan_for_system(verdict)
-                        if verdict is not None
-                        else None
-                    )
-                    system_blocks = _build_system_blocks(
-                        charts_mode=charts_mode, gateway_plan=gateway_plan
-                    )
+                    ):
+                        system_blocks = _build_system_blocks(
+                            charts_mode=charts_mode, gateway_plan=gateway_plan
+                        )
                 annotate(model=model)
 
                 logger.info(
@@ -256,6 +285,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
 
                 while iteration < max_iterations:
                     if await request.is_disconnected():
+                        annotate_client_disconnected()
                         return
 
                     iteration += 1
@@ -516,6 +546,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                         for fut in asyncio.as_completed(tasks):
                             tu, result = await fut
                             if await request.is_disconnected():
+                                annotate_client_disconnected()
                                 return
                             completed_tools[tu["id"]] = result
                             tool_call_counts[tu["name"]] = (

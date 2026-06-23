@@ -4,12 +4,14 @@ Tests the HTTP layer — chat streaming, conversations CRUD, title generation.
 Run inside the backend container: pytest tests/
 """
 
+import asyncio
 import json
 import os
 from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
+from policyengine_observability.runtime import EVENT_LOGGER
 from policyengine_observability.runtime import OPERATION_LOGGER
 from api.main import app
 
@@ -487,15 +489,79 @@ class TestChatRouteWithMockedAnthropic:
         assert turn_log["model"]
         assert turn_log["ttft_ms"] >= 0
         assert turn_log["timings_ms"]["gateway.classify"] >= 0
+        assert turn_log["timings_ms"]["gateway.plan_serialize"] >= 0
+        assert turn_log["timings_ms"]["model.select"] >= 0
+        assert turn_log["timings_ms"]["system.build"] >= 0
+        assert turn_log["timings_ms"]["tool_schema.build"] >= 0
         assert turn_log["timings_ms"]["model.iteration"] >= 0
         assert turn_log["timings_ms"]["model.stream"] >= 0
         assert turn_log["timings_ms"]["tool.execute"] >= 0
         assert turn_log["timings_ms"]["billing.record_usage"] >= 0
         assert turn_log["timing_counts"]["gateway.classify"] == 1
+        assert turn_log["timing_counts"]["gateway.plan_serialize"] == 1
+        assert turn_log["timing_counts"]["model.select"] == 1
+        assert turn_log["timing_counts"]["system.build"] == 1
+        assert turn_log["timing_counts"]["tool_schema.build"] == 1
         assert turn_log["timing_counts"]["model.iteration"] == 2
         assert turn_log["timing_counts"]["model.stream"] == 2
         assert turn_log["timing_counts"]["tool.execute"] == 1
         assert turn_log["timing_counts"]["billing.record_usage"] == 1
+
+    def test_chat_route_logs_client_disconnect(self, monkeypatch):
+        import chat.orchestrator as chatbot
+        from chat.schemas import ChatRequest
+
+        class DisconnectingRequest:
+            async def is_disconnected(self):
+                return True
+
+        operation_records = []
+        event_records = []
+        monkeypatch.setattr(chatbot, "get_async_client", lambda: object())
+        monkeypatch.setattr(chatbot, "_is_followup", lambda _conversation: True)
+        monkeypatch.setattr(OPERATION_LOGGER, "info", operation_records.append)
+        monkeypatch.setattr(EVENT_LOGGER, "info", event_records.append)
+
+        async def consume_stream():
+            response = chatbot.stream_chat(
+                DisconnectingRequest(),
+                ChatRequest(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": "Calculate this household.",
+                        }
+                    ],
+                    session_id="disconnect-session",
+                ),
+            )
+            chunks = []
+            async for chunk in response.body_iterator:
+                chunks.append(chunk)
+            return chunks
+
+        assert asyncio.run(consume_stream()) == []
+
+        turn_log = next(
+            payload
+            for payload in map(json.loads, operation_records)
+            if payload.get("operation") == "chat.turn"
+        )
+        assert turn_log["stop_reason"] == "client_disconnected"
+        assert turn_log["session_id"] == "disconnect-session"
+        assert turn_log["iterations"] == 0
+        assert turn_log["timing_counts"]["model.select"] == 1
+        assert turn_log["timing_counts"]["system.build"] == 1
+        assert turn_log["timing_counts"]["tool_schema.build"] == 1
+
+        disconnect_event = next(
+            payload
+            for payload in map(json.loads, event_records)
+            if payload.get("event") == "chat.client_disconnected"
+        )
+        assert disconnect_event["session_id"] == "disconnect-session"
+        assert disconnect_event["iterations"] == 0
+        assert disconnect_event["tool_calls"] == 0
 
 
 # ---------------------------------------------------------------------------
