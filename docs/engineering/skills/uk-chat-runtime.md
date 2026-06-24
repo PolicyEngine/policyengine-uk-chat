@@ -70,6 +70,12 @@ reform is supplied, including an empty no-op object (`{}`), calculations use
 side-by-side `baseline_*` and `reform_*` comparison columns. Do not normalize
 omitted-reform outputs back to the older prefixed shape.
 
+The default columns for `analyse_microdata` are manually enumerated in
+`backend/engine/microdata.py` because `policyengine-uk-compiled` does not yet
+expose a programmatic way to query output columns or recommended defaults for
+plain versus reform-comparison mode. Replace those lists with upstream metadata
+when it becomes available.
+
 ## Deterministic And Non-Deterministic Segments
 
 - Non-deterministic: user text interpretation, model planning, tool selection,

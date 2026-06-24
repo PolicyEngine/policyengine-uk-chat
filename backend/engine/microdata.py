@@ -12,6 +12,10 @@ from engine.simulations import DATASET_LABELS, build_simulation
 _microdata_cache: Dict[tuple, Any] = {}
 _MAX_CACHE = 4
 
+# These are manually enumerated because policyengine-uk-compiled does not yet
+# expose programmatic output-column metadata or recommended defaults for plain
+# versus comparison microdata modes. Replace this with package metadata when
+# PolicyEngine/policyengine-uk-v2#107 is available.
 _PLAIN_DEFAULT_COLUMNS = {
     "persons": [
         "age",
