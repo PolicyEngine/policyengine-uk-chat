@@ -199,90 +199,87 @@ GENERATE_CHART_INPUT_SCHEMA = {
     "required": ["chart_type", "title", "data", "x_field", "y_fields"],
 }
 
-TOOL_DEFINITIONS = [
-    {
-        "name": "validate_reform",
-        "description": (
-            "Validate parametric reform JSON without running a simulation. "
-            "Use this when the user is drafting, debugging, or asking whether "
-            "a reform object is valid. Do not call it as a routine preflight "
-            "before every simulation; calculation tools validate reforms internally."
-        ),
-        "input_schema": VALIDATE_REFORM_INPUT_SCHEMA,
-    },
-    {
-        "name": "calculate_household",
-        "description": (
-            "Compute taxes, benefits, and net income for an illustrative "
-            "specific household described with person, benefit-unit, and "
-            "household records. Prefer this over run_python for household-level "
-            "questions with a defined household composition. These inputs are "
-            "synthetic examples, not real households. When reform is omitted, "
-            "output calculated columns use plain names such as income_tax and "
-            "net_income. When reform is supplied, including an empty no-op "
-            "object, output includes baseline_* and reform_* comparison columns."
-        ),
-        "input_schema": CALCULATE_HOUSEHOLD_INPUT_SCHEMA,
-    },
-    {
-        "name": "run_economy_simulation",
-        "description": (
-            "Run a UK economy-wide microsimulation comparing baseline current "
-            "law to a parametric reform. Returns aggregate outputs including "
-            "budgetary impact, programme breakdown, decile impacts, "
-            "winners/losers, caseloads, HBAI incomes, and poverty metrics. "
-            "Prefer this over run_python for society-wide reform analysis. "
-            "Use run_python for structural reforms."
-        ),
-        "input_schema": RUN_ECONOMY_SIMULATION_INPUT_SCHEMA,
-    },
-    {
-        "name": "analyse_microdata",
-        "description": (
-            "Slice, filter, sample, or aggregate non-FRS model microdata for a "
-            "given year and optional parametric reform. Use this for allowed "
-            "non-FRS microdata follow-ups such as subset means, counts, group "
-            "breakdowns, descriptions, or small model-record samples. This tool "
-            "explicitly does not support FRS; use run_economy_simulation for "
-            "aggregate FRS outputs. Row-level `sample` is also not supported "
-            "for the FRS-derived `efrs` dataset; use aggregate operations there. "
-            "When reform is omitted, calculated columns use plain names; when "
-            "reform is supplied, including an empty no-op object, use "
-            "baseline_* and reform_* comparison columns."
-        ),
-        "input_schema": ANALYSE_MICRODATA_INPUT_SCHEMA,
-    },
-    {
-        "name": "run_python",
-        "description": (
-            "Execute reproducible Python code using the official PolicyEngine UK compiled interface. "
-            "Prefer the typed tools (`calculate_household`, `run_economy_simulation`, `analyse_microdata`) "
-            "when the question fits their shape; use `run_python` as a fallback for structural reforms, "
-            "novel aggregations, parameter introspection, historical lookups, or unsupported cases. "
-            "The environment preloads `policyengine_uk_compiled` as `pe`, plus `Simulation`, `Parameters`, "
-            "`StructuralReform`, `aggregate_microdata`, `combine_microdata`, `capabilities`, "
-            "`ensure_dataset`, `pd`, `np`, `json`, and `math`. Assign the final answer to `result` and "
-            "use `print()` for intermediate output. Do not inspect or return row-level survey microdata, "
-            "including FRS data. For household examples, create illustrative synthetic households, prefer "
-            "`Simulation.single_person()` for single-person examples, and label them as illustrative rather "
-            "than real households."
-        ),
-        "input_schema": RUN_PYTHON_INPUT_SCHEMA,
-    },
-    {
-        "name": "generate_chart",
-        "description": (
-            "Generate a chart JSON block for the frontend to render. "
-            "Use this for visualisations such as income distributions, marginal-rate or tax-schedule curves, "
-            "decile impact comparisons, and trends over time or income. "
-            "Use factually neutral titles, subtitles, labels, and captions; do not call policies good, bad, fair, unfair, "
-            "regressive, progressive, generous, or punitive. "
-            "The tool returns a `chart_markdown` field containing a ```chart fenced JSON block - you MUST paste that "
-            "string verbatim into your next text response, otherwise the chart will not appear to the user. "
-            "Do not attempt to render charts with matplotlib inside `run_python`; the UI cannot display matplotlib output. "
-            "Compute the data first with a typed calculation tool or `run_python` "
-            "(returning a list of row dicts), then pass it to this tool."
-        ),
-        "input_schema": GENERATE_CHART_INPUT_SCHEMA,
-    },
-]
+VALIDATE_REFORM_DESCRIPTION = (
+    "Validate parametric reform JSON without running a simulation. "
+    "Use this when the user is drafting, debugging, or asking whether "
+    "a reform object is valid. Do not call it as a routine preflight "
+    "before every simulation; calculation tools validate reforms internally."
+)
+
+CALCULATE_HOUSEHOLD_DESCRIPTION = (
+    "Compute taxes, benefits, and net income for an illustrative "
+    "specific household described with person, benefit-unit, and "
+    "household records. Prefer this over run_python for household-level "
+    "questions with a defined household composition. These inputs are "
+    "synthetic examples, not real households. When reform is omitted, "
+    "output calculated columns use plain names such as income_tax and "
+    "net_income. When reform is supplied, including an empty no-op "
+    "object, output includes baseline_* and reform_* comparison columns."
+)
+
+RUN_ECONOMY_SIMULATION_DESCRIPTION = (
+    "Run a UK economy-wide microsimulation comparing baseline current "
+    "law to a parametric reform. Returns aggregate outputs including "
+    "budgetary impact, programme breakdown, decile impacts, "
+    "winners/losers, caseloads, HBAI incomes, and poverty metrics. "
+    "Prefer this over run_python for society-wide reform analysis. "
+    "Use run_python for structural reforms."
+)
+
+ANALYSE_MICRODATA_DESCRIPTION = (
+    "Slice, filter, sample, or aggregate non-FRS model microdata for a "
+    "given year and optional parametric reform. Use this for allowed "
+    "non-FRS microdata follow-ups such as subset means, counts, group "
+    "breakdowns, descriptions, or small model-record samples. This tool "
+    "explicitly does not support FRS; use run_economy_simulation for "
+    "aggregate FRS outputs. Row-level `sample` is also not supported "
+    "for the FRS-derived `efrs` dataset; use aggregate operations there. "
+    "When reform is omitted, calculated columns use plain names; when "
+    "reform is supplied, including an empty no-op object, use "
+    "baseline_* and reform_* comparison columns."
+)
+
+RUN_PYTHON_DESCRIPTION = (
+    "Execute reproducible Python code using the official PolicyEngine UK compiled interface. "
+    "Prefer the typed tools (`calculate_household`, `run_economy_simulation`, `analyse_microdata`) "
+    "when the question fits their shape; use `run_python` as a fallback for structural reforms, "
+    "novel aggregations, parameter introspection, historical lookups, or unsupported cases. "
+    "The environment preloads `policyengine_uk_compiled` as `pe`, plus `Simulation`, `Parameters`, "
+    "`StructuralReform`, `aggregate_microdata`, `combine_microdata`, `capabilities`, "
+    "`ensure_dataset`, `pd`, `np`, `json`, and `math`. Assign the final answer to `result` and "
+    "use `print()` for intermediate output. Do not inspect or return row-level survey microdata, "
+    "including FRS data. For household examples, create illustrative synthetic households, prefer "
+    "`Simulation.single_person()` for single-person examples, and label them as illustrative rather "
+    "than real households."
+)
+
+GENERATE_CHART_DESCRIPTION = (
+    "Generate a chart JSON block for the frontend to render. "
+    "Use this for visualisations such as income distributions, marginal-rate or tax-schedule curves, "
+    "decile impact comparisons, and trends over time or income. "
+    "Use factually neutral titles, subtitles, labels, and captions; do not call policies good, bad, fair, unfair, "
+    "regressive, progressive, generous, or punitive. "
+    "The tool returns a `chart_markdown` field containing a ```chart fenced JSON block - you MUST paste that "
+    "string verbatim into your next text response, otherwise the chart will not appear to the user. "
+    "Do not attempt to render charts with matplotlib inside `run_python`; the UI cannot display matplotlib output. "
+    "Compute the data first with a typed calculation tool or `run_python` "
+    "(returning a list of row dicts), then pass it to this tool."
+)
+
+
+def _load_registered_tools() -> None:
+    # Importing dispatch runs the decorators that populate the shared registry.
+    import tools.dispatch  # noqa: F401
+
+
+def get_tool_definitions() -> list[dict]:
+    _load_registered_tools()
+    from tools.registry import tool_definitions
+
+    return tool_definitions()
+
+
+def __getattr__(name: str):
+    if name == "TOOL_DEFINITIONS":
+        return get_tool_definitions()
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

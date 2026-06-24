@@ -12,6 +12,7 @@ from conftest import requires_compiled
 
 import tools.dispatch as agent_tools
 import tools.definitions as tool_definitions
+import tools.registry as tool_registry
 from tools.dispatch import (
     get_baseline_parameters,
     validate_reform,
@@ -280,16 +281,34 @@ class TestJsonSafe:
 class TestToolDefinitions:
     def test_exposes_typed_tools_and_fallback_python(self):
         names = [tool["name"] for tool in TOOL_DEFINITIONS]
-        assert "validate_reform" in names
-        assert "calculate_household" in names
-        assert "run_economy_simulation" in names
-        assert "analyse_microdata" in names
-        assert "run_python" in names
+        assert names == [
+            "validate_reform",
+            "calculate_household",
+            "run_economy_simulation",
+            "analyse_microdata",
+            "run_python",
+            "generate_chart",
+        ]
 
     def test_tool_definitions_match_dispatch_handlers(self):
         definition_names = [tool["name"] for tool in TOOL_DEFINITIONS]
         assert len(definition_names) == len(set(definition_names))
         assert set(definition_names) == set(agent_tools.TOOL_HANDLERS)
+
+    def test_tool_definitions_and_handlers_are_registry_views(self):
+        definition_names = [tool["name"] for tool in TOOL_DEFINITIONS]
+
+        assert TOOL_DEFINITIONS is tool_registry.tool_definitions()
+        assert agent_tools.TOOL_HANDLERS is tool_registry.tool_handlers()
+        assert [spec.name for spec in tool_registry.tool_specs()] == definition_names
+
+    def test_duplicate_tool_registration_is_rejected(self):
+        with pytest.raises(ValueError, match="Duplicate tool registration: validate_reform"):
+            tool_registry.register_tool(
+                name="validate_reform",
+                description="Duplicate",
+                input_schema={"type": "object", "properties": {}},
+            )(lambda: {})
 
     def test_agent_tools_reexports_canonical_tool_definitions(self):
         assert TOOL_DEFINITIONS is tool_definitions.TOOL_DEFINITIONS

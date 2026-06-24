@@ -10,7 +10,21 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
+from tools.definitions import (
+    ANALYSE_MICRODATA_DESCRIPTION,
+    ANALYSE_MICRODATA_INPUT_SCHEMA,
+    CALCULATE_HOUSEHOLD_DESCRIPTION,
+    CALCULATE_HOUSEHOLD_INPUT_SCHEMA,
+    DEFAULT_SIMULATION_YEAR,
+    GENERATE_CHART_DESCRIPTION,
+    GENERATE_CHART_INPUT_SCHEMA,
+    RUN_ECONOMY_SIMULATION_DESCRIPTION,
+    RUN_ECONOMY_SIMULATION_INPUT_SCHEMA,
+    RUN_PYTHON_DESCRIPTION,
+    RUN_PYTHON_INPUT_SCHEMA,
+    VALIDATE_REFORM_DESCRIPTION,
+    VALIDATE_REFORM_INPUT_SCHEMA,
+)
 from engine.households import build_household_frames
 from engine.microdata import analyse_microdata_result, get_cached_microdata, hash_reform
 from engine.reforms import build_compiled_policy, validate_reform_dict
@@ -22,11 +36,12 @@ from engine.sandbox import (
 from engine.serialization import dataframe_to_records, explore_tabular_data, json_safe
 from engine.simulations import DATASET_LABELS, build_simulation, ensure_compiled_package_importable
 from engine.simulations import get_capabilities as _engine_capabilities
+from tools.registry import register_tool, tool_definitions, tool_handlers
 
 logger = logging.getLogger(__name__)
 
 # Compatibility aliases for tests and existing imports. They remain internal
-# unless also listed in TOOL_DEFINITIONS and execute_tool().
+# unless registered with @register_tool.
 _ensure_compiled_package_importable = ensure_compiled_package_importable
 _safe_import = safe_import
 _json_safe = json_safe
@@ -38,6 +53,7 @@ _run_generator = run_generator
 
 __all__ = [
     "TOOL_DEFINITIONS",
+    "TOOL_HANDLERS",
     "analyse_microdata",
     "calculate_household",
     "execute_tool",
@@ -71,11 +87,21 @@ def get_baseline_parameters(year: int = DEFAULT_SIMULATION_YEAR) -> Dict[str, An
         return {"error": str(exc)}
 
 
+@register_tool(
+    name="validate_reform",
+    description=VALIDATE_REFORM_DESCRIPTION,
+    input_schema=VALIDATE_REFORM_INPUT_SCHEMA,
+)
 def validate_reform(reform: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Validate parametric reform JSON without running a simulation."""
     return validate_reform_dict(reform)
 
 
+@register_tool(
+    name="calculate_household",
+    description=CALCULATE_HOUSEHOLD_DESCRIPTION,
+    input_schema=CALCULATE_HOUSEHOLD_INPUT_SCHEMA,
+)
 def calculate_household(
     person: List[Dict[str, Any]],
     benunit: List[Dict[str, Any]],
@@ -108,6 +134,11 @@ def calculate_household(
         return {"error": str(exc)}
 
 
+@register_tool(
+    name="run_economy_simulation",
+    description=RUN_ECONOMY_SIMULATION_DESCRIPTION,
+    input_schema=RUN_ECONOMY_SIMULATION_INPUT_SCHEMA,
+)
 def run_economy_simulation(
     year: int = DEFAULT_SIMULATION_YEAR,
     reform: Optional[Dict[str, Any]] = None,
@@ -159,6 +190,11 @@ def run_economy_simulation(
         return {"error": str(exc)}
 
 
+@register_tool(
+    name="analyse_microdata",
+    description=ANALYSE_MICRODATA_DESCRIPTION,
+    input_schema=ANALYSE_MICRODATA_INPUT_SCHEMA,
+)
 def analyse_microdata(
     entity: str,
     operation: str,
@@ -213,6 +249,21 @@ def analyse_microdata(
         return {"error": str(exc)}
 
 
+@register_tool(
+    name="run_python",
+    description=RUN_PYTHON_DESCRIPTION,
+    input_schema=RUN_PYTHON_INPUT_SCHEMA,
+)
+def run_python(code: str) -> Dict[str, Any]:
+    """Execute Python code with the PolicyEngine UK compiled interface preloaded."""
+    return run_python_code(code)
+
+
+@register_tool(
+    name="generate_chart",
+    description=GENERATE_CHART_DESCRIPTION,
+    input_schema=GENERATE_CHART_INPUT_SCHEMA,
+)
 def generate_chart(
     chart_type: str,
     title: str,
@@ -288,19 +339,8 @@ def generate_chart(
         return {"error": str(exc)}
 
 
-def run_python(code: str) -> Dict[str, Any]:
-    """Execute Python code with the PolicyEngine UK compiled interface preloaded."""
-    return run_python_code(code)
-
-
-TOOL_HANDLERS = {
-    "validate_reform": validate_reform,
-    "calculate_household": calculate_household,
-    "run_economy_simulation": run_economy_simulation,
-    "analyse_microdata": analyse_microdata,
-    "run_python": run_python,
-    "generate_chart": generate_chart,
-}
+TOOL_DEFINITIONS = tool_definitions()
+TOOL_HANDLERS = tool_handlers()
 
 
 def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
