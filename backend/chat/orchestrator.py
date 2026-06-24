@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import uuid
+from contextlib import asynccontextmanager
 from typing import Any, Dict, List
 
 import httpx
@@ -123,29 +124,70 @@ def stream_chat(request: Request, chat_request: ChatRequest):
     async def generate_stream():
         ttft_recorded = False
         terminal_stop_reason: str | None = None
+        captured_exception: Exception | None = None
+        captured_traceback = ""
+        conversation = deduplicated.copy()
+        iteration = 0
+        max_iterations = MAX_ITERATIONS
+        total_input_tokens = 0
+        total_output_tokens = 0
+        total_cache_read_input_tokens = 0
+        total_cache_creation_input_tokens = 0
+        recent_tool_calls: List[str] = []
+        tool_call_counts: Dict[str, int] = {}
+        last_tool_error: str | None = None
+        verdict = None
+        route = "compute"
+        model: str | None = None
+        charts_mode = chat_request.charts_mode
+
+        def annotate_turn(stop_reason: str | None) -> None:
+            annotate(
+                model=model,
+                stop_reason=stop_reason,
+                iterations=iteration,
+                tool_calls=sum(tool_call_counts.values()),
+                input_tokens=total_input_tokens,
+                output_tokens=total_output_tokens,
+                cache_read_input_tokens=total_cache_read_input_tokens,
+                cache_creation_input_tokens=total_cache_creation_input_tokens,
+            )
+
+        @asynccontextmanager
+        async def capture_turn_errors():
+            nonlocal captured_exception
+            nonlocal captured_traceback
+            nonlocal terminal_stop_reason
+
+            try:
+                yield
+            except Exception as e:
+                import traceback
+
+                captured_exception = e
+                captured_traceback = traceback.format_exc()
+                if terminal_stop_reason is None:
+                    terminal_stop_reason = "error"
+                try:
+                    annotate_turn(terminal_stop_reason)
+                    record_error(e, handled=True, status_code=500)
+                except Exception:
+                    logger.exception(
+                        "[CHAT] Failed to record observability for chat turn error"
+                    )
+
         try:
             async with operation(
                 "chat.turn",
                 flavor="chat",
                 session_id=session_id,
-            ):
+            ), capture_turn_errors():
                 annotate(session_id=session_id)
-                conversation = deduplicated.copy()
-                iteration = 0
-                max_iterations = MAX_ITERATIONS
-                total_input_tokens = 0
-                total_output_tokens = 0
-                total_cache_read_input_tokens = 0
-                total_cache_creation_input_tokens = 0
-                recent_tool_calls: List[str] = []
                 # Track every tool call across the turn so the cap-hit fallback
                 # can tell the user what was tried. Counts only (no inputs) keeps PII out
                 # of the summary and keeps it well under the 300-char target.
-                tool_call_counts: Dict[str, int] = {}
-                last_tool_error: str | None = None
 
                 client = get_async_client()
-                charts_mode = chat_request.charts_mode
                 annotate(charts_mode=charts_mode)
 
                 def usage_payload() -> dict:
@@ -174,18 +216,6 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                         "cost_gbp": billing["cost_gbp"] if billing else None,
                         "balance": billing["balance"] if billing else None,
                     }
-
-                def annotate_turn(stop_reason: str | None) -> None:
-                    annotate(
-                        model=model,
-                        stop_reason=stop_reason,
-                        iterations=iteration,
-                        tool_calls=sum(tool_call_counts.values()),
-                        input_tokens=total_input_tokens,
-                        output_tokens=total_output_tokens,
-                        cache_read_input_tokens=total_cache_read_input_tokens,
-                        cache_creation_input_tokens=total_cache_creation_input_tokens,
-                    )
 
                 def annotate_client_disconnected() -> None:
                     nonlocal terminal_stop_reason
@@ -225,8 +255,6 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                 # must flow to compute). A non-`ready` outcome replies on the lean
                 # lightweight path; `ready` runs the full compute loop, seeded with
                 # the resolved plan. Any gateway error fails safe to compute.
-                verdict = None
-                route = "compute"
                 if not _is_followup(conversation):
                     loop = asyncio.get_running_loop()
                     async with asegment(SegmentName.GATEWAY_CLASSIFY):
@@ -664,12 +692,15 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                     final_content = assistant_content + fallback_message
                     yield f"data: {json.dumps(done_event(content=final_content, stop_reason=terminal_stop_reason, billing=billing))}\n\n"
 
+            if captured_exception is not None:
+                logger.error(
+                    f"[CHAT] Exception: {captured_exception}\n{captured_traceback}"
+                )
+                yield f"data: {json.dumps({'type': 'error', 'content': str(captured_exception)})}\n\n"
+
         except Exception as e:
             import traceback
 
-            record_error(e, handled=True, status_code=500)
-            if terminal_stop_reason is None:
-                annotate(stop_reason="error")
             logger.error(f"[CHAT] Exception: {e}\n{traceback.format_exc()}")
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
 

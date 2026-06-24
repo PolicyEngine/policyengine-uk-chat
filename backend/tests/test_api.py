@@ -563,6 +563,62 @@ class TestChatRouteWithMockedAnthropic:
         assert disconnect_event["iterations"] == 0
         assert disconnect_event["tool_calls"] == 0
 
+    def test_chat_route_logs_error_on_chat_turn(self, monkeypatch):
+        import chat.orchestrator as chatbot
+        from chat.schemas import ChatRequest
+
+        class ConnectedRequest:
+            async def is_disconnected(self):
+                return False
+
+        operation_records = []
+
+        def raise_model_selection(*_args, **_kwargs):
+            raise RuntimeError("model selection failed")
+
+        monkeypatch.setattr(chatbot, "get_async_client", lambda: object())
+        monkeypatch.setattr(chatbot, "_is_followup", lambda _conversation: True)
+        monkeypatch.setattr(chatbot, "_select_chat_model", raise_model_selection)
+        monkeypatch.setattr(OPERATION_LOGGER, "info", operation_records.append)
+
+        async def consume_stream():
+            response = chatbot.stream_chat(
+                ConnectedRequest(),
+                ChatRequest(
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": "Calculate this household.",
+                        }
+                    ],
+                    session_id="error-session",
+                ),
+            )
+            chunks = []
+            async for chunk in response.body_iterator:
+                chunks.append(chunk)
+            return "".join(
+                chunk.decode() if isinstance(chunk, bytes) else chunk
+                for chunk in chunks
+            )
+
+        events = parse_sse(asyncio.run(consume_stream()))
+
+        assert events == [
+            {"type": "error", "content": "model selection failed"},
+        ]
+        turn_log = next(
+            payload
+            for payload in map(json.loads, operation_records)
+            if payload.get("operation") == "chat.turn"
+        )
+        assert turn_log["event"] == "operation_failed"
+        assert turn_log["stop_reason"] == "error"
+        assert turn_log["session_id"] == "error-session"
+        assert turn_log["iterations"] == 0
+        assert turn_log["tool_calls"] == 0
+        assert turn_log["timing_counts"]["model.select"] == 1
+
 
 # ---------------------------------------------------------------------------
 # Rate limiting
