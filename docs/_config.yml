@@ -1,0 +1,40 @@
+# Jupyter Book configuration
+# Build locally with:  jupyter-book build docs/
+# Output is written to docs/_build/html and published to GitHub Pages.
+
+title: PolicyEngine UK Chat
+author: PolicyEngine
+logo: ""
+copyright: "2026"
+
+# Only build files that are listed in the table of contents.
+only_build_toc_files: true
+
+execute:
+  # These docs are prose-only; never execute notebooks during the build.
+  execute_notebooks: "off"
+
+# Surface build warnings but don't fail the whole book on a single bad ref.
+sphinx:
+  config:
+    html_theme: sphinx_book_theme
+    html_last_updated_fmt: "%Y-%m-%d"
+    suppress_warnings:
+      - "etoc.toctree"
+
+html:
+  use_issues_button: true
+  use_repository_button: true
+  use_edit_page_button: true
+  home_page_in_navbar: true
+
+repository:
+  url: https://github.com/PolicyEngine/policyengine-uk-chat
+  path_to_book: docs
+  branch: main
+
+parse:
+  myst_enable_extensions:
+    - colon_fence
+    - deflist
+    - linkify
