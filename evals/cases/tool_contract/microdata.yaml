@@ -18,7 +18,7 @@ cases:
       entity: households
       operation: sample
       dataset: frs
-      columns: [baseline_net_income]
+      columns: [net_income]
     expect:
       error_contains: FRS
 
@@ -63,10 +63,10 @@ cases:
       entity: households
       operation: mean
       dataset: efrs
-      columns: [baseline_net_income]
+      columns: [net_income]
     expect:
       required_paths:
-        - result.baseline_net_income
+        - result.net_income
 
   - id: analyse_microdata_non_frs_sum
     suite: tool_contract
@@ -77,10 +77,10 @@ cases:
       entity: households
       operation: sum
       dataset: efrs
-      columns: [baseline_total_tax]
+      columns: [total_tax]
     expect:
       required_paths:
-        - result.baseline_total_tax
+        - result.total_tax
 
   - id: analyse_microdata_non_frs_group_by
     suite: tool_contract
@@ -92,7 +92,7 @@ cases:
       operation: group_by
       dataset: efrs
       group_by: [region]
-      columns: [baseline_net_income]
+      columns: [net_income]
     expect:
       required_paths:
         - result.0.region
@@ -120,6 +120,6 @@ cases:
       operation: sample
       dataset: efrs
       n: 100
-      columns: [region, baseline_net_income]
+      columns: [region, net_income]
     expect:
       error_contains: Enhanced FRS

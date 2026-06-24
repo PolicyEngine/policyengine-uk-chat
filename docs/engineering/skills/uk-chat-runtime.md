@@ -62,6 +62,14 @@ exposed to the model. At present, the exposed tools are:
 Helper functions in `backend/engine/` are implementation details unless they
 are added to both the tool definitions and dispatcher.
 
+`policyengine-uk-compiled` 0.43.0 is the minimum supported output contract for
+microdata-backed tools. When reform is omitted, `run_microdata()`,
+`calculate_household`, and `analyse_microdata` outputs use plain calculated
+column names such as `income_tax`, `universal_credit`, and `net_income`. When a
+reform is supplied, including an empty no-op object (`{}`), calculations use
+side-by-side `baseline_*` and `reform_*` comparison columns. Do not normalize
+omitted-reform outputs back to the older prefixed shape.
+
 ## Deterministic And Non-Deterministic Segments
 
 - Non-deterministic: user text interpretation, model planning, tool selection,

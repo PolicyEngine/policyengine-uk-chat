@@ -12,9 +12,66 @@ from engine.simulations import DATASET_LABELS, build_simulation
 _microdata_cache: Dict[tuple, Any] = {}
 _MAX_CACHE = 4
 
+_PLAIN_DEFAULT_COLUMNS = {
+    "persons": [
+        "age",
+        "gender",
+        "employment_income",
+        "self_employment_income",
+        "income_tax",
+        "employee_ni",
+        "total_income",
+    ],
+    "benunits": [
+        "total_benefits",
+        "universal_credit",
+        "child_benefit",
+    ],
+    "households": [
+        "region",
+        "net_income",
+        "total_tax",
+        "total_benefits",
+    ],
+}
+
+_COMPARISON_DEFAULT_COLUMNS = {
+    "persons": [
+        "age",
+        "gender",
+        "employment_income",
+        "self_employment_income",
+        "baseline_income_tax",
+        "reform_income_tax",
+        "income_tax_change",
+        "baseline_total_income",
+        "reform_total_income",
+        "total_income_change",
+    ],
+    "benunits": [
+        "baseline_total_benefits",
+        "reform_total_benefits",
+        "total_benefits_change",
+        "baseline_universal_credit",
+        "reform_universal_credit",
+        "baseline_child_benefit",
+        "reform_child_benefit",
+    ],
+    "households": [
+        "region",
+        "baseline_net_income",
+        "reform_net_income",
+        "net_income_change",
+        "baseline_total_tax",
+        "reform_total_tax",
+        "baseline_total_benefits",
+        "reform_total_benefits",
+    ],
+}
+
 
 def hash_reform(reform: Optional[Dict[str, Any]]) -> str:
-    if not reform:
+    if reform is None:
         return "none"
     return hashlib.md5(json.dumps(reform, sort_keys=True).encode()).hexdigest()
 
@@ -29,6 +86,11 @@ def get_cached_microdata(year: int, reform: Optional[Dict[str, Any]], dataset: s
         if len(_microdata_cache) > _MAX_CACHE:
             del _microdata_cache[next(iter(_microdata_cache))]
     return _microdata_cache[key]
+
+
+def _default_value_columns(entity: str, columns: List[str], reform_applied: bool) -> List[str]:
+    defaults = _COMPARISON_DEFAULT_COLUMNS if reform_applied else _PLAIN_DEFAULT_COLUMNS
+    return [column for column in defaults.get(entity, []) if column in columns]
 
 
 def analyse_microdata_result(
@@ -113,41 +175,7 @@ def analyse_microdata_result(
             return {"error": f"Columns not found: {missing}. Available: {all_cols}"}
         value_cols = columns
     else:
-        if entity == "persons":
-            value_cols = [
-                "age",
-                "gender",
-                "employment_income",
-                "self_employment_income",
-                "baseline_income_tax",
-                "reform_income_tax",
-                "income_tax_change",
-                "baseline_total_income",
-                "reform_total_income",
-                "total_income_change",
-            ]
-        elif entity == "benunits":
-            value_cols = [
-                "baseline_total_benefits",
-                "reform_total_benefits",
-                "total_benefits_change",
-                "baseline_universal_credit",
-                "reform_universal_credit",
-                "baseline_child_benefit",
-                "reform_child_benefit",
-            ]
-        else:
-            value_cols = [
-                "region",
-                "baseline_net_income",
-                "reform_net_income",
-                "net_income_change",
-                "baseline_total_tax",
-                "reform_total_tax",
-                "baseline_total_benefits",
-                "reform_total_benefits",
-            ]
-        value_cols = [c for c in value_cols if c in df.columns]
+        value_cols = _default_value_columns(entity, all_cols, reform_applied)
 
     if operation == "sample":
         actual_n = min(n, 20, row_count)
@@ -221,4 +249,3 @@ def analyse_microdata_result(
         "result": result,
         "available_columns": all_cols,
     }
-

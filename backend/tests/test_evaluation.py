@@ -399,7 +399,7 @@ def test_policyengine_uk_sync_renders_active_and_skipped_cases(tmp_path):
                         "id": "active_case",
                         "path": "tests/policy/sample.yaml",
                         "name": "Active case",
-                        "output_map": {"income_tax": "person[].baseline_income_tax"},
+                        "output_map": {"income_tax": "person[].income_tax"},
                     },
                     {
                         "id": "skipped_case",
@@ -428,6 +428,6 @@ def test_policyengine_uk_sync_renders_active_and_skipped_cases(tmp_path):
     assert generated["source"]["version"] == "1.2.3"
     assert generated["source"]["compiled_version"] == "4.5.6"
     assert generated["cases"][0]["input"]["person"][0]["employment_income"] == 10000
-    assert generated["cases"][0]["expect"]["numeric"][0]["path"] == "person[].baseline_income_tax"
+    assert generated["cases"][0]["expect"]["numeric"][0]["path"] == "person[].income_tax"
     assert generated["cases"][0]["expect"]["numeric"][0]["tolerance"] == 2.0
     assert generated["cases"][1]["skip"]["code"] == "compiled_coverage_gap"

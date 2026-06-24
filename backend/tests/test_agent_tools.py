@@ -84,10 +84,10 @@ class TestCalculateHousehold:
         assert len(result["person"]) == 1
         assert len(result["household"]) == 1
 
-    def test_baseline_income_tax_positive(self):
+    def test_no_reform_uses_plain_income_tax(self):
         result = calculate_household(**SINGLE_ADULT)
         person = result["person"][0]
-        assert person["baseline_income_tax"] > 0
+        assert person["income_tax"] > 0
 
     def test_reform_reduces_tax_with_higher_allowance(self):
         reform = {"income_tax": {"personal_allowance": 20000}}
@@ -100,10 +100,30 @@ class TestCalculateHousehold:
         result = calculate_household(**{**SINGLE_ADULT, "reform": reform})
         assert result["reform_applied"] is True
 
-    def test_no_reform_baseline_equals_reform(self):
+    def test_no_reform_omits_comparison_columns(self):
         result = calculate_household(**SINGLE_ADULT)
         person = result["person"][0]
-        assert person["baseline_income_tax"] == person["reform_income_tax"]
+        benunit = result["benunit"][0]
+        household = result["household"][0]
+        assert "income_tax" in person
+        assert "total_benefits" in benunit
+        assert "net_income" in household
+        assert "baseline_income_tax" not in person
+        assert "reform_income_tax" not in person
+        assert "baseline_total_benefits" not in benunit
+        assert "reform_total_benefits" not in benunit
+        assert "baseline_net_income" not in household
+        assert "reform_net_income" not in household
+
+    def test_empty_reform_uses_comparison_columns(self):
+        result = calculate_household(**{**SINGLE_ADULT, "reform": {}})
+        person = result["person"][0]
+        household = result["household"][0]
+
+        assert result["reform_applied"] is True
+        assert "income_tax" not in person
+        assert person["baseline_income_tax"] == pytest.approx(person["reform_income_tax"])
+        assert household["baseline_net_income"] == pytest.approx(household["reform_net_income"])
 
     def test_batch_multiple_incomes(self):
         # IDs must be 0-indexed (engine constraint)
@@ -122,7 +142,7 @@ class TestCalculateHousehold:
         benunits = [{"benunit_id": i, "household_id": i} for i in range(2)]
         households = [{"household_id": i} for i in range(2)]
         result = calculate_household(person=persons, benunit=benunits, household=households, year=2023)
-        taxes = [p["baseline_income_tax"] for p in result["person"]]
+        taxes = [p["income_tax"] for p in result["person"]]
         assert taxes[1] > taxes[0]
 
     def test_unknown_reform_program_returns_error(self):
@@ -170,7 +190,7 @@ class TestCalculateHousehold:
             year=2023,
         )
         assert result["status"] == "success"
-        assert result["person"][0]["baseline_income_tax"] == 0
+        assert result["person"][0]["income_tax"] == 0
 
     def test_universal_credit_low_income(self):
         result = calculate_household(
@@ -182,7 +202,7 @@ class TestCalculateHousehold:
         assert result["status"] == "success"
         # Low earner should have some UC entitlement
         benunit = result["benunit"][0]
-        assert "baseline_universal_credit" in benunit
+        assert "universal_credit" in benunit
 
     def test_historical_year(self):
         result = calculate_household(**{**SINGLE_ADULT, "year": 2010})
@@ -206,7 +226,7 @@ class TestCalculateHousehold:
         assert len(result["benunit"]) == 1
         # Adult should pay income tax
         adult = result["person"][0]
-        assert adult["baseline_income_tax"] > 0
+        assert adult["income_tax"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -347,7 +367,7 @@ class TestAnalyseMicrodataContract:
         assert "Enhanced FRS" in result["error"]
         assert "aggregate" in result["hint"]
 
-    def _install_mock_microdata(self, monkeypatch, row_count=4):
+    def _install_mock_microdata(self, monkeypatch, row_count=4, comparison=False):
         import pandas as pd
 
         household_ids = list(range(row_count))
@@ -355,40 +375,71 @@ class TestAnalyseMicrodataContract:
         weights = [2.0, 1.0, 3.0, 4.0] if row_count == 4 else [1.0] * row_count
         incomes = [10.0, 30.0, 20.0, 40.0] if row_count == 4 else [float(i) for i in household_ids]
 
-        households = pd.DataFrame(
-            {
-                "household_id": household_ids,
-                "region": regions,
-                "weight": weights,
-                "baseline_net_income": incomes,
-                "reform_net_income": [income + 5.0 for income in incomes],
-                "baseline_total_tax": [income / 10.0 for income in incomes],
-                "reform_total_tax": [income / 10.0 + 1.0 for income in incomes],
-                "baseline_total_benefits": [1.0 for _ in household_ids],
-                "reform_total_benefits": [2.0 for _ in household_ids],
-            }
-        )
-        persons = pd.DataFrame(
-            {
-                "person_id": household_ids,
-                "household_id": household_ids,
-                "age": [30 + i for i in household_ids],
-                "gender": ["F" if i % 2 == 0 else "M" for i in household_ids],
-                "employment_income": incomes,
-                "baseline_income_tax": [income / 10.0 for income in incomes],
-                "reform_income_tax": [income / 10.0 + 1.0 for income in incomes],
-                "baseline_total_income": incomes,
-                "reform_total_income": [income + 5.0 for income in incomes],
-            }
-        )
-        benunits = pd.DataFrame(
-            {
-                "benunit_id": household_ids,
-                "household_id": household_ids,
-                "baseline_total_benefits": [1.0 for _ in household_ids],
-                "reform_total_benefits": [2.0 for _ in household_ids],
-            }
-        )
+        household_data = {
+            "household_id": household_ids,
+            "region": regions,
+            "weight": weights,
+        }
+        person_data = {
+            "person_id": household_ids,
+            "household_id": household_ids,
+            "age": [30 + i for i in household_ids],
+            "gender": ["F" if i % 2 == 0 else "M" for i in household_ids],
+            "employment_income": incomes,
+        }
+        benunit_data = {
+            "benunit_id": household_ids,
+            "household_id": household_ids,
+        }
+        if comparison:
+            household_data.update(
+                {
+                    "baseline_net_income": incomes,
+                    "reform_net_income": [income + 5.0 for income in incomes],
+                    "baseline_total_tax": [income / 10.0 for income in incomes],
+                    "reform_total_tax": [income / 10.0 + 1.0 for income in incomes],
+                    "baseline_total_benefits": [1.0 for _ in household_ids],
+                    "reform_total_benefits": [2.0 for _ in household_ids],
+                }
+            )
+            person_data.update(
+                {
+                    "baseline_income_tax": [income / 10.0 for income in incomes],
+                    "reform_income_tax": [income / 10.0 + 1.0 for income in incomes],
+                    "baseline_total_income": incomes,
+                    "reform_total_income": [income + 5.0 for income in incomes],
+                }
+            )
+            benunit_data.update(
+                {
+                    "baseline_total_benefits": [1.0 for _ in household_ids],
+                    "reform_total_benefits": [2.0 for _ in household_ids],
+                }
+            )
+        else:
+            household_data.update(
+                {
+                    "net_income": incomes,
+                    "total_tax": [income / 10.0 for income in incomes],
+                    "total_benefits": [1.0 for _ in household_ids],
+                }
+            )
+            person_data.update(
+                {
+                    "income_tax": [income / 10.0 for income in incomes],
+                    "total_income": incomes,
+                }
+            )
+            benunit_data.update(
+                {
+                    "total_benefits": [1.0 for _ in household_ids],
+                    "universal_credit": [0.0 for _ in household_ids],
+                }
+            )
+
+        households = pd.DataFrame(household_data)
+        persons = pd.DataFrame(person_data)
+        benunits = pd.DataFrame(benunit_data)
         microdata = SimpleNamespace(persons=persons, benunits=benunits, households=households)
 
         calls = []
@@ -419,11 +470,11 @@ class TestAnalyseMicrodataContract:
         result = analyse_microdata(
             entity="households",
             operation="mean",
-            columns=["baseline_net_income"],
+            columns=["net_income"],
             dataset="efrs",
         )
 
-        assert result["result"]["baseline_net_income"] == pytest.approx(27.0)
+        assert result["result"]["net_income"] == pytest.approx(27.0)
 
     def test_group_by_returns_weighted_group_means(self, monkeypatch):
         self._install_mock_microdata(monkeypatch)
@@ -431,7 +482,7 @@ class TestAnalyseMicrodataContract:
         result = analyse_microdata(
             entity="households",
             operation="group_by",
-            columns=["baseline_net_income"],
+            columns=["net_income"],
             group_by=["region"],
             dataset="efrs",
         )
@@ -439,10 +490,10 @@ class TestAnalyseMicrodataContract:
         rows = {row["region"]: row for row in result["result"]}
         assert rows["North"]["row_count"] == 2
         assert rows["North"]["weighted_population"] == 5.0
-        assert rows["North"]["baseline_net_income"] == pytest.approx(16.0)
+        assert rows["North"]["net_income"] == pytest.approx(16.0)
         assert rows["South"]["row_count"] == 2
         assert rows["South"]["weighted_population"] == 5.0
-        assert rows["South"]["baseline_net_income"] == pytest.approx(38.0)
+        assert rows["South"]["net_income"] == pytest.approx(38.0)
 
     def test_sample_is_deterministic_and_capped_for_non_frs(self, monkeypatch):
         self._install_mock_microdata(monkeypatch, row_count=25)
@@ -450,7 +501,7 @@ class TestAnalyseMicrodataContract:
         kwargs = {
             "entity": "households",
             "operation": "sample",
-            "columns": ["household_id", "baseline_net_income"],
+            "columns": ["household_id", "net_income"],
             "n": 100,
             "dataset": "spi",
         }
@@ -459,6 +510,41 @@ class TestAnalyseMicrodataContract:
 
         assert len(first["result"]) == 20
         assert first["result"] == second["result"]
+
+    def test_no_reform_defaults_use_plain_columns(self, monkeypatch):
+        self._install_mock_microdata(monkeypatch)
+
+        result = analyse_microdata(entity="households", operation="mean", dataset="efrs")
+
+        assert result["result"]["net_income"] == pytest.approx(27.0)
+        assert result["result"]["total_tax"] == pytest.approx(2.7)
+        assert "baseline_net_income" not in result["result"]
+        assert "reform_net_income" not in result["result"]
+
+    def test_reform_defaults_use_comparison_columns(self, monkeypatch):
+        self._install_mock_microdata(monkeypatch, comparison=True)
+
+        result = analyse_microdata(
+            entity="households",
+            operation="mean",
+            reform={"income_tax": {"personal_allowance": 15000}},
+            dataset="efrs",
+        )
+
+        assert result["result"]["baseline_net_income"] == pytest.approx(27.0)
+        assert result["result"]["reform_net_income"] == pytest.approx(32.0)
+        assert result["result"]["net_income_change"] == pytest.approx(5.0)
+        assert "net_income" not in result["result"]
+
+    def test_empty_reform_defaults_use_comparison_columns(self, monkeypatch):
+        self._install_mock_microdata(monkeypatch, comparison=True)
+
+        result = analyse_microdata(entity="households", operation="mean", reform={}, dataset="efrs")
+
+        assert result["reform_applied"] is True
+        assert result["result"]["baseline_net_income"] == pytest.approx(27.0)
+        assert result["result"]["reform_net_income"] == pytest.approx(32.0)
+        assert result["result"]["net_income_change"] == pytest.approx(5.0)
 
 
 class TestRunEconomySimulationContract:
@@ -659,12 +745,18 @@ class TestBuildCompiledPolicy:
     def test_none_reform_returns_none(self):
         assert _build_compiled_policy(None) is None
 
-    def test_empty_reform_returns_none(self):
-        assert _build_compiled_policy({}) is None
+    def test_empty_reform_returns_empty_policy(self):
+        # Mirrors policyengine-uk-compiled: supplying even an empty Parameters
+        # object puts run_microdata in baseline_*/reform_* comparison mode.
+        assert _build_compiled_policy({}) is not None
 
     def test_valid_reform(self):
         policy = _build_compiled_policy({"income_tax": {"personal_allowance": 15000}})
         assert policy is not None
+
+    def test_falsy_non_dict_reform_raises(self):
+        with pytest.raises(ValueError, match="Reform must be a dict"):
+            _build_compiled_policy([])
 
     def test_unknown_program_raises(self):
         with pytest.raises(ValueError, match="Unknown reform program"):
@@ -673,6 +765,11 @@ class TestBuildCompiledPolicy:
     def test_unknown_field_raises(self):
         with pytest.raises(ValueError, match="Unknown field"):
             _build_compiled_policy({"income_tax": {"not_real_field": 1}})
+
+
+class TestReformCacheKeys:
+    def test_empty_reform_hash_differs_from_absent_reform(self):
+        assert agent_tools._hash_reform({}) != agent_tools._hash_reform(None)
 
 
 # ---------------------------------------------------------------------------

@@ -365,7 +365,7 @@ class TestChatRouteWithMockedAnthropic:
             executed.append((tool_name, received_input))
             return {
                 "status": "success",
-                "household": [{"baseline_net_income": 25119.60}],
+                "household": [{"net_income": 25119.60}],
             }
 
         monkeypatch.setattr(chatbot, "get_async_client", lambda: fake_client)
