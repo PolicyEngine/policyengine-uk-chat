@@ -1,4 +1,10 @@
-"""Single-source registry for model-facing chat tools."""
+"""Single-source registry for model-facing chat tools.
+
+This keeps registration explicit for now: handlers still pass hand-written
+schemas and descriptions to `@register_tool`. A fuller automated registration
+system could derive more from typed signatures or richer tool specs, but this
+small layer only removes TOOL_DEFINITIONS / TOOL_HANDLERS drift.
+"""
 
 from collections.abc import Callable
 from dataclasses import dataclass
