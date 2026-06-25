@@ -111,6 +111,19 @@ cases:
     prompt: Plot the income tax schedule on employment income from £0 to £150,000.
     expected_outcome: ready
 
+  - id: gw_ready_parameter_lookup
+    suite: gateway
+    description: A static parameter lookup is fully determined and should route to lookup_parameter.
+    requirements: [live_model]
+    prompt: What is the basic rate threshold in 2025?
+    expected_outcome: ready
+    expected_tool: lookup_parameter
+    expected_slots:
+      - slot: query
+        gates: false
+      - slot: year
+        gates: false
+
   - id: gw_ready_decile_distribution
     suite: gateway
     description: A fully-specified distributional ask; FRS/EFRS is the correct default

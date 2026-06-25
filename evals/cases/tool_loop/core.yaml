@@ -1,4 +1,98 @@
 cases:
+  - id: tool_loop_parameter_lookup_needs_confirmation
+    suite: tool_loop
+    description: Ambiguous parameter lookup should ask for user confirmation after tool execution.
+    requirements: [compiled]
+    prompt: What is the Universal Credit standard allowance?
+    expected_tools:
+      - name: lookup_parameter
+        input_contains:
+          query: universal credit standard allowance
+    forbidden_tools:
+      - validate_reform
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - run_python
+      - generate_chart
+    expect:
+      required:
+        - choose
+        - single under 25
+        - single over 25
+        - couple under 25
+        - couple over 25
+      forbidden:
+        - £628.10
+        - £497.55
+        - £400.14
+        - £316.98
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+    offline_responses:
+      - tool_calls:
+          - name: lookup_parameter
+            input:
+              query: universal credit standard allowance
+              year: 2025
+      - text: >
+          I found several Universal Credit standard allowance parameters for
+          2025. Please choose which one you mean: single under 25, single over
+          25, couple under 25, or couple over 25.
+
+  - id: tool_loop_parameter_lookup_basic_rate_threshold
+    suite: tool_loop
+    description: Parameter lookup should execute lookup_parameter and feed a grounded final answer.
+    requirements: [compiled]
+    prompt: What is the basic rate threshold in 2025?
+    expected_tools:
+      - name: lookup_parameter
+        input_contains:
+          year: 2025
+    forbidden_tools:
+      - validate_reform
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - run_python
+      - generate_chart
+    expect:
+      required:
+        - "2025"
+        - £37,700
+        - taxable income
+        - £50,270
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+        - simulated household
+      grounded_numbers: true
+      allowed_numbers: [2025, 37700, 12570, 50270]
+      number_tolerance: 0.01
+    offline_responses:
+      - tool_calls:
+          - name: lookup_parameter
+            input:
+              query: basic rate threshold
+              year: 2025
+      - text: >
+          In 2025, the model parameter for the basic-rate upper threshold is
+          £37,700 of taxable income after the personal allowance. For someone
+          receiving the full £12,570 personal allowance, that corresponds to a
+          standard gross-income threshold of £50,270.
+
   - id: tool_loop_household_calculation_to_answer
     suite: tool_loop
     description: Household calculation result should feed a grounded final answer.

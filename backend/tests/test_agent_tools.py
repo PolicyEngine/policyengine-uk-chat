@@ -15,6 +15,7 @@ import tools.definitions as tool_definitions
 import tools.registry as tool_registry
 from tools.dispatch import (
     get_baseline_parameters,
+    lookup_parameter,
     validate_reform,
     calculate_household,
     run_economy_simulation,
@@ -42,6 +43,36 @@ def isolated_tool_registry():
         yield
     finally:
         tool_registry._TOOL_SPECS[:] = original_specs
+
+
+def _assert_match_certainties_descending(options: list[dict]) -> None:
+    certainties = [option["match_certainty"] for option in options]
+    assert certainties == sorted(certainties, reverse=True)
+
+
+class TestLookupScoring:
+    def test_confirmation_reason_handles_empty_ranked_list(self):
+        from engine.lookup.scoring import _confirmation_reason
+
+        assert _confirmation_reason([]) == "low_string_match_certainty"
+
+    def test_confirmation_reason_handles_single_high_certainty_match(self):
+        from engine.lookup.scoring import _RankedCandidate, _confirmation_reason
+
+        ranked = [
+            _RankedCandidate(
+                certainty=1.0,
+                candidate=object(),
+                matched_on="name",
+                match_reason="exact_name",
+                exact=True,
+                field_priority=0,
+                extra_tokens=0,
+                stable_key="only",
+            )
+        ]
+
+        assert _confirmation_reason(ranked) == "low_string_match_certainty"
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +106,116 @@ class TestGetBaselineParameters:
 
     def test_invalid_year_returns_error(self):
         result = get_baseline_parameters(year=9999)
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
+# lookup_parameter
+# ---------------------------------------------------------------------------
+
+@requires_compiled
+class TestLookupParameter:
+    def test_exact_path_returns_value(self):
+        result = lookup_parameter(query="income_tax.personal_allowance", year=2025)
+        assert result["status"] == "success"
+        assert result["needs_confirmation"] is False
+        assert result["match_certainty"] >= 0.98
+        assert result["primary_match"]["path"] == "income_tax.personal_allowance"
+        assert result["primary_match"]["value"] == 12570.0
+
+    def test_basic_rate_threshold_returns_context(self):
+        result = lookup_parameter(query="basic rate threshold", year=2025)
+        match = result["primary_match"]
+        assert match["path"] == "income_tax.uk_brackets.1.threshold"
+        assert match["value"] == 37700.0
+        assert match["context"]["personal_allowance"] == 12570.0
+        assert match["context"]["standard_gross_income_threshold"] == 50270.0
+
+    def test_parameter_alias_paths_resolve_in_compiled_baseline(self):
+        from engine.lookup.parameters import missing_parameter_alias_paths
+        from policyengine_uk_compiled import Simulation
+
+        parameters = Simulation(year=2025).get_baseline_params()
+
+        assert missing_parameter_alias_paths(parameters) == ()
+
+    def test_basic_rate_context_requires_expected_candidate_shape(self):
+        from engine.lookup.parameters import (
+            BASIC_RATE_THRESHOLD_PATH,
+            _ParameterCandidate,
+            _parameter_context,
+        )
+
+        parameters = {
+            "income_tax": {
+                "personal_allowance": 12570,
+                "uk_brackets": [
+                    {"rate": 0.2},
+                    {"threshold": 37700, "rate": 0.4},
+                    {"threshold": 125140, "rate": 0.45},
+                ],
+            }
+        }
+        candidate = _ParameterCandidate(
+            path=BASIC_RATE_THRESHOLD_PATH,
+            value=37700,
+            label="income tax uk brackets 1 threshold",
+            program="income_tax",
+            aliases=("basic rate threshold",),
+        )
+
+        assert _parameter_context(candidate, parameters)["standard_gross_income_threshold"] == 50270
+
+        wrong_program = _ParameterCandidate(
+            path=BASIC_RATE_THRESHOLD_PATH,
+            value=37700,
+            label="income tax uk brackets 1 threshold",
+            program="other_tax",
+            aliases=("basic rate threshold",),
+        )
+        missing_alias = _ParameterCandidate(
+            path=BASIC_RATE_THRESHOLD_PATH,
+            value=37700,
+            label="income tax uk brackets 1 threshold",
+            program="income_tax",
+            aliases=(),
+        )
+
+        assert _parameter_context(wrong_program, parameters) == {}
+        assert _parameter_context(missing_alias, parameters) == {}
+
+    def test_standard_rate_of_vat_returns_standard_rate(self):
+        result = lookup_parameter(query="standard rate of VAT", year=2025)
+        assert result["status"] == "success"
+        assert result["needs_confirmation"] is False
+        assert result["primary_match"]["path"] == "vat.standard_rate"
+        assert result["primary_match"]["value"] == 0.2
+
+    def test_ambiguous_standard_allowance_needs_confirmation(self):
+        result = lookup_parameter(query="universal credit standard allowance", year=2025, limit=1)
+        assert result["status"] == "needs_confirmation"
+        assert result["needs_confirmation"] is True
+        assert result["confirmation_reason"] == "close_string_match_certainty_margin"
+        assert "primary_match" not in result
+        assert result["options"][0]["path"].startswith("universal_credit.standard_allowance")
+        assert len(result["options"]) > 1
+        _assert_match_certainties_descending(result["options"])
+        assert len([
+            option
+            for option in result["options"]
+            if option["path"].startswith("universal_credit.standard_allowance")
+        ]) >= 4
+
+    def test_unknown_query_returns_error_with_suggestions(self):
+        result = lookup_parameter(query="zzzxqv not a known parameter", year=2025)
+        assert result["status"] == "error"
+        assert result["needs_confirmation"] is False
+        assert "error" in result
+        assert result["query"] == "zzzxqv not a known parameter"
+        assert result["suggestions"]
+
+    def test_invalid_year_returns_error(self):
+        result = lookup_parameter(query="personal allowance", year=9999)
         assert "error" in result
 
 
@@ -298,6 +439,7 @@ class TestToolDefinitions:
             "calculate_household",
             "run_economy_simulation",
             "analyse_microdata",
+            "lookup_parameter",
             "run_python",
             "generate_chart",
         ]
@@ -412,11 +554,13 @@ class TestToolDefinitions:
         household_schema = _tool("calculate_household")["input_schema"]
         economy_schema = _tool("run_economy_simulation")["input_schema"]
         microdata_schema = _tool("analyse_microdata")["input_schema"]
+        parameter_schema = _tool("lookup_parameter")["input_schema"]
         chart_schema = _tool("generate_chart")["input_schema"]
 
         assert household_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
         assert economy_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
         assert microdata_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
+        assert parameter_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
         assert economy_schema["properties"]["reform"] == tool_definitions.REFORM_PROPERTY
         assert microdata_schema["properties"]["reform"] == tool_definitions.REFORM_PROPERTY
         assert microdata_schema["properties"]["columns"] == tool_definitions.STRING_ARRAY_SCHEMA
@@ -451,6 +595,13 @@ class TestToolDefinitions:
         assert "calculate_household" in description
         assert "run_economy_simulation" in description
         assert "analyse_microdata" in description
+        assert "lookup_parameter" in description
+        assert "parameter introspection" not in description
+
+    def test_lookup_certainty_is_documented_as_string_parsing_certainty(self):
+        parameter_description = _tool("lookup_parameter")["description"]
+        assert "string parsing certainty" in parameter_description
+        assert "confirmation_reason" in parameter_description
 
 
 class TestAnalyseMicrodataContract:
@@ -961,6 +1112,15 @@ class TestExecuteTool:
         )
         result = execute_tool("analyse_microdata", {"entity": "households", "operation": "count"})
         assert result["tool"] == "microdata"
+
+    def test_dispatches_lookup_parameter(self, monkeypatch):
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"lookup_parameter": lambda **kwargs: {"tool": "parameter", "input": kwargs}},
+        )
+        result = execute_tool("lookup_parameter", {"query": "personal allowance", "year": 2025})
+        assert result["tool"] == "parameter"
 
     def test_dispatches_generate_chart(self):
         result = execute_tool("generate_chart", {

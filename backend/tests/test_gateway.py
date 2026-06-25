@@ -29,10 +29,12 @@ class TestSlotInventory:
         assert TOOL_SLOT_KIND[("calculate_household", "person")] == "required"
         assert TOOL_SLOT_KIND[("analyse_microdata", "entity")] == "required"
         assert TOOL_SLOT_KIND[("analyse_microdata", "operation")] == "required"
+        assert TOOL_SLOT_KIND[("lookup_parameter", "query")] == "required"
 
     def test_defaulted_slots_detected(self):
         assert TOOL_SLOT_KIND[("run_economy_simulation", "dataset")] == "defaulted"
         assert TOOL_SLOT_KIND[("calculate_household", "year")] == "defaulted"
+        assert TOOL_SLOT_KIND[("lookup_parameter", "year")] == "defaulted"
 
     def test_optional_undefaulted_slots_detected(self):
         assert TOOL_SLOT_KIND[("calculate_household", "reform")] == "optional"

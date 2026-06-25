@@ -57,6 +57,8 @@ dispatched by `execute_tool()`. At present, the exposed tools are:
   parametric reforms.
 - `analyse_microdata`: analyse allowed non-FRS model microdata through bounded
   filtering, sampling, grouping, and aggregation operations.
+- `lookup_parameter`: look up baseline model parameter values by exact path or
+  natural-language query.
 - `run_python`: execute reproducible PolicyEngine UK Python code for fallback
   cases that do not fit the typed tools.
 - `generate_chart`: return frontend-renderable chart JSON markdown.
@@ -68,6 +70,9 @@ are exposed through `@register_tool`.
 model/eval requests. Mutating those snapshots is only a local per-call edit and
 does not register, remove, or mutate canonical tools. Use `@register_tool` for
 tool registration.
+
+`lookup_parameter` reads year-scoped values from
+`policyengine_uk_compiled.Simulation.get_baseline_params()`.
 
 `policyengine-uk-compiled` 0.44.0 is the minimum supported output contract for
 microdata-backed tools. When reform is omitted, `run_microdata()`,
@@ -111,6 +116,14 @@ for follow-up suggestion chips, which deliberately sample with variety.
   tools when they fit the request, or with `run_python` as a fallback; do not
   answer tax, benefit, reform, poverty, decile, or distributional questions from
   memory.
+- Static parameter questions should use `lookup_parameter`. Do not run household
+  or economy simulations just to infer a parameter value.
+- If `lookup_parameter` returns `status: "needs_confirmation"`, ask the user to
+  pick one of the returned options before presenting a value. Treat
+  `match_certainty` as deterministic string parsing certainty only, not factual
+  confidence in the policy value. Use
+  `confirmation_reason` to explain whether the parsed query is low-certainty or
+  closely tied between options.
 - Use `validate_reform` only when the user is drafting, debugging, or asking
   whether reform JSON is valid. Do not use it as a routine preflight before
   every simulation.
