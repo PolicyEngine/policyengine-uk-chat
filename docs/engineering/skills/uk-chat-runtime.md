@@ -50,9 +50,9 @@ belong in `backend/prompts/`.
 Only tools registered with `@register_tool` are exposed to the model and
 dispatched by `execute_tool()`. At present, the exposed tools are:
 
-- `calculate_household`: calculate illustrative synthetic household outcomes.
 - `validate_reform`: validate parametric reform JSON without running a
   simulation.
+- `calculate_household`: calculate illustrative synthetic household outcomes.
 - `run_economy_simulation`: calculate aggregate society-wide impacts for
   parametric reforms.
 - `analyse_microdata`: analyse allowed non-FRS model microdata through bounded
@@ -63,6 +63,11 @@ dispatched by `execute_tool()`. At present, the exposed tools are:
 
 Helper functions in `backend/engine/` are implementation details unless they
 are exposed through `@register_tool`.
+
+`tools.registry.tool_definitions()` returns caller-owned JSON-like snapshots for
+model/eval requests. Mutating those snapshots is only a local per-call edit and
+does not register, remove, or mutate canonical tools. Use `@register_tool` for
+tool registration.
 
 `policyengine-uk-compiled` 0.44.0 is the minimum supported output contract for
 microdata-backed tools. When reform is omitted, `run_microdata()`,

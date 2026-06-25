@@ -315,14 +315,34 @@ class TestToolDefinitions:
         assert list(tool_registry.tool_handlers()) == definition_names
         assert [spec.name for spec in tool_registry.tool_specs()] == definition_names
 
-    def test_registry_public_views_are_immutable(self):
+    def test_tool_definition_snapshots_are_caller_owned(self):
         definitions = tool_registry.tool_definitions()
+        first_name = definitions[0]["name"]
+        first_schema_type = definitions[0]["input_schema"]["type"]
+
+        definitions.append({"name": "extra"})
+        definitions[0]["name"] = "changed"
+        definitions[0]["input_schema"]["type"] = "mutated"
+
+        fresh_definitions = tool_registry.tool_definitions()
+
+        assert [tool["name"] for tool in fresh_definitions] == [
+            tool["name"] for tool in TOOL_DEFINITIONS
+        ]
+        assert fresh_definitions[0]["name"] == first_name
+        assert fresh_definitions[0]["input_schema"]["type"] == first_schema_type
+
+    def test_tool_specs_do_not_expose_canonical_schema_objects(self):
+        specs = tool_registry.tool_specs()
+        first_schema_type = specs[0].input_schema["type"]
+
+        specs[0].input_schema["type"] = "mutated"
+
+        assert tool_registry.tool_specs()[0].input_schema["type"] == first_schema_type
+
+    def test_tool_handlers_view_is_immutable(self):
         handlers = tool_registry.tool_handlers()
 
-        with pytest.raises(AttributeError):
-            definitions.append({"name": "extra"})
-        with pytest.raises(TypeError):
-            definitions[0]["name"] = "changed"
         with pytest.raises(TypeError):
             handlers["extra"] = lambda: {}
 
@@ -364,17 +384,42 @@ class TestToolDefinitions:
         ]
 
     def test_shared_schema_fragments_are_reused(self):
+        assert (
+            tool_definitions.CALCULATE_HOUSEHOLD_INPUT_SCHEMA["properties"]["year"]
+            is tool_definitions.YEAR_SCHEMA
+        )
+        assert (
+            tool_definitions.RUN_ECONOMY_SIMULATION_INPUT_SCHEMA["properties"]["year"]
+            is tool_definitions.YEAR_SCHEMA
+        )
+        assert (
+            tool_definitions.ANALYSE_MICRODATA_INPUT_SCHEMA["properties"]["year"]
+            is tool_definitions.YEAR_SCHEMA
+        )
+        assert (
+            tool_definitions.RUN_ECONOMY_SIMULATION_INPUT_SCHEMA["properties"]["reform"]
+            is tool_definitions.REFORM_PROPERTY
+        )
+        assert (
+            tool_definitions.ANALYSE_MICRODATA_INPUT_SCHEMA["properties"]["reform"]
+            is tool_definitions.REFORM_PROPERTY
+        )
+        assert (
+            tool_definitions.ANALYSE_MICRODATA_INPUT_SCHEMA["properties"]["columns"]
+            is tool_definitions.STRING_ARRAY_SCHEMA
+        )
+
         household_schema = _tool("calculate_household")["input_schema"]
         economy_schema = _tool("run_economy_simulation")["input_schema"]
         microdata_schema = _tool("analyse_microdata")["input_schema"]
         chart_schema = _tool("generate_chart")["input_schema"]
 
-        assert household_schema["properties"]["year"] is tool_definitions.YEAR_SCHEMA
-        assert economy_schema["properties"]["year"] is tool_definitions.YEAR_SCHEMA
-        assert microdata_schema["properties"]["year"] is tool_definitions.YEAR_SCHEMA
-        assert economy_schema["properties"]["reform"] is tool_definitions.REFORM_PROPERTY
-        assert microdata_schema["properties"]["reform"] is tool_definitions.REFORM_PROPERTY
-        assert microdata_schema["properties"]["columns"] is tool_definitions.STRING_ARRAY_SCHEMA
+        assert household_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
+        assert economy_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
+        assert microdata_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
+        assert economy_schema["properties"]["reform"] == tool_definitions.REFORM_PROPERTY
+        assert microdata_schema["properties"]["reform"] == tool_definitions.REFORM_PROPERTY
+        assert microdata_schema["properties"]["columns"] == tool_definitions.STRING_ARRAY_SCHEMA
         assert chart_schema["properties"]["x_format"]["enum"] == tool_definitions.CHART_FORMAT_SCHEMA["enum"]
 
     def test_validate_reform_tool_is_debugging_tool(self):

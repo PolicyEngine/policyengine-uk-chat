@@ -6,19 +6,20 @@ system could derive more from typed signatures or richer tool specs, but this
 small layer only removes TOOL_DEFINITIONS / TOOL_HANDLERS drift.
 
 Tool registration happens as an import side effect of `tools.dispatch`. Public
-read accessors lazily import that module before deriving immutable registry
-views, so direct `tools.registry` callers see the same registered tools as the
-chat runtime.
+read accessors lazily import that module before deriving caller-owned snapshots,
+so direct `tools.registry` callers see the same registered tools as the chat
+runtime without being able to mutate the canonical registry by accident.
 """
 
 from collections.abc import Callable, Mapping
+from copy import deepcopy
 from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any
 
 
 ToolHandler = Callable[..., dict[str, Any]]
-ToolDefinition = Mapping[str, Any]
+ToolDefinition = dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,7 @@ def register_tool(
             RegisteredTool(
                 name=name,
                 description=description,
-                input_schema=input_schema,
+                input_schema=deepcopy(input_schema),
                 handler=handler,
             )
         )
@@ -63,22 +64,42 @@ def _ensure_registered() -> None:
 
 
 def tool_specs() -> tuple[RegisteredTool, ...]:
-    _ensure_registered()
-    return tuple(_TOOL_SPECS)
+    """Return caller-owned snapshots of registered tool specs in model order."""
 
-
-def tool_definitions() -> tuple[ToolDefinition, ...]:
     _ensure_registered()
     return tuple(
-        MappingProxyType({
-            "name": spec.name,
-            "description": spec.description,
-            "input_schema": spec.input_schema,
-        })
+        RegisteredTool(
+            name=spec.name,
+            description=spec.description,
+            input_schema=deepcopy(spec.input_schema),
+            handler=spec.handler,
+        )
         for spec in _TOOL_SPECS
     )
 
 
+def tool_definitions() -> list[ToolDefinition]:
+    """Return fresh JSON-like tool-definition snapshots in model order.
+
+    Callers may mutate the returned list/dicts for a local model/eval request,
+    but mutation is not a registration mechanism and does not affect future
+    registry reads. Register or remove model-facing tools only through
+    `@register_tool`.
+    """
+
+    _ensure_registered()
+    return [
+        {
+            "name": spec.name,
+            "description": spec.description,
+            "input_schema": deepcopy(spec.input_schema),
+        }
+        for spec in _TOOL_SPECS
+    ]
+
+
 def tool_handlers() -> Mapping[str, ToolHandler]:
+    """Return a read-only handler mapping in model order."""
+
     _ensure_registered()
     return MappingProxyType({spec.name: spec.handler for spec in _TOOL_SPECS})
