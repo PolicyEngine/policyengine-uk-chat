@@ -547,31 +547,33 @@ class TestAnalyseMicrodataContract:
         assert result["result"]["net_income_change"] == pytest.approx(5.0)
 
 
+class _DummyDump:
+    def __init__(self, value):
+        self.value = value
+
+    def model_dump(self):
+        return self.value
+
+
+def _economy_result(hbai_mean, breakdown):
+    return SimpleNamespace(
+        fiscal_year="2025/26",
+        program_breakdown=_DummyDump(breakdown),
+        budgetary_impact=_DummyDump({"baseline_revenue": 1.0}),
+        decile_impacts=[],
+        winners_losers=_DummyDump({"winners_pct": 0.0}),
+        caseloads=_DummyDump({"income_tax_payers": 0.0}),
+        baseline_hbai_incomes=_DummyDump({"mean_bhc": hbai_mean}),
+        reform_hbai_incomes=_DummyDump({"mean_bhc": hbai_mean}),
+        baseline_poverty=_DummyDump({"relative_bhc_children": 10.0}),
+        reform_poverty=_DummyDump({"relative_bhc_children": 10.0}),
+    )
+
+
 class TestRunEconomySimulationContract:
     def test_reports_true_baseline_hbai_alongside_reform(self, monkeypatch):
-        class DummyDump:
-            def __init__(self, value):
-                self.value = value
-
-            def model_dump(self):
-                return self.value
-
-        def make_result(hbai_mean, breakdown):
-            return SimpleNamespace(
-                fiscal_year="2025/26",
-                program_breakdown=DummyDump(breakdown),
-                budgetary_impact=DummyDump({"baseline_revenue": 1.0}),
-                decile_impacts=[],
-                winners_losers=DummyDump({"winners_pct": 0.0}),
-                caseloads=DummyDump({"income_tax_payers": 0.0}),
-                baseline_hbai_incomes=DummyDump({"mean_bhc": hbai_mean}),
-                reform_hbai_incomes=DummyDump({"mean_bhc": hbai_mean}),
-                baseline_poverty=DummyDump({"relative_bhc_children": 10.0}),
-                reform_poverty=DummyDump({"relative_bhc_children": 10.0}),
-            )
-
-        baseline = make_result(100.0, {"income_tax": 100.0})
-        reform = make_result(80.0, {"income_tax": 90.0})
+        baseline = _economy_result(100.0, {"income_tax": 100.0})
+        reform = _economy_result(80.0, {"income_tax": 90.0})
 
         class DummySimulation:
             def __init__(self):
@@ -593,6 +595,26 @@ class TestRunEconomySimulationContract:
         assert result["reform_hbai_incomes"]["mean_bhc"] == 80.0
         assert result["program_breakdown_changes"]["income_tax"]["change"] == -10.0
         assert "structural_reform_applied" not in result
+
+    @requires_compiled
+    def test_empty_reform_runs_reform_policy_path(self, monkeypatch):
+        baseline = _economy_result(100.0, {"income_tax": 100.0})
+        reform = _economy_result(100.0, {"income_tax": 100.0})
+        policies = []
+
+        class DummySimulation:
+            def run(self, policy=None):
+                policies.append(policy)
+                return baseline if len(policies) == 1 else reform
+
+        monkeypatch.setattr(agent_tools, "_build_simulation", lambda year, dataset: DummySimulation())
+
+        result = agent_tools.run_economy_simulation(year=2025, reform={})
+
+        assert result["program_breakdown_changes"]["income_tax"]["change"] == 0.0
+        assert len(policies) == 2
+        assert policies[0] is None
+        assert policies[1] is not None
 
     def test_rejects_structural_reform_input(self):
         result = execute_tool(

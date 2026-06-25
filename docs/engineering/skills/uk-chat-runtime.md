@@ -62,7 +62,7 @@ exposed to the model. At present, the exposed tools are:
 Helper functions in `backend/engine/` are implementation details unless they
 are added to both the tool definitions and dispatcher.
 
-`policyengine-uk-compiled` 0.43.0 is the minimum supported output contract for
+`policyengine-uk-compiled` 0.44.0 is the minimum supported output contract for
 microdata-backed tools. When reform is omitted, `run_microdata()`,
 `calculate_household`, and `analyse_microdata` outputs use plain calculated
 column names such as `income_tax`, `universal_credit`, and `net_income`. When a
