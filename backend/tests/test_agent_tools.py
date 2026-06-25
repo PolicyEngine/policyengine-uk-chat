@@ -1136,12 +1136,20 @@ class TestExecuteTool:
         assert result["tool"] == "microdata"
 
     def test_dispatches_lookup_parameter(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "lookup_parameter", lambda **kwargs: {"tool": "parameter", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"lookup_parameter": lambda **kwargs: {"tool": "parameter", "input": kwargs}},
+        )
         result = execute_tool("lookup_parameter", {"query": "personal allowance", "year": 2025})
         assert result["tool"] == "parameter"
 
     def test_dispatches_lookup_variable(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "lookup_variable", lambda **kwargs: {"tool": "variable", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"lookup_variable": lambda **kwargs: {"tool": "variable", "input": kwargs}},
+        )
         result = execute_tool("lookup_variable", {"query": "income_tax"})
         assert result["tool"] == "variable"
 
