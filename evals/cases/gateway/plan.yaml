@@ -124,17 +124,6 @@ cases:
       - slot: year
         gates: false
 
-  - id: gw_ready_variable_definition
-    suite: gateway
-    description: A variable definition and formula lookup should route to lookup_variable.
-    requirements: [live_model]
-    prompt: What does the income_tax variable calculate? Show the formula if available.
-    expected_outcome: ready
-    expected_tool: lookup_variable
-    expected_slots:
-      - slot: query
-        gates: false
-
   - id: gw_ready_decile_distribution
     suite: gateway
     description: A fully-specified distributional ask; FRS/EFRS is the correct default

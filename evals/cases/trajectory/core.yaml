@@ -80,7 +80,6 @@ cases:
       - run_economy_simulation
       - analyse_microdata
       - lookup_parameter
-      - lookup_variable
       - run_python
       - generate_chart
     offline_response:
@@ -97,7 +96,6 @@ cases:
       - calculate_household
       - run_economy_simulation
       - analyse_microdata
-      - lookup_variable
       - run_python
       - generate_chart
     offline_response:
@@ -119,7 +117,6 @@ cases:
       - calculate_household
       - run_economy_simulation
       - analyse_microdata
-      - lookup_variable
       - run_python
       - generate_chart
     offline_response:
@@ -128,27 +125,6 @@ cases:
           input:
             query: basic rate threshold
             year: 2025
-
-  - id: trajectory_variable_definition_income_tax
-    suite: trajectory
-    description: Variable definition and formula questions should select lookup_variable.
-    prompt: What does the income_tax variable calculate? Please show the formula if available.
-    expected_tools:
-      - name: lookup_variable
-    forbidden_tools:
-      - validate_reform
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - lookup_parameter
-      - run_python
-      - generate_chart
-    offline_response:
-      tool_calls:
-        - name: lookup_variable
-          input:
-            query: income_tax
-            include_formula: true
 
   - id: trajectory_validate_reform_debugging
     suite: trajectory

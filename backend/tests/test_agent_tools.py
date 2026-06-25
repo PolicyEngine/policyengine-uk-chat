@@ -16,7 +16,6 @@ import tools.registry as tool_registry
 from tools.dispatch import (
     get_baseline_parameters,
     lookup_parameter,
-    lookup_variable,
     validate_reform,
     calculate_household,
     run_economy_simulation,
@@ -218,162 +217,6 @@ class TestLookupParameter:
     def test_invalid_year_returns_error(self):
         result = lookup_parameter(query="personal allowance", year=9999)
         assert "error" in result
-
-
-# ---------------------------------------------------------------------------
-# lookup_variable
-# ---------------------------------------------------------------------------
-
-class TestLookupVariable:
-    def test_exact_variable_returns_formula_source(self):
-        pytest.importorskip("policyengine_uk")
-        result = lookup_variable(query="income_tax", limit=1)
-        match = result["primary_match"]
-        assert result["status"] == "success"
-        assert result["needs_confirmation"] is False
-        assert match["name"] == "income_tax"
-        assert match["label"] == "Income Tax"
-        assert match["documentation"] == "Total Income Tax liability"
-        assert match["entity"] == "person"
-        assert match["definition_period"] == "year"
-        assert match["has_formula"] is True
-        assert match["formula_status"] == "available"
-        assert match["formula_source"] == "policyengine_uk variable definition source"
-        assert "policyengine_uk_compiled" in match["formula_source_note"]
-        assert match["formulas"][0]["source_type"] == "policyengine_uk_variable_definition"
-        assert "def formula" in match["formulas"][0]["source"]
-
-    def test_formula_records_keep_most_recent_formulas_first(self, monkeypatch):
-        import engine.lookup.variables as variable_lookups
-
-        def formula_2020():
-            return 2020
-
-        def formula_2021():
-            return 2021
-
-        def formula_2022():
-            return 2022
-
-        def formula_2023():
-            return 2023
-
-        def formula_2024():
-            return 2024
-
-        fake_variable = SimpleNamespace(
-            name="historical_formula",
-            label="Historical formula",
-            documentation=None,
-            entity=SimpleNamespace(key="person"),
-            definition_period="year",
-            value_type=float,
-            default_value=0,
-            unit=None,
-            category=None,
-            formulas={
-                "2020-01-01": formula_2020,
-                "2021-01-01": formula_2021,
-                "2022-01-01": formula_2022,
-                "2023-01-01": formula_2023,
-                "2024-01-01": formula_2024,
-            },
-        )
-
-        monkeypatch.setattr(variable_lookups, "_variable_registry", lambda: {"historical_formula": fake_variable})
-        monkeypatch.setattr(
-            variable_lookups.inspect,
-            "getsource",
-            lambda formula: f"def {formula.__name__}(): pass",
-        )
-
-        result = lookup_variable(query="historical_formula", include_formula=True, limit=1)
-
-        formulas = result["primary_match"]["formulas"]
-        assert [formula["effective_date"] for formula in formulas] == [
-            "2024-01-01",
-            "2023-01-01",
-            "2022-01-01",
-            "2021-01-01",
-        ]
-        assert "2020-01-01" not in [formula["effective_date"] for formula in formulas]
-        assert all(
-            formula["source_type"] == "policyengine_uk_variable_definition"
-            for formula in formulas
-        )
-
-    def test_input_variable_has_no_formula(self):
-        pytest.importorskip("policyengine_uk")
-        result = lookup_variable(query="employment_income", limit=1)
-        match = result["primary_match"]
-        assert match["name"] == "employment_income"
-        assert match["has_formula"] is False
-        assert match["formula_status"] == "input_variable"
-        assert match["formulas"] == []
-
-    def test_natural_language_query_finds_variable(self):
-        pytest.importorskip("policyengine_uk")
-        result = lookup_variable(query="income tax liability", limit=1)
-        assert result["status"] == "success"
-        assert result["primary_match"]["name"] == "income_tax"
-
-    def test_natural_language_employment_income_prefers_input_variable(self):
-        pytest.importorskip("policyengine_uk")
-        result = lookup_variable(query="employment income", include_formula=False)
-        assert result["status"] == "success"
-        assert result["primary_match"]["name"] == "employment_income"
-
-    def test_natural_language_child_benefit_prefers_amount_variable(self):
-        pytest.importorskip("policyengine_uk")
-        result = lookup_variable(query="child benefit", include_formula=False)
-        assert result["status"] == "success"
-        assert result["primary_match"]["name"] == "child_benefit"
-
-    def test_ambiguous_variable_query_ignores_limit_for_confirmation_options(self):
-        pytest.importorskip("policyengine_uk")
-        result = lookup_variable(query="benefit", include_formula=False, limit=1)
-        assert result["status"] == "needs_confirmation"
-        assert result["needs_confirmation"] is True
-        assert result["confirmation_reason"] == "close_string_match_certainty_margin"
-        assert len(result["options"]) > 1
-        _assert_match_certainties_descending(result["options"])
-        assert "primary_match" not in result
-
-    def test_formula_source_failure_is_marked_unavailable(self, monkeypatch):
-        pytest.importorskip("policyengine_uk")
-        import engine.lookup.variables as variable_lookups
-
-        fake_variable = SimpleNamespace(
-            name="fake_formula",
-            label="Fake formula",
-            documentation=None,
-            entity=SimpleNamespace(key="person"),
-            definition_period="year",
-            value_type=float,
-            default_value=0,
-            unit=None,
-            category=None,
-            formulas={"0001-01-01": lambda: None},
-        )
-
-        def fail_getsource(_formula):
-            raise OSError("source unavailable")
-
-        monkeypatch.setattr(variable_lookups, "_variable_registry", lambda: {"fake_formula": fake_variable})
-        monkeypatch.setattr(variable_lookups.inspect, "getsource", fail_getsource)
-        result = lookup_variable(query="fake_formula", include_formula=True)
-        assert result["status"] == "success"
-        assert result["primary_match"]["has_formula"] is True
-        assert result["primary_match"]["formula_status"] == "source_unavailable"
-
-    def test_unknown_query_returns_error_with_suggestions(self):
-        pytest.importorskip("policyengine_uk")
-        result = lookup_variable(query="zzzxqv not a policyengine variable")
-        assert result["status"] == "error"
-        assert result["needs_confirmation"] is False
-        assert "error" in result
-        assert result["query"] == "zzzxqv not a policyengine variable"
-        assert result["suggestions"]
 
 
 # ---------------------------------------------------------------------------
@@ -597,7 +440,6 @@ class TestToolDefinitions:
             "run_economy_simulation",
             "analyse_microdata",
             "lookup_parameter",
-            "lookup_variable",
             "run_python",
             "generate_chart",
         ]
@@ -754,16 +596,12 @@ class TestToolDefinitions:
         assert "run_economy_simulation" in description
         assert "analyse_microdata" in description
         assert "lookup_parameter" in description
-        assert "lookup_variable" in description
         assert "parameter introspection" not in description
 
     def test_lookup_certainty_is_documented_as_string_parsing_certainty(self):
         parameter_description = _tool("lookup_parameter")["description"]
-        variable_description = _tool("lookup_variable")["description"]
         assert "string parsing certainty" in parameter_description
         assert "confirmation_reason" in parameter_description
-        assert "string parsing certainty" in variable_description
-        assert "confirmation_reason" in variable_description
 
 
 class TestAnalyseMicrodataContract:
@@ -1283,15 +1121,6 @@ class TestExecuteTool:
         )
         result = execute_tool("lookup_parameter", {"query": "personal allowance", "year": 2025})
         assert result["tool"] == "parameter"
-
-    def test_dispatches_lookup_variable(self, monkeypatch):
-        monkeypatch.setattr(
-            agent_tools,
-            "TOOL_HANDLERS",
-            {"lookup_variable": lambda **kwargs: {"tool": "variable", "input": kwargs}},
-        )
-        result = execute_tool("lookup_variable", {"query": "income_tax"})
-        assert result["tool"] == "variable"
 
     def test_dispatches_generate_chart(self):
         result = execute_tool("generate_chart", {

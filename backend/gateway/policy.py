@@ -112,7 +112,6 @@ OUTPUT_VOCAB = (
     "net_income",
     "benefit_entitlement",
     "parameter_lookup",
-    "variable_definition",
     "reform_validity",
 )
 

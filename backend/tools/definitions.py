@@ -156,26 +156,6 @@ LOOKUP_PARAMETER_INPUT_SCHEMA = {
     "required": ["query"],
 }
 
-LOOKUP_VARIABLE_INPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "query": {
-            "type": "string",
-            "description": (
-                "Variable name, label, or natural-language query, for example "
-                "`income_tax`, `employment_income`, or `income tax liability`."
-            ),
-        },
-        "include_formula": {
-            "type": "boolean",
-            "default": True,
-            "description": "Whether to include formula source when the variable has formulas.",
-        },
-        "limit": LOOKUP_LIMIT_SCHEMA,
-    },
-    "required": ["query"],
-}
-
 RUN_PYTHON_INPUT_SCHEMA = {
     "type": "object",
     "properties": {
@@ -302,24 +282,10 @@ LOOKUP_PARAMETER_DESCRIPTION = (
     "to explain whether the string match is low-certainty or closely tied."
 )
 
-LOOKUP_VARIABLE_DESCRIPTION = (
-    "Look up PolicyEngine UK variable definitions, metadata, and formula "
-    "source when available. Use this for questions about what a model "
-    "variable represents, which entity or period it belongs to, or how "
-    "it is calculated. Prefer this over run_python for variable "
-    "definition and formula lookups. Formula source comes from policyengine_uk "
-    "variable-definition metadata, not a guarantee of compiled-engine behavior. "
-    "`match_certainty` is deterministic string parsing certainty, not factual "
-    "confidence in the variable metadata or formula. If several matches are "
-    "plausible, returns status `needs_confirmation`; ask the user to choose before answering, "
-    "using `confirmation_reason` to explain whether the string match is "
-    "low-certainty or closely tied."
-)
-
 RUN_PYTHON_DESCRIPTION = (
     "Execute reproducible Python code using the official PolicyEngine UK compiled interface. "
     "Prefer the typed tools (`calculate_household`, `run_economy_simulation`, `analyse_microdata`, "
-    "`lookup_parameter`, `lookup_variable`) "
+    "`lookup_parameter`) "
     "when the question fits their shape; use `run_python` as a fallback for structural reforms, "
     "novel aggregations, historical lookups, or unsupported cases. "
     "The environment preloads `policyengine_uk_compiled` as `pe`, plus `Simulation`, `Parameters`, "

@@ -22,17 +22,10 @@ CRITICAL - ALWAYS COMPUTE WITH TOOLS:
 - Use `lookup_parameter` for static model parameter values such as allowances,
   rates, thresholds, limits, and amounts. Do not run household or economy
   simulations just to infer a parameter value.
-- Use `lookup_variable` for questions about what a PolicyEngine UK variable
-  represents, which entity or period it belongs to, or how its formula is
-  defined.
-- Treat `lookup_variable` formula text as policyengine_uk variable-definition
-  metadata. It is useful for explaining the variable definition, but do not
-  describe it as a guarantee of policyengine_uk_compiled execution behaviour.
-- If `lookup_parameter` or `lookup_variable` returns `status:
-  "needs_confirmation"`, do not answer with a value yet. Ask the user to choose
-  from the returned options, ordered by match certainty. Treat
-  `match_certainty` as deterministic string parsing certainty only, not factual
-  confidence in the policy value, metadata, or formula. Use
+- If `lookup_parameter` returns `status: "needs_confirmation"`, do not answer
+  with a value yet. Ask the user to choose from the returned options, ordered by
+  match certainty. Treat `match_certainty` as deterministic string parsing certainty
+  only, not factual confidence in the policy value. Use
   `confirmation_reason` to explain whether the parsed query is low-certainty or
   closely tied between options.
 - Use `validate_reform` when the user is drafting, debugging, or asking
