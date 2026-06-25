@@ -4,7 +4,7 @@ cases:
     description: Household calculation result should feed a grounded final answer.
     prompt: >
       For an illustrative single adult earning GBP 30k in 2025, calculate their
-      baseline household income.
+      current-policy household income.
     expected_tools:
       - name: calculate_household
         input_contains:

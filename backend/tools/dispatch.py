@@ -119,7 +119,7 @@ def run_economy_simulation(
         policy = _build_compiled_policy(reform)
         sim = _build_simulation(year, dataset)
         baseline_result = sim.run()
-        reform_result = sim.run(policy=policy) if policy else baseline_result
+        reform_result = sim.run(policy=policy) if policy is not None else baseline_result
 
         baseline_breakdown = baseline_result.program_breakdown.model_dump()
         reform_breakdown = reform_result.program_breakdown.model_dump()
