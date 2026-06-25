@@ -25,22 +25,7 @@ def _preload_engine():
 image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("libpq-dev", "gcc")
-    .pip_install(
-        "fastapi",
-        "uvicorn[standard]",
-        "sqlmodel",
-        "psycopg2-binary",
-        "anthropic",
-        "pydantic-ai[anthropic]",
-        "policyengine-uk-compiled>=0.44.0",
-        "policyengine_uk>=2.89.2",
-        "pandas",
-        "httpx",
-        "supabase",
-        "stripe",
-        "slowapi",
-        "python-dateutil",
-    )
+    .pip_install_from_requirements("backend/requirements.txt")
     .run_function(_preload_engine)
     .add_local_dir("backend", remote_path="/app/backend", copy=True)
     # Regenerate reference.md against the Modal-installed
@@ -69,6 +54,16 @@ def web():
 
     sys.path.insert(0, "/app/backend")
     os.chdir("/app/backend")
+
+    from observability.fastapi import configure_process_observability
+
+    configure_process_observability(
+        platform="modal",
+        service_role="api",
+        runtime_role="modal_web",
+        modal_app_name=APP_NAME,
+        modal_function_name="web",
+    )
 
     from api.main import app as fastapi_app
     return fastapi_app
