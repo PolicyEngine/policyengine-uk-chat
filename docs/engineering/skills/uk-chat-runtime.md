@@ -73,6 +73,13 @@ model/eval requests. Mutating those snapshots is only a local per-call edit and
 does not register, remove, or mutate canonical tools. Use `@register_tool` for
 tool registration.
 
+`lookup_parameter` reads year-scoped values from
+`policyengine_uk_compiled.Simulation.get_baseline_params()`. `lookup_variable`
+intentionally reads metadata and formula text from `policyengine_uk` because
+`policyengine-uk-compiled` does not currently expose a variable/formula catalog.
+Present returned formulas as `policyengine_uk` variable-definition source, not
+as a guarantee of compiled-engine execution behaviour.
+
 `policyengine-uk-compiled` 0.44.0 is the minimum supported output contract for
 microdata-backed tools. When reform is omitted, `run_microdata()`,
 `calculate_household`, and `analyse_microdata` outputs use plain calculated
@@ -118,6 +125,9 @@ for follow-up suggestion chips, which deliberately sample with variety.
 - Static parameter questions should use `lookup_parameter`; variable definition
   or formula questions should use `lookup_variable`. Do not run household or
   economy simulations just to infer a parameter value.
+- `lookup_variable` formula text comes from `policyengine_uk` metadata, while
+  calculations run through `policyengine_uk_compiled`; describe it as variable
+  definition source, not as guaranteed compiled-engine implementation detail.
 - If a lookup tool returns `status: "needs_confirmation"`, ask the user to pick
   one of the returned options before presenting a value or formula. Treat
   `match_certainty` as deterministic string parsing certainty only, not factual

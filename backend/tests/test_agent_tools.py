@@ -51,6 +51,31 @@ def _assert_match_certainties_descending(options: list[dict]) -> None:
     assert certainties == sorted(certainties, reverse=True)
 
 
+class TestLookupScoring:
+    def test_confirmation_reason_handles_empty_ranked_list(self):
+        from engine.lookup.scoring import _confirmation_reason
+
+        assert _confirmation_reason([]) == "low_string_match_certainty"
+
+    def test_confirmation_reason_handles_single_high_certainty_match(self):
+        from engine.lookup.scoring import _RankedCandidate, _confirmation_reason
+
+        ranked = [
+            _RankedCandidate(
+                certainty=1.0,
+                candidate=object(),
+                matched_on="name",
+                match_reason="exact_name",
+                exact=True,
+                field_priority=0,
+                extra_tokens=0,
+                stable_key="only",
+            )
+        ]
+
+        assert _confirmation_reason(ranked) == "low_string_match_certainty"
+
+
 # ---------------------------------------------------------------------------
 # policyengine_uk_compiled interface
 # ---------------------------------------------------------------------------
@@ -107,6 +132,59 @@ class TestLookupParameter:
         assert match["context"]["personal_allowance"] == 12570.0
         assert match["context"]["standard_gross_income_threshold"] == 50270.0
 
+    def test_parameter_alias_paths_resolve_in_compiled_baseline(self):
+        from engine.lookup.parameters import missing_parameter_alias_paths
+        from policyengine_uk_compiled import Simulation
+
+        parameters = Simulation(year=2025).get_baseline_params()
+
+        assert missing_parameter_alias_paths(parameters) == ()
+
+    def test_basic_rate_context_requires_expected_candidate_shape(self):
+        from engine.lookup.parameters import (
+            BASIC_RATE_THRESHOLD_PATH,
+            _ParameterCandidate,
+            _parameter_context,
+        )
+
+        parameters = {
+            "income_tax": {
+                "personal_allowance": 12570,
+                "uk_brackets": [
+                    {"rate": 0.2},
+                    {"threshold": 37700, "rate": 0.4},
+                    {"threshold": 125140, "rate": 0.45},
+                ],
+            }
+        }
+        candidate = _ParameterCandidate(
+            path=BASIC_RATE_THRESHOLD_PATH,
+            value=37700,
+            label="income tax uk brackets 1 threshold",
+            program="income_tax",
+            aliases=("basic rate threshold",),
+        )
+
+        assert _parameter_context(candidate, parameters)["standard_gross_income_threshold"] == 50270
+
+        wrong_program = _ParameterCandidate(
+            path=BASIC_RATE_THRESHOLD_PATH,
+            value=37700,
+            label="income tax uk brackets 1 threshold",
+            program="other_tax",
+            aliases=("basic rate threshold",),
+        )
+        missing_alias = _ParameterCandidate(
+            path=BASIC_RATE_THRESHOLD_PATH,
+            value=37700,
+            label="income tax uk brackets 1 threshold",
+            program="income_tax",
+            aliases=(),
+        )
+
+        assert _parameter_context(wrong_program, parameters) == {}
+        assert _parameter_context(missing_alias, parameters) == {}
+
     def test_standard_rate_of_vat_returns_standard_rate(self):
         result = lookup_parameter(query="standard rate of VAT", year=2025)
         assert result["status"] == "success"
@@ -160,7 +238,69 @@ class TestLookupVariable:
         assert match["definition_period"] == "year"
         assert match["has_formula"] is True
         assert match["formula_status"] == "available"
+        assert match["formula_source"] == "policyengine_uk variable definition source"
+        assert "policyengine_uk_compiled" in match["formula_source_note"]
+        assert match["formulas"][0]["source_type"] == "policyengine_uk_variable_definition"
         assert "def formula" in match["formulas"][0]["source"]
+
+    def test_formula_records_keep_most_recent_formulas_first(self, monkeypatch):
+        import engine.lookup.variables as variable_lookups
+
+        def formula_2020():
+            return 2020
+
+        def formula_2021():
+            return 2021
+
+        def formula_2022():
+            return 2022
+
+        def formula_2023():
+            return 2023
+
+        def formula_2024():
+            return 2024
+
+        fake_variable = SimpleNamespace(
+            name="historical_formula",
+            label="Historical formula",
+            documentation=None,
+            entity=SimpleNamespace(key="person"),
+            definition_period="year",
+            value_type=float,
+            default_value=0,
+            unit=None,
+            category=None,
+            formulas={
+                "2020-01-01": formula_2020,
+                "2021-01-01": formula_2021,
+                "2022-01-01": formula_2022,
+                "2023-01-01": formula_2023,
+                "2024-01-01": formula_2024,
+            },
+        )
+
+        monkeypatch.setattr(variable_lookups, "_variable_registry", lambda: {"historical_formula": fake_variable})
+        monkeypatch.setattr(
+            variable_lookups.inspect,
+            "getsource",
+            lambda formula: f"def {formula.__name__}(): pass",
+        )
+
+        result = lookup_variable(query="historical_formula", include_formula=True, limit=1)
+
+        formulas = result["primary_match"]["formulas"]
+        assert [formula["effective_date"] for formula in formulas] == [
+            "2024-01-01",
+            "2023-01-01",
+            "2022-01-01",
+            "2021-01-01",
+        ]
+        assert "2020-01-01" not in [formula["effective_date"] for formula in formulas]
+        assert all(
+            formula["source_type"] == "policyengine_uk_variable_definition"
+            for formula in formulas
+        )
 
     def test_input_variable_has_no_formula(self):
         pytest.importorskip("policyengine_uk")

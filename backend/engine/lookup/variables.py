@@ -38,7 +38,12 @@ def _variable_registry() -> Dict[str, Any]:
 def _formula_records(variable: Any) -> List[Dict[str, Any]]:
     formulas = getattr(variable, "formulas", None) or {}
     records = []
-    for effective_date, formula in list(formulas.items())[:MAX_FORMULAS_PER_VARIABLE]:
+    formula_items = sorted(
+        formulas.items(),
+        key=lambda item: str(item[0]),
+        reverse=True,
+    )
+    for effective_date, formula in formula_items[:MAX_FORMULAS_PER_VARIABLE]:
         try:
             source = inspect.getsource(formula)
             source, truncated = _truncate_source(source)
@@ -47,6 +52,7 @@ def _formula_records(variable: Any) -> List[Dict[str, Any]]:
                     "effective_date": str(effective_date),
                     "source": source,
                     "truncated": truncated,
+                    "source_type": "policyengine_uk_variable_definition",
                 }
             )
         except (OSError, TypeError) as exc:
@@ -54,6 +60,7 @@ def _formula_records(variable: Any) -> List[Dict[str, Any]]:
                 {
                     "effective_date": str(effective_date),
                     "error": f"Formula source unavailable: {exc}",
+                    "source_type": "policyengine_uk_variable_definition",
                 }
             )
     return records
@@ -115,6 +122,12 @@ def _variable_record(
         "category": _json_safe_default(category),
         "has_formula": has_formula,
         "formula_status": formula_status,
+        "formula_source": "policyengine_uk variable definition source",
+        "formula_source_note": (
+            "Formula text comes from policyengine_uk metadata. UK Chat calculations "
+            "run through policyengine_uk_compiled, so this is not a guarantee of "
+            "compiled-engine implementation behavior."
+        ),
         "formulas": formulas,
         "score": round(ranked.certainty, 4),
         "match_certainty": round(ranked.certainty, 4),

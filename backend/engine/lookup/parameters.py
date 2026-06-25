@@ -17,8 +17,11 @@ from engine.lookup.scoring import (
 from engine.lookup.text import _humanize
 
 
+BASIC_RATE_THRESHOLD_PATH = "income_tax.uk_brackets.1.threshold"
+PERSONAL_ALLOWANCE_PATH = "income_tax.personal_allowance"
+
 _PARAMETER_ALIASES = {
-    "income_tax.personal_allowance": (
+    PERSONAL_ALLOWANCE_PATH: (
         "personal allowance",
         "tax free allowance",
         "income tax allowance",
@@ -27,7 +30,7 @@ _PARAMETER_ALIASES = {
         "basic rate",
         "basic income tax rate",
     ),
-    "income_tax.uk_brackets.1.threshold": (
+    BASIC_RATE_THRESHOLD_PATH: (
         "basic rate threshold",
         "basic rate limit",
         "basic rate upper limit",
@@ -81,17 +84,40 @@ def _parameter_candidates(parameters: Dict[str, Any]) -> List[_ParameterCandidat
     return candidates
 
 
-def _parameter_context(path: str, value: Any, parameters: Dict[str, Any]) -> Dict[str, Any]:
+def parameter_alias_paths() -> tuple[str, ...]:
+    """Return compiled parameter paths that have hand-authored aliases."""
+
+    return tuple(_PARAMETER_ALIASES)
+
+
+def missing_parameter_alias_paths(parameters: Dict[str, Any]) -> tuple[str, ...]:
+    """Return alias paths that no longer resolve in compiled baseline params."""
+
+    return tuple(
+        path
+        for path in parameter_alias_paths()
+        if _get_path(parameters, path) is None
+    )
+
+
+def _parameter_context(candidate: _ParameterCandidate, parameters: Dict[str, Any]) -> Dict[str, Any]:
     context: Dict[str, Any] = {}
-    if path == "income_tax.uk_brackets.1.threshold" and isinstance(value, int | float):
-        personal_allowance = _get_path(parameters, "income_tax.personal_allowance")
+    if (
+        candidate.path == BASIC_RATE_THRESHOLD_PATH
+        and candidate.program == "income_tax"
+        and "basic rate threshold" in candidate.aliases
+        and isinstance(candidate.value, int | float)
+        and _get_path(parameters, BASIC_RATE_THRESHOLD_PATH) == candidate.value
+    ):
+        personal_allowance = _get_path(parameters, PERSONAL_ALLOWANCE_PATH)
+        if not isinstance(personal_allowance, int | float):
+            return context
         context["threshold_basis"] = "taxable_income_after_personal_allowance"
-        if isinstance(personal_allowance, int | float):
-            context["personal_allowance"] = personal_allowance
-            context["standard_gross_income_threshold"] = value + personal_allowance
-            context["standard_gross_income_threshold_note"] = (
-                "For a taxpayer receiving the full personal allowance, this is personal allowance plus the taxable-income threshold."
-            )
+        context["personal_allowance"] = personal_allowance
+        context["standard_gross_income_threshold"] = candidate.value + personal_allowance
+        context["standard_gross_income_threshold_note"] = (
+            "For a taxpayer receiving the full personal allowance, this is personal allowance plus the taxable-income threshold."
+        )
     return context
 
 
@@ -137,7 +163,7 @@ def _parameter_match_item(
     aliases = list(candidate.aliases)
     if aliases:
         item["aliases"] = aliases
-    context = _parameter_context(candidate.path, candidate.value, parameters)
+    context = _parameter_context(candidate, parameters)
     if context:
         item["context"] = context
     return item
