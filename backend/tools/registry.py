@@ -4,14 +4,21 @@ This keeps registration explicit for now: handlers still pass hand-written
 schemas and descriptions to `@register_tool`. A fuller automated registration
 system could derive more from typed signatures or richer tool specs, but this
 small layer only removes TOOL_DEFINITIONS / TOOL_HANDLERS drift.
+
+Tool registration happens as an import side effect of `tools.dispatch`. Public
+read accessors lazily import that module before deriving immutable registry
+views, so direct `tools.registry` callers see the same registered tools as the
+chat runtime.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any
 
 
 ToolHandler = Callable[..., dict[str, Any]]
+ToolDefinition = Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -23,8 +30,6 @@ class RegisteredTool:
 
 
 _TOOL_SPECS: list[RegisteredTool] = []
-_TOOL_DEFINITIONS: list[dict[str, Any]] = []
-_TOOL_HANDLERS: dict[str, ToolHandler] = {}
 
 
 def register_tool(
@@ -36,7 +41,7 @@ def register_tool(
     """Register one model-facing tool and derive schema + dispatch views."""
 
     def decorator(handler: ToolHandler) -> ToolHandler:
-        if name in _TOOL_HANDLERS:
+        if any(spec.name == name for spec in _TOOL_SPECS):
             raise ValueError(f"Duplicate tool registration: {name}")
 
         _TOOL_SPECS.append(
@@ -47,26 +52,33 @@ def register_tool(
                 handler=handler,
             )
         )
-        _TOOL_DEFINITIONS.append(
-            {
-                "name": name,
-                "description": description,
-                "input_schema": input_schema,
-            }
-        )
-        _TOOL_HANDLERS[name] = handler
         return handler
 
     return decorator
 
 
+def _ensure_registered() -> None:
+    # Importing dispatch runs the decorators that populate this registry.
+    import tools.dispatch  # noqa: F401
+
+
 def tool_specs() -> tuple[RegisteredTool, ...]:
+    _ensure_registered()
     return tuple(_TOOL_SPECS)
 
 
-def tool_definitions() -> list[dict[str, Any]]:
-    return _TOOL_DEFINITIONS
+def tool_definitions() -> tuple[ToolDefinition, ...]:
+    _ensure_registered()
+    return tuple(
+        MappingProxyType({
+            "name": spec.name,
+            "description": spec.description,
+            "input_schema": spec.input_schema,
+        })
+        for spec in _TOOL_SPECS
+    )
 
 
-def tool_handlers() -> dict[str, ToolHandler]:
-    return _TOOL_HANDLERS
+def tool_handlers() -> Mapping[str, ToolHandler]:
+    _ensure_registered()
+    return MappingProxyType({spec.name: spec.handler for spec in _TOOL_SPECS})

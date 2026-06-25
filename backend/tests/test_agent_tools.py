@@ -32,6 +32,18 @@ def _tool(name: str) -> dict:
     return next(tool for tool in TOOL_DEFINITIONS if tool["name"] == name)
 
 
+@pytest.fixture
+def isolated_tool_registry():
+    """Temporarily isolate registry mutations made by registry unit tests."""
+
+    original_specs = list(tool_registry._TOOL_SPECS)
+    tool_registry._TOOL_SPECS.clear()
+    try:
+        yield
+    finally:
+        tool_registry._TOOL_SPECS[:] = original_specs
+
+
 # ---------------------------------------------------------------------------
 # policyengine_uk_compiled interface
 # ---------------------------------------------------------------------------
@@ -298,11 +310,29 @@ class TestToolDefinitions:
     def test_tool_definitions_and_handlers_are_registry_views(self):
         definition_names = [tool["name"] for tool in TOOL_DEFINITIONS]
 
-        assert TOOL_DEFINITIONS is tool_registry.tool_definitions()
-        assert agent_tools.TOOL_HANDLERS is tool_registry.tool_handlers()
+        assert [tool["name"] for tool in tool_registry.tool_definitions()] == definition_names
+        assert list(agent_tools.TOOL_HANDLERS) == definition_names
+        assert list(tool_registry.tool_handlers()) == definition_names
         assert [spec.name for spec in tool_registry.tool_specs()] == definition_names
 
-    def test_duplicate_tool_registration_is_rejected(self):
+    def test_registry_public_views_are_immutable(self):
+        definitions = tool_registry.tool_definitions()
+        handlers = tool_registry.tool_handlers()
+
+        with pytest.raises(AttributeError):
+            definitions.append({"name": "extra"})
+        with pytest.raises(TypeError):
+            definitions[0]["name"] = "changed"
+        with pytest.raises(TypeError):
+            handlers["extra"] = lambda: {}
+
+    def test_duplicate_tool_registration_is_rejected(self, isolated_tool_registry):
+        tool_registry.register_tool(
+            name="validate_reform",
+            description="Original",
+            input_schema={"type": "object", "properties": {}},
+        )(lambda: {})
+
         with pytest.raises(ValueError, match="Duplicate tool registration: validate_reform"):
             tool_registry.register_tool(
                 name="validate_reform",
@@ -310,8 +340,28 @@ class TestToolDefinitions:
                 input_schema={"type": "object", "properties": {}},
             )(lambda: {})
 
+        assert [spec.name for spec in tool_registry.tool_specs()] == ["validate_reform"]
+
+    def test_register_tool_appends_in_call_order(self, isolated_tool_registry):
+        tool_registry.register_tool(
+            name="first",
+            description="First",
+            input_schema={"type": "object", "properties": {}},
+        )(lambda: {"tool": "first"})
+        tool_registry.register_tool(
+            name="second",
+            description="Second",
+            input_schema={"type": "object", "properties": {}},
+        )(lambda: {"tool": "second"})
+
+        assert [spec.name for spec in tool_registry.tool_specs()] == ["first", "second"]
+        assert [tool["name"] for tool in tool_registry.tool_definitions()] == ["first", "second"]
+        assert list(tool_registry.tool_handlers()) == ["first", "second"]
+
     def test_agent_tools_reexports_canonical_tool_definitions(self):
-        assert TOOL_DEFINITIONS is tool_definitions.TOOL_DEFINITIONS
+        assert [tool["name"] for tool in TOOL_DEFINITIONS] == [
+            tool["name"] for tool in tool_definitions.TOOL_DEFINITIONS
+        ]
 
     def test_shared_schema_fragments_are_reused(self):
         household_schema = _tool("calculate_household")["input_schema"]
@@ -832,22 +882,38 @@ class TestExecuteTool:
         assert result["error"] == "Unknown tool: compute"
 
     def test_dispatches_validate_reform(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "validate_reform", lambda **kwargs: {"tool": "validator", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"validate_reform": lambda **kwargs: {"tool": "validator", "input": kwargs}},
+        )
         result = execute_tool("validate_reform", {"reform": {}})
         assert result["tool"] == "validator"
 
     def test_dispatches_calculate_household(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "calculate_household", lambda **kwargs: {"tool": "household", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"calculate_household": lambda **kwargs: {"tool": "household", "input": kwargs}},
+        )
         result = execute_tool("calculate_household", {"person": [], "benunit": [], "household": []})
         assert result["tool"] == "household"
 
     def test_dispatches_run_economy_simulation(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "run_economy_simulation", lambda **kwargs: {"tool": "economy", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"run_economy_simulation": lambda **kwargs: {"tool": "economy", "input": kwargs}},
+        )
         result = execute_tool("run_economy_simulation", {"year": 2025})
         assert result["tool"] == "economy"
 
     def test_dispatches_analyse_microdata(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "analyse_microdata", lambda **kwargs: {"tool": "microdata", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"analyse_microdata": lambda **kwargs: {"tool": "microdata", "input": kwargs}},
+        )
         result = execute_tool("analyse_microdata", {"entity": "households", "operation": "count"})
         assert result["tool"] == "microdata"
 

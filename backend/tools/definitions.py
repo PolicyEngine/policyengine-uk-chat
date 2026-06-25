@@ -267,13 +267,7 @@ GENERATE_CHART_DESCRIPTION = (
 )
 
 
-def _load_registered_tools() -> None:
-    # Importing dispatch runs the decorators that populate the shared registry.
-    import tools.dispatch  # noqa: F401
-
-
-def get_tool_definitions() -> list[dict]:
-    _load_registered_tools()
+def get_tool_definitions():
     from tools.registry import tool_definitions
 
     return tool_definitions()
