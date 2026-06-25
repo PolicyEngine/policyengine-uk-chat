@@ -12,6 +12,7 @@ from conftest import requires_compiled
 
 import tools.dispatch as agent_tools
 import tools.definitions as tool_definitions
+import tools.registry as tool_registry
 from tools.dispatch import (
     get_baseline_parameters,
     validate_reform,
@@ -29,6 +30,18 @@ from tools.dispatch import (
 
 def _tool(name: str) -> dict:
     return next(tool for tool in TOOL_DEFINITIONS if tool["name"] == name)
+
+
+@pytest.fixture
+def isolated_tool_registry():
+    """Temporarily isolate registry mutations made by registry unit tests."""
+
+    original_specs = list(tool_registry._TOOL_SPECS)
+    tool_registry._TOOL_SPECS.clear()
+    try:
+        yield
+    finally:
+        tool_registry._TOOL_SPECS[:] = original_specs
 
 
 # ---------------------------------------------------------------------------
@@ -280,32 +293,133 @@ class TestJsonSafe:
 class TestToolDefinitions:
     def test_exposes_typed_tools_and_fallback_python(self):
         names = [tool["name"] for tool in TOOL_DEFINITIONS]
-        assert "validate_reform" in names
-        assert "calculate_household" in names
-        assert "run_economy_simulation" in names
-        assert "analyse_microdata" in names
-        assert "run_python" in names
+        assert names == [
+            "validate_reform",
+            "calculate_household",
+            "run_economy_simulation",
+            "analyse_microdata",
+            "run_python",
+            "generate_chart",
+        ]
 
     def test_tool_definitions_match_dispatch_handlers(self):
         definition_names = [tool["name"] for tool in TOOL_DEFINITIONS]
         assert len(definition_names) == len(set(definition_names))
         assert set(definition_names) == set(agent_tools.TOOL_HANDLERS)
 
+    def test_tool_definitions_and_handlers_are_registry_views(self):
+        definition_names = [tool["name"] for tool in TOOL_DEFINITIONS]
+
+        assert [tool["name"] for tool in tool_registry.tool_definitions()] == definition_names
+        assert list(agent_tools.TOOL_HANDLERS) == definition_names
+        assert list(tool_registry.tool_handlers()) == definition_names
+        assert [spec.name for spec in tool_registry.tool_specs()] == definition_names
+
+    def test_tool_definition_snapshots_are_caller_owned(self):
+        definitions = tool_registry.tool_definitions()
+        first_name = definitions[0]["name"]
+        first_schema_type = definitions[0]["input_schema"]["type"]
+
+        definitions.append({"name": "extra"})
+        definitions[0]["name"] = "changed"
+        definitions[0]["input_schema"]["type"] = "mutated"
+
+        fresh_definitions = tool_registry.tool_definitions()
+
+        assert [tool["name"] for tool in fresh_definitions] == [
+            tool["name"] for tool in TOOL_DEFINITIONS
+        ]
+        assert fresh_definitions[0]["name"] == first_name
+        assert fresh_definitions[0]["input_schema"]["type"] == first_schema_type
+
+    def test_tool_specs_do_not_expose_canonical_schema_objects(self):
+        specs = tool_registry.tool_specs()
+        first_schema_type = specs[0].input_schema["type"]
+
+        specs[0].input_schema["type"] = "mutated"
+
+        assert tool_registry.tool_specs()[0].input_schema["type"] == first_schema_type
+
+    def test_tool_handlers_view_is_immutable(self):
+        handlers = tool_registry.tool_handlers()
+
+        with pytest.raises(TypeError):
+            handlers["extra"] = lambda: {}
+
+    def test_duplicate_tool_registration_is_rejected(self, isolated_tool_registry):
+        tool_registry.register_tool(
+            name="validate_reform",
+            description="Original",
+            input_schema={"type": "object", "properties": {}},
+        )(lambda: {})
+
+        with pytest.raises(ValueError, match="Duplicate tool registration: validate_reform"):
+            tool_registry.register_tool(
+                name="validate_reform",
+                description="Duplicate",
+                input_schema={"type": "object", "properties": {}},
+            )(lambda: {})
+
+        assert [spec.name for spec in tool_registry.tool_specs()] == ["validate_reform"]
+
+    def test_register_tool_appends_in_call_order(self, isolated_tool_registry):
+        tool_registry.register_tool(
+            name="first",
+            description="First",
+            input_schema={"type": "object", "properties": {}},
+        )(lambda: {"tool": "first"})
+        tool_registry.register_tool(
+            name="second",
+            description="Second",
+            input_schema={"type": "object", "properties": {}},
+        )(lambda: {"tool": "second"})
+
+        assert [spec.name for spec in tool_registry.tool_specs()] == ["first", "second"]
+        assert [tool["name"] for tool in tool_registry.tool_definitions()] == ["first", "second"]
+        assert list(tool_registry.tool_handlers()) == ["first", "second"]
+
     def test_agent_tools_reexports_canonical_tool_definitions(self):
-        assert TOOL_DEFINITIONS is tool_definitions.TOOL_DEFINITIONS
+        assert [tool["name"] for tool in TOOL_DEFINITIONS] == [
+            tool["name"] for tool in tool_definitions.TOOL_DEFINITIONS
+        ]
 
     def test_shared_schema_fragments_are_reused(self):
+        assert (
+            tool_definitions.CALCULATE_HOUSEHOLD_INPUT_SCHEMA["properties"]["year"]
+            is tool_definitions.YEAR_SCHEMA
+        )
+        assert (
+            tool_definitions.RUN_ECONOMY_SIMULATION_INPUT_SCHEMA["properties"]["year"]
+            is tool_definitions.YEAR_SCHEMA
+        )
+        assert (
+            tool_definitions.ANALYSE_MICRODATA_INPUT_SCHEMA["properties"]["year"]
+            is tool_definitions.YEAR_SCHEMA
+        )
+        assert (
+            tool_definitions.RUN_ECONOMY_SIMULATION_INPUT_SCHEMA["properties"]["reform"]
+            is tool_definitions.REFORM_PROPERTY
+        )
+        assert (
+            tool_definitions.ANALYSE_MICRODATA_INPUT_SCHEMA["properties"]["reform"]
+            is tool_definitions.REFORM_PROPERTY
+        )
+        assert (
+            tool_definitions.ANALYSE_MICRODATA_INPUT_SCHEMA["properties"]["columns"]
+            is tool_definitions.STRING_ARRAY_SCHEMA
+        )
+
         household_schema = _tool("calculate_household")["input_schema"]
         economy_schema = _tool("run_economy_simulation")["input_schema"]
         microdata_schema = _tool("analyse_microdata")["input_schema"]
         chart_schema = _tool("generate_chart")["input_schema"]
 
-        assert household_schema["properties"]["year"] is tool_definitions.YEAR_SCHEMA
-        assert economy_schema["properties"]["year"] is tool_definitions.YEAR_SCHEMA
-        assert microdata_schema["properties"]["year"] is tool_definitions.YEAR_SCHEMA
-        assert economy_schema["properties"]["reform"] is tool_definitions.REFORM_PROPERTY
-        assert microdata_schema["properties"]["reform"] is tool_definitions.REFORM_PROPERTY
-        assert microdata_schema["properties"]["columns"] is tool_definitions.STRING_ARRAY_SCHEMA
+        assert household_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
+        assert economy_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
+        assert microdata_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
+        assert economy_schema["properties"]["reform"] == tool_definitions.REFORM_PROPERTY
+        assert microdata_schema["properties"]["reform"] == tool_definitions.REFORM_PROPERTY
+        assert microdata_schema["properties"]["columns"] == tool_definitions.STRING_ARRAY_SCHEMA
         assert chart_schema["properties"]["x_format"]["enum"] == tool_definitions.CHART_FORMAT_SCHEMA["enum"]
 
     def test_validate_reform_tool_is_debugging_tool(self):
@@ -813,22 +927,38 @@ class TestExecuteTool:
         assert result["error"] == "Unknown tool: compute"
 
     def test_dispatches_validate_reform(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "validate_reform", lambda **kwargs: {"tool": "validator", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"validate_reform": lambda **kwargs: {"tool": "validator", "input": kwargs}},
+        )
         result = execute_tool("validate_reform", {"reform": {}})
         assert result["tool"] == "validator"
 
     def test_dispatches_calculate_household(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "calculate_household", lambda **kwargs: {"tool": "household", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"calculate_household": lambda **kwargs: {"tool": "household", "input": kwargs}},
+        )
         result = execute_tool("calculate_household", {"person": [], "benunit": [], "household": []})
         assert result["tool"] == "household"
 
     def test_dispatches_run_economy_simulation(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "run_economy_simulation", lambda **kwargs: {"tool": "economy", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"run_economy_simulation": lambda **kwargs: {"tool": "economy", "input": kwargs}},
+        )
         result = execute_tool("run_economy_simulation", {"year": 2025})
         assert result["tool"] == "economy"
 
     def test_dispatches_analyse_microdata(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "analyse_microdata", lambda **kwargs: {"tool": "microdata", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"analyse_microdata": lambda **kwargs: {"tool": "microdata", "input": kwargs}},
+        )
         result = execute_tool("analyse_microdata", {"entity": "households", "operation": "count"})
         assert result["tool"] == "microdata"
 
