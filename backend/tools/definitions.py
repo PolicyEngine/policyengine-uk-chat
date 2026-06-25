@@ -217,7 +217,10 @@ TOOL_DEFINITIONS = [
             "specific household described with person, benefit-unit, and "
             "household records. Prefer this over run_python for household-level "
             "questions with a defined household composition. These inputs are "
-            "synthetic examples, not real households."
+            "synthetic examples, not real households. When reform is omitted, "
+            "output calculated columns use plain names such as income_tax and "
+            "net_income. When reform is supplied, including an empty no-op "
+            "object, output includes baseline_* and reform_* comparison columns."
         ),
         "input_schema": CALCULATE_HOUSEHOLD_INPUT_SCHEMA,
     },
@@ -242,7 +245,10 @@ TOOL_DEFINITIONS = [
             "breakdowns, descriptions, or small model-record samples. This tool "
             "explicitly does not support FRS; use run_economy_simulation for "
             "aggregate FRS outputs. Row-level `sample` is also not supported "
-            "for the FRS-derived `efrs` dataset; use aggregate operations there."
+            "for the FRS-derived `efrs` dataset; use aggregate operations there. "
+            "When reform is omitted, calculated columns use plain names; when "
+            "reform is supplied, including an empty no-op object, use "
+            "baseline_* and reform_* comparison columns."
         ),
         "input_schema": ANALYSE_MICRODATA_INPUT_SCHEMA,
     },
@@ -280,4 +286,3 @@ TOOL_DEFINITIONS = [
         "input_schema": GENERATE_CHART_INPUT_SCHEMA,
     },
 ]
-

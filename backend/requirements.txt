@@ -4,8 +4,8 @@ sqlmodel
 psycopg2-binary
 anthropic
 pydantic-ai[anthropic]
-policyengine-uk-compiled>=0.20.0
-policyengine_uk
+policyengine-uk-compiled>=0.44.0
+policyengine_uk>=2.89.2
 pandas
 pyyaml
 httpx

@@ -91,10 +91,10 @@ cases:
         position by £1.2 billion. The reported decile impacts range up to £120
         per year in decile 10.
 
-  - id: answer_household_baseline_only
+  - id: answer_household_current_policy_only
     suite: answer
-    description: Baseline-only household answers should stay illustrative and grounded.
-    prompt: Summarise the baseline household result.
+    description: Current-policy household answers should stay illustrative and grounded.
+    prompt: Summarise the current-policy household result.
     tool_calls:
       - name: calculate_household
         input:
@@ -117,11 +117,11 @@ cases:
           person:
             - person_id: 0
               employment_income: 30000
-              baseline_income_tax: 3486
-              baseline_employee_ni: 1394.40
+              income_tax: 3486
+              employee_ni: 1394.40
           household:
             - household_id: 0
-              baseline_net_income: 25119.60
+              net_income: 25119.60
     expect:
       required:
         - illustrative
@@ -143,7 +143,7 @@ cases:
       number_tolerance: 0.01
     offline_response:
       text: >
-        For this illustrative 2025 household earning £30000, baseline net
+        For this illustrative 2025 household earning £30000, current-policy net
         income is £25119.60 after £3486 of income tax and £1394.40 of employee NI.
 
   - id: answer_chart_markdown_from_tool
@@ -420,17 +420,17 @@ cases:
           operation: group_by
           dataset: efrs
           group_by: [region]
-          columns: [baseline_net_income]
+          columns: [net_income]
         output:
           entity: households
           operation: group_by
           dataset: Enhanced FRS
           result:
             - region: London
-              baseline_net_income: 32000
+              net_income: 32000
               weighted_population: 1000000
             - region: Wales
-              baseline_net_income: 28000
+              net_income: 28000
               weighted_population: 800000
     expect:
       required:
@@ -443,15 +443,16 @@ cases:
         - real FRS household
         - actual survey row
         - here are real households
+        - baseline
       grounded_numbers: true
       allowed_numbers: [32000, 28000, 1000000, 800000]
       number_tolerance: 0.01
     offline_response:
       text: >
         This is an aggregate Enhanced FRS result with no row-level records
-        exposed. London has modelled average baseline net income of £32000
-        across a weighted population of 1000000, while Wales has £28000 across
-        800000.
+        exposed. London has modelled average net income under current policy
+        of £32000 across a weighted population of 1000000, while Wales has
+        £28000 across 800000.
 
   - id: answer_tool_error_requests_valid_structure
     suite: answer

@@ -33,7 +33,7 @@ image = (
         "anthropic",
         "pydantic-ai[anthropic]",
         "policyengine-uk-compiled>=0.44.0",
-        "policyengine_uk>=2.75.0",
+        "policyengine_uk>=2.89.2",
         "pandas",
         "httpx",
         "supabase",

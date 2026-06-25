@@ -48,7 +48,7 @@ _NON_PROGRAMME_KEYS = {"fiscal_year", "labour_supply", "uc_migration"}
 #
 # Coverage: every field name and baseline value below was checked against
 # `Parameters.model_json_schema()` and `Simulation(year=2025).get_baseline_params()`
-# from policyengine-uk-compiled 0.38.0.
+# from policyengine-uk-compiled 0.44.0.
 #
 # DANGER — silent no-ops: `Parameters(...)` does NOT raise on an unknown field;
 # it silently drops it, so a typo'd field name runs a BASELINE simulation and

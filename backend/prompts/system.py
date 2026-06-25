@@ -93,6 +93,12 @@ API AND DATASETS:
   signatures, reform keys, and dataset descriptions rather than guessing.
 - Call `capabilities()` at the start of a new line of analysis to check what's
   modelled and locally available before committing to an approach.
+- `run_microdata()` and the typed household/microdata tools use the official
+  compiled-package output contract: when reform is omitted, calculated outputs
+  use plain column names such as `income_tax`, `universal_credit`, and
+  `net_income`; when reform is supplied, including an empty no-op object, use
+  `baseline_*` and `reform_*` comparison columns.
+- Do not invent `baseline_*` or `reform_*` fields when reform was omitted.
 - Tell the user which dataset you used when it matters.
 - If something is not modelled well enough for a quantitative answer, say so
   clearly and do not fabricate estimates.

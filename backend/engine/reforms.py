@@ -100,12 +100,14 @@ def normalise_reform(
     reform: Optional[Dict[str, Any]],
 ) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
     """Validate and normalize a reform dict, returning JSON and model objects."""
-    if not reform:
+    if reform is None:
         return {}, {}
     if not isinstance(reform, dict):
         raise ReformValidationError(
             [{"path": "reform", "message": f"Reform must be a dict, got {type(reform).__name__}"}]
         )
+    if not reform:
+        return {}, {}
 
     param_cls_map, stamp_duty_cls, stamp_duty_band_cls = _parameter_classes()
     normalized: Dict[str, Dict[str, Any]] = {}
@@ -167,12 +169,15 @@ def normalise_reform(
 
 
 def build_compiled_policy(reform: Optional[Dict[str, Any]]):
-    normalized, model_kwargs = normalise_reform(reform)
-    if not normalized:
+    _, model_kwargs = normalise_reform(reform)
+    if reform is None:
         return None
     ensure_compiled_package_importable()
     from policyengine_uk_compiled import Parameters
 
+    # Match policyengine-uk-compiled's output-shape switch: policy=None means
+    # plain baseline output, while any supplied Parameters object, including an
+    # empty no-op policy, means baseline_*/reform_* comparison output.
     return Parameters(**model_kwargs)
 
 
