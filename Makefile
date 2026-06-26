@@ -53,13 +53,13 @@ test-frontend:
 	cd frontend && npm run build
 
 sync-policyengine-uk-evals:
-	PYTHONPATH=backend python -m evaluation.sync_policyengine_uk --sync
+	PYTHONPATH=backend python -m eval.sync_policyengine_uk --sync
 
 check-policyengine-uk-evals:
-	PYTHONPATH=backend python -m evaluation.sync_policyengine_uk --check
+	PYTHONPATH=backend python -m eval.sync_policyengine_uk --check
 
 eval-ai-offline: check-policyengine-uk-evals
-	PYTHONPATH=backend python -m evaluation.run --mode offline
+	PYTHONPATH=backend python -m eval.run --mode offline
 
 eval-ai-live: check-policyengine-uk-evals
-	PYTHONPATH=backend python -m evaluation.run --mode live --provider anthropic
+	PYTHONPATH=backend python -m eval.run --mode live --provider anthropic

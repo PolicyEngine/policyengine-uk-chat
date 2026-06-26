@@ -4,12 +4,12 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-import evaluation.runner as runner
-from evaluation.graders import grade_output, grade_text, grade_tool_calls
-from evaluation.loaders import load_case_file
-from evaluation.reporting import render_markdown
-from evaluation.runner import run_eval
-from evaluation.schemas import (
+import eval.runner as runner
+from eval.graders import grade_output, grade_text, grade_tool_calls
+from eval.loaders import load_case_file
+from eval.reporting import render_markdown
+from eval.runner import run_eval
+from eval.schemas import (
     CaseResult,
     CaseSkip,
     EvalReport,
@@ -22,7 +22,7 @@ from evaluation.schemas import (
     ToolCallExpectation,
     TrajectoryCase,
 )
-from evaluation.sync_policyengine_uk import render_generated_cases
+from eval.sync_policyengine_uk import render_generated_cases
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -208,30 +208,6 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
     assert report.failed == 0
     assert report.passed == 1
     assert calls == [("calculate_household", {"year": 2025})]
-
-
-def test_plan_mode_trajectory_omits_tools_and_adds_directive():
-    class RecordingClient:
-        def __init__(self):
-            self.calls = []
-
-        def generate(self, **kwargs):
-            self.calls.append(kwargs)
-            return ModelTurn(text="I would ask for inputs first.")
-
-    case = TrajectoryCase(
-        id="plan_case",
-        description="Plan mode omits tools.",
-        prompt="Plan a calculation.",
-        plan_mode=True,
-    )
-    client = RecordingClient()
-
-    result = runner._run_trajectory(case, client)
-
-    assert result.status == "passed"
-    assert client.calls[0]["tools"] is None
-    assert "PLAN MODE IS ACTIVE" in client.calls[0]["system"]
 
 
 def test_charts_mode_trajectory_adds_directive_and_keeps_tools():
@@ -423,7 +399,7 @@ def test_policyengine_uk_sync_renders_active_and_skipped_cases(tmp_path):
                         "id": "active_case",
                         "path": "tests/policy/sample.yaml",
                         "name": "Active case",
-                        "output_map": {"income_tax": "person[].baseline_income_tax"},
+                        "output_map": {"income_tax": "person[].income_tax"},
                     },
                     {
                         "id": "skipped_case",
@@ -452,6 +428,6 @@ def test_policyengine_uk_sync_renders_active_and_skipped_cases(tmp_path):
     assert generated["source"]["version"] == "1.2.3"
     assert generated["source"]["compiled_version"] == "4.5.6"
     assert generated["cases"][0]["input"]["person"][0]["employment_income"] == 10000
-    assert generated["cases"][0]["expect"]["numeric"][0]["path"] == "person[].baseline_income_tax"
+    assert generated["cases"][0]["expect"]["numeric"][0]["path"] == "person[].income_tax"
     assert generated["cases"][0]["expect"]["numeric"][0]["tolerance"] == 2.0
     assert generated["cases"][1]["skip"]["code"] == "compiled_coverage_gap"

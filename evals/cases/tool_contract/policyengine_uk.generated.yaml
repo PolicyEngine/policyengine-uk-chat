@@ -1,9 +1,9 @@
 source:
   generated_from: evals/sources/policyengine_uk.yaml
   package: policyengine-uk
-  version: 2.88.32
+  version: 2.89.2
   compiled_package: policyengine-uk-compiled
-  compiled_version: 0.35.0
+  compiled_version: 0.44.0
 cases:
 - id: policyengine_uk_tax_no_income
   suite: tool_contract
@@ -16,7 +16,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/integration/tax.yaml
     name: No income
   tool_name: calculate_household
@@ -33,10 +33,10 @@ cases:
     - household_id: household
   expect:
     numeric:
-    - path: person[].baseline_income_tax
+    - path: person[].income_tax
       equals: 0.0
       tolerance: 0.0
-    - path: person[].baseline_employee_ni
+    - path: person[].employee_ni
       equals: 0.0
       tolerance: 0.0
 - id: policyengine_uk_tax_some_employed_income
@@ -50,7 +50,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/integration/tax.yaml
     name: Some employed income
   tool_name: calculate_household
@@ -68,10 +68,10 @@ cases:
     - household_id: household
   expect:
     numeric:
-    - path: person[].baseline_employee_ni
+    - path: person[].employee_ni
       equals: 3935.0
       tolerance: 30.0
-    - path: person[].baseline_income_tax
+    - path: person[].income_tax
       equals: 5875.0
       tolerance: 30.0
 - id: policyengine_uk_income_tax_earner
@@ -85,7 +85,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
     name: Income Tax for earner
   tool_name: calculate_household
@@ -103,7 +103,7 @@ cases:
     - household_id: household
   expect:
     numeric:
-    - path: person[].baseline_income_tax
+    - path: person[].income_tax
       equals: 4298.0
       tolerance: 10.0
 - id: policyengine_uk_income_tax_pension_contributions
@@ -117,7 +117,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
     name: Income Tax for earner with pension contributions
   tool_name: calculate_household
@@ -150,7 +150,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
     name: NI Class 1 employee contributions - below PT
   tool_name: calculate_household
@@ -183,7 +183,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
     name: NI Class 1 employee contributions - between PT and UEL
   tool_name: calculate_household
@@ -216,7 +216,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
     name: NI Class 1 employee contributions - above UEL
   tool_name: calculate_household
@@ -249,7 +249,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/national_insurance/national_insurance.yaml
     name: National Insurance sums non-employer-side contributions.
   tool_name: calculate_household
@@ -285,7 +285,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
     name: Child Benefit with no children
   tool_name: calculate_household
@@ -322,7 +322,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
     name: Child Benefit with one child
   tool_name: calculate_household
@@ -364,7 +364,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
     name: Child Benefit with two children, one over 16
   tool_name: calculate_household
@@ -411,7 +411,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
     name: Income reduction applies
   tool_name: calculate_household
@@ -447,7 +447,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
     name: Capital above the upper limit removes Universal Credit entitlement
   tool_name: calculate_household
@@ -481,7 +481,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml
     name: "\xA3445k first-time buyer"
   tool_name: calculate_household
@@ -515,7 +515,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml
     name: "\xA3350k second home"
   tool_name: calculate_household
@@ -548,7 +548,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
     name: Basic rate capital gains tax
   tool_name: calculate_household
@@ -582,7 +582,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
     name: Higher rate capital gains tax
   tool_name: calculate_household
@@ -616,7 +616,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/council_tax/high_value_council_tax_surcharge.yaml
     name: High value council tax surcharge applies in England and flows into aggregates
   tool_name: calculate_household
@@ -654,7 +654,7 @@ cases:
   - compiled
   source:
     package: policyengine-uk
-    version: 2.88.32
+    version: 2.89.2
     path: tests/policy/baseline/gov/treasury/energy_bills_rebate/council_tax_rebate.yaml
     name: CT bands A-D get full rebate, others don't.
   tool_name: calculate_household

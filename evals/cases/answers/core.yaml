@@ -91,10 +91,123 @@ cases:
         position by £1.2 billion. The reported decile impacts range up to £120
         per year in decile 10.
 
-  - id: answer_household_baseline_only
+  - id: answer_parameter_lookup_basic_rate_threshold
     suite: answer
-    description: Baseline-only household answers should stay illustrative and grounded.
-    prompt: Summarise the baseline household result.
+    description: Parameter lookup answers should distinguish raw taxable-income thresholds from standard gross-income thresholds.
+    prompt: What is the basic rate threshold in 2025?
+    tool_calls:
+      - name: lookup_parameter
+        input:
+          query: basic rate threshold
+          year: 2025
+        output:
+          status: success
+          year: 2025
+          query: basic rate threshold
+          primary_match:
+            path: income_tax.uk_brackets.1.threshold
+            value: 37700.0
+            label: income tax uk brackets 1 threshold
+            program: income_tax
+            context:
+              threshold_basis: taxable_income_after_personal_allowance
+              personal_allowance: 12570.0
+              standard_gross_income_threshold: 50270.0
+          matches: []
+    expect:
+      required:
+        - "2025"
+        - £37,700
+        - taxable income
+        - £50,270
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+        - simulated household
+      grounded_numbers: true
+      allowed_numbers: [2025, 37700, 12570, 50270]
+      number_tolerance: 0.01
+    offline_response:
+      text: >
+        In 2025, the model parameter for the basic-rate upper threshold is
+        £37,700 of taxable income after the personal allowance. For someone
+        receiving the full £12,570 personal allowance, that corresponds to a
+        standard gross-income threshold of £50,270.
+
+  - id: answer_parameter_lookup_needs_confirmation
+    suite: answer
+    description: Ambiguous lookup results should ask the user to choose an option rather than answer with a value.
+    prompt: What is the Universal Credit standard allowance?
+    tool_calls:
+      - name: lookup_parameter
+        input:
+          query: universal credit standard allowance
+          year: 2025
+        output:
+          status: needs_confirmation
+          needs_confirmation: true
+          year: 2025
+          query: universal credit standard allowance
+          match_certainty: 1.0
+          confirmation_reason: close_string_match_certainty_margin
+          message: Multiple parameter matches are plausible. Ask the user which option they mean before answering.
+          options:
+            - path: universal_credit.standard_allowance_couple_over25
+              value: 628.1
+              label: universal credit standard allowance couple over25
+              program: universal_credit
+              match_certainty: 1.0
+            - path: universal_credit.standard_allowance_couple_under25
+              value: 497.55
+              label: universal credit standard allowance couple under25
+              program: universal_credit
+              match_certainty: 1.0
+            - path: universal_credit.standard_allowance_single_over25
+              value: 400.14
+              label: universal credit standard allowance single over25
+              program: universal_credit
+              match_certainty: 1.0
+            - path: universal_credit.standard_allowance_single_under25
+              value: 316.98
+              label: universal credit standard allowance single under25
+              program: universal_credit
+              match_certainty: 1.0
+    expect:
+      required:
+        - choose
+        - single over 25
+        - single under 25
+        - couple over 25
+        - couple under 25
+      forbidden:
+        - £628.10
+        - £497.55
+        - £400.14
+        - £316.98
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+    offline_response:
+      text: >
+        I found several Universal Credit standard allowance parameters for
+        2025. Please choose which one you mean: single under 25, single over
+        25, couple under 25, or couple over 25.
+
+  - id: answer_household_current_policy_only
+    suite: answer
+    description: Current-policy household answers should stay illustrative and grounded.
+    prompt: Summarise the current-policy household result.
     tool_calls:
       - name: calculate_household
         input:
@@ -117,11 +230,11 @@ cases:
           person:
             - person_id: 0
               employment_income: 30000
-              baseline_income_tax: 3486
-              baseline_employee_ni: 1394.40
+              income_tax: 3486
+              employee_ni: 1394.40
           household:
             - household_id: 0
-              baseline_net_income: 25119.60
+              net_income: 25119.60
     expect:
       required:
         - illustrative
@@ -143,7 +256,7 @@ cases:
       number_tolerance: 0.01
     offline_response:
       text: >
-        For this illustrative 2025 household earning £30000, baseline net
+        For this illustrative 2025 household earning £30000, current-policy net
         income is £25119.60 after £3486 of income tax and £1394.40 of employee NI.
 
   - id: answer_chart_markdown_from_tool
@@ -420,17 +533,17 @@ cases:
           operation: group_by
           dataset: efrs
           group_by: [region]
-          columns: [baseline_net_income]
+          columns: [net_income]
         output:
           entity: households
           operation: group_by
           dataset: Enhanced FRS
           result:
             - region: London
-              baseline_net_income: 32000
+              net_income: 32000
               weighted_population: 1000000
             - region: Wales
-              baseline_net_income: 28000
+              net_income: 28000
               weighted_population: 800000
     expect:
       required:
@@ -443,15 +556,16 @@ cases:
         - real FRS household
         - actual survey row
         - here are real households
+        - baseline
       grounded_numbers: true
       allowed_numbers: [32000, 28000, 1000000, 800000]
       number_tolerance: 0.01
     offline_response:
       text: >
         This is an aggregate Enhanced FRS result with no row-level records
-        exposed. London has modelled average baseline net income of £32000
-        across a weighted population of 1000000, while Wales has £28000 across
-        800000.
+        exposed. London has modelled average net income under current policy
+        of £32000 across a weighted population of 1000000, while Wales has
+        £28000 across 800000.
 
   - id: answer_tool_error_requests_valid_structure
     suite: answer

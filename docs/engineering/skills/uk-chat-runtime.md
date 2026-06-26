@@ -5,22 +5,34 @@ tools, calculation behavior, or AI-facing runtime boundaries.
 
 ## Source Boundaries
 
-- `backend/prompts.py` owns product runtime prompt text. Keep prompts modular and
-  declarative there.
-- `backend/routes/chatbot.py` owns application orchestration: request parsing,
-  system block assembly, model calls, SSE streaming, tool-loop handling,
-  usage/billing, title generation, and follow-up suggestions.
-- `backend/agent_tools.py` owns the model-facing tool functions, dispatcher,
-  and compatibility exports.
-- `backend/tool_definitions.py` owns model-facing tool schemas and
-  descriptions. Reuse shared schema fragments there rather than duplicating
-  object/array/dataset/format shapes.
-- Shared deterministic tool helpers live under `backend/tooling/`.
-- `backend/scripts/build_reference.py` builds the API reference that is attached
-  to the chat system prompt.
+The backend is organized by topic — one package per concern:
+
+- `backend/chat/` owns the chat turn: `orchestrator.py` (request parsing, SSE
+  streaming, the tool loop), `system_blocks.py` (system-block assembly + the
+  reference doc), `model_selection.py`, `schemas.py`, `titles.py`,
+  `suggestions.py`, and `routes.py` (the `/chat` router).
+- `backend/gateway/` owns the opening-turn pre-pass: `runtime.py` (the
+  forced-tool classifier) and `policy.py` (the deterministic criticality + gate).
+- `backend/prompts/` owns all product prompt text: `system.py` (the compute
+  system prompt), `gateway.py` (gateway + lightweight prompts), `meta.py` (title
+  + suggestion prompts). Keep prompts modular and declarative there.
+- `backend/tools/` owns the model-facing tool seam: `definitions.py` (schemas),
+  `registry.py` (the `@register_tool` decorator), and `dispatch.py` (the
+  `execute_tool` dispatcher + tool functions). Register model-facing tools once
+  with `@register_tool`; `TOOL_DEFINITIONS` and `TOOL_HANDLERS` are derived from
+  that registry. Reuse shared schema fragments in `definitions.py` rather than
+  duplicating object/array/dataset/format shapes.
+- `backend/engine/` owns the deterministic PolicyEngine compute helpers
+  (households, microdata, reforms, simulations, sandbox, serialization);
+  `backend/engine/reference.py` builds the API reference attached to the chat
+  system prompt.
+- `backend/config/` owns model-call configuration (model ids, temperatures, the
+  Anthropic client factories, the scope-descriptor loader).
+- `backend/api/` owns the HTTP surface (`main.py` app + router mounting,
+  `errors.py`, `rate_limit.py`).
 
 Do not spread prompt strings back into route handlers. If runtime prompt rules
-change, update `backend/prompts.py` and the prompt contract tests together.
+change, update `backend/prompts/` and the prompt contract tests together.
 
 ## Model Harness
 
@@ -31,43 +43,70 @@ orchestration layer unless the code is deliberately refactored.
 
 Keep model/provider-specific code at the orchestration edge. Durable guidance
 for agents belongs in `docs/engineering/skills/`; product behavior prompts
-belong in `backend/prompts.py`.
+belong in `backend/prompts/`.
 
 ## Tool Boundary
 
-Only tools listed in `TOOL_DEFINITIONS` and dispatched by `execute_tool()` are
-exposed to the model. At present, the exposed tools are:
+Only tools registered with `@register_tool` are exposed to the model and
+dispatched by `execute_tool()`. At present, the exposed tools are:
 
-- `calculate_household`: calculate illustrative synthetic household outcomes.
 - `validate_reform`: validate parametric reform JSON without running a
   simulation.
+- `calculate_household`: calculate illustrative synthetic household outcomes.
 - `run_economy_simulation`: calculate aggregate society-wide impacts for
   parametric reforms.
 - `analyse_microdata`: analyse allowed non-FRS model microdata through bounded
   filtering, sampling, grouping, and aggregation operations.
+- `lookup_parameter`: look up baseline model parameter values by exact path or
+  natural-language query.
 - `run_python`: execute reproducible PolicyEngine UK Python code for fallback
   cases that do not fit the typed tools.
 - `generate_chart`: return frontend-renderable chart JSON markdown.
 
-Helper functions in `backend/tooling/` are implementation details unless they
-are added to both the tool definitions and dispatcher.
+Helper functions in `backend/engine/` are implementation details unless they
+are exposed through `@register_tool`.
+
+`tools.registry.tool_definitions()` returns caller-owned JSON-like snapshots for
+model/eval requests. Mutating those snapshots is only a local per-call edit and
+does not register, remove, or mutate canonical tools. Use `@register_tool` for
+tool registration.
+
+`lookup_parameter` reads year-scoped values from
+`policyengine_uk_compiled.Simulation.get_baseline_params()`.
+
+`policyengine-uk-compiled` 0.44.0 is the minimum supported output contract for
+microdata-backed tools. When reform is omitted, `run_microdata()`,
+`calculate_household`, and `analyse_microdata` outputs use plain calculated
+column names such as `income_tax`, `universal_credit`, and `net_income`. When a
+reform is supplied, including an empty no-op object (`{}`), calculations use
+side-by-side `baseline_*` and `reform_*` comparison columns. Do not normalize
+omitted-reform outputs back to the older prefixed shape.
+
+The default columns for `analyse_microdata` are manually enumerated in
+`backend/engine/microdata.py` because `policyengine-uk-compiled` does not yet
+expose a programmatic way to query output columns or recommended defaults for
+plain versus reform-comparison mode. Replace those lists with upstream metadata
+when it becomes available.
 
 ## Deterministic And Non-Deterministic Segments
 
 - Non-deterministic: user text interpretation, model planning, tool selection,
   prose generation, follow-up suggestions, and title generation.
-- Deterministic: request validation, plan-mode tool omission, tool dispatch,
-  typed tool execution after selection, Python execution, chart JSON
-  construction, result truncation/summarisation, billing calculation, and
-  database writes.
+- Deterministic: request validation, the gateway gate (criticality + outcome),
+  lightweight-route tool omission, tool dispatch, typed tool execution after
+  selection, Python execution, chart JSON construction,
+  result truncation/summarisation, billing calculation, and database writes.
 
-Plan mode must remain structurally enforced by omitting tools from the model
-request, not only by prompting the model not to call tools.
+The gateway's non-`ready` (lightweight) outcomes must remain structurally
+enforced by omitting tools from the model request, not only by prompting the
+model not to call tools.
 
 Tool choice is model-mediated unless the route layer deliberately forces a
 specific tool. Prompt and schema guidance improve selection consistency, but
-they are not deterministic controls. The chat route defaults the model
-temperature to `0` to reduce sampling variance.
+they are not deterministic controls. Every model call sets its temperature from
+`backend/config/`: `DEFAULT_TEMPERATURE` (0, deterministic) for the
+compute loop, titling, the gateway classifier, and evals; `SUGGESTION_TEMPERATURE`
+for follow-up suggestion chips, which deliberately sample with variety.
 
 ## Policy Analysis Rules
 
@@ -77,6 +116,14 @@ temperature to `0` to reduce sampling variance.
   tools when they fit the request, or with `run_python` as a fallback; do not
   answer tax, benefit, reform, poverty, decile, or distributional questions from
   memory.
+- Static parameter questions should use `lookup_parameter`. Do not run household
+  or economy simulations just to infer a parameter value.
+- If `lookup_parameter` returns `status: "needs_confirmation"`, ask the user to
+  pick one of the returned options before presenting a value. Treat
+  `match_certainty` as deterministic string parsing certainty only, not factual
+  confidence in the policy value. Use
+  `confirmation_reason` to explain whether the parsed query is low-certainty or
+  closely tied between options.
 - Use `validate_reform` only when the user is drafting, debugging, or asking
   whether reform JSON is valid. Do not use it as a routine preflight before
   every simulation.

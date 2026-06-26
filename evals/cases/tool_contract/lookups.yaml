@@ -1,0 +1,93 @@
+cases:
+  - id: lookup_parameter_personal_allowance_2025
+    suite: tool_contract
+    description: lookup_parameter returns the canonical personal allowance parameter value.
+    requirements: [compiled]
+    tool_name: lookup_parameter
+    input:
+      query: income_tax.personal_allowance
+      year: 2025
+    expect:
+      contains:
+        status: success
+        needs_confirmation: false
+        year: 2025
+        primary_match:
+          path: income_tax.personal_allowance
+          value: 12570.0
+          program: income_tax
+      numeric:
+        - path: primary_match.value
+          equals: 12570
+          tolerance: 0
+
+  - id: lookup_parameter_basic_rate_threshold_2025
+    suite: tool_contract
+    description: lookup_parameter resolves a common phrase to the income tax bracket threshold and contextual gross threshold.
+    requirements: [compiled]
+    tool_name: lookup_parameter
+    input:
+      query: basic rate threshold
+      year: 2025
+    expect:
+      contains:
+        status: success
+        needs_confirmation: false
+        year: 2025
+        primary_match:
+          path: income_tax.uk_brackets.1.threshold
+          value: 37700.0
+          context:
+            threshold_basis: taxable_income_after_personal_allowance
+            personal_allowance: 12570.0
+            standard_gross_income_threshold: 50270.0
+      numeric:
+        - path: primary_match.value
+          equals: 37700
+          tolerance: 0
+        - path: primary_match.context.standard_gross_income_threshold
+          equals: 50270
+          tolerance: 0
+
+  - id: lookup_parameter_standard_rate_vat_2025
+    suite: tool_contract
+    description: lookup_parameter resolves a natural-language VAT query to the standard rate parameter.
+    requirements: [compiled]
+    tool_name: lookup_parameter
+    input:
+      query: standard rate of VAT
+      year: 2025
+    expect:
+      contains:
+        status: success
+        needs_confirmation: false
+        primary_match:
+          path: vat.standard_rate
+          value: 0.2
+          program: vat
+      numeric:
+        - path: primary_match.value
+          equals: 0.2
+          tolerance: 0
+
+  - id: lookup_parameter_uc_standard_allowance_confirmation
+    suite: tool_contract
+    description: lookup_parameter asks for confirmation when a query maps to several Universal Credit standard allowance variants.
+    requirements: [compiled]
+    tool_name: lookup_parameter
+    input:
+      query: universal credit standard allowance
+      year: 2025
+      limit: 1
+    expect:
+      contains:
+        status: needs_confirmation
+        needs_confirmation: true
+        confirmation_reason: close_string_match_certainty_margin
+        options:
+          - program: universal_credit
+      required_paths:
+        - options.0.path
+        - options.1.path
+      absent_paths:
+        - primary_match

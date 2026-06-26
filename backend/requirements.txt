@@ -4,11 +4,13 @@ sqlmodel
 psycopg2-binary
 anthropic
 pydantic-ai[anthropic]
-policyengine-uk-compiled>=0.20.0
-policyengine_uk
+policyengine-uk-compiled>=0.44.0
+policyengine_uk>=2.89.2
 pandas
 pyyaml
 httpx
 supabase
 stripe
 slowapi
+python-dateutil
+policyengine-observability[fastapi,httpx]>=1.0.0,<2

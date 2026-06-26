@@ -8,21 +8,21 @@ cases:
     path: tests/policy/integration/tax.yaml
     name: No income
     output_map:
-      income_tax: person[].baseline_income_tax
-      national_insurance: person[].baseline_employee_ni
+      income_tax: person[].income_tax
+      national_insurance: person[].employee_ni
 
   - id: policyengine_uk_tax_some_employed_income
     path: tests/policy/integration/tax.yaml
     name: Some employed income
     output_map:
-      income_tax: person[].baseline_income_tax
-      national_insurance: person[].baseline_employee_ni
+      income_tax: person[].income_tax
+      national_insurance: person[].employee_ni
 
   - id: policyengine_uk_income_tax_earner
     path: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
     name: Income Tax for earner
     output_map:
-      income_tax: person[].baseline_income_tax
+      income_tax: person[].income_tax
 
   - id: policyengine_uk_income_tax_pension_contributions
     path: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml

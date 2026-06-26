@@ -6,7 +6,7 @@ the UK chat pathway.
 ## Scope
 
 - AI eval cases live under `evals/`.
-- The reusable harness lives under `backend/evaluation/`.
+- The reusable harness lives under `backend/eval/`.
 - Production chat code must not import evaluation modules.
 - Evals are manual for now; do not add them to PR CI unless that product
   decision changes.
@@ -37,9 +37,8 @@ validate-then-calculate flows.
   must skip in offline mode and run only through `make eval-ai-live`.
 - Use `messages` on trajectory or tool-loop cases when the expected behavior
   depends on prior conversation turns.
-- Use `plan_mode: true` when the case should structurally omit tools from the
-  model request. Use `charts_mode: true` when the chart-mode directive is part
-  of the behavior under test.
+- Use `charts_mode: true` when the chart-mode directive is part of the behavior
+  under test.
 - Use deterministic graders first: JSON partial match, path checks, numeric
   tolerance, forbidden terms, required caveats, privacy statements, and grounded
   number checks.

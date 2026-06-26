@@ -72,8 +72,25 @@ cases:
   - id: trajectory_no_tool_for_definition
     suite: trajectory
     description: Conceptual questions should not trigger calculation tools.
-    prompt: What is the UK personal allowance?
+    prompt: What does the UK personal allowance mean conceptually?
     expected_tools: []
+    forbidden_tools:
+      - validate_reform
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - lookup_parameter
+      - run_python
+      - generate_chart
+    offline_response:
+      text: The personal allowance is the amount of income that can be received before income tax is due.
+
+  - id: trajectory_parameter_lookup_personal_allowance
+    suite: trajectory
+    description: Current parameter value questions should select lookup_parameter, not Python or simulations.
+    prompt: What is the current UK personal allowance?
+    expected_tools:
+      - name: lookup_parameter
     forbidden_tools:
       - validate_reform
       - calculate_household
@@ -82,7 +99,32 @@ cases:
       - run_python
       - generate_chart
     offline_response:
-      text: The personal allowance is the amount of income that can be received before income tax is due.
+      tool_calls:
+        - name: lookup_parameter
+          input:
+            query: personal allowance
+
+  - id: trajectory_parameter_lookup_basic_rate_threshold
+    suite: trajectory
+    description: Threshold value questions should select lookup_parameter with the requested year.
+    prompt: What is the basic rate threshold in 2025?
+    expected_tools:
+      - name: lookup_parameter
+        input_contains:
+          year: 2025
+    forbidden_tools:
+      - validate_reform
+      - calculate_household
+      - run_economy_simulation
+      - analyse_microdata
+      - run_python
+      - generate_chart
+    offline_response:
+      tool_calls:
+        - name: lookup_parameter
+          input:
+            query: basic rate threshold
+            year: 2025
 
   - id: trajectory_validate_reform_debugging
     suite: trajectory
@@ -747,7 +789,7 @@ cases:
                   persons, benunits, households = Simulation.single_person(employment_income=income)
                   sim = Simulation(year=2025, persons=persons, benunits=benunits, households=households)
                   md = sim.run_microdata()
-                  rows.append({"employment_income": income, "net_income": md.persons["baseline_net_income"].iloc[0]})
+                  rows.append({"employment_income": income, "net_income": md.households["net_income"].iloc[0]})
               result = rows
 
   - id: trajectory_non_frs_microdata_aggregate
@@ -756,7 +798,7 @@ cases:
     tags: [microdata_aggregate]
     prompt: >
       In the Enhanced FRS model data, group households by region and show the
-      average baseline net income.
+      average net income under current policy.
     expected_tools:
       - name: analyse_microdata
         input_contains:
@@ -764,7 +806,7 @@ cases:
           operation: group_by
           dataset: efrs
           group_by: [region]
-          columns: [baseline_net_income]
+          columns: [net_income]
     forbidden_tools:
       - run_python
       - run_economy_simulation
@@ -776,7 +818,7 @@ cases:
             operation: group_by
             dataset: efrs
             group_by: [region]
-            columns: [baseline_net_income]
+            columns: [net_income]
 
   - id: trajectory_missing_year_asks_followup
     suite: trajectory
@@ -793,27 +835,6 @@ cases:
       - generate_chart
     offline_response:
       text: To calculate this, I need the tax year, household structure, income, and the new personal allowance amount.
-
-  - id: trajectory_plan_mode_explains_without_tools
-    suite: trajectory
-    description: Plan mode should omit tools and return an explanation path rather than executing.
-    tags: [plan_mode]
-    plan_mode: true
-    prompt: >
-      Plan how you would calculate the effect of increasing the personal
-      allowance to GBP 15k for a single adult earning GBP 30k in 2025.
-    expected_tools: []
-    forbidden_tools:
-      - validate_reform
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - run_python
-      - generate_chart
-    offline_response:
-      text: >
-        I would construct an illustrative single-adult household, apply the
-        personal allowance reform, then compare baseline and reform outputs.
 
   - id: trajectory_charts_mode_supplied_values
     suite: trajectory

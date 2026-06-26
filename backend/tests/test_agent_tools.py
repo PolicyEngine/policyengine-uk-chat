@@ -1,5 +1,5 @@
 """
-Integration tests for agent_tools.py.
+Integration tests for tools/dispatch.py.
 These call the compiled PolicyEngine UK engine directly — no mocking.
 Run inside the backend container: pytest tests/
 """
@@ -10,10 +10,12 @@ import pytest
 
 from conftest import requires_compiled
 
-import agent_tools
-import tool_definitions
-from agent_tools import (
+import tools.dispatch as agent_tools
+import tools.definitions as tool_definitions
+import tools.registry as tool_registry
+from tools.dispatch import (
     get_baseline_parameters,
+    lookup_parameter,
     validate_reform,
     calculate_household,
     run_economy_simulation,
@@ -29,6 +31,48 @@ from agent_tools import (
 
 def _tool(name: str) -> dict:
     return next(tool for tool in TOOL_DEFINITIONS if tool["name"] == name)
+
+
+@pytest.fixture
+def isolated_tool_registry():
+    """Temporarily isolate registry mutations made by registry unit tests."""
+
+    original_specs = list(tool_registry._TOOL_SPECS)
+    tool_registry._TOOL_SPECS.clear()
+    try:
+        yield
+    finally:
+        tool_registry._TOOL_SPECS[:] = original_specs
+
+
+def _assert_match_certainties_descending(options: list[dict]) -> None:
+    certainties = [option["match_certainty"] for option in options]
+    assert certainties == sorted(certainties, reverse=True)
+
+
+class TestLookupScoring:
+    def test_confirmation_reason_handles_empty_ranked_list(self):
+        from engine.lookup.scoring import _confirmation_reason
+
+        assert _confirmation_reason([]) == "low_string_match_certainty"
+
+    def test_confirmation_reason_handles_single_high_certainty_match(self):
+        from engine.lookup.scoring import _RankedCandidate, _confirmation_reason
+
+        ranked = [
+            _RankedCandidate(
+                certainty=1.0,
+                candidate=object(),
+                matched_on="name",
+                match_reason="exact_name",
+                exact=True,
+                field_priority=0,
+                extra_tokens=0,
+                stable_key="only",
+            )
+        ]
+
+        assert _confirmation_reason(ranked) == "low_string_match_certainty"
 
 
 # ---------------------------------------------------------------------------
@@ -66,6 +110,116 @@ class TestGetBaselineParameters:
 
 
 # ---------------------------------------------------------------------------
+# lookup_parameter
+# ---------------------------------------------------------------------------
+
+@requires_compiled
+class TestLookupParameter:
+    def test_exact_path_returns_value(self):
+        result = lookup_parameter(query="income_tax.personal_allowance", year=2025)
+        assert result["status"] == "success"
+        assert result["needs_confirmation"] is False
+        assert result["match_certainty"] >= 0.98
+        assert result["primary_match"]["path"] == "income_tax.personal_allowance"
+        assert result["primary_match"]["value"] == 12570.0
+
+    def test_basic_rate_threshold_returns_context(self):
+        result = lookup_parameter(query="basic rate threshold", year=2025)
+        match = result["primary_match"]
+        assert match["path"] == "income_tax.uk_brackets.1.threshold"
+        assert match["value"] == 37700.0
+        assert match["context"]["personal_allowance"] == 12570.0
+        assert match["context"]["standard_gross_income_threshold"] == 50270.0
+
+    def test_parameter_alias_paths_resolve_in_compiled_baseline(self):
+        from engine.lookup.parameters import missing_parameter_alias_paths
+        from policyengine_uk_compiled import Simulation
+
+        parameters = Simulation(year=2025).get_baseline_params()
+
+        assert missing_parameter_alias_paths(parameters) == ()
+
+    def test_basic_rate_context_requires_expected_candidate_shape(self):
+        from engine.lookup.parameters import (
+            BASIC_RATE_THRESHOLD_PATH,
+            _ParameterCandidate,
+            _parameter_context,
+        )
+
+        parameters = {
+            "income_tax": {
+                "personal_allowance": 12570,
+                "uk_brackets": [
+                    {"rate": 0.2},
+                    {"threshold": 37700, "rate": 0.4},
+                    {"threshold": 125140, "rate": 0.45},
+                ],
+            }
+        }
+        candidate = _ParameterCandidate(
+            path=BASIC_RATE_THRESHOLD_PATH,
+            value=37700,
+            label="income tax uk brackets 1 threshold",
+            program="income_tax",
+            aliases=("basic rate threshold",),
+        )
+
+        assert _parameter_context(candidate, parameters)["standard_gross_income_threshold"] == 50270
+
+        wrong_program = _ParameterCandidate(
+            path=BASIC_RATE_THRESHOLD_PATH,
+            value=37700,
+            label="income tax uk brackets 1 threshold",
+            program="other_tax",
+            aliases=("basic rate threshold",),
+        )
+        missing_alias = _ParameterCandidate(
+            path=BASIC_RATE_THRESHOLD_PATH,
+            value=37700,
+            label="income tax uk brackets 1 threshold",
+            program="income_tax",
+            aliases=(),
+        )
+
+        assert _parameter_context(wrong_program, parameters) == {}
+        assert _parameter_context(missing_alias, parameters) == {}
+
+    def test_standard_rate_of_vat_returns_standard_rate(self):
+        result = lookup_parameter(query="standard rate of VAT", year=2025)
+        assert result["status"] == "success"
+        assert result["needs_confirmation"] is False
+        assert result["primary_match"]["path"] == "vat.standard_rate"
+        assert result["primary_match"]["value"] == 0.2
+
+    def test_ambiguous_standard_allowance_needs_confirmation(self):
+        result = lookup_parameter(query="universal credit standard allowance", year=2025, limit=1)
+        assert result["status"] == "needs_confirmation"
+        assert result["needs_confirmation"] is True
+        assert result["confirmation_reason"] == "close_string_match_certainty_margin"
+        assert "primary_match" not in result
+        assert result["options"][0]["path"].startswith("universal_credit.standard_allowance")
+        assert len(result["options"]) > 1
+        _assert_match_certainties_descending(result["options"])
+        assert len([
+            option
+            for option in result["options"]
+            if option["path"].startswith("universal_credit.standard_allowance")
+        ]) >= 4
+
+    def test_unknown_query_returns_error_with_suggestions(self):
+        result = lookup_parameter(query="zzzxqv not a known parameter", year=2025)
+        assert result["status"] == "error"
+        assert result["needs_confirmation"] is False
+        assert "error" in result
+        assert result["query"] == "zzzxqv not a known parameter"
+        assert result["suggestions"]
+
+    def test_invalid_year_returns_error(self):
+        result = lookup_parameter(query="personal allowance", year=9999)
+        assert "error" in result
+
+
+# ---------------------------------------------------------------------------
 # calculate_household
 # ---------------------------------------------------------------------------
 
@@ -84,10 +238,10 @@ class TestCalculateHousehold:
         assert len(result["person"]) == 1
         assert len(result["household"]) == 1
 
-    def test_baseline_income_tax_positive(self):
+    def test_no_reform_uses_plain_income_tax(self):
         result = calculate_household(**SINGLE_ADULT)
         person = result["person"][0]
-        assert person["baseline_income_tax"] > 0
+        assert person["income_tax"] > 0
 
     def test_reform_reduces_tax_with_higher_allowance(self):
         reform = {"income_tax": {"personal_allowance": 20000}}
@@ -100,10 +254,30 @@ class TestCalculateHousehold:
         result = calculate_household(**{**SINGLE_ADULT, "reform": reform})
         assert result["reform_applied"] is True
 
-    def test_no_reform_baseline_equals_reform(self):
+    def test_no_reform_omits_comparison_columns(self):
         result = calculate_household(**SINGLE_ADULT)
         person = result["person"][0]
-        assert person["baseline_income_tax"] == person["reform_income_tax"]
+        benunit = result["benunit"][0]
+        household = result["household"][0]
+        assert "income_tax" in person
+        assert "total_benefits" in benunit
+        assert "net_income" in household
+        assert "baseline_income_tax" not in person
+        assert "reform_income_tax" not in person
+        assert "baseline_total_benefits" not in benunit
+        assert "reform_total_benefits" not in benunit
+        assert "baseline_net_income" not in household
+        assert "reform_net_income" not in household
+
+    def test_empty_reform_uses_comparison_columns(self):
+        result = calculate_household(**{**SINGLE_ADULT, "reform": {}})
+        person = result["person"][0]
+        household = result["household"][0]
+
+        assert result["reform_applied"] is True
+        assert "income_tax" not in person
+        assert person["baseline_income_tax"] == pytest.approx(person["reform_income_tax"])
+        assert household["baseline_net_income"] == pytest.approx(household["reform_net_income"])
 
     def test_batch_multiple_incomes(self):
         # IDs must be 0-indexed (engine constraint)
@@ -122,7 +296,7 @@ class TestCalculateHousehold:
         benunits = [{"benunit_id": i, "household_id": i} for i in range(2)]
         households = [{"household_id": i} for i in range(2)]
         result = calculate_household(person=persons, benunit=benunits, household=households, year=2023)
-        taxes = [p["baseline_income_tax"] for p in result["person"]]
+        taxes = [p["income_tax"] for p in result["person"]]
         assert taxes[1] > taxes[0]
 
     def test_unknown_reform_program_returns_error(self):
@@ -170,7 +344,7 @@ class TestCalculateHousehold:
             year=2023,
         )
         assert result["status"] == "success"
-        assert result["person"][0]["baseline_income_tax"] == 0
+        assert result["person"][0]["income_tax"] == 0
 
     def test_universal_credit_low_income(self):
         result = calculate_household(
@@ -182,7 +356,7 @@ class TestCalculateHousehold:
         assert result["status"] == "success"
         # Low earner should have some UC entitlement
         benunit = result["benunit"][0]
-        assert "baseline_universal_credit" in benunit
+        assert "universal_credit" in benunit
 
     def test_historical_year(self):
         result = calculate_household(**{**SINGLE_ADULT, "year": 2010})
@@ -206,7 +380,7 @@ class TestCalculateHousehold:
         assert len(result["benunit"]) == 1
         # Adult should pay income tax
         adult = result["person"][0]
-        assert adult["baseline_income_tax"] > 0
+        assert adult["income_tax"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -260,32 +434,136 @@ class TestJsonSafe:
 class TestToolDefinitions:
     def test_exposes_typed_tools_and_fallback_python(self):
         names = [tool["name"] for tool in TOOL_DEFINITIONS]
-        assert "validate_reform" in names
-        assert "calculate_household" in names
-        assert "run_economy_simulation" in names
-        assert "analyse_microdata" in names
-        assert "run_python" in names
+        assert names == [
+            "validate_reform",
+            "calculate_household",
+            "run_economy_simulation",
+            "analyse_microdata",
+            "lookup_parameter",
+            "run_python",
+            "generate_chart",
+        ]
 
     def test_tool_definitions_match_dispatch_handlers(self):
         definition_names = [tool["name"] for tool in TOOL_DEFINITIONS]
         assert len(definition_names) == len(set(definition_names))
         assert set(definition_names) == set(agent_tools.TOOL_HANDLERS)
 
+    def test_tool_definitions_and_handlers_are_registry_views(self):
+        definition_names = [tool["name"] for tool in TOOL_DEFINITIONS]
+
+        assert [tool["name"] for tool in tool_registry.tool_definitions()] == definition_names
+        assert list(agent_tools.TOOL_HANDLERS) == definition_names
+        assert list(tool_registry.tool_handlers()) == definition_names
+        assert [spec.name for spec in tool_registry.tool_specs()] == definition_names
+
+    def test_tool_definition_snapshots_are_caller_owned(self):
+        definitions = tool_registry.tool_definitions()
+        first_name = definitions[0]["name"]
+        first_schema_type = definitions[0]["input_schema"]["type"]
+
+        definitions.append({"name": "extra"})
+        definitions[0]["name"] = "changed"
+        definitions[0]["input_schema"]["type"] = "mutated"
+
+        fresh_definitions = tool_registry.tool_definitions()
+
+        assert [tool["name"] for tool in fresh_definitions] == [
+            tool["name"] for tool in TOOL_DEFINITIONS
+        ]
+        assert fresh_definitions[0]["name"] == first_name
+        assert fresh_definitions[0]["input_schema"]["type"] == first_schema_type
+
+    def test_tool_specs_do_not_expose_canonical_schema_objects(self):
+        specs = tool_registry.tool_specs()
+        first_schema_type = specs[0].input_schema["type"]
+
+        specs[0].input_schema["type"] = "mutated"
+
+        assert tool_registry.tool_specs()[0].input_schema["type"] == first_schema_type
+
+    def test_tool_handlers_view_is_immutable(self):
+        handlers = tool_registry.tool_handlers()
+
+        with pytest.raises(TypeError):
+            handlers["extra"] = lambda: {}
+
+    def test_duplicate_tool_registration_is_rejected(self, isolated_tool_registry):
+        tool_registry.register_tool(
+            name="validate_reform",
+            description="Original",
+            input_schema={"type": "object", "properties": {}},
+        )(lambda: {})
+
+        with pytest.raises(ValueError, match="Duplicate tool registration: validate_reform"):
+            tool_registry.register_tool(
+                name="validate_reform",
+                description="Duplicate",
+                input_schema={"type": "object", "properties": {}},
+            )(lambda: {})
+
+        assert [spec.name for spec in tool_registry.tool_specs()] == ["validate_reform"]
+
+    def test_register_tool_appends_in_call_order(self, isolated_tool_registry):
+        tool_registry.register_tool(
+            name="first",
+            description="First",
+            input_schema={"type": "object", "properties": {}},
+        )(lambda: {"tool": "first"})
+        tool_registry.register_tool(
+            name="second",
+            description="Second",
+            input_schema={"type": "object", "properties": {}},
+        )(lambda: {"tool": "second"})
+
+        assert [spec.name for spec in tool_registry.tool_specs()] == ["first", "second"]
+        assert [tool["name"] for tool in tool_registry.tool_definitions()] == ["first", "second"]
+        assert list(tool_registry.tool_handlers()) == ["first", "second"]
+
     def test_agent_tools_reexports_canonical_tool_definitions(self):
-        assert TOOL_DEFINITIONS is tool_definitions.TOOL_DEFINITIONS
+        assert [tool["name"] for tool in TOOL_DEFINITIONS] == [
+            tool["name"] for tool in tool_definitions.TOOL_DEFINITIONS
+        ]
 
     def test_shared_schema_fragments_are_reused(self):
+        assert (
+            tool_definitions.CALCULATE_HOUSEHOLD_INPUT_SCHEMA["properties"]["year"]
+            is tool_definitions.YEAR_SCHEMA
+        )
+        assert (
+            tool_definitions.RUN_ECONOMY_SIMULATION_INPUT_SCHEMA["properties"]["year"]
+            is tool_definitions.YEAR_SCHEMA
+        )
+        assert (
+            tool_definitions.ANALYSE_MICRODATA_INPUT_SCHEMA["properties"]["year"]
+            is tool_definitions.YEAR_SCHEMA
+        )
+        assert (
+            tool_definitions.RUN_ECONOMY_SIMULATION_INPUT_SCHEMA["properties"]["reform"]
+            is tool_definitions.REFORM_PROPERTY
+        )
+        assert (
+            tool_definitions.ANALYSE_MICRODATA_INPUT_SCHEMA["properties"]["reform"]
+            is tool_definitions.REFORM_PROPERTY
+        )
+        assert (
+            tool_definitions.ANALYSE_MICRODATA_INPUT_SCHEMA["properties"]["columns"]
+            is tool_definitions.STRING_ARRAY_SCHEMA
+        )
+
         household_schema = _tool("calculate_household")["input_schema"]
         economy_schema = _tool("run_economy_simulation")["input_schema"]
         microdata_schema = _tool("analyse_microdata")["input_schema"]
+        parameter_schema = _tool("lookup_parameter")["input_schema"]
         chart_schema = _tool("generate_chart")["input_schema"]
 
-        assert household_schema["properties"]["year"] is tool_definitions.YEAR_SCHEMA
-        assert economy_schema["properties"]["year"] is tool_definitions.YEAR_SCHEMA
-        assert microdata_schema["properties"]["year"] is tool_definitions.YEAR_SCHEMA
-        assert economy_schema["properties"]["reform"] is tool_definitions.REFORM_PROPERTY
-        assert microdata_schema["properties"]["reform"] is tool_definitions.REFORM_PROPERTY
-        assert microdata_schema["properties"]["columns"] is tool_definitions.STRING_ARRAY_SCHEMA
+        assert household_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
+        assert economy_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
+        assert microdata_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
+        assert parameter_schema["properties"]["year"] == tool_definitions.YEAR_SCHEMA
+        assert economy_schema["properties"]["reform"] == tool_definitions.REFORM_PROPERTY
+        assert microdata_schema["properties"]["reform"] == tool_definitions.REFORM_PROPERTY
+        assert microdata_schema["properties"]["columns"] == tool_definitions.STRING_ARRAY_SCHEMA
         assert chart_schema["properties"]["x_format"]["enum"] == tool_definitions.CHART_FORMAT_SCHEMA["enum"]
 
     def test_validate_reform_tool_is_debugging_tool(self):
@@ -317,6 +595,13 @@ class TestToolDefinitions:
         assert "calculate_household" in description
         assert "run_economy_simulation" in description
         assert "analyse_microdata" in description
+        assert "lookup_parameter" in description
+        assert "parameter introspection" not in description
+
+    def test_lookup_certainty_is_documented_as_string_parsing_certainty(self):
+        parameter_description = _tool("lookup_parameter")["description"]
+        assert "string parsing certainty" in parameter_description
+        assert "confirmation_reason" in parameter_description
 
 
 class TestAnalyseMicrodataContract:
@@ -347,7 +632,7 @@ class TestAnalyseMicrodataContract:
         assert "Enhanced FRS" in result["error"]
         assert "aggregate" in result["hint"]
 
-    def _install_mock_microdata(self, monkeypatch, row_count=4):
+    def _install_mock_microdata(self, monkeypatch, row_count=4, comparison=False):
         import pandas as pd
 
         household_ids = list(range(row_count))
@@ -355,40 +640,71 @@ class TestAnalyseMicrodataContract:
         weights = [2.0, 1.0, 3.0, 4.0] if row_count == 4 else [1.0] * row_count
         incomes = [10.0, 30.0, 20.0, 40.0] if row_count == 4 else [float(i) for i in household_ids]
 
-        households = pd.DataFrame(
-            {
-                "household_id": household_ids,
-                "region": regions,
-                "weight": weights,
-                "baseline_net_income": incomes,
-                "reform_net_income": [income + 5.0 for income in incomes],
-                "baseline_total_tax": [income / 10.0 for income in incomes],
-                "reform_total_tax": [income / 10.0 + 1.0 for income in incomes],
-                "baseline_total_benefits": [1.0 for _ in household_ids],
-                "reform_total_benefits": [2.0 for _ in household_ids],
-            }
-        )
-        persons = pd.DataFrame(
-            {
-                "person_id": household_ids,
-                "household_id": household_ids,
-                "age": [30 + i for i in household_ids],
-                "gender": ["F" if i % 2 == 0 else "M" for i in household_ids],
-                "employment_income": incomes,
-                "baseline_income_tax": [income / 10.0 for income in incomes],
-                "reform_income_tax": [income / 10.0 + 1.0 for income in incomes],
-                "baseline_total_income": incomes,
-                "reform_total_income": [income + 5.0 for income in incomes],
-            }
-        )
-        benunits = pd.DataFrame(
-            {
-                "benunit_id": household_ids,
-                "household_id": household_ids,
-                "baseline_total_benefits": [1.0 for _ in household_ids],
-                "reform_total_benefits": [2.0 for _ in household_ids],
-            }
-        )
+        household_data = {
+            "household_id": household_ids,
+            "region": regions,
+            "weight": weights,
+        }
+        person_data = {
+            "person_id": household_ids,
+            "household_id": household_ids,
+            "age": [30 + i for i in household_ids],
+            "gender": ["F" if i % 2 == 0 else "M" for i in household_ids],
+            "employment_income": incomes,
+        }
+        benunit_data = {
+            "benunit_id": household_ids,
+            "household_id": household_ids,
+        }
+        if comparison:
+            household_data.update(
+                {
+                    "baseline_net_income": incomes,
+                    "reform_net_income": [income + 5.0 for income in incomes],
+                    "baseline_total_tax": [income / 10.0 for income in incomes],
+                    "reform_total_tax": [income / 10.0 + 1.0 for income in incomes],
+                    "baseline_total_benefits": [1.0 for _ in household_ids],
+                    "reform_total_benefits": [2.0 for _ in household_ids],
+                }
+            )
+            person_data.update(
+                {
+                    "baseline_income_tax": [income / 10.0 for income in incomes],
+                    "reform_income_tax": [income / 10.0 + 1.0 for income in incomes],
+                    "baseline_total_income": incomes,
+                    "reform_total_income": [income + 5.0 for income in incomes],
+                }
+            )
+            benunit_data.update(
+                {
+                    "baseline_total_benefits": [1.0 for _ in household_ids],
+                    "reform_total_benefits": [2.0 for _ in household_ids],
+                }
+            )
+        else:
+            household_data.update(
+                {
+                    "net_income": incomes,
+                    "total_tax": [income / 10.0 for income in incomes],
+                    "total_benefits": [1.0 for _ in household_ids],
+                }
+            )
+            person_data.update(
+                {
+                    "income_tax": [income / 10.0 for income in incomes],
+                    "total_income": incomes,
+                }
+            )
+            benunit_data.update(
+                {
+                    "total_benefits": [1.0 for _ in household_ids],
+                    "universal_credit": [0.0 for _ in household_ids],
+                }
+            )
+
+        households = pd.DataFrame(household_data)
+        persons = pd.DataFrame(person_data)
+        benunits = pd.DataFrame(benunit_data)
         microdata = SimpleNamespace(persons=persons, benunits=benunits, households=households)
 
         calls = []
@@ -419,11 +735,11 @@ class TestAnalyseMicrodataContract:
         result = analyse_microdata(
             entity="households",
             operation="mean",
-            columns=["baseline_net_income"],
+            columns=["net_income"],
             dataset="efrs",
         )
 
-        assert result["result"]["baseline_net_income"] == pytest.approx(27.0)
+        assert result["result"]["net_income"] == pytest.approx(27.0)
 
     def test_group_by_returns_weighted_group_means(self, monkeypatch):
         self._install_mock_microdata(monkeypatch)
@@ -431,7 +747,7 @@ class TestAnalyseMicrodataContract:
         result = analyse_microdata(
             entity="households",
             operation="group_by",
-            columns=["baseline_net_income"],
+            columns=["net_income"],
             group_by=["region"],
             dataset="efrs",
         )
@@ -439,10 +755,10 @@ class TestAnalyseMicrodataContract:
         rows = {row["region"]: row for row in result["result"]}
         assert rows["North"]["row_count"] == 2
         assert rows["North"]["weighted_population"] == 5.0
-        assert rows["North"]["baseline_net_income"] == pytest.approx(16.0)
+        assert rows["North"]["net_income"] == pytest.approx(16.0)
         assert rows["South"]["row_count"] == 2
         assert rows["South"]["weighted_population"] == 5.0
-        assert rows["South"]["baseline_net_income"] == pytest.approx(38.0)
+        assert rows["South"]["net_income"] == pytest.approx(38.0)
 
     def test_sample_is_deterministic_and_capped_for_non_frs(self, monkeypatch):
         self._install_mock_microdata(monkeypatch, row_count=25)
@@ -450,7 +766,7 @@ class TestAnalyseMicrodataContract:
         kwargs = {
             "entity": "households",
             "operation": "sample",
-            "columns": ["household_id", "baseline_net_income"],
+            "columns": ["household_id", "net_income"],
             "n": 100,
             "dataset": "spi",
         }
@@ -460,32 +776,69 @@ class TestAnalyseMicrodataContract:
         assert len(first["result"]) == 20
         assert first["result"] == second["result"]
 
+    def test_no_reform_defaults_use_plain_columns(self, monkeypatch):
+        self._install_mock_microdata(monkeypatch)
+
+        result = analyse_microdata(entity="households", operation="mean", dataset="efrs")
+
+        assert result["result"]["net_income"] == pytest.approx(27.0)
+        assert result["result"]["total_tax"] == pytest.approx(2.7)
+        assert "baseline_net_income" not in result["result"]
+        assert "reform_net_income" not in result["result"]
+
+    def test_reform_defaults_use_comparison_columns(self, monkeypatch):
+        self._install_mock_microdata(monkeypatch, comparison=True)
+
+        result = analyse_microdata(
+            entity="households",
+            operation="mean",
+            reform={"income_tax": {"personal_allowance": 15000}},
+            dataset="efrs",
+        )
+
+        assert result["result"]["baseline_net_income"] == pytest.approx(27.0)
+        assert result["result"]["reform_net_income"] == pytest.approx(32.0)
+        assert result["result"]["net_income_change"] == pytest.approx(5.0)
+        assert "net_income" not in result["result"]
+
+    def test_empty_reform_defaults_use_comparison_columns(self, monkeypatch):
+        self._install_mock_microdata(monkeypatch, comparison=True)
+
+        result = analyse_microdata(entity="households", operation="mean", reform={}, dataset="efrs")
+
+        assert result["reform_applied"] is True
+        assert result["result"]["baseline_net_income"] == pytest.approx(27.0)
+        assert result["result"]["reform_net_income"] == pytest.approx(32.0)
+        assert result["result"]["net_income_change"] == pytest.approx(5.0)
+
+
+class _DummyDump:
+    def __init__(self, value):
+        self.value = value
+
+    def model_dump(self):
+        return self.value
+
+
+def _economy_result(hbai_mean, breakdown):
+    return SimpleNamespace(
+        fiscal_year="2025/26",
+        program_breakdown=_DummyDump(breakdown),
+        budgetary_impact=_DummyDump({"baseline_revenue": 1.0}),
+        decile_impacts=[],
+        winners_losers=_DummyDump({"winners_pct": 0.0}),
+        caseloads=_DummyDump({"income_tax_payers": 0.0}),
+        baseline_hbai_incomes=_DummyDump({"mean_bhc": hbai_mean}),
+        reform_hbai_incomes=_DummyDump({"mean_bhc": hbai_mean}),
+        baseline_poverty=_DummyDump({"relative_bhc_children": 10.0}),
+        reform_poverty=_DummyDump({"relative_bhc_children": 10.0}),
+    )
+
 
 class TestRunEconomySimulationContract:
     def test_reports_true_baseline_hbai_alongside_reform(self, monkeypatch):
-        class DummyDump:
-            def __init__(self, value):
-                self.value = value
-
-            def model_dump(self):
-                return self.value
-
-        def make_result(hbai_mean, breakdown):
-            return SimpleNamespace(
-                fiscal_year="2025/26",
-                program_breakdown=DummyDump(breakdown),
-                budgetary_impact=DummyDump({"baseline_revenue": 1.0}),
-                decile_impacts=[],
-                winners_losers=DummyDump({"winners_pct": 0.0}),
-                caseloads=DummyDump({"income_tax_payers": 0.0}),
-                baseline_hbai_incomes=DummyDump({"mean_bhc": hbai_mean}),
-                reform_hbai_incomes=DummyDump({"mean_bhc": hbai_mean}),
-                baseline_poverty=DummyDump({"relative_bhc_children": 10.0}),
-                reform_poverty=DummyDump({"relative_bhc_children": 10.0}),
-            )
-
-        baseline = make_result(100.0, {"income_tax": 100.0})
-        reform = make_result(80.0, {"income_tax": 90.0})
+        baseline = _economy_result(100.0, {"income_tax": 100.0})
+        reform = _economy_result(80.0, {"income_tax": 90.0})
 
         class DummySimulation:
             def __init__(self):
@@ -508,6 +861,26 @@ class TestRunEconomySimulationContract:
         assert result["program_breakdown_changes"]["income_tax"]["change"] == -10.0
         assert "structural_reform_applied" not in result
 
+    @requires_compiled
+    def test_empty_reform_runs_reform_policy_path(self, monkeypatch):
+        baseline = _economy_result(100.0, {"income_tax": 100.0})
+        reform = _economy_result(100.0, {"income_tax": 100.0})
+        policies = []
+
+        class DummySimulation:
+            def run(self, policy=None):
+                policies.append(policy)
+                return baseline if len(policies) == 1 else reform
+
+        monkeypatch.setattr(agent_tools, "_build_simulation", lambda year, dataset: DummySimulation())
+
+        result = agent_tools.run_economy_simulation(year=2025, reform={})
+
+        assert result["program_breakdown_changes"]["income_tax"]["change"] == 0.0
+        assert len(policies) == 2
+        assert policies[0] is None
+        assert policies[1] is not None
+
     def test_rejects_structural_reform_input(self):
         result = execute_tool(
             "run_economy_simulation",
@@ -524,7 +897,7 @@ class TestRunEconomySimulationContract:
 class TestValidateReform:
     @pytest.fixture(autouse=True)
     def mock_parameter_classes(self, monkeypatch):
-        import tooling.reforms as reform_helpers
+        import engine.reforms as reform_helpers
 
         class DummyIncomeTaxParams:
             model_fields = {"personal_allowance": None, "higher_rate": None}
@@ -590,7 +963,7 @@ class TestValidateReformCompiledPath:
         assert result["normalized_reform"] == {"income_tax": {"personal_allowance": 15000}}
 
     def test_valid_programs_match_compiled_parameter_classes(self):
-        from tooling.reforms import _parameter_classes, get_valid_programs
+        from engine.reforms import _parameter_classes, get_valid_programs
 
         param_cls_map, _, _ = _parameter_classes()
 
@@ -659,12 +1032,18 @@ class TestBuildCompiledPolicy:
     def test_none_reform_returns_none(self):
         assert _build_compiled_policy(None) is None
 
-    def test_empty_reform_returns_none(self):
-        assert _build_compiled_policy({}) is None
+    def test_empty_reform_returns_empty_policy(self):
+        # Mirrors policyengine-uk-compiled: supplying even an empty Parameters
+        # object puts run_microdata in baseline_*/reform_* comparison mode.
+        assert _build_compiled_policy({}) is not None
 
     def test_valid_reform(self):
         policy = _build_compiled_policy({"income_tax": {"personal_allowance": 15000}})
         assert policy is not None
+
+    def test_falsy_non_dict_reform_raises(self):
+        with pytest.raises(ValueError, match="Reform must be a dict"):
+            _build_compiled_policy([])
 
     def test_unknown_program_raises(self):
         with pytest.raises(ValueError, match="Unknown reform program"):
@@ -673,6 +1052,11 @@ class TestBuildCompiledPolicy:
     def test_unknown_field_raises(self):
         with pytest.raises(ValueError, match="Unknown field"):
             _build_compiled_policy({"income_tax": {"not_real_field": 1}})
+
+
+class TestReformCacheKeys:
+    def test_empty_reform_hash_differs_from_absent_reform(self):
+        assert agent_tools._hash_reform({}) != agent_tools._hash_reform(None)
 
 
 # ---------------------------------------------------------------------------
@@ -694,24 +1078,49 @@ class TestExecuteTool:
         assert result["error"] == "Unknown tool: compute"
 
     def test_dispatches_validate_reform(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "validate_reform", lambda **kwargs: {"tool": "validator", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"validate_reform": lambda **kwargs: {"tool": "validator", "input": kwargs}},
+        )
         result = execute_tool("validate_reform", {"reform": {}})
         assert result["tool"] == "validator"
 
     def test_dispatches_calculate_household(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "calculate_household", lambda **kwargs: {"tool": "household", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"calculate_household": lambda **kwargs: {"tool": "household", "input": kwargs}},
+        )
         result = execute_tool("calculate_household", {"person": [], "benunit": [], "household": []})
         assert result["tool"] == "household"
 
     def test_dispatches_run_economy_simulation(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "run_economy_simulation", lambda **kwargs: {"tool": "economy", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"run_economy_simulation": lambda **kwargs: {"tool": "economy", "input": kwargs}},
+        )
         result = execute_tool("run_economy_simulation", {"year": 2025})
         assert result["tool"] == "economy"
 
     def test_dispatches_analyse_microdata(self, monkeypatch):
-        monkeypatch.setitem(agent_tools.TOOL_HANDLERS, "analyse_microdata", lambda **kwargs: {"tool": "microdata", "input": kwargs})
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"analyse_microdata": lambda **kwargs: {"tool": "microdata", "input": kwargs}},
+        )
         result = execute_tool("analyse_microdata", {"entity": "households", "operation": "count"})
         assert result["tool"] == "microdata"
+
+    def test_dispatches_lookup_parameter(self, monkeypatch):
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"lookup_parameter": lambda **kwargs: {"tool": "parameter", "input": kwargs}},
+        )
+        result = execute_tool("lookup_parameter", {"query": "personal allowance", "year": 2025})
+        assert result["tool"] == "parameter"
 
     def test_dispatches_generate_chart(self):
         result = execute_tool("generate_chart", {
