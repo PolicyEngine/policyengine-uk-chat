@@ -1,6 +1,6 @@
 # Jupyter Book configuration
-# Build locally with:  jupyter-book build docs/
-# Output is written to docs/_build/html and published to GitHub Pages.
+# Build locally with:  jupyter-book build docs-site/
+# Output is written to docs-site/_build/html and published to GitHub Pages.
 
 title: PolicyEngine UK Chat
 author: PolicyEngine
@@ -19,6 +19,8 @@ sphinx:
   config:
     html_theme: sphinx_book_theme
     html_last_updated_fmt: "%Y-%m-%d"
+    # Generate anchors for headings (h1-h4) so in-page section links resolve.
+    myst_heading_anchors: 4
     suppress_warnings:
       - "etoc.toctree"
 
@@ -30,7 +32,7 @@ html:
 
 repository:
   url: https://github.com/PolicyEngine/policyengine-uk-chat
-  path_to_book: docs
+  path_to_book: docs-site
   branch: main
 
 parse:

@@ -1,5 +1,5 @@
 # Dependencies for building the documentation site.
-# Install with:  pip install -r docs/requirements.txt
+# Install with:  pip install -r docs-site/requirements.txt
 # Pinned to Jupyter Book v1 (the _config.yml + _toc.yml format used across
 # PolicyEngine docs). v2 is a MyST-engine rewrite with a different config format.
 jupyter-book>=1.0.0,<2.0.0

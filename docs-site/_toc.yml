@@ -11,7 +11,10 @@ parts:
     chapters:
       - file: backend/overview
       - file: backend/api
-      - file: backend/agent-and-tools
+      - file: backend/chat
+      - file: backend/gateway
+      - file: backend/tools
+      - file: backend/engine
       - file: backend/billing
   - caption: Frontend
     chapters:
