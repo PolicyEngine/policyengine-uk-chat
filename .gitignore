@@ -12,6 +12,9 @@ node_modules/
 *.egg-info/
 dist/
 
+# Jupyter Book build output (published to GitHub Pages by CI).
+docs-site/_build/
+
 # Generated at image build time by backend/engine/reference.py.
 # Both backend/Dockerfile and modal_app.py regenerate this against the
 # installed policyengine-uk-compiled version, so it never lives in git.
