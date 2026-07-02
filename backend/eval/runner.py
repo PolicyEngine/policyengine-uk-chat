@@ -144,10 +144,6 @@ def _system_for_case(case: TrajectoryCase | ToolLoopCase) -> str:
     return "\n\n".join(sections)
 
 
-def _tools_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, Any]] | None:
-    return _tool_specs_for_model()
-
-
 def _run_tool_contract(case: ToolContractCase) -> CaseResult:
     try:
         output = execute_tool(case.tool_name, case.input)
@@ -169,7 +165,7 @@ def _run_trajectory(case: TrajectoryCase, client: ModelClient) -> CaseResult:
             case_id=case.id,
             messages=_messages_for_case(case),
             system=_system_for_case(case),
-            tools=_tools_for_case(case),
+            tools=_tool_specs_for_model(),
         )
     except Exception as exc:
         return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
@@ -241,7 +237,7 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
                 case_id=case.id,
                 messages=messages,
                 system=_system_for_case(case),
-                tools=_tools_for_case(case),
+                tools=_tool_specs_for_model(),
             )
         except Exception as exc:
             return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])

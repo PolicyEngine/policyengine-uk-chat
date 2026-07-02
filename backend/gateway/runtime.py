@@ -63,13 +63,11 @@ class GatewayVerdict:
     slots: List[SlotFact] = field(default_factory=list)
     gating_slots: List[str] = field(default_factory=list)
     unmodellable_outputs: List[str] = field(default_factory=list)
-    in_domain: bool = True
-    rationale: str = ""
 
 
 def _fail_safe() -> GatewayVerdict:
     """The safe default: behave exactly like today (full compute background)."""
-    return GatewayVerdict(outcome="ready", route="compute", rationale="gateway fail-safe")
+    return GatewayVerdict(outcome="ready", route="compute")
 
 
 # Forced-use tool that carries the structured plan. Local to the gateway — must
@@ -138,8 +136,6 @@ def _verdict_from_plan(plan: dict, prompt: str) -> GatewayVerdict:
         slots=slots,
         gating_slots=result.gating_slots,
         unmodellable_outputs=unmodellable,
-        in_domain=in_domain,
-        rationale=str(plan.get("rationale", "")),
     )
 
 

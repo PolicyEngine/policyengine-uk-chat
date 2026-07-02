@@ -50,7 +50,6 @@ chat_secrets = modal.Secret.from_name(SECRET_NAME)
 @modal.asgi_app()
 def web():
     import sys
-    import os
 
     sys.path.insert(0, "/app/backend")
     os.chdir("/app/backend")

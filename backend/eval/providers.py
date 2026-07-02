@@ -87,10 +87,4 @@ class AnthropicModelClient:
                 tool_input = block.input if isinstance(block.input, dict) else {}
                 tool_calls.append(ModelToolCall(id=block.id, name=block.name, input=tool_input))
 
-        usage = {}
-        if getattr(response, "usage", None):
-            usage = {
-                "input_tokens": getattr(response.usage, "input_tokens", 0),
-                "output_tokens": getattr(response.usage, "output_tokens", 0),
-            }
-        return ModelTurn(text="".join(text_parts), tool_calls=tool_calls, usage=usage)
+        return ModelTurn(text="".join(text_parts), tool_calls=tool_calls)

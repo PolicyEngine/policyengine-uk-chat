@@ -183,7 +183,7 @@ def analyse_microdata_result(
 
     if operation == "sample":
         actual_n = min(n, 20, row_count)
-        sample_df = df[value_cols].sample(n=actual_n, random_state=42) if row_count >= actual_n else df[value_cols]
+        sample_df = df[value_cols].sample(n=actual_n, random_state=42)
         result = [
             {k: (None if (isinstance(v, float) and str(v) == "nan") else v) for k, v in row.items()}
             for row in sample_df.to_dict(orient="records")
