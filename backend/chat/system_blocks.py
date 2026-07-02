@@ -34,7 +34,7 @@ SCOPE_DESCRIPTOR = load_scope_descriptor(DEFAULT_SCOPE_DESCRIPTOR)
 LIGHTWEIGHT_SYSTEM = lightweight_system(SCOPE_DESCRIPTOR)
 
 
-def _tool_defs_for_anthropic():
+def tool_defs_for_anthropic():
     """Convert our TOOL_DEFINITIONS to Anthropic SDK format.
     Mark the last tool with cache_control so the system prompt + all tools
     are cached across requests (prompt caching)."""
@@ -51,11 +51,11 @@ def _tool_defs_for_anthropic():
     return defs
 
 
-def _serialise_tool_result(result: Any) -> str:
+def serialise_tool_result(result: Any) -> str:
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
-def _build_system_blocks(
+def build_system_blocks(
     charts_mode: bool = False,
     gateway_plan: str | None = None,
 ) -> List[dict]:
@@ -84,7 +84,7 @@ def _build_system_blocks(
     return blocks
 
 
-def _build_lightweight_system_blocks(verdict) -> List[dict]:
+def build_lightweight_system_blocks(verdict) -> List[dict]:
     """Lean system payload for a non-`ready` gateway outcome: the lightweight
     prompt (no reference doc, no tools) plus the per-outcome writer directive.
     The model still writes the actual reply to the user's message.

@@ -36,7 +36,7 @@ FIXTURE_ROOT = EVAL_ROOT / "fixtures" / "tool_outputs"
 SUITE_DIRS = {
     "tool_contract": CASE_ROOT / "tool_contract",
     "trajectory": CASE_ROOT / "trajectory",
-    "answer": CASE_ROOT / "answers",
+    "answer": CASE_ROOT / "answer",
     "tool_loop": CASE_ROOT / "tool_loop",
     "gateway": CASE_ROOT / "gateway",
 }

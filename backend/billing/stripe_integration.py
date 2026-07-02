@@ -7,6 +7,7 @@ Stripe SDK calls and credit side-effects live here.
 import logging
 import os
 
+import stripe
 from fastapi import HTTPException
 from pydantic import BaseModel
 
@@ -29,8 +30,6 @@ def _get_public_base_url() -> str:
 
 def create_checkout_session(request: CheckoutRequest) -> str:
     """Create a Stripe checkout session and return its hosted URL."""
-    import stripe
-
     stripe.api_key = os.environ.get("STRIPE_SECRET_KEY", "")
     if not stripe.api_key:
         raise HTTPException(status_code=500, detail="Stripe not configured")
@@ -58,8 +57,6 @@ def create_checkout_session(request: CheckoutRequest) -> str:
 
 def apply_webhook(payload: bytes, sig: str) -> None:
     """Verify a Stripe webhook and credit the user on a completed checkout."""
-    import stripe
-
     webhook_secret = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
     try:

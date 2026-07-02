@@ -16,7 +16,7 @@ from prompts import SUGGESTION_SYSTEM
 logger = logging.getLogger(__name__)
 
 
-async def _generate_followup_suggestions(
+async def generate_followup_suggestions(
     last_user_message: str,
     assistant_answer: str,
 ) -> List[str]:

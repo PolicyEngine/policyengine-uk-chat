@@ -513,7 +513,7 @@ class TestChatRouteWithMockedAnthropic:
             }
 
         monkeypatch.setattr(chatbot, "get_async_client", lambda: fake_client)
-        monkeypatch.setattr(chatbot, "_generate_followup_suggestions", no_suggestions)
+        monkeypatch.setattr(chatbot, "generate_followup_suggestions", no_suggestions)
         monkeypatch.setattr(chatbot, "execute_tool", fake_execute_tool)
         monkeypatch.setattr(OPERATION_LOGGER, "info", operation_records.append)
         usage_calls = []
@@ -595,7 +595,7 @@ class TestChatRouteWithMockedAnthropic:
         operation_records = []
         event_records = []
         monkeypatch.setattr(chatbot, "get_async_client", lambda: object())
-        monkeypatch.setattr(chatbot, "_is_followup", lambda _conversation: True)
+        monkeypatch.setattr(chatbot, "is_followup", lambda _conversation: True)
         monkeypatch.setattr(OPERATION_LOGGER, "info", operation_records.append)
         monkeypatch.setattr(EVENT_LOGGER, "info", event_records.append)
 
@@ -654,8 +654,8 @@ class TestChatRouteWithMockedAnthropic:
             raise RuntimeError("model selection failed")
 
         monkeypatch.setattr(chatbot, "get_async_client", lambda: object())
-        monkeypatch.setattr(chatbot, "_is_followup", lambda _conversation: True)
-        monkeypatch.setattr(chatbot, "_select_chat_model", raise_model_selection)
+        monkeypatch.setattr(chatbot, "is_followup", lambda _conversation: True)
+        monkeypatch.setattr(chatbot, "select_chat_model", raise_model_selection)
         # Handled-error operation logs emit at WARNING since observability 1.1.
         monkeypatch.setattr(OPERATION_LOGGER, "warning", operation_records.append)
 
@@ -717,7 +717,7 @@ class TestChatRouteWithMockedAnthropic:
         fake_client = SimpleNamespace(messages=RaisingAnthropicMessages())
 
         monkeypatch.setattr(chatbot, "get_async_client", lambda: fake_client)
-        monkeypatch.setattr(chatbot, "_is_followup", lambda _conversation: True)
+        monkeypatch.setattr(chatbot, "is_followup", lambda _conversation: True)
 
         with client.stream(
             "POST",

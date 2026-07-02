@@ -127,11 +127,11 @@ def test_offline_eval_runs_seed_trajectory_and_answer_cases_without_reports():
     )
     expected_cases = (
         len(load_case_file(REPO_ROOT / "evals" / "cases" / "trajectory" / "core.yaml"))
-        + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answers" / "core.yaml"))
+        + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answer" / "core.yaml"))
     )
     live_only_cases = (
         len(load_case_file(REPO_ROOT / "evals" / "cases" / "trajectory" / "live.yaml"))
-        + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answers" / "live.yaml"))
+        + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answer" / "live.yaml"))
     )
 
     assert report.failed == 0

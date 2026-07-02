@@ -29,14 +29,14 @@ from gateway import run_gateway, serialise_plan_for_system
 from observability.segments import SegmentName
 from tools.dispatch import execute_tool
 
-from chat.model_selection import _is_followup, _last_user_text, _select_chat_model
+from chat.model_selection import is_followup, last_user_text, select_chat_model
 from chat.schemas import ChatRequest
-from chat.suggestions import _generate_followup_suggestions
+from chat.suggestions import generate_followup_suggestions
 from chat.system_blocks import (
-    _build_lightweight_system_blocks,
-    _build_system_blocks,
-    _serialise_tool_result,
-    _tool_defs_for_anthropic,
+    build_lightweight_system_blocks,
+    build_system_blocks,
+    serialise_tool_result,
+    tool_defs_for_anthropic,
 )
 
 logger = logging.getLogger(__name__)
@@ -276,11 +276,11 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                 # must flow to compute). A non-`ready` outcome replies on the lean
                 # lightweight path; `ready` runs the full compute loop, seeded with
                 # the resolved plan. Any gateway error fails safe to compute.
-                if not _is_followup(conversation):
+                if not is_followup(conversation):
                     loop = asyncio.get_running_loop()
                     async with asegment(SegmentName.GATEWAY_CLASSIFY):
                         verdict = await loop.run_in_executor(
-                            None, run_gateway, _last_user_text(conversation)
+                            None, run_gateway, last_user_text(conversation)
                         )
                     route = verdict.route
 
@@ -299,7 +299,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                     if route == "lightweight":
                         model = DEFAULT_FAST_MODEL
                     else:
-                        model = _select_chat_model(
+                        model = select_chat_model(
                             conversation,
                             charts_mode=charts_mode,
                             gateway_verdict=verdict,
@@ -308,10 +308,10 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                 if route == "lightweight":
                     tools = []
                     with segment(SegmentName.SYSTEM_BUILD, route=route):
-                        system_blocks = _build_lightweight_system_blocks(verdict)
+                        system_blocks = build_lightweight_system_blocks(verdict)
                 else:
                     with segment(SegmentName.TOOL_SCHEMA_BUILD):
-                        tools = _tool_defs_for_anthropic()
+                        tools = tool_defs_for_anthropic()
                     gateway_plan = None
                     if verdict is not None:
                         with segment(SegmentName.GATEWAY_PLAN_SERIALIZE):
@@ -321,7 +321,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                         route=route,
                         charts_mode=charts_mode,
                     ):
-                        system_blocks = _build_system_blocks(
+                        system_blocks = build_system_blocks(
                             charts_mode=charts_mode, gateway_plan=gateway_plan
                         )
                 annotate(model=model)
@@ -517,7 +517,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                                         if isinstance(b, dict)
                                     )
                                 async with asegment(SegmentName.SUGGESTIONS):
-                                    suggestions = await _generate_followup_suggestions(
+                                    suggestions = await generate_followup_suggestions(
                                         last_user_message=str(last_user_msg),
                                         assistant_answer=assistant_content,
                                     )
@@ -618,7 +618,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                                     )
                                     if err_str:
                                         last_tool_error = err_str[:120]
-                            result_str = _serialise_tool_result(result)
+                            result_str = serialise_tool_result(result)
                             result_summary = (
                                 result_str[:5000] + "..."
                                 if len(result_str) > 5000
@@ -639,7 +639,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                         MAX_RESULT_CHARS = 15000
                         tool_results = []
                         for tu in tool_uses:
-                            result_json = _serialise_tool_result(
+                            result_json = serialise_tool_result(
                                 completed_tools[tu["id"]]
                             )
                             if len(result_json) > MAX_RESULT_CHARS:
@@ -670,7 +670,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                                         "exploration": exploration,
                                         data_key: data_array[:20],
                                     }
-                                    result_json = _serialise_tool_result(processed)
+                                    result_json = serialise_tool_result(processed)
                                 # Hard cap: if still too large, truncate the JSON string
                                 if len(result_json) > MAX_RESULT_CHARS:
                                     result_json = (
