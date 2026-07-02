@@ -7,8 +7,9 @@ how the engine version is kept in sync with the agent's API reference.
 
 ## Modal backend
 
-`backend/modal_app.py` defines the deployed application: it wraps the FastAPI
-app (`api/main.py`) and bakes the compiled engine into the image snapshot.
+`modal_app.py` (at the repository root) defines the deployed application: it
+wraps the FastAPI app (`api/main.py`) and bakes the compiled engine into the
+image snapshot.
 
 - **Image.** `modal.Image.debian_slim(python_version="3.13")` with `libpq-dev`
   and `gcc`, plus the `backend/requirements.txt` dependencies — FastAPI, the
