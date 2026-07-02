@@ -1128,3 +1128,32 @@ class TestExecuteTool:
             "data": [{"x": 1, "y": 2}], "x_field": "x", "y_fields": ["y"],
         })
         assert result["status"] == "success"
+
+    # The dispatcher must never treat undeclared input keys as code. A
+    # "generator" key was once a hidden exec path (removed in the fix for
+    # issue #153); these tests lock the contract that tool input is passed
+    # to handlers verbatim and undeclared kwargs fail like any other.
+    def test_generator_key_is_passed_through_verbatim_not_executed(self, monkeypatch):
+        generator_code = "def generate():\n    return {'reform': {}}"
+        monkeypatch.setattr(
+            agent_tools,
+            "TOOL_HANDLERS",
+            {"validate_reform": lambda **kwargs: {"received": kwargs}},
+        )
+        result = execute_tool("validate_reform", {"generator": generator_code})
+        # The raw string reaches the handler untouched; with the old escape
+        # hatch the handler would instead have received {"reform": {}}.
+        assert result["received"] == {"generator": generator_code}
+
+    def test_generator_key_is_rejected_as_unexpected_kwarg(self):
+        result = execute_tool(
+            "validate_reform",
+            {"reform": {}, "generator": "def generate():\n    return {'reform': {}}"},
+        )
+        assert "error" in result
+        assert "generator" in result["error"]
+
+    def test_sandbox_has_no_generator_exec_path(self):
+        import engine.sandbox as sandbox
+
+        assert not hasattr(sandbox, "run_generator")
