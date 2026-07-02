@@ -94,6 +94,7 @@ INFERABLE: set = {
     ("generate_chart", "x_field"),
     ("generate_chart", "y_fields"),
     ("generate_chart", "data"),  # comes from an upstream tool, not the user
+    ("run_python", "code"),  # the model authors the code; the user never supplies it
 }
 
 # Closed vocabulary for the synthetic "output" (deliverable) slot. The single

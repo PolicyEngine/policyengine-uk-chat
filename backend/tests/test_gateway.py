@@ -30,6 +30,7 @@ class TestSlotInventory:
         assert TOOL_SLOT_KIND[("analyse_microdata", "entity")] == "required"
         assert TOOL_SLOT_KIND[("analyse_microdata", "operation")] == "required"
         assert TOOL_SLOT_KIND[("lookup_parameter", "query")] == "required"
+        assert TOOL_SLOT_KIND[("run_python", "code")] == "required"
 
     def test_defaulted_slots_detected(self):
         assert TOOL_SLOT_KIND[("run_economy_simulation", "dataset")] == "defaulted"
@@ -80,6 +81,9 @@ class TestInferable:
     def test_person_not_inferable(self):
         assert not is_inferable("calculate_household", "person")
 
+    def test_run_python_code_inferable(self):
+        assert is_inferable("run_python", "code")
+
 
 class TestGate:
     def test_ready_all_grounded(self):
@@ -107,6 +111,17 @@ class TestGate:
             [],
         )
         assert r.outcome == "ready"
+
+    def test_run_python_assumed_code_does_not_gate(self):
+        # `code` is schema-required (high criticality) and always "assumed" —
+        # the model authors the Python itself; the user never supplies it. It
+        # is inferable, so it must not force a clarifying question → ready.
+        r = gate(
+            True, "run_python",
+            [sf("code", "assumed"), sf("output", "prompt", kind="output")],
+            [],
+        )
+        assert r.outcome == "ready" and r.gating_slots == []
 
     def test_default_source_does_not_gate(self):
         r = gate(
