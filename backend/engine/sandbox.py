@@ -51,8 +51,32 @@ def _safe_simulation_class(simulation_cls):
             object.__setattr__(self, "_simulation", simulation_cls(*args, **kwargs))
 
         @classmethod
+        def _wrap(cls, simulation, dataset=None, is_synthetic=True):
+            """Wrap an already-built raw simulation without re-running it.
+
+            Factory classmethods use this so a raw ``simulation_cls`` instance is
+            never handed back to sandboxed code, where ``type(...)`` could
+            otherwise recover the unguarded class and call
+            ``RawSimulation(dataset="frs").run_microdata()`` to defeat the FRS
+            row-level guard.
+            """
+            wrapped = object.__new__(cls)
+            object.__setattr__(wrapped, "_dataset", dataset)
+            object.__setattr__(wrapped, "_is_synthetic", is_synthetic)
+            object.__setattr__(wrapped, "_simulation", simulation)
+            return wrapped
+
+        @classmethod
         def single_person(cls, *args, **kwargs):
-            return simulation_cls.single_person(*args, **kwargs)
+            result = simulation_cls.single_person(*args, **kwargs)
+            # The pinned compiled contract returns (persons, benunits,
+            # households) frames, which pass through untouched. Guard against a
+            # contract that hands back a raw Simulation instance by wrapping it
+            # so the raw class stays hidden. single_person is synthetic by
+            # construction, so the FRS row-level guard stays satisfied.
+            if isinstance(result, simulation_cls):
+                return cls._wrap(result)
+            return result
 
         def run_microdata(self, *args, **kwargs):
             dataset = object.__getattribute__(self, "_dataset")

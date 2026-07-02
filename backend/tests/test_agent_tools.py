@@ -1022,6 +1022,46 @@ result = {"persons": len(md.persons), "households": len(md.households)}
 
         assert result["result"] == {"persons": 1, "households": 1}
 
+    def test_single_person_return_cannot_recover_frs_capable_class(self):
+        # A factory classmethod must never hand sandboxed code a raw Simulation
+        # instance: type(...) on such an instance would recover the unguarded
+        # class and let RawSim(dataset="frs").run_microdata() defeat the FRS
+        # row-level guard. Under the pinned compiled contract single_person
+        # returns DataFrame frames (so type(...) is tuple), and the guard also
+        # wraps any raw instance a future contract might hand back.
+        code = """
+built = Simulation.single_person(employment_income=30000)
+recovered = type(built)
+try:
+    leaked = recovered(dataset="frs").run_microdata()
+    result = {"escaped": True}
+except Exception as exc:
+    result = {"escaped": False, "error": type(exc).__name__}
+"""
+        result = run_python(code)
+
+        assert result["result"]["escaped"] is False
+
+    def test_factory_wrap_returns_guarded_simulation(self):
+        # Directly exercise the wrapping a factory classmethod applies to a raw
+        # instance: the result hides the raw simulation (so type(...) cannot
+        # recover the raw class) and still enforces the FRS row-level guard.
+        import policyengine_uk_compiled as pe
+        from engine.sandbox import _safe_simulation_class
+
+        SafeSimulation = _safe_simulation_class(pe.Simulation)
+        persons, benunits, households = pe.Simulation.single_person(employment_income=30000)
+        raw = pe.Simulation(year=2025, persons=persons, benunits=benunits, households=households)
+
+        wrapped = SafeSimulation._wrap(raw)
+        assert type(wrapped) is SafeSimulation
+        with pytest.raises(AttributeError):
+            wrapped._simulation
+
+        guarded_frs = SafeSimulation._wrap(raw, dataset="frs", is_synthetic=False)
+        with pytest.raises(PermissionError):
+            guarded_frs.run_microdata()
+
 
 # ---------------------------------------------------------------------------
 # _build_compiled_policy
