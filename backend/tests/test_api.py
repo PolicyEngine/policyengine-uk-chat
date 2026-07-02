@@ -37,6 +37,42 @@ class TestHealth:
 
 
 # ---------------------------------------------------------------------------
+# CORS preflight
+# ---------------------------------------------------------------------------
+
+
+class TestCorsPreflight:
+    """Regression guard for #167 against the real app's middleware stack.
+
+    Every browser request from the Vercel frontend is preceded by a CORS
+    preflight OPTIONS. opentelemetry-instrumentation-fastapi < 0.64b0 raised
+    AttributeError on FastAPI >= 0.137 include_router routing (`_IncludedRouter`
+    has no `.path`), so every preflight to a router-mounted route 500'd and the
+    app was unusable. This exercises the actual wired app (CORS + observability
+    middleware), which a synthetic stand-in app would not.
+    """
+
+    @pytest.mark.parametrize(
+        "path, request_method",
+        [
+            ("/conversations", "POST"),
+            ("/chat/message", "POST"),
+        ],
+    )
+    def test_preflight_does_not_500(self, path, request_method):
+        r = client.options(
+            path,
+            headers={
+                "Origin": "https://policyengine-uk-chat.vercel.app",
+                "Access-Control-Request-Method": request_method,
+            },
+        )
+        assert r.status_code != 500
+        assert r.status_code == 200
+        assert "access-control-allow-origin" in r.headers
+
+
+# ---------------------------------------------------------------------------
 # Conversations CRUD
 # ---------------------------------------------------------------------------
 
