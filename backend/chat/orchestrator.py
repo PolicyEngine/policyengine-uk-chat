@@ -53,6 +53,22 @@ logger = logging.getLogger(__name__)
 MAX_ITERATIONS = 30
 
 
+def _user_facing_error_message(session_id: str) -> str:
+    """Generic text for terminal SSE `error` events.
+
+    Raw exception strings (Anthropic SDK, httpx, Supabase) can embed internal
+    URLs, file paths, and provider payloads, so they must never be streamed to
+    the client. The full exception and traceback stay in the server logs; the
+    session id gives users a correlation reference to quote when reporting the
+    problem.
+    """
+    return (
+        "Something went wrong while generating this response. Please try "
+        f"again — if the problem persists, quote session {session_id} when "
+        "reporting it."
+    )
+
+
 def stream_chat(request: Request, chat_request: ChatRequest):
     # `request` is the Starlette Request (slowapi's @limiter.limit decorators
     # require the endpoint parameter named `request` to be that type); the
@@ -712,16 +728,20 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                     yield f"data: {json.dumps(done_event(content=final_content, stop_reason=terminal_stop_reason, billing=billing))}\n\n"
 
             if captured_exception is not None:
+                # Full detail stays server-side; the SSE event carries only a
+                # generic message plus the session id for correlation.
                 logger.error(
-                    f"[CHAT] Exception: {captured_exception}\n{captured_traceback}"
+                    f"[CHAT] Session {session_id} exception: {captured_exception}\n{captured_traceback}"
                 )
-                yield f"data: {json.dumps({'type': 'error', 'content': str(captured_exception)})}\n\n"
+                yield f"data: {json.dumps({'type': 'error', 'content': _user_facing_error_message(session_id)})}\n\n"
 
         except Exception as e:
             import traceback
 
-            logger.error(f"[CHAT] Exception: {e}\n{traceback.format_exc()}")
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            logger.error(
+                f"[CHAT] Session {session_id} exception: {e}\n{traceback.format_exc()}"
+            )
+            yield f"data: {json.dumps({'type': 'error', 'content': _user_facing_error_message(session_id)})}\n\n"
 
     return StreamingResponse(
         generate_stream(),
