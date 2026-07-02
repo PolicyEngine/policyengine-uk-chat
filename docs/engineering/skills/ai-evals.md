@@ -44,7 +44,9 @@ validate-then-calculate flows.
   number checks.
 - Source-synced `policyengine-uk` cases are generated from the installed
   `policyengine_uk` package. Update them with `make sync-policyengine-uk-evals`
-  rather than editing the generated YAML by hand.
+  rather than editing the generated YAML by hand. The pure-Python
+  `policyengine_uk` package is not in the runtime `requirements.txt`; install the
+  eval extras first with `pip install -r backend/requirements-eval.txt`.
 - Keep source-synced cases with `skip.code: compiled_coverage_gap` visible in
   the suite. These mark upstream cases that should become executable as
   `policyengine-uk-compiled` gains support or parity.
