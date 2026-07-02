@@ -250,6 +250,19 @@ class TestRunGateway:
         assert v.outcome == "needs_plan" and v.gating_slots == ["reform"]
 
 
+class TestGatewaySystemPrompt:
+    def test_rendered_prompt_contains_default_simulation_year(self):
+        # The gate in gateway.policy keys its non-default-year detection off
+        # DEFAULT_SIMULATION_YEAR; the rendered classifier prompt must state the
+        # same year, so a year bump can't leave the prompt describing the old
+        # default. Compare against the imported constant, never a literal.
+        from gateway import runtime as gateway
+        from tools.definitions import DEFAULT_SIMULATION_YEAR
+
+        assert f"year {DEFAULT_SIMULATION_YEAR}" in gateway.GATEWAY_SYSTEM
+        assert "{default_year}" not in gateway.GATEWAY_SYSTEM
+
+
 class TestWriterDirective:
     def test_needs_plan_lists_slots(self):
         from gateway import runtime as gateway

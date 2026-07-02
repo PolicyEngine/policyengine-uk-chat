@@ -28,7 +28,7 @@ from prompts import (
     GATEWAY_PARTIAL_DIRECTIVE,
     gateway_system,
 )
-from tools.definitions import TOOL_DEFINITIONS
+from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
 
 logger = logging.getLogger(__name__)
 
@@ -52,7 +52,9 @@ def _build_tool_summary() -> str:
 
 TOOL_SUMMARY = _build_tool_summary()
 SCOPE_DESCRIPTOR = load_scope_descriptor(DEFAULT_SCOPE_DESCRIPTOR)
-GATEWAY_SYSTEM = gateway_system(SCOPE_DESCRIPTOR, TOOL_SUMMARY, ", ".join(OUTPUT_VOCAB))
+GATEWAY_SYSTEM = gateway_system(
+    SCOPE_DESCRIPTOR, TOOL_SUMMARY, ", ".join(OUTPUT_VOCAB), DEFAULT_SIMULATION_YEAR
+)
 
 
 @dataclass
