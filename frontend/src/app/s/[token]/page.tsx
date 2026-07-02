@@ -60,13 +60,17 @@ function renderMarkdown(content: string) {
     return <ReactMarkdown remarkPlugins={[[remarkGfm, { singleTilde: false }]]} components={markdownComponents as never}>{cleanContent}</ReactMarkdown>;
   }
 
-  const segments: Array<{ type: "text" | "chart"; content?: string; chartIdx?: number }> = [];
+  const segments: Array<{ type: "text" | "chart" | "loading"; content?: string; chartIdx?: number }> = [];
   let lastIndex = 0;
-  const placeholderRegex = /\[CHART_PLACEHOLDER_(\d+)\]/g;
+  // Mirrors ChatPage: [CHART_LOADING] marks a chart block that never finished
+  // (e.g. a stream stopped mid-chart) — treat it as a placeholder rather than
+  // rendering the literal marker text.
+  const placeholderRegex = /\[CHART_PLACEHOLDER_(\d+)\]|\[CHART_LOADING\]/g;
   let match;
   while ((match = placeholderRegex.exec(cleanContent)) !== null) {
     if (match.index > lastIndex) segments.push({ type: "text", content: cleanContent.slice(lastIndex, match.index) });
-    segments.push({ type: "chart", chartIdx: parseInt(match[1], 10) });
+    if (match[0] === "[CHART_LOADING]") segments.push({ type: "loading" });
+    else segments.push({ type: "chart", chartIdx: parseInt(match[1], 10) });
     lastIndex = match.index + match[0].length;
   }
   if (lastIndex < cleanContent.length) segments.push({ type: "text", content: cleanContent.slice(lastIndex) });
@@ -78,6 +82,9 @@ function renderMarkdown(content: string) {
           if (!segment.content?.trim()) return null;
           return <ReactMarkdown key={idx} remarkPlugins={[[remarkGfm, { singleTilde: false }]]} components={markdownComponents as never}>{segment.content}</ReactMarkdown>;
         }
+        // On a static shared page the chart will never arrive, so show a
+        // quiet placeholder instead of ChatPage's live spinner.
+        if (segment.type === "loading") return <div key={idx} style={{ margin: "16px 0", padding: "40px", background: "#f9f8f6", border: `1px solid ${THEME.border}`, display: "flex", alignItems: "center", justifyContent: "center", color: THEME.muted, fontSize: "13px" }}>Chart unavailable</div>;
         if (segment.chartIdx !== undefined) {
           const chart = charts[segment.chartIdx];
           if (chart) return <div key={idx} style={{ margin: "16px 0" }}><Chart spec={chart} width={680} height={400} /></div>;

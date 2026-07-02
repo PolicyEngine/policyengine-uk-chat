@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback, useId } from "react";
+import { useRef, useEffect, useState, useCallback, useId, useMemo } from "react";
 import * as d3 from "d3";
 import { BarChartSpec, TooltipData, CHART_COLORS, CHART_TYPOGRAPHY } from "./types";
 import { formatValue, getSeriesColor, CHART_MARGINS, getNiceDomain } from "./utils";
@@ -18,35 +18,41 @@ export function BarChart({ spec, width = 540, height = 340 }: BarChartProps) {
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
   const clipId = useId().replace(/:/g, "");
 
-  const categories = spec.data.map((d) => String(d[spec.x.field]));
+  // Memoize derived values so the draw effect below only re-runs when the spec
+  // or dimensions actually change — not on every tooltip-driven render, which
+  // previously tore down and redrew the SVG at mousemove frequency.
+  const categories = useMemo(() => spec.data.map((d) => String(d[spec.x.field])), [spec]);
   const maxLabelLen = Math.max(...categories.map((c) => c.length));
   const allNumeric = categories.every((c) => /^-?\d+(\.\d+)?$/.test(c.trim()));
   const isHorizontal = spec.orientation === "horizontal" || (spec.orientation !== "vertical" && !allNumeric && (maxLabelLen > 12 || categories.length > 6));
   const isStacked = spec.arrangement === "stacked";
 
   const leftMargin = isHorizontal ? Math.min(Math.max(maxLabelLen * 7, 80), 200) : CHART_MARGINS.left;
-  const margins = { ...CHART_MARGINS, left: leftMargin, bottom: isHorizontal ? 50 : 60 };
+  const margins = useMemo(() => ({ ...CHART_MARGINS, left: leftMargin, bottom: isHorizontal ? 50 : 60 }), [leftMargin, isHorizontal]);
   const innerWidth = width - margins.left - margins.right;
   const innerHeight = height - margins.top - margins.bottom;
 
-  let valMin: number, valMax: number;
-  if (isStacked) {
-    valMax = d3.max(spec.data, (d) => spec.series.reduce((s, ser) => s + (Number(d[ser.field]) || 0), 0)) || 0;
-    valMin = d3.min(spec.data, (d) => spec.series.reduce((s, ser) => s + (Number(d[ser.field]) || 0), 0)) || 0;
-  } else {
-    const all = spec.series.flatMap((s) => spec.data.map((d) => Number(d[s.field])));
-    valMax = d3.max(all) || 0; valMin = d3.min(all) || 0;
-  }
-  // Bar charts must always include 0 in the value domain so bars render from the baseline.
-  // Only override if the spec explicitly sets y.min/y.max.
-  const valDomainMin = spec.y.min ?? (valMin >= 0 ? 0 : valMin);
-  const valDomainMax = spec.y.max ?? (valMax <= 0 ? 0 : valMax);
-  const valDomain = getNiceDomain([valDomainMin, valDomainMax], spec.y.min, spec.y.max, 0.1);
+  const valDomain = useMemo(() => {
+    let valMin: number, valMax: number;
+    if (isStacked) {
+      valMax = d3.max(spec.data, (d) => spec.series.reduce((s, ser) => s + (Number(d[ser.field]) || 0), 0)) || 0;
+      valMin = d3.min(spec.data, (d) => spec.series.reduce((s, ser) => s + (Number(d[ser.field]) || 0), 0)) || 0;
+    } else {
+      const all = spec.series.flatMap((s) => spec.data.map((d) => Number(d[s.field])));
+      valMax = d3.max(all) || 0; valMin = d3.min(all) || 0;
+    }
+    // Bar charts must always include 0 in the value domain so bars render from the baseline.
+    // Only override if the spec explicitly sets y.min/y.max.
+    const valDomainMin = spec.y.min ?? (valMin >= 0 ? 0 : valMin);
+    const valDomainMax = spec.y.max ?? (valMax <= 0 ? 0 : valMax);
+    return getNiceDomain([valDomainMin, valDomainMax], spec.y.min, spec.y.max, 0.1);
+  }, [spec, isStacked]);
 
-  let stackedData: d3.Series<Record<string, unknown>, string>[] = [];
-  if (isStacked) {
-    stackedData = d3.stack<Record<string, unknown>>().keys(spec.series.map((s) => s.field)).value((d, k) => Number(d[k]) || 0)(spec.data);
-  }
+  const stackedData = useMemo<d3.Series<Record<string, unknown>, string>[]>(() => (
+    isStacked
+      ? d3.stack<Record<string, unknown>>().keys(spec.series.map((s) => s.field)).value((d, k) => Number(d[k]) || 0)(spec.data)
+      : []
+  ), [spec, isStacked]);
 
   const handleMouseMove = useCallback((event: React.MouseEvent<SVGSVGElement>) => {
     const svg = svgRef.current;

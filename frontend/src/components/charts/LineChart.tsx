@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useRef, useEffect, useState, useCallback, useMemo } from "react";
 import * as d3 from "d3";
 import { LineChartSpec, TooltipData, CHART_COLORS, CHART_TYPOGRAPHY } from "./types";
 import { formatValue, getSeriesColor, getDashArray, CHART_MARGINS, getNiceDomain } from "./utils";
@@ -24,17 +24,26 @@ export function LineChart({ spec, width = 540, height = 340 }: LineChartProps) {
   const firstXValue = spec.data[0]?.[spec.x.field];
   const isXCategorical = typeof firstXValue === "string" && isNaN(Number(firstXValue));
 
-  const yValues = spec.series.flatMap((s) => spec.data.map((d) => Number(d[s.field])).filter((v) => !isNaN(v)));
-  const yDomain = getNiceDomain(yValues, spec.y.min, spec.y.max, 0.05);
-  const yScale = d3.scaleLinear().domain(yDomain).range([innerHeight, 0]);
+  // Memoize the scales so the draw effect below only re-runs when the spec or
+  // dimensions actually change — not on every tooltip-driven render, which
+  // previously tore down and redrew the SVG at mousemove frequency.
+  const yScale = useMemo(() => {
+    const yValues = spec.series.flatMap((s) => spec.data.map((d) => Number(d[s.field])).filter((v) => !isNaN(v)));
+    const yDomain = getNiceDomain(yValues, spec.y.min, spec.y.max, 0.05);
+    return d3.scaleLinear().domain(yDomain).range([innerHeight, 0]);
+  }, [spec, innerHeight]);
 
-  const xScalePoint = isXCategorical
-    ? d3.scalePoint<string>().domain(spec.data.map((d) => String(d[spec.x.field]))).range([0, innerWidth]).padding(0.5)
-    : null;
+  const xScalePoint = useMemo(() => (
+    isXCategorical
+      ? d3.scalePoint<string>().domain(spec.data.map((d) => String(d[spec.x.field]))).range([0, innerWidth]).padding(0.5)
+      : null
+  ), [isXCategorical, spec, innerWidth]);
 
-  const xScaleLinear = !isXCategorical
-    ? (() => { const xv = spec.data.map((d) => Number(d[spec.x.field])); return d3.scaleLinear().domain(getNiceDomain(xv, spec.x.min, spec.x.max, 0)).range([0, innerWidth]); })()
-    : null;
+  const xScaleLinear = useMemo(() => (
+    !isXCategorical
+      ? (() => { const xv = spec.data.map((d) => Number(d[spec.x.field])); return d3.scaleLinear().domain(getNiceDomain(xv, spec.x.min, spec.x.max, 0)).range([0, innerWidth]); })()
+      : null
+  ), [isXCategorical, spec, innerWidth]);
 
   const getX = useCallback((d: Record<string, unknown>): number => {
     if (isXCategorical && xScalePoint) return xScalePoint(String(d[spec.x.field])) ?? 0;
