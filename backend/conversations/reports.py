@@ -76,8 +76,8 @@ def _build_issue_body(
     ]
     if share_url:
         lines.append(f"- Shared thread: {share_url}")
-    if row.user_email:
-        lines.append(f"- Reporter email: {row.user_email}")
+    # Never include the reporter's email (or any other account identity) here:
+    # this body is prefilled into a public GitHub issue.
 
     lines.extend(["", "## Transcript excerpt"])
     for message in transcript:

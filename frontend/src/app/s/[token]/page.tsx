@@ -20,7 +20,6 @@ interface SharedConversation {
       | { type: "tool"; data: { tool_name: string } }
     >;
   }>;
-  author: string | null;
   created_at: string;
 }
 
@@ -158,7 +157,6 @@ table .highlight-mark { animation: none; background: none; padding: 0; margin: 0
           <img src="/policyengine-logo.svg" alt="PolicyEngine" style={{ height: "24px" }} />
         </a>
         <div style={{ display: "flex", alignItems: "center", gap: "12px", fontSize: "13px", color: THEME.text3 }}>
-          {data.author && <span>Shared by {data.author}</span>}
           <span style={{ color: THEME.muted }}>{formatDate(data.created_at)}</span>
         </div>
       </div>

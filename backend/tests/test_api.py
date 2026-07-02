@@ -44,7 +44,12 @@ class TestHealth:
 @pytest.mark.usefixtures("isolated_conversations_table")
 class TestConversations:
     def _save(
-        self, session_id="test-session-1", title="Test", messages=None, user_id=None
+        self,
+        session_id="test-session-1",
+        title="Test",
+        messages=None,
+        user_id=None,
+        user_email=None,
     ):
         return client.post(
             "/conversations",
@@ -53,6 +58,7 @@ class TestConversations:
                 "title": title,
                 "messages": messages or [{"role": "user", "content": "hello"}],
                 "user_id": user_id,
+                "user_email": user_email,
             },
         )
 
@@ -155,6 +161,41 @@ class TestConversations:
         issue_body = report_r.json()["issue_body"]
         assert "result = 1 + 1" in issue_body
         assert '"result": 2' in issue_body
+
+    def test_shared_conversation_does_not_expose_author_email(self):
+        email = "private-author@example.com"
+        save_r = self._save(
+            session_id="share-privacy-1", user_id="user-1", user_email=email
+        )
+        conv_id = save_r.json()["id"]
+        share_r = client.post(
+            f"/conversations/{conv_id}/share", params={"user_id": "user-1"}
+        )
+        assert share_r.status_code == 200
+        token = share_r.json()["share_token"]
+        shared_r = client.get(f"/conversations/shared/{token}")
+        assert shared_r.status_code == 200
+        payload = shared_r.json()
+        assert "author" not in payload
+        assert email not in shared_r.text
+        # The shared payload should carry only content, not account identity.
+        assert set(payload) == {"title", "messages", "created_at"}
+
+    def test_report_body_does_not_expose_reporter_email(self):
+        email = "private-reporter@example.com"
+        save_r = self._save(
+            session_id="report-privacy-1", user_id="user-1", user_email=email
+        )
+        conv_id = save_r.json()["id"]
+        report_r = client.post(
+            f"/conversations/{conv_id}/report",
+            json={"user_id": "user-1", "app_url": "https://example.com"},
+        )
+        assert report_r.status_code == 200
+        data = report_r.json()
+        assert email not in data["issue_body"]
+        assert email not in data["issue_title"]
+        assert email not in data["issue_url"]
 
 
 # ---------------------------------------------------------------------------
