@@ -1,0 +1,8 @@
+# Extra dependencies for eval-case syncing (make sync-policyengine-uk-evals /
+# check-policyengine-uk-evals). Not needed to run the app or the pytest suite.
+#
+# The pure-Python policyengine_uk package is only used to source-sync
+# tool-contract eval cases from the upstream YAML tests. Runtime calculations
+# use policyengine-uk-compiled (the Rust engine) — never this package.
+-r requirements.txt
+policyengine_uk>=2.89.2
