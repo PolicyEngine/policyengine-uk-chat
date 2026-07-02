@@ -1,0 +1,15 @@
+# Keep the build context (context: ./backend) small and reproducible.
+# The Dockerfile regenerates reference.md/scope_descriptor.md at build time, so
+# any locally generated copies must not leak in.
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+tests/
+.env
+.env.*
+reference.md
+scope_descriptor.md
+requirements-eval.txt

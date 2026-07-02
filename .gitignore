@@ -1,8 +1,11 @@
 .env
+.env.local
+.env.*.local
 .DS_Store
 __pycache__/
 *.pyc
 .next/
+.vercel/
 node_modules/
 .venv/
 .venv-backend/
@@ -18,6 +21,9 @@ backend/scope_descriptor.md
 
 # Manual AI evaluation reports.
 evals/reports/
+
+# Jupyter Book build output (docs-site/ is built on the docs branch).
+docs-site/_build/
 
 # TypeScript incremental build cache
 *.tsbuildinfo
