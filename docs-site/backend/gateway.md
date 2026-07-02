@@ -69,7 +69,8 @@ avoids over-asking for values it can reasonably infer.
   `prompt`/`default`-sourced slots). The full tool set is available.
 - On every **other** outcome, the orchestrator takes the lightweight route: a
   no-tool reply built from the scope descriptor plus the per-outcome directive
-  from `backend/prompts/gateway.py` (`gateway_writer_directive`). The agent can
+  text in `backend/prompts/gateway.py`, assembled by `gateway_writer_directive()`
+  in `backend/gateway/runtime.py`. The agent can
   decline, scope, or ask its clarifying question without running any simulation.
 
 ## Fail-safe
