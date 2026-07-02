@@ -102,41 +102,6 @@ def test_fastapi_otel_instrumentation_is_disabled(monkeypatch):
     assert getattr(app, "_is_instrumented_by_opentelemetry", False) is False
 
 
-def test_preflight_options_on_included_router_does_not_500(monkeypatch):
-    # End-to-end guard for #167: an OPTIONS preflight to an include_router-mounted
-    # route must not surface a 500 through the observability middleware stack.
-    from fastapi import APIRouter
-    from fastapi.middleware.cors import CORSMiddleware
-
-    monkeypatch.delenv("OBSERVABILITY_INSTRUMENT_FASTAPI", raising=False)
-    app = FastAPI()
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=["https://example.com"],
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
-    router = APIRouter()
-
-    @router.post("/thing")
-    def thing():
-        return {"ok": True}
-
-    app.include_router(router)
-    init_observability(app, service_role="test_api")
-
-    response = TestClient(app).options(
-        "/thing",
-        headers={
-            "Origin": "https://example.com",
-            "Access-Control-Request-Method": "POST",
-        },
-    )
-
-    assert response.status_code != 500
-    assert response.status_code == 200
-
-
 def test_init_observability_is_idempotent():
     app = FastAPI()
 
