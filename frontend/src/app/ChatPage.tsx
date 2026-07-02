@@ -869,13 +869,23 @@ export default function ChatPage() {
         body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, charts_mode: chartsMode }),
         signal: controller.signal,
       });
+      // The message was optimistically marked in-flight (isComplete: false) at
+      // the top of continueMessage. On an early bail (no credit / rate limited)
+      // we never stream anything back, so restore its completed state — otherwise
+      // the finished answer collapses into the "Working…" section and disappears.
+      const restoreTarget = () =>
+        setMessages((prev) => prev.map((m, i) => i === idx ? {
+          ...m, isComplete: true, stop_reason: target.stop_reason, stopped: target.stopped,
+        } : m));
       if (response.status === 402) {
         const err = await response.json().catch(() => ({ error: "No credit remaining" }));
+        restoreTarget();
         setMessages((prev) => [...prev, { role: "assistant", content: err.error || "No credit remaining. Please top up to continue.", isComplete: true }]);
         return;
       }
       if (response.status === 429) {
         const seconds = parseInt(response.headers.get("retry-after") || "60", 10);
+        restoreTarget();
         setMessages((prev) => [...prev, { role: "assistant", content: `You're sending messages a bit fast — please wait ~${seconds}s and try again.`, isComplete: true }]);
         return;
       }
