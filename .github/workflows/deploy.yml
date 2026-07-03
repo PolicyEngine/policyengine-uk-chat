@@ -82,3 +82,21 @@ jobs:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: modal deploy modal_app.py
+
+      # A deploy that leaves the backend unable to serve requests must turn
+      # this run red instead of failing silently (see the #142 outage, where
+      # the first log write hung every request in the new containers).
+      - name: Smoke test deployed backend
+        run: |
+          url="https://policyengine--policyengine-uk-chat-web.modal.run/version"
+          for attempt in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$url" || true)
+            if [ "$code" = "200" ]; then
+              echo "Backend healthy after deploy (attempt $attempt)."
+              exit 0
+            fi
+            echo "Attempt $attempt: got '$code'; retrying in 10s..."
+            sleep 10
+          done
+          echo "Deployed backend failed the smoke test: $url" >&2
+          exit 1
