@@ -29,7 +29,7 @@ from tools.definitions import (
 )
 from engine.constants import FRS_DATASET
 from engine.households import build_household_frames
-from engine.lookups import lookup_parameter_metadata
+from engine.lookup.parameters import lookup_parameter_metadata
 from engine.microdata import analyse_microdata_result, get_cached_microdata, hash_reform
 from engine.reforms import build_compiled_policy, validate_reform_dict
 from engine.sandbox import (

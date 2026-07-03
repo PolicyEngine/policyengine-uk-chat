@@ -20,6 +20,11 @@ os.environ.setdefault("RATE_LIMIT_CHAT_PER_MIN", "10000")
 os.environ.setdefault("RATE_LIMIT_CHAT_PER_HOUR", "100000")
 os.environ.setdefault("RATE_LIMIT_CHAT_IP_PER_MIN", "10000")
 
+# main.py reads HOSTNAMES at import to build the CORS allowlist, and now fails
+# closed (blocks all origins) when it is unset. Declare an allowed origin here
+# so CORS-preflight tests exercise the real allowlisted path.
+os.environ.setdefault("HOSTNAMES", "https://policyengine-uk-chat.vercel.app")
+
 if not os.environ.get("DATABASE_URL"):
     test_db = Path(os.environ.get("PYTEST_SQLITE_DB", "/tmp/policyengine_uk_chat_tests.sqlite"))
     try:

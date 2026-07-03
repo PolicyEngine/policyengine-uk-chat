@@ -157,7 +157,4 @@ def _confirmation_reason(ranked: List[_RankedCandidate]) -> str:
     # Callers should ask for a reason only when _needs_confirmation() is true.
     # At this point the remaining confirmation case is a close margin between
     # the top candidate and runner-up.
-    runner_up = ranked[1]
-    if top.exact and not runner_up.exact:
-        return LOW_MARGIN_CONFIRMATION_REASON
     return LOW_MARGIN_CONFIRMATION_REASON

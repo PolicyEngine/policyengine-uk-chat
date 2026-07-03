@@ -4,6 +4,7 @@ FastAPI entrypoint for the microsim public chatbot.
 
 import logging
 import os
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -21,13 +22,31 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 _hostnames_env = os.environ.get("HOSTNAMES", "")
-HOSTNAMES = _hostnames_env.split(",") if _hostnames_env else ["*"]
+if _hostnames_env:
+    HOSTNAMES = _hostnames_env.split(",")
+else:
+    # Fail closed: an unset HOSTNAMES must not silently allow every origin,
+    # which combined with allow_credentials=True would expose the API to any
+    # website. Deploy and docker-compose set HOSTNAMES explicitly.
+    HOSTNAMES = []
+    logger.warning(
+        "HOSTNAMES is not set; blocking all cross-origin requests. "
+        "Set HOSTNAMES to a comma-separated list of allowed origins."
+    )
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    conversations.ensure_table()
+    yield
+    shutdown_observability()
 
 
 app = FastAPI(
     title="Microsim Public Chatbot API",
     version="1.0.0",
     default_response_class=NaNSafeJSONResponse,
+    lifespan=lifespan,
 )
 
 app.state.limiter = limiter
@@ -48,16 +67,6 @@ app.include_router(chat.router)
 app.include_router(conversations.router)
 
 init_observability(app, service_role="api")
-
-
-@app.on_event("startup")
-def startup():
-    conversations.ensure_table()
-
-
-@app.on_event("shutdown")
-def shutdown():
-    shutdown_observability()
 
 
 @app.get("/health")
