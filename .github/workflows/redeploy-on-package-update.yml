@@ -20,7 +20,7 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Poll PyPI and update requirements
+      - name: Poll PyPI and update modal_app.py
         id: update
         run: |
           pip install requests packaging --quiet
@@ -29,70 +29,45 @@ jobs:
           import requests
           from packaging.version import Version
 
-          # The engine pin lives in backend/requirements.txt (Modal installs the
-          # image from it). It may carry an upper cap, e.g.
-          #   policyengine-uk-compiled>=0.44.0,<0.45
-          # Only bump the floor within the allowed range so a breaking major
-          # release isn't auto-deployed. (The deploy workflow also runs the test
-          # suite before deploying, as a second safety net.)
-          REQ_PATH = "backend/requirements.txt"
-          content = open(REQ_PATH).read()
+          content = open("modal_app.py").read()
+          m = re.search(r'policyengine-uk-compiled>=([0-9]+\.[0-9]+\.[0-9]+)', content)
+          current = Version(m.group(1)) if m else Version("0")
+          print(f"Current pinned: {current}")
 
-          floor_match = re.search(
-              r'policyengine-uk-compiled>=([0-9]+\.[0-9]+\.[0-9]+)', content
-          )
-          if not floor_match:
-              print("No policyengine-uk-compiled floor pin found; nothing to do.")
-              with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-                  f.write("should_deploy=false\n")
-              sys.exit(0)
-          current = Version(floor_match.group(1))
-          cap_match = re.search(
-              r'policyengine-uk-compiled>=[0-9.]+,<([0-9]+(?:\.[0-9]+){1,2})', content
-          )
-          ceiling = Version(cap_match.group(1)) if cap_match else None
-          print(f"Current floor: {current}; ceiling: {ceiling}")
-
-          def in_range(v: Version) -> bool:
-              return v > current and (ceiling is None or v < ceiling)
-
-          # Poll PyPI for up to 10 minutes for a newer in-range version.
+          # Poll PyPI for up to 10 minutes
           latest = current
           deadline = time.time() + 600
           while time.time() < deadline:
-              r = requests.get(
-                  "https://pypi.org/pypi/policyengine-uk-compiled/json", timeout=10
-              )
+              r = requests.get("https://pypi.org/pypi/policyengine-uk-compiled/json", timeout=10)
               latest = Version(r.json()["info"]["version"])
               print(f"PyPI latest: {latest}")
-              if in_range(latest):
+              if latest > current:
                   break
               time.sleep(30)
 
-          if not in_range(latest):
-              print("No new in-range version found within timeout.")
+          if latest <= current:
+              print("No new version found within timeout.")
               with open(os.environ["GITHUB_OUTPUT"], "a") as f:
                   f.write("should_deploy=false\n")
               sys.exit(0)
 
-          # Rewrite only the floor version, preserving any upper cap.
           new_content = re.sub(
-              r'(policyengine-uk-compiled>=)[0-9]+\.[0-9]+\.[0-9]+',
-              rf'\g<1>{latest}',
+              r'policyengine-uk-compiled>=[0-9]+\.[0-9]+\.[0-9]+',
+              f'policyengine-uk-compiled>={latest}',
               content,
           )
-          open(REQ_PATH, "w").write(new_content)
-          print(f"Updated {REQ_PATH} floor to >={latest}")
+          open("modal_app.py", "w").write(new_content)
+          print(f"Updated modal_app.py to >={latest}")
           with open(os.environ["GITHUB_OUTPUT"], "a") as f:
               f.write(f"new_version={latest}\n")
               f.write("should_deploy=true\n")
           PYEOF
 
-      - name: Commit updated requirements
+      - name: Commit updated modal_app.py
         if: steps.update.outputs.should_deploy == 'true'
         uses: EndBug/add-and-commit@v10
         with:
-          add: backend/requirements.txt
+          add: modal_app.py
           message: "chore: bump policyengine-uk-compiled to ${{ steps.update.outputs.new_version }}"
           author_name: policyengine[bot]
           author_email: policyengine[bot]@users.noreply.github.com
