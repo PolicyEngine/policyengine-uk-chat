@@ -62,6 +62,9 @@ jobs:
           OBSERVABILITY_GOOGLE_CLOUD_PROJECT: ${{ vars.OBSERVABILITY_GOOGLE_CLOUD_PROJECT || 'policyengine-api' }}
           OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER || 'projects/389282473430/locations/global/workloadIdentityPools/modal/providers/modal' }}
           OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ vars.OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL || 'observability-writer@policyengine-api.iam.gserviceaccount.com' }}
+          # Production stays on stdout until Google Cloud Logging is verified
+          # on previews; flip by setting the repo variable — no code change.
+          OBSERVABILITY_LOG_DESTINATIONS: ${{ vars.OBSERVABILITY_LOG_DESTINATIONS_PRODUCTION || 'stdout' }}
         run: |
           modal secret create policyengine-uk-chat-secrets \
             ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
@@ -79,6 +82,7 @@ jobs:
             OBSERVABILITY_GOOGLE_CLOUD_PROJECT="$OBSERVABILITY_GOOGLE_CLOUD_PROJECT" \
             OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER="$OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER" \
             OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL="$OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL" \
+            OBSERVABILITY_LOG_DESTINATIONS="$OBSERVABILITY_LOG_DESTINATIONS" \
             HOSTNAMES="https://policyengine-uk-chat.vercel.app,https://policyengine-uk-chat-bmxyy36r1-policy-engine.vercel.app" \
             PUBLIC_BASE_URL="https://policyengine-uk-chat.vercel.app" \
             --force

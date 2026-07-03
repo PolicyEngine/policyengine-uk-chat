@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import logging
 import os
 
 from fastapi import FastAPI
@@ -12,6 +13,8 @@ from policyengine_observability.adapters.fastapi import (
 
 from observability.segments import SegmentName
 
+
+logger = logging.getLogger(__name__)
 
 SERVICE_NAME = "policyengine-uk-chat"
 SPAN_PREFIX = "uk_chat"
@@ -134,6 +137,15 @@ def init_observability(
             default_log_destinations=_default_log_destinations(platform),
         ),
         environment=_environment(),
+    )
+    # One startup line so a misrouted destination or missing workload
+    # identity token is visible in the first seconds of any container.
+    logger.info(
+        "Observability initialized: platform=%s log_destinations=%s "
+        "modal_identity_token=%s",
+        platform,
+        ",".join(config.log_destinations),
+        "present" if os.getenv("MODAL_IDENTITY_TOKEN") else "absent",
     )
     return init_fastapi_observability(
         app,

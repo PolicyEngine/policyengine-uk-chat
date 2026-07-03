@@ -77,6 +77,8 @@ jobs:
           OBSERVABILITY_GOOGLE_CLOUD_PROJECT: ${{ vars.OBSERVABILITY_GOOGLE_CLOUD_PROJECT || 'policyengine-api' }}
           OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER || 'projects/389282473430/locations/global/workloadIdentityPools/modal/providers/modal' }}
           OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ vars.OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL || 'observability-writer@policyengine-api.iam.gserviceaccount.com' }}
+          # Previews are the live test bed for Google Cloud Logging routing.
+          OBSERVABILITY_LOG_DESTINATIONS: ${{ vars.OBSERVABILITY_LOG_DESTINATIONS_PREVIEW || 'google_cloud_logging' }}
         run: |
           modal secret create "$MODAL_SECRET_NAME" \
             ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
@@ -94,6 +96,7 @@ jobs:
             OBSERVABILITY_GOOGLE_CLOUD_PROJECT="$OBSERVABILITY_GOOGLE_CLOUD_PROJECT" \
             OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER="$OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER" \
             OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL="$OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL" \
+            OBSERVABILITY_LOG_DESTINATIONS="$OBSERVABILITY_LOG_DESTINATIONS" \
             HOSTNAMES="https://policyengine-uk-chat.vercel.app" \
             PUBLIC_BASE_URL="https://policyengine-uk-chat.vercel.app" \
             --force
@@ -127,6 +130,8 @@ jobs:
           OBSERVABILITY_GOOGLE_CLOUD_PROJECT: ${{ vars.OBSERVABILITY_GOOGLE_CLOUD_PROJECT || 'policyengine-api' }}
           OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER || 'projects/389282473430/locations/global/workloadIdentityPools/modal/providers/modal' }}
           OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ vars.OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL || 'observability-writer@policyengine-api.iam.gserviceaccount.com' }}
+          # Previews are the live test bed for Google Cloud Logging routing.
+          OBSERVABILITY_LOG_DESTINATIONS: ${{ vars.OBSERVABILITY_LOG_DESTINATIONS_PREVIEW || 'google_cloud_logging' }}
           FRONTEND_URL: ${{ steps.names.outputs.frontend_url }}
         run: |
           modal secret create "$MODAL_SECRET_NAME" \
@@ -145,6 +150,7 @@ jobs:
             OBSERVABILITY_GOOGLE_CLOUD_PROJECT="$OBSERVABILITY_GOOGLE_CLOUD_PROJECT" \
             OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER="$OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER" \
             OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL="$OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL" \
+            OBSERVABILITY_LOG_DESTINATIONS="$OBSERVABILITY_LOG_DESTINATIONS" \
             HOSTNAMES="$FRONTEND_URL" \
             PUBLIC_BASE_URL="$FRONTEND_URL" \
             --force
