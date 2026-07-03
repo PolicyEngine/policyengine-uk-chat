@@ -23,8 +23,20 @@ function getBackendUrl(): string {
     return `https://policyengine--peukchat-${branchSlug}-web.modal.run`;
   }
 
+  if (vercelEnv === "production") {
+    // BACKEND_URL must be set in production; falling back to localhost here
+    // means every API call fails inside the serverless function with a
+    // generic 500. Log loudly so the misconfiguration is diagnosable.
+    console.error("BACKEND_URL is not set in production; proxy will fail.");
+  }
+
   return "http://localhost:8080";
 }
+
+// Request headers to forward to the backend. The backend keys billing and
+// rate limiting on X-User-Id, so dropping it (as the old proxy did) silently
+// broke per-user accounting on every request that went through the proxy.
+const FORWARDED_HEADERS = ["x-user-id", "authorization"];
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ slug: string[] }> }) {
   return handleRequest(request, params, "GET");
@@ -56,7 +68,13 @@ async function handleRequest(
   const url = new URL(`${backendUrl}/${slug.join("/")}`);
   request.nextUrl.searchParams.forEach((value, key) => url.searchParams.append(key, value));
 
-  const fetchOptions: RequestInit = { method, headers: { "Content-Type": "application/json" }, redirect: "follow" };
+  const forwardHeaders: Record<string, string> = { "Content-Type": "application/json" };
+  for (const name of FORWARDED_HEADERS) {
+    const value = request.headers.get(name);
+    if (value) forwardHeaders[name] = value;
+  }
+
+  const fetchOptions: RequestInit = { method, headers: forwardHeaders, redirect: "follow" };
   if (["POST", "PUT", "PATCH"].includes(method)) {
     try {
       const body = await request.text();
@@ -67,15 +85,25 @@ async function handleRequest(
   try {
     const response = await fetch(url.toString(), fetchOptions);
     if (!response.ok) {
+      // Pass the backend's own error body and status straight through so the
+      // client sees the real message (e.g. "No credit remaining") rather than a
+      // generic "Backend error: 402", and preserve Retry-After for 429s.
       const errorText = await response.text();
-      return NextResponse.json({ error: `Backend error: ${response.status}`, details: errorText.substring(0, 200) }, { status: response.status });
+      const passHeaders = new Headers();
+      const errCt = response.headers.get("content-type");
+      if (errCt) passHeaders.set("content-type", errCt);
+      const retryAfter = response.headers.get("retry-after");
+      if (retryAfter) passHeaders.set("retry-after", retryAfter);
+      return new NextResponse(errorText, { status: response.status, headers: passHeaders });
     }
 
     const contentType = response.headers.get("content-type") || "";
     if (contentType.includes("text/event-stream")) {
       // Pipe through a TransformStream to prevent Next.js from buffering SSE
       const { readable, writable } = new TransformStream();
-      response.body?.pipeTo(writable);
+      // The client can disconnect mid-stream; swallow the resulting pipe
+      // rejection so it doesn't surface as an unhandled rejection.
+      response.body?.pipeTo(writable).catch(() => {});
       return new NextResponse(readable, {
         headers: { "Content-Type": "text/event-stream", "Cache-Control": "no-cache, no-transform", "Connection": "keep-alive", "X-Accel-Buffering": "no" },
       });
