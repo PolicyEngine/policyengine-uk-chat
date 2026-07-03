@@ -135,7 +135,7 @@ class TestLookupParameter:
         from engine.lookup.parameters import missing_parameter_alias_paths
         from policyengine_uk_compiled import Simulation
 
-        parameters = Simulation(year=2025).get_baseline_params()
+        parameters = Simulation(year=2025, dataset="frs").get_baseline_params()
 
         assert missing_parameter_alias_paths(parameters) == ()
 

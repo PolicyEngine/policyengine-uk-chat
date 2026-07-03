@@ -5,6 +5,7 @@ import json
 import math
 from typing import Any, Callable, Dict, List, Optional
 
+from engine.constants import FRS_DATASET
 from engine.serialization import json_safe
 from engine.simulations import ensure_compiled_package_importable
 
@@ -39,7 +40,17 @@ def optional_numpy():
 def _safe_simulation_class(simulation_cls):
     class SafeSimulation:
         def __init__(self, *args, **kwargs):
-            object.__setattr__(self, "_dataset", (kwargs.get("dataset") or "frs").lower())
+            # The engine requires an explicit data source since 0.45. The
+            # sandbox contract keeps data-less Simulation(year=...) meaning
+            # the FRS survey, matching the guard bookkeeping below.
+            if not any(
+                kwargs.get(key) is not None
+                for key in ("persons", "benunits", "households", "dataset", "data_dir")
+            ):
+                kwargs["dataset"] = FRS_DATASET
+            object.__setattr__(
+                self, "_dataset", (kwargs.get("dataset") or FRS_DATASET).lower()
+            )
             object.__setattr__(
                 self,
                 "_is_synthetic",
@@ -57,7 +68,7 @@ def _safe_simulation_class(simulation_cls):
         def run_microdata(self, *args, **kwargs):
             dataset = object.__getattribute__(self, "_dataset")
             is_synthetic = object.__getattribute__(self, "_is_synthetic")
-            if dataset == "frs" and not is_synthetic:
+            if dataset == FRS_DATASET and not is_synthetic:
                 raise PermissionError(
                     "run_python cannot access FRS row-level microdata. "
                     "Use run_economy_simulation for aggregate FRS outputs."

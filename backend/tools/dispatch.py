@@ -27,6 +27,7 @@ from tools.definitions import (
     VALIDATE_REFORM_DESCRIPTION,
     VALIDATE_REFORM_INPUT_SCHEMA,
 )
+from engine.constants import FRS_DATASET
 from engine.households import build_household_frames
 from engine.lookups import lookup_parameter_metadata
 from engine.microdata import analyse_microdata_result, get_cached_microdata, hash_reform
@@ -84,7 +85,9 @@ def get_baseline_parameters(year: int = DEFAULT_SIMULATION_YEAR) -> Dict[str, An
         _ensure_compiled_package_importable()
         from policyengine_uk_compiled import Simulation
 
-        sim = Simulation(year=year)
+        # The engine requires an explicit data source since 0.45, but
+        # get_baseline_params() only shells out for parameters; no data loads.
+        sim = Simulation(year=year, dataset=FRS_DATASET)
         return {"year": year, "parameters": sim.get_baseline_params()}
     except Exception as exc:
         logger.error(f"Error getting baseline parameters: {exc}")
@@ -146,7 +149,7 @@ def calculate_household(
 def run_economy_simulation(
     year: int = DEFAULT_SIMULATION_YEAR,
     reform: Optional[Dict[str, Any]] = None,
-    dataset: str = "frs",
+    dataset: str = FRS_DATASET,
 ) -> Dict[str, Any]:
     # Structural reforms are intentionally run_python-only; this tool covers
     # parametric reforms.
@@ -212,7 +215,7 @@ def analyse_microdata(
 ) -> Dict[str, Any]:
     try:
         dataset_key = (dataset or "").lower()
-        if dataset_key == "frs":
+        if dataset_key == FRS_DATASET:
             return {
                 "error": "analyse_microdata does not support FRS row-level access",
                 "hint": (
@@ -268,7 +271,7 @@ def lookup_parameter(
         _ensure_compiled_package_importable()
         from policyengine_uk_compiled import Simulation
 
-        sim = Simulation(year=year)
+        sim = Simulation(year=year, dataset=FRS_DATASET)
         return lookup_parameter_metadata(
             parameters=sim.get_baseline_params(),
             query=query,
