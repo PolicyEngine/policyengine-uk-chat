@@ -84,7 +84,9 @@ def get_baseline_parameters(year: int = DEFAULT_SIMULATION_YEAR) -> Dict[str, An
         _ensure_compiled_package_importable()
         from policyengine_uk_compiled import Simulation
 
-        sim = Simulation(year=year)
+        # The engine requires an explicit data source since 0.45, but
+        # get_baseline_params() only shells out for parameters; no data loads.
+        sim = Simulation(year=year, dataset="frs")
         return {"year": year, "parameters": sim.get_baseline_params()}
     except Exception as exc:
         logger.error(f"Error getting baseline parameters: {exc}")
@@ -268,7 +270,7 @@ def lookup_parameter(
         _ensure_compiled_package_importable()
         from policyengine_uk_compiled import Simulation
 
-        sim = Simulation(year=year)
+        sim = Simulation(year=year, dataset="frs")
         return lookup_parameter_metadata(
             parameters=sim.get_baseline_params(),
             query=query,

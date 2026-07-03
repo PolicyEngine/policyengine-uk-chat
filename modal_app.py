@@ -17,7 +17,7 @@ app = modal.App(APP_NAME)
 def _preload_engine():
     """Bake the compiled engine into the image snapshot for fast cold starts."""
     from policyengine_uk_compiled import Simulation
-    sim = Simulation(year=2024)
+    sim = Simulation(year=2024, dataset="frs")
     sim.get_baseline_params()
     print("Engine pre-loaded.")
 

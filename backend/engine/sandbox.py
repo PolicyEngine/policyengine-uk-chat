@@ -39,6 +39,14 @@ def optional_numpy():
 def _safe_simulation_class(simulation_cls):
     class SafeSimulation:
         def __init__(self, *args, **kwargs):
+            # The engine requires an explicit data source since 0.45. The
+            # sandbox contract keeps data-less Simulation(year=...) meaning
+            # the FRS survey, matching the guard bookkeeping below.
+            if not any(
+                kwargs.get(key) is not None
+                for key in ("persons", "benunits", "households", "dataset", "data_dir")
+            ):
+                kwargs["dataset"] = "frs"
             object.__setattr__(self, "_dataset", (kwargs.get("dataset") or "frs").lower())
             object.__setattr__(
                 self,
