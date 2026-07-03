@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import logging
 import os
 
 from fastapi import FastAPI
@@ -13,12 +14,19 @@ from policyengine_observability.adapters.fastapi import (
 from observability.segments import SegmentName
 
 
+logger = logging.getLogger(__name__)
+
 SERVICE_NAME = "policyengine-uk-chat"
 SPAN_PREFIX = "uk_chat"
+DEPLOYED_PLATFORMS = frozenset(("google_cloud_run", "modal"))
 UK_CHAT_METRIC_ATTRIBUTE_KEYS = (
+    "cloud_run_configuration",
+    "cloud_run_revision",
+    "cloud_run_service",
     "gateway_outcome",
     "gateway_route",
     "gateway_tool",
+    "google_cloud_project",
     "modal_app_name",
     "modal_environment",
     "modal_function_name",
@@ -49,6 +57,10 @@ def _service_role(default: str) -> str:
 def _platform() -> str:
     if platform := _PROCESS_METADATA.get("platform"):
         return platform
+    if platform := os.getenv("OBSERVABILITY_PLATFORM"):
+        return platform
+    if os.getenv("K_SERVICE") or os.getenv("K_REVISION"):
+        return "google_cloud_run"
     if (
         os.getenv("MODAL_ENVIRONMENT")
         or os.getenv("MODAL_TASK_ID")
@@ -58,10 +70,23 @@ def _platform() -> str:
     return "local"
 
 
-def _metadata(service_role: str) -> dict[str, str]:
+def _default_log_destinations(platform: str) -> tuple[str, ...]:
+    if platform in DEPLOYED_PLATFORMS:
+        return ("google_cloud_logging",)
+    return ("stdout",)
+
+
+def _metadata(service_role: str, platform: str) -> dict[str, str]:
     values = {
-        "platform": _platform(),
+        "platform": platform,
         "runtime_role": _PROCESS_METADATA.get("runtime_role") or service_role,
+        "cloud_run_service": os.getenv("K_SERVICE"),
+        "cloud_run_revision": os.getenv("K_REVISION"),
+        "cloud_run_configuration": os.getenv("K_CONFIGURATION"),
+        "google_cloud_project": os.getenv("OBSERVABILITY_GOOGLE_CLOUD_PROJECT")
+        or os.getenv("GOOGLE_CLOUD_PROJECT")
+        or os.getenv("GCP_PROJECT")
+        or os.getenv("GCLOUD_PROJECT"),
         "modal_environment": os.getenv("MODAL_ENVIRONMENT"),
         "modal_app_name": _PROCESS_METADATA.get("modal_app_name"),
         "modal_function_name": _PROCESS_METADATA.get("modal_function_name"),
@@ -100,6 +125,7 @@ def init_observability(
         return existing
 
     service_role = _service_role(service_role)
+    platform = _platform()
     config = replace(
         ObservabilityConfig.from_env(
             service_name=SERVICE_NAME,
@@ -108,8 +134,18 @@ def init_observability(
             instrument_fastapi=True,
             instrument_httpx=True,
             extra_metric_attribute_keys=UK_CHAT_METRIC_ATTRIBUTE_KEYS,
+            default_log_destinations=_default_log_destinations(platform),
         ),
         environment=_environment(),
+    )
+    # One startup line so a misrouted destination or missing workload
+    # identity token is visible in the first seconds of any container.
+    logger.info(
+        "Observability initialized: platform=%s log_destinations=%s "
+        "modal_identity_token=%s",
+        platform,
+        ",".join(config.log_destinations),
+        "present" if os.getenv("MODAL_IDENTITY_TOKEN") else "absent",
     )
     return init_fastapi_observability(
         app,
@@ -119,5 +155,5 @@ def init_observability(
         service_role=service_role,
         span_prefix=SPAN_PREFIX,
         segment_registry=SegmentName,
-        static_attributes=_metadata(service_role),
+        static_attributes=_metadata(service_role, platform),
     )
