@@ -106,6 +106,21 @@ jobs:
 
           echo "modal_url=${{ steps.names.outputs.modal_url }}" >> "$GITHUB_OUTPUT"
 
+      - name: Smoke test preview backend
+        run: |
+          url="${{ steps.names.outputs.modal_url }}/version"
+          for attempt in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$url" || true)
+            if [ "$code" = "200" ]; then
+              echo "Preview backend healthy after deploy (attempt $attempt)."
+              exit 0
+            fi
+            echo "Attempt $attempt: got '$code'; retrying in 10s..."
+            sleep 10
+          done
+          echo "Preview backend failed the smoke test: $url" >&2
+          exit 1
+
       - name: Update Modal secret with preview frontend URL
         env:
           MODAL_SECRET_NAME: ${{ steps.names.outputs.modal_secret_name }}
@@ -147,6 +162,21 @@ jobs:
           POLICYENGINE_UK_CHAT_MODAL_APP_NAME="$MODAL_APP_NAME" \
           POLICYENGINE_UK_CHAT_MODAL_SECRET_NAME="$MODAL_SECRET_NAME" \
           modal deploy modal_app.py --name "$MODAL_APP_NAME"
+
+      - name: Smoke test preview backend after refresh
+        run: |
+          url="${{ steps.names.outputs.modal_url }}/version"
+          for attempt in $(seq 1 12); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$url" || true)
+            if [ "$code" = "200" ]; then
+              echo "Preview backend healthy after refresh (attempt $attempt)."
+              exit 0
+            fi
+            echo "Attempt $attempt: got '$code'; retrying in 10s..."
+            sleep 10
+          done
+          echo "Preview backend failed the smoke test: $url" >&2
+          exit 1
 
       - name: Add deploy summary
         run: |
