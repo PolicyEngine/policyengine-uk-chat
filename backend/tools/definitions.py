@@ -1,5 +1,6 @@
 """Model-facing tool definitions for the UK chat runtime."""
 
+from engine.constants import FRS_DATASET
 from engine.reforms import REFORM_SCHEMA
 
 
@@ -19,8 +20,8 @@ STRING_ARRAY_SCHEMA = {"type": "array", "items": {"type": "string"}}
 
 ALL_DATASET_SCHEMA = {
     "type": "string",
-    "enum": ["frs", "efrs", "spi", "lcfs", "was"],
-    "default": "frs",
+    "enum": [FRS_DATASET, "efrs", "spi", "lcfs", "was"],
+    "default": FRS_DATASET,
     "description": "Microdata source for aggregate simulation. FRS is the default for aggregate outputs.",
 }
 

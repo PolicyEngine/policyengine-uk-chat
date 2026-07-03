@@ -4,9 +4,11 @@ from pathlib import Path
 import sys
 from typing import Any, Dict
 
+from engine.constants import FRS_DATASET
+
 
 DATASET_LABELS = {
-    "frs": "Family Resources Survey",
+    FRS_DATASET: "Family Resources Survey",
     "efrs": "Enhanced FRS",
     "spi": "Survey of Personal Incomes",
     "lcfs": "Living Costs and Food Survey",
@@ -44,7 +46,7 @@ def ensure_compiled_package_importable() -> None:
     )
 
 
-def build_simulation(year: int, dataset: str = "frs"):
+def build_simulation(year: int, dataset: str = FRS_DATASET):
     """Build a compiled PolicyEngine UK Simulation."""
     ensure_compiled_package_importable()
     from policyengine_uk_compiled import Simulation
