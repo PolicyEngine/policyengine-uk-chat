@@ -641,9 +641,14 @@ class TestChatRouteWithMockedAnthropic:
 
         events = parse_sse(asyncio.run(consume_stream()))
 
-        assert events == [
-            {"type": "error", "content": "model selection failed"},
-        ]
+        # The SSE error event carries a generic message plus the session id as
+        # a correlation reference — never the raw exception text.
+        assert len(events) == 1
+        error_event = events[0]
+        assert error_event["type"] == "error"
+        assert "model selection failed" not in error_event["content"]
+        assert "Something went wrong" in error_event["content"]
+        assert "error-session" in error_event["content"]
         turn_log = next(
             payload
             for payload in map(json.loads, operation_records)
@@ -655,6 +660,42 @@ class TestChatRouteWithMockedAnthropic:
         assert turn_log["iterations"] == 0
         assert turn_log["tool_calls"] == 0
         assert turn_log["timing_counts"]["model.select"] == 1
+
+    def test_chat_route_error_event_hides_exception_details(self, monkeypatch):
+        """Regression test for information disclosure: raw exception text
+        (Anthropic SDK / httpx / Supabase strings can embed internal URLs,
+        file paths, and provider payloads) must never reach the SSE `error`
+        event. Users get a generic message with the session id as a
+        correlation reference; the full detail stays in server logs."""
+        import chat.orchestrator as chatbot
+
+        class RaisingAnthropicMessages:
+            def stream(self, **_kwargs):
+                raise Exception("secret-internal-detail-xyz")
+
+        fake_client = SimpleNamespace(messages=RaisingAnthropicMessages())
+
+        monkeypatch.setattr(chatbot, "get_async_client", lambda: fake_client)
+        monkeypatch.setattr(chatbot, "_is_followup", lambda _conversation: True)
+
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "messages": [
+                    {"role": "user", "content": "Calculate this household."}
+                ],
+                "session_id": "leak-test-session",
+            },
+        ) as response:
+            assert response.status_code == 200
+            text = response.read().decode()
+
+        assert "secret-internal-detail-xyz" not in text
+        events = parse_sse(text)
+        error_event = next(event for event in events if event["type"] == "error")
+        assert "Something went wrong" in error_event["content"]
+        assert "leak-test-session" in error_event["content"]
 
 
 # ---------------------------------------------------------------------------
