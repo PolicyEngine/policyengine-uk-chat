@@ -26,7 +26,6 @@ class ConversationDetail(ConversationSummary):
 class SharedConversationDetail(BaseModel):
     title: str
     messages: list
-    author: str | None = None
     created_at: str
 
 

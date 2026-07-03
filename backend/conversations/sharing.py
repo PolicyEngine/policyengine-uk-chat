@@ -38,9 +38,10 @@ def get_shared_conversation(share_token: str):
         ).first()
     if not row:
         raise HTTPException(status_code=404, detail="Shared conversation not found")
+    # Deliberately omit the author's identity: a share link should expose the
+    # thread's content, never the account email of whoever saved it.
     return SharedConversationDetail(
         title=row.title,
         messages=json.loads(row.messages) if isinstance(row.messages, str) else row.messages,
-        author=row.user_email,
         created_at=row.created_at.isoformat(),
     )
