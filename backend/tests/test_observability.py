@@ -64,9 +64,6 @@ def test_request_log_contains_metadata_and_timings(monkeypatch):
 
 
 def test_request_log_contains_modal_metadata(monkeypatch):
-    # Deployed platforms default to the Google Cloud Logging destination;
-    # force stdout here so this unit test never touches the network seam.
-    monkeypatch.setenv("OBSERVABILITY_LOG_DESTINATIONS", "stdout")
     monkeypatch.setenv("MODAL_ENVIRONMENT", "preview")
     configure_process_observability(
         platform="modal",
@@ -105,91 +102,6 @@ def test_fastapi_otel_instrumentation_is_enabled(monkeypatch):
     assert getattr(app, "_is_instrumented_by_opentelemetry", False) is True
 
 
-def test_request_log_contains_cloud_run_metadata(monkeypatch):
-    # Destination defaults are asserted init-only in
-    # test_cloud_run_observability_defaults_to_google_logs; force stdout here
-    # so the emission path never touches the network seam.
-    monkeypatch.setenv("OBSERVABILITY_LOG_DESTINATIONS", "stdout")
-    monkeypatch.delenv("OBSERVABILITY_PLATFORM", raising=False)
-    monkeypatch.setenv("K_SERVICE", "policyengine-uk-chat")
-    monkeypatch.setenv("K_REVISION", "policyengine-uk-chat-00001")
-    monkeypatch.setenv("K_CONFIGURATION", "policyengine-uk-chat")
-    monkeypatch.setenv("GOOGLE_CLOUD_PROJECT", "policyengine-test")
-
-    records = []
-    monkeypatch.setattr(REQUEST_LOGGER, "info", records.append)
-    app = _observed_app()
-
-    response = TestClient(app).get("/ok")
-
-    assert response.status_code == 200
-    payload = json.loads(records[0])
-    assert payload["platform"] == "google_cloud_run"
-    assert payload["runtime_role"] == "test_api"
-    assert payload["cloud_run_service"] == "policyengine-uk-chat"
-    assert payload["cloud_run_revision"] == "policyengine-uk-chat-00001"
-    assert payload["cloud_run_configuration"] == "policyengine-uk-chat"
-    assert payload["google_cloud_project"] == "policyengine-test"
-
-
-def test_local_observability_defaults_to_stdout_logs(monkeypatch):
-    monkeypatch.delenv("OBSERVABILITY_LOG_DESTINATIONS", raising=False)
-    monkeypatch.delenv("OBSERVABILITY_PLATFORM", raising=False)
-    monkeypatch.delenv("K_SERVICE", raising=False)
-    monkeypatch.delenv("K_REVISION", raising=False)
-    monkeypatch.delenv("MODAL_ENVIRONMENT", raising=False)
-    monkeypatch.delenv("MODAL_TASK_ID", raising=False)
-
-    app = FastAPI()
-    runtime = init_observability(app, service_role="test_api")
-
-    assert runtime.config.log_destinations == ("stdout",)
-
-
-def test_cloud_run_observability_defaults_to_google_logs(monkeypatch):
-    monkeypatch.delenv("OBSERVABILITY_LOG_DESTINATIONS", raising=False)
-    monkeypatch.delenv("OBSERVABILITY_PLATFORM", raising=False)
-    monkeypatch.setenv("K_SERVICE", "policyengine-uk-chat")
-
-    app = FastAPI()
-    runtime = init_observability(app, service_role="test_api")
-
-    assert runtime.config.log_destinations == ("google_cloud_logging",)
-
-
-def test_modal_observability_defaults_to_google_logs(monkeypatch):
-    monkeypatch.delenv("OBSERVABILITY_LOG_DESTINATIONS", raising=False)
-    monkeypatch.delenv("OBSERVABILITY_PLATFORM", raising=False)
-    configure_process_observability(
-        platform="modal",
-        service_role="api",
-        runtime_role="modal_web",
-        modal_app_name="peukchat-preview",
-        modal_function_name="web",
-    )
-
-    app = FastAPI()
-    runtime = init_observability(app, service_role="test_api")
-
-    assert runtime.config.log_destinations == ("google_cloud_logging",)
-
-
-def test_observability_log_destination_env_overrides_deployed_default(
-    monkeypatch,
-):
-    monkeypatch.setenv("OBSERVABILITY_LOG_DESTINATIONS", "stdout")
-    configure_process_observability(
-        platform="modal",
-        service_role="api",
-        runtime_role="modal_web",
-    )
-
-    app = FastAPI()
-    runtime = init_observability(app, service_role="test_api")
-
-    assert runtime.config.log_destinations == ("stdout",)
-
-
 def test_init_observability_is_idempotent():
     app = FastAPI()
 
@@ -222,8 +134,6 @@ def test_process_observability_does_not_mutate_env(monkeypatch):
         "OBSERVABILITY_RUNTIME_ROLE",
         "OBSERVABILITY_MODAL_APP_NAME",
         "OBSERVABILITY_MODAL_FUNCTION_NAME",
-        "OBSERVABILITY_GOOGLE_CLOUD_PROJECT",
-        "OBSERVABILITY_LOG_DESTINATIONS",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -241,8 +151,6 @@ def test_process_observability_does_not_mutate_env(monkeypatch):
         "OBSERVABILITY_RUNTIME_ROLE",
         "OBSERVABILITY_MODAL_APP_NAME",
         "OBSERVABILITY_MODAL_FUNCTION_NAME",
-        "OBSERVABILITY_GOOGLE_CLOUD_PROJECT",
-        "OBSERVABILITY_LOG_DESTINATIONS",
     ):
         assert key not in os.environ
 
