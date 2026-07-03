@@ -87,19 +87,19 @@ def test_request_log_contains_modal_metadata(monkeypatch):
     assert payload["modal_function_name"] == "web"
 
 
-def test_fastapi_otel_instrumentation_is_disabled(monkeypatch):
-    # Regression for #167: opentelemetry-instrumentation-fastapi < 0.64b0 raises
-    # AttributeError on FastAPI >= 0.137 include_router routing (`_IncludedRouter`
-    # has no `.path`), which 500'd every CORS preflight in production. We keep the
-    # OTel FastAPI auto-instrumentation off (overridable via the env var) until
-    # the pinned upstream fix ships. This guarantee is version-independent.
+def test_fastapi_otel_instrumentation_is_enabled(monkeypatch):
+    # #167/#170: policyengine-observability >= 1.3.1 pins the OTel stack to
+    # >= 0.64b0, which fixes the `_IncludedRouter` AttributeError on FastAPI
+    # >= 0.137 routing, so auto-instrumentation is back on. The CORS preflight
+    # test in test_api.py guards the original failure mode against the
+    # instrumented app.
     monkeypatch.delenv("OBSERVABILITY_INSTRUMENT_FASTAPI", raising=False)
     app = FastAPI()
 
     runtime = init_observability(app, service_role="test_api")
 
-    assert runtime.config.instrument_fastapi is False
-    assert getattr(app, "_is_instrumented_by_opentelemetry", False) is False
+    assert runtime.config.instrument_fastapi is True
+    assert getattr(app, "_is_instrumented_by_opentelemetry", False) is True
 
 
 def test_init_observability_is_idempotent():

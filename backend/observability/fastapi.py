@@ -105,12 +105,7 @@ def init_observability(
             service_name=SERVICE_NAME,
             service_role=service_role,
             span_prefix=SPAN_PREFIX,
-            # Disabled: opentelemetry-instrumentation-fastapi < 0.64b0 raises
-            # AttributeError on FastAPI >= 0.137 routing (`_IncludedRouter` has
-            # no `.path`), turning every CORS preflight into a 500 (see #167).
-            # Still overridable via OBSERVABILITY_INSTRUMENT_FASTAPI; re-enable
-            # once policyengine-observability pins the fixed instrumentor.
-            instrument_fastapi=False,
+            instrument_fastapi=True,
             instrument_httpx=True,
             extra_metric_attribute_keys=UK_CHAT_METRIC_ATTRIBUTE_KEYS,
         ),

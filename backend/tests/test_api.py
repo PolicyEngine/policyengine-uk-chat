@@ -615,7 +615,8 @@ class TestChatRouteWithMockedAnthropic:
         monkeypatch.setattr(chatbot, "get_async_client", lambda: object())
         monkeypatch.setattr(chatbot, "_is_followup", lambda _conversation: True)
         monkeypatch.setattr(chatbot, "_select_chat_model", raise_model_selection)
-        monkeypatch.setattr(OPERATION_LOGGER, "info", operation_records.append)
+        # Handled-error operation logs emit at WARNING since observability 1.1.
+        monkeypatch.setattr(OPERATION_LOGGER, "warning", operation_records.append)
 
         async def consume_stream():
             response = chatbot.stream_chat(
