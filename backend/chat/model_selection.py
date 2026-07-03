@@ -60,9 +60,34 @@ _POLICY_NUMERIC_CHANGE_RE = re.compile(
 )
 
 
+# Upper-bound token cost of one attached image. Anthropic bills an image at
+# roughly (width * height) / 750 tokens, capped near this for a full-size image.
+# We don't have dimensions at selection time, so use the cap as a safe estimate
+# rather than counting the base64 payload as if it were text (which inflated a
+# ~500 KB photo to ~170k "tokens" and misrouted trivial questions to the
+# expensive model).
+_IMAGE_TOKEN_ESTIMATE = 1600
+
+
 def _estimate_message_tokens(messages: List[dict]) -> int:
-    char_count = sum(len(str(block.get("content", ""))) for block in messages)
-    return char_count // 4
+    char_count = 0
+    image_count = 0
+    for block in messages:
+        content = block.get("content", "")
+        if isinstance(content, str):
+            char_count += len(content)
+        elif isinstance(content, list):
+            for part in content:
+                if isinstance(part, dict) and part.get("type") == "image":
+                    image_count += 1
+                elif isinstance(part, dict) and part.get("type") == "text":
+                    char_count += len(str(part.get("text", "")))
+                else:
+                    # tool_use / tool_result / other blocks — count serialised size.
+                    char_count += len(str(part))
+        else:
+            char_count += len(str(content))
+    return char_count // 4 + image_count * _IMAGE_TOKEN_ESTIMATE
 
 
 def _slot_value(slot: Any, attr: str) -> Any:

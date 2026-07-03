@@ -93,3 +93,24 @@ def test_generic_change_language_does_not_trigger_reform_signal(prompt):
     assert _detect_reform_signal(prompt) is None
     assert _select_chat_model(_messages(prompt)) == DEFAULT_FAST_MODEL
 
+
+def test_attached_image_does_not_inflate_token_estimate():
+    # A large base64 image on a trivial question must not be counted as text
+    # (which would push the estimate past the fast-model window and misroute
+    # the turn to the expensive complex model).
+    image_message = {
+        "role": "user",
+        "content": [
+            {
+                "type": "image",
+                "source": {
+                    "type": "base64",
+                    "media_type": "image/png",
+                    "data": "A" * 500_000,
+                },
+            },
+            {"type": "text", "text": "What is the personal allowance for 2025?"},
+        ],
+    }
+    assert _select_chat_model([image_message]) == DEFAULT_FAST_MODEL
+

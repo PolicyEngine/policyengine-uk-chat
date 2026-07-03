@@ -222,6 +222,11 @@ def stream_chat(request: Request, chat_request: ChatRequest):
 
                     terminal_stop_reason = "client_disconnected"
                     annotate_turn(terminal_stop_reason)
+                    # The tokens consumed before the disconnect are real Anthropic
+                    # usage; bill them so an aborted turn isn't free. This path
+                    # returns from the generator, so convergence billing never runs
+                    # and there's no double-count.
+                    record_usage_for_turn()
                     record_event(
                         "chat.client_disconnected",
                         session_id=session_id,
@@ -515,6 +520,11 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                         if len(recent_tool_calls) > 3:
                             recent_tool_calls.pop(0)
                             if len(set(recent_tool_calls)) == 1:
+                                # Bill the tokens spent looping before aborting.
+                                # This branch breaks out of the loop and skips the
+                                # convergence/iteration-cap billing, so recording
+                                # here bills the turn exactly once.
+                                record_usage_for_turn()
                                 terminal_stop_reason = "loop_detected"
                                 annotate_turn(terminal_stop_reason)
                                 yield f"data: {json.dumps({'type': 'error', 'content': 'Agent appears to be stuck in a loop. Please try rephrasing your question.'})}\n\n"
@@ -598,7 +608,16 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                                 if len(result_str) > 5000
                                 else result_str
                             )
-                            yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tu['name'], 'tool_id': tu['id'], 'status': 'success', 'result_summary': result_summary})}\n\n"
+                            # Tool handlers return an {"error": ...} dict rather than
+                            # raising, so surface that as an error status instead of
+                            # reporting every result as a success. (A `stderr` key can
+                            # appear on successful run_python calls, so it doesn't count.)
+                            tool_status = (
+                                "error"
+                                if isinstance(result, dict) and result.get("error")
+                                else "success"
+                            )
+                            yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tu['name'], 'tool_id': tu['id'], 'status': tool_status, 'result_summary': result_summary})}\n\n"
 
                         # Add tool results (truncate aggressively to avoid context blowup)
                         MAX_RESULT_CHARS = 15000
