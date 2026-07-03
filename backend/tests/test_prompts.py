@@ -109,7 +109,6 @@ def test_secondary_model_prompts_use_neutral_wording():
 
 
 def test_system_blocks_preserve_cache_breakpoints_after_prompt_refactor():
-    pytest.importorskip("pydantic_ai")
     pytest.importorskip("anthropic")
 
     from chat.system_blocks import _build_system_blocks
