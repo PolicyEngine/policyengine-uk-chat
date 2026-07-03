@@ -2,11 +2,12 @@
 
 import pytest
 
-from tools.definitions import TOOL_DEFINITIONS
+from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
 from prompts import (
     SYSTEM_PROMPT,
     SUGGESTION_SYSTEM,
     TITLE_SYSTEM,
+    gateway_system,
 )
 
 
@@ -99,6 +100,20 @@ def test_generate_chart_tool_requires_neutral_titles():
     assert "factually neutral" in description
     assert "typed calculation tool or `run_python`" in description
     assert "factually neutral" in title_description.lower()
+
+
+def test_gateway_prompt_renders_caller_supplied_default_year():
+    # The documented safe default year must flow through the `default_year`
+    # parameter (wired from DEFAULT_SIMULATION_YEAR by gateway/runtime.py), not
+    # sit hardcoded in the prompt text.
+    rendered = gateway_system(
+        "scope text",
+        "- tool — purpose. Required: none.",
+        "label_a, label_b",
+        DEFAULT_SIMULATION_YEAR,
+    )
+    assert f"year {DEFAULT_SIMULATION_YEAR}" in rendered
+    assert "{default_year}" not in rendered
 
 
 def test_secondary_model_prompts_use_neutral_wording():

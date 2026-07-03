@@ -45,8 +45,10 @@ def lightweight_system(scope_descriptor: str) -> str:
 # any expensive model call. It does NOT judge importance — it grounds each slot
 # (prompt / default / assumed); the server applies criticality and gates. These
 # instructions tell the model how to fill the plan via the forced `emit_plan`
-# tool. The two fail-safe biases are stated explicitly.
-_GATEWAY_INSTRUCTIONS = """
+# tool. The two fail-safe biases are stated explicitly. `{default_year}` is
+# filled by gateway_system() from the caller-supplied engine default so the
+# documented safe default can't drift from `DEFAULT_SIMULATION_YEAR`.
+_GATEWAY_INSTRUCTIONS_TEMPLATE = """
 You are a routing pre-pass for a UK tax-and-benefit microsimulation assistant.
 You do NOT answer the user. You build a short execution plan and emit it by
 calling the `emit_plan` tool exactly once. Never write prose.
@@ -62,8 +64,8 @@ Steps:
    of the output labels listed below). For each slot set `value` and tag
    `source`:
    - "prompt": the user stated it or clearly implied it.
-   - "default": a documented safe default applies (year 2025; dataset FRS/EFRS
-     for general income/benefit work; baseline is current law).
+   - "default": a documented safe default applies (year {default_year}; dataset
+     FRS/EFRS for general income/benefit work; baseline is current law).
    - "assumed": you are guessing — OR a default exists but the question makes it
      unsafe (e.g. a wealth question needs the wealth survey, so the usual
      dataset default is NOT safe → tag "assumed", not "default").
@@ -81,12 +83,15 @@ Two fail-safe biases — apply them:
 """.strip()
 
 
-def gateway_system(scope_descriptor: str, tool_summary: str, output_labels: str) -> str:
+def gateway_system(
+    scope_descriptor: str, tool_summary: str, output_labels: str, default_year: int
+) -> str:
     """Gateway classifier prompt, parameterised by the scope descriptor, a
-    compact tool summary, and the output-slot labels — all derived from the
-    engine / config so they can't drift from a hardcoded copy."""
+    compact tool summary, the output-slot labels, and the default simulation
+    year — all derived from the engine / config so they can't drift from a
+    hardcoded copy."""
     return (
-        _GATEWAY_INSTRUCTIONS
+        _GATEWAY_INSTRUCTIONS_TEMPLATE.format(default_year=default_year)
         + "\n\nOutput labels (use one per `output` slot): "
         + output_labels
         + "\n\nTools available (name — purpose; required params):\n"
