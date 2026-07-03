@@ -28,7 +28,7 @@ export function Chart({ spec, width, height }: ChartProps) {
   }
 }
 
-export function parseChartSpec(json: string): ChartSpec | null {
+function parseChartSpec(json: string): ChartSpec | null {
   try {
     const spec = JSON.parse(json);
     if (spec?.type && ["line", "bar", "area", "scatter"].includes(spec.type)) return spec as ChartSpec;
@@ -38,9 +38,8 @@ export function parseChartSpec(json: string): ChartSpec | null {
   }
 }
 
-export function extractChartSpecs(content: string): { charts: ChartSpec[]; cleanContent: string; hasIncompleteChart: boolean } {
+export function extractChartSpecs(content: string): { charts: ChartSpec[]; cleanContent: string } {
   const charts: ChartSpec[] = [];
-  let hasIncompleteChart = false;
 
   let cleanContent = content.replace(/```chart\s*([\s\S]*?)```/g, (match, jsonContent) => {
     const spec = parseChartSpec(jsonContent.trim());
@@ -49,9 +48,8 @@ export function extractChartSpecs(content: string): { charts: ChartSpec[]; clean
   });
 
   if (/```chart\s*[\s\S]*$/.test(cleanContent)) {
-    hasIncompleteChart = true;
     cleanContent = cleanContent.replace(/```chart\s*[\s\S]*$/, "[CHART_LOADING]");
   }
 
-  return { charts, cleanContent, hasIncompleteChart };
+  return { charts, cleanContent };
 }

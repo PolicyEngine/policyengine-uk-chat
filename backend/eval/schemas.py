@@ -64,8 +64,6 @@ class ModelToolCall(StrictModel):
 class ModelTurn(StrictModel):
     text: str = ""
     tool_calls: List[ModelToolCall] = Field(default_factory=list)
-    usage: Dict[str, Any] = Field(default_factory=dict)
-    raw: Dict[str, Any] = Field(default_factory=dict)
 
 
 class FrozenToolCall(StrictModel):

@@ -29,9 +29,6 @@ from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
 _DEFAULT_YEAR = str(DEFAULT_SIMULATION_YEAR)
 
 Criticality = Literal["high", "medium", "low"]
-Source = Literal["prompt", "default", "assumed"]
-Outcome = Literal["irrelevant", "out_of_scope", "partial", "needs_plan", "ready"]
-SlotKind = Literal["tool_input", "output"]
 
 
 @dataclass(frozen=True)

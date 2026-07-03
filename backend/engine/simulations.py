@@ -27,7 +27,6 @@ def ensure_compiled_package_importable() -> None:
     repo_parent = Path(__file__).resolve().parents[3]
     candidates = [
         repo_parent / "policyengine-uk-rust" / "interfaces" / "python",
-        repo_parent / "policyengine-uk-rust-codex-debug-issue" / "interfaces" / "python",
     ]
     for candidate in candidates:
         if candidate.is_dir():

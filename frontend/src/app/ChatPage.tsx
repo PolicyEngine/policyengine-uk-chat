@@ -8,7 +8,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
-import { Chart, extractChartSpecs, ChartSpec } from "@/components/charts";
+import { Chart, extractChartSpecs } from "@/components/charts";
 import { THEME } from "@/components/theme";
 import { getBackendEndpoint } from "@/utils/backend";
 
@@ -71,18 +71,6 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "help",  description: "Insert a starter prompt",           kind: "fill", fillText: "Help me understand " },
 ];
 
-function formatRelativeTime(isoString: string): string {
-  const date = new Date(isoString);
-  const diffMins = Math.floor((Date.now() - date.getTime()) / 60000);
-  if (diffMins < 1) return "just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  const diffHours = Math.floor(diffMins / 60);
-  if (diffHours < 24) return `${diffHours}h ago`;
-  const diffDays = Math.floor(diffHours / 24);
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString("en-GB", { day: "numeric", month: "short" });
-}
-
 function useAnimatedPlaceholder(queries: string[], enabled: boolean) {
   const [placeholder, setPlaceholder] = useState("");
   const [queryIndex, setQueryIndex] = useState(0);
@@ -123,7 +111,7 @@ interface ToolData {
   result_summary?: string;
 }
 
-type StreamEvent = { type: "text"; content: string; thinking?: boolean } | { type: "tool"; data: ToolData };
+type StreamEvent = { type: "text"; content: string } | { type: "tool"; data: ToolData };
 
 interface Message {
   role: "user" | "assistant";
@@ -308,7 +296,6 @@ export default function ChatPage() {
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sessionId = useRef<string | null>(null);
-  const debugLog = useRef<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const draftRestoredRef = useRef(false);
 
@@ -570,7 +557,6 @@ export default function ChatPage() {
     }
     setIsStreaming(true);
     setIsWaiting(true);
-    debugLog.current = [];
 
     const apiMessages = allMessages.map((msg) => {
       let content = msg.content;
@@ -676,18 +662,15 @@ export default function ChatPage() {
 
         for (const line of lines) {
           if (!line.startsWith("data: ")) continue;
-          debugLog.current.push(line);
           try {
             const data = JSON.parse(line.slice(6));
             if (data.type === "chunk") {
               setIsWaiting(false);
               const lastEvent = events[events.length - 1];
-              if (lastEvent?.type === "text" && !lastEvent.thinking) lastEvent.content += data.content;
+              if (lastEvent?.type === "text") lastEvent.content += data.content;
               else events.push({ type: "text", content: data.content });
               currentText += data.content;
               startDrain();
-            } else if (data.type === "thinking_done") {
-              // No-op: position-based split handles CoT placement
             } else if (data.type === "tool_start") {
               setIsWaiting(false);
               // Flush any pending text before showing tool
@@ -908,7 +891,7 @@ export default function ChatPage() {
             if (data.type === "chunk") {
               setIsWaiting(false);
               const lastEvent = newEvents[newEvents.length - 1];
-              if (lastEvent?.type === "text" && !lastEvent.thinking) lastEvent.content += data.content;
+              if (lastEvent?.type === "text") lastEvent.content += data.content;
               else newEvents.push({ type: "text", content: data.content });
               appendedText += data.content;
               flushTarget();
@@ -1160,13 +1143,6 @@ export default function ChatPage() {
       const len = el.value.length;
       try { el.setSelectionRange(len, len); } catch {}
     }, 0);
-  };
-
-  const formatToolSummary = (summary: string): string => {
-    // If it looks like raw JSON, just show the tool completed
-    if (summary.startsWith("{") || summary.startsWith("[") || summary.startsWith("'")) return "done";
-    // Otherwise truncate to something readable
-    return summary.length > 50 ? summary.slice(0, 50) + "…" : summary;
   };
 
   const toggleTool = (toolId: string) => {

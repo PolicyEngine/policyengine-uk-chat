@@ -14,21 +14,6 @@ export interface SeriesConfig {
   lineStyle?: "solid" | "dashed" | "dotted";
   lineWidth?: number;
   curve?: "smooth" | "step" | "linear";
-  radius?: number;
-  stack?: string;
-}
-
-export interface AnnotationConfig {
-  type: "line" | "label" | "area";
-  x?: number;
-  y?: number;
-  text?: string;
-  x1?: number;
-  x2?: number;
-  y1?: number;
-  y2?: number;
-  color?: string;
-  style?: "solid" | "dashed";
 }
 
 export interface LineChartSpec {
@@ -40,7 +25,6 @@ export interface LineChartSpec {
   y: AxisConfig;
   series: SeriesConfig[];
   data: Record<string, number | string>[];
-  annotations?: AnnotationConfig[];
   showLegend?: boolean;
   showGrid?: boolean;
   areaFill?: boolean;
@@ -55,7 +39,6 @@ export interface BarChartSpec {
   y: AxisConfig;
   series: SeriesConfig[];
   data: Record<string, number | string>[];
-  annotations?: AnnotationConfig[];
   showLegend?: boolean;
   showGrid?: boolean;
   arrangement?: "grouped" | "stacked";
@@ -71,10 +54,8 @@ export interface AreaChartSpec {
   y: AxisConfig;
   series: SeriesConfig[];
   data: Record<string, number | string>[];
-  annotations?: AnnotationConfig[];
   showLegend?: boolean;
   showGrid?: boolean;
-  stacked?: boolean;
 }
 
 export interface ScatterSeriesConfig {
