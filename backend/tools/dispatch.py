@@ -33,7 +33,6 @@ from engine.lookup.parameters import lookup_parameter_metadata
 from engine.microdata import analyse_microdata_result, get_cached_microdata, hash_reform
 from engine.reforms import build_compiled_policy, validate_reform_dict
 from engine.sandbox import (
-    run_generator,
     run_python_code,
     safe_import,
 )
@@ -53,7 +52,6 @@ _hash_reform = hash_reform
 _get_cached_microdata = get_cached_microdata
 _build_compiled_policy = build_compiled_policy
 _build_simulation = build_simulation
-_run_generator = run_generator
 
 __all__ = [
     "TOOL_DEFINITIONS",
@@ -382,10 +380,6 @@ def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
     if tool_name not in TOOL_HANDLERS:
         return {"error": f"Unknown tool: {tool_name}"}
     try:
-        if "generator" in tool_input:
-            logger.info(f"[TOOLS] Running generator for {tool_name}")
-            tool_input = _run_generator(tool_input["generator"])
-            logger.info(f"[TOOLS] Generator produced keys: {list(tool_input.keys())}")
         result = TOOL_HANDLERS[tool_name](**tool_input)
         logger.info(f"[TOOLS] {tool_name} completed")
         return result
