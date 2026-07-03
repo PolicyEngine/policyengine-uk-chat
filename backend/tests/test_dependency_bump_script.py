@@ -1,9 +1,10 @@
 """Unit tests for .github/scripts/dependency_bump.py.
 
-The script drives the dependency-update-pr workflow: it plans pin bumps for
-policyengine-* packages in backend/requirements.txt and opens PRs for them.
-These tests cover the planning and rewriting logic with the PyPI and git/gh
-seams mocked; nothing here touches the network or runs subprocesses.
+The script drives the dependency-update-pr workflow: it plans exact-pin
+bumps for policyengine-* packages in backend/requirements.txt and opens PRs
+for them. These tests cover the planning and rewriting logic with the PyPI
+and git/gh seams mocked; nothing here touches the network or runs
+subprocesses.
 """
 
 import importlib.util
@@ -23,42 +24,36 @@ _spec.loader.exec_module(bump)
 
 REQUIREMENTS = (
     "fastapi\n"
-    "policyengine-uk-compiled>=0.44.0,<0.45\n"
+    "policyengine-uk-compiled==0.44.0\n"
     "pandas\n"
-    "policyengine-observability[fastapi,httpx]>=1.0.0,<1.1\n"
+    "policyengine-observability[fastapi,httpx]==1.0.0\n"
 )
 
 
-def _plan(content, package, target, widens_cap):
+def _plan(content, package, target, crosses_minor):
     return {
         "package": package,
         "match": bump.parse_pin(content, package),
         "target": Version(target),
-        "widens_cap": widens_cap,
+        "crosses_minor": crosses_minor,
     }
 
 
 # ── Pin parsing ──────────────────────────────────────────────────────────
 
 
-def test_parse_pin_reads_floor_cap_and_extras():
+def test_parse_pin_reads_version_and_extras():
     match = bump.parse_pin(REQUIREMENTS, "policyengine-observability")
     assert match.group("extras") == "[fastapi,httpx]"
-    assert match.group("floor") == "1.0.0"
-    assert match.group("cap") == "1.1"
+    assert match.group("version") == "1.0.0"
 
 
-def test_parse_pin_allows_capless_pins():
-    match = bump.parse_pin("policyengine-foo>=2.0.0\n", "policyengine-foo")
-    assert match.group("floor") == "2.0.0"
-    assert match.group("cap") is None
-
-
-def test_parse_pin_ignores_comments_unpinned_and_other_packages():
+def test_parse_pin_ignores_comments_ranges_and_other_packages():
     content = (
-        "# policyengine-uk-compiled>=0.1.0\n"
+        "# policyengine-uk-compiled==0.1.0\n"
         "policyengine-uk-compiled\n"
-        "policyengine-uk-compiled-extras>=1.0.0\n"
+        "policyengine-uk-compiled>=0.44.0,<0.45\n"
+        "policyengine-uk-compiled-extras==1.0.0\n"
     )
     assert bump.parse_pin(content, "policyengine-uk-compiled") is None
 
@@ -73,43 +68,42 @@ def test_pinned_packages_finds_all_policyengine_pins():
 # ── Pin rewriting ────────────────────────────────────────────────────────
 
 
-def test_bumped_line_floor_only_preserves_cap():
+def test_bumped_line_rewrites_exact_pin():
     match = bump.parse_pin(REQUIREMENTS, "policyengine-uk-compiled")
-    line = bump.bumped_line(match, Version("0.44.2"), widens_cap=False)
-    assert line == "policyengine-uk-compiled>=0.44.2,<0.45"
+    assert bump.bumped_line(match, Version("0.44.2")) == (
+        "policyengine-uk-compiled==0.44.2"
+    )
 
 
-def test_bumped_line_widens_cap_to_next_minor_and_keeps_extras():
+def test_bumped_line_keeps_extras():
     match = bump.parse_pin(REQUIREMENTS, "policyengine-observability")
-    line = bump.bumped_line(match, Version("1.3.1"), widens_cap=True)
-    assert line == "policyengine-observability[fastapi,httpx]>=1.3.1,<1.4"
-
-
-def test_bumped_line_capless_pin_stays_capless():
-    match = bump.parse_pin("policyengine-foo>=2.0.0\n", "policyengine-foo")
-    assert bump.bumped_line(match, Version("2.5.0"), widens_cap=False) == (
-        "policyengine-foo>=2.5.0"
+    assert bump.bumped_line(match, Version("1.3.1")) == (
+        "policyengine-observability[fastapi,httpx]==1.3.1"
     )
 
 
 # ── Bump planning ────────────────────────────────────────────────────────
 
 
-def test_plan_explicit_version_not_newer_than_floor_is_noop(monkeypatch):
+def test_plan_explicit_version_not_newer_than_pin_is_noop(monkeypatch):
     monkeypatch.setattr(bump, "pypi_releases", lambda package: [Version("0.44.0")])
     assert bump.plan_bumps(REQUIREMENTS, "policyengine-uk-compiled", "0.44.0") == []
 
 
-def test_plan_explicit_in_range_version_bumps_floor_only(monkeypatch):
+def test_plan_explicit_patch_version_within_minor(monkeypatch):
     monkeypatch.setattr(bump, "pypi_releases", lambda package: [Version("0.44.2")])
     plans = bump.plan_bumps(REQUIREMENTS, "policyengine-uk-compiled", "0.44.2")
-    assert [(p["target"], p["widens_cap"]) for p in plans] == [(Version("0.44.2"), False)]
+    assert [(p["target"], p["crosses_minor"]) for p in plans] == [
+        (Version("0.44.2"), False)
+    ]
 
 
-def test_plan_explicit_version_beyond_cap_widens(monkeypatch):
+def test_plan_explicit_version_crossing_minor_needs_review(monkeypatch):
     monkeypatch.setattr(bump, "pypi_releases", lambda package: [Version("0.46.0")])
     plans = bump.plan_bumps(REQUIREMENTS, "policyengine-uk-compiled", "0.46.0")
-    assert [(p["target"], p["widens_cap"]) for p in plans] == [(Version("0.46.0"), True)]
+    assert [(p["target"], p["crosses_minor"]) for p in plans] == [
+        (Version("0.46.0"), True)
+    ]
 
 
 def test_plan_waits_for_pypi_propagation(monkeypatch):
@@ -134,11 +128,9 @@ def test_plan_exits_when_version_never_reaches_pypi(monkeypatch):
         bump.plan_bumps(REQUIREMENTS, "policyengine-uk-compiled", "0.44.2")
 
 
-def test_plan_discovery_picks_newest_in_range_not_global_latest(monkeypatch):
-    # The scenario from the #147 review: an out-of-range release exists above
-    # the cap, and PyPI's info.version would only ever report it. Discovery
-    # must still find the newest in-range release, and separately propose the
-    # cap-widening bump.
+def test_plan_discovery_proposes_patch_and_cross_minor_separately(monkeypatch):
+    # A newer cross-minor release must not hide the newest same-minor patch:
+    # the patch is proposed for auto-merge, the cross-minor jump for review.
     monkeypatch.setattr(
         bump,
         "pypi_releases",
@@ -150,18 +142,20 @@ def test_plan_discovery_picks_newest_in_range_not_global_latest(monkeypatch):
         ],
     )
     plans = bump.plan_bumps(REQUIREMENTS, "policyengine-uk-compiled", "")
-    assert [(p["target"], p["widens_cap"]) for p in plans] == [
+    assert [(p["target"], p["crosses_minor"]) for p in plans] == [
         (Version("0.44.2"), False),
         (Version("0.47.0"), True),
     ]
 
 
-def test_plan_discovery_only_beyond_cap_releases(monkeypatch):
+def test_plan_discovery_only_cross_minor_releases(monkeypatch):
     monkeypatch.setattr(
         bump, "pypi_releases", lambda package: [Version("1.2.0"), Version("1.3.1")]
     )
     plans = bump.plan_bumps(REQUIREMENTS, "policyengine-observability", "")
-    assert [(p["target"], p["widens_cap"]) for p in plans] == [(Version("1.3.1"), True)]
+    assert [(p["target"], p["crosses_minor"]) for p in plans] == [
+        (Version("1.3.1"), True)
+    ]
 
 
 def test_plan_discovery_current_pin_is_noop(monkeypatch):
@@ -239,13 +233,13 @@ def pr_sandbox(tmp_path, monkeypatch):
 
 
 def test_open_pr_rewrites_pin_and_requests_automerge(pr_sandbox):
-    plan = _plan(REQUIREMENTS, "policyengine-uk-compiled", "0.44.2", widens_cap=False)
+    plan = _plan(REQUIREMENTS, "policyengine-uk-compiled", "0.44.2", crosses_minor=False)
     bump.open_pr(REQUIREMENTS, plan)
 
     written = (pr_sandbox.root / "backend" / "requirements.txt").read_text()
-    assert "policyengine-uk-compiled>=0.44.2,<0.45" in written
+    assert "policyengine-uk-compiled==0.44.2" in written
     # Other pins are untouched.
-    assert "policyengine-observability[fastapi,httpx]>=1.0.0,<1.1" in written
+    assert "policyengine-observability[fastapi,httpx]==1.0.0" in written
 
     branch = "auto/bump-policyengine-uk-compiled-0.44.2"
     assert ("git", "switch", "-c", branch, "main") in pr_sandbox.commands
@@ -259,24 +253,24 @@ def test_open_pr_rewrites_pin_and_requests_automerge(pr_sandbox):
     assert pr_sandbox.merge_calls[0][:5] == ["gh", "pr", "merge", "--auto", "--squash"]
 
 
-def test_open_pr_cap_widening_skips_automerge(pr_sandbox):
-    plan = _plan(REQUIREMENTS, "policyengine-observability", "1.3.1", widens_cap=True)
+def test_open_pr_cross_minor_skips_automerge(pr_sandbox):
+    plan = _plan(REQUIREMENTS, "policyengine-observability", "1.3.1", crosses_minor=True)
     bump.open_pr(REQUIREMENTS, plan)
 
     written = (pr_sandbox.root / "backend" / "requirements.txt").read_text()
-    assert "policyengine-observability[fastapi,httpx]>=1.3.1,<1.4" in written
+    assert "policyengine-observability[fastapi,httpx]==1.3.1" in written
 
     pr_create = next(c for c in pr_sandbox.commands if c[:3] == ("gh", "pr", "create"))
     assert pr_create[pr_create.index("--title") + 1] == (
-        "chore: bump policyengine-observability to 1.3.1 (widens version cap)"
+        "chore: bump policyengine-observability to 1.3.1 (crosses minor version)"
     )
-    assert "outside the previous upper cap" in pr_create[pr_create.index("--body") + 1]
+    assert "crosses a minor version boundary" in pr_create[pr_create.index("--body") + 1]
     assert pr_sandbox.merge_calls == []
 
 
 def test_open_pr_skips_existing_branch(pr_sandbox, monkeypatch):
     monkeypatch.setattr(bump, "branch_exists", lambda branch: True)
-    plan = _plan(REQUIREMENTS, "policyengine-uk-compiled", "0.44.2", widens_cap=False)
+    plan = _plan(REQUIREMENTS, "policyengine-uk-compiled", "0.44.2", crosses_minor=False)
     bump.open_pr(REQUIREMENTS, plan)
 
     assert pr_sandbox.commands == []

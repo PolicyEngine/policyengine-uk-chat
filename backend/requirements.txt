@@ -3,7 +3,7 @@ uvicorn[standard]
 sqlmodel
 psycopg2-binary
 anthropic
-policyengine-uk-compiled>=0.47.0,<0.48
+policyengine-uk-compiled==0.47.0
 pandas
 pyyaml
 httpx
@@ -11,4 +11,4 @@ supabase
 stripe
 slowapi
 python-dateutil
-policyengine-observability[fastapi,httpx]>=1.3.1,<1.4
+policyengine-observability[fastapi,httpx]==1.3.1

@@ -7,16 +7,18 @@ Invoked by .github/workflows/dependency-update-pr.yml on:
 - workflow_dispatch, for manual bumps or sweeps;
 - a daily schedule, as a fallback sweep for dispatches lost to outages.
 
-Behaviour per package:
-- a release within the pin's upper cap bumps the floor only, and the PR has
+Pins are exact (`==`), so every version reaching production has been through
+a PR and CI — there is no in-range drift between releases. Behaviour per
+package:
+- a release within the pinned minor version is a patch update: the PR has
   auto-merge requested so it lands once CI is green;
-- a release at/above the cap bumps floor and cap in a PR left for human
-  review, so a potentially breaking upstream release surfaces as a visible
-  PR instead of silent drift.
+- a release at/above the next minor is left for human review, so a
+  potentially breaking upstream release surfaces as a visible PR instead of
+  an untested deploy.
 
 Version discovery reads PyPI's full `releases` map, never `info.version`,
-which only reports the newest release overall and would hide in-range
-releases behind a newer out-of-range one.
+which only reports the newest release overall and would hide a same-minor
+patch behind a newer cross-minor release.
 
 Environment:
   PACKAGE  optional; a single package to bump (empty = all policyengine-*
@@ -43,8 +45,7 @@ REQ_PATH = "backend/requirements.txt"
 PIN_RE = re.compile(
     r"^(?P<name>policyengine-[a-z0-9-]+)"
     r"(?P<extras>\[[^\]]*\])?"
-    r">=(?P<floor>[0-9]+(?:\.[0-9]+)*)"
-    r"(?:,<(?P<cap>[0-9]+(?:\.[0-9]+)*))?$"
+    r"==(?P<version>[0-9]+(?:\.[0-9]+)*)$"
 )
 # How long to wait for a dispatched version to appear on PyPI's JSON API
 # (publish and JSON propagation can lag the dispatch by a little).
@@ -88,18 +89,20 @@ def pinned_packages(content: str) -> list[str]:
 
 
 def plan_bumps(content: str, package: str, explicit_version: str) -> list[dict]:
-    """Return a list of {package, match, target, widens_cap} bump plans."""
+    """Return a list of {package, match, target, crosses_minor} bump plans."""
     match = parse_pin(content, package)
     if match is None:
-        print(f"{package}: no >= pin found in {REQ_PATH}; skipping.")
+        print(f"{package}: no == pin found in {REQ_PATH}; skipping.")
         return []
-    floor = Version(match.group("floor"))
-    cap = Version(match.group("cap")) if match.group("cap") else None
+    current = Version(match.group("version"))
+    # Auto-merge policy boundary: releases within the pinned minor are safe
+    # patch updates; anything at/above the next minor needs human review.
+    next_minor = Version(f"{current.major}.{current.minor + 1}")
 
     if explicit_version:
         target = Version(explicit_version)
-        if target <= floor:
-            print(f"{package}: {target} is not newer than the {floor} floor; nothing to do.")
+        if target <= current:
+            print(f"{package}: {target} is not newer than the {current} pin; nothing to do.")
             return []
         for attempt in range(PYPI_WAIT_ATTEMPTS):
             if target in pypi_releases(package):
@@ -109,35 +112,28 @@ def plan_bumps(content: str, package: str, explicit_version: str) -> list[dict]:
         else:
             print(f"{package}: {target} never appeared on PyPI; giving up.", file=sys.stderr)
             sys.exit(1)
-        widens = cap is not None and target >= cap
-        return [{"package": package, "match": match, "target": target, "widens_cap": widens}]
+        crosses = target >= next_minor
+        return [{"package": package, "match": match, "target": target, "crosses_minor": crosses}]
 
     releases = pypi_releases(package)
     plans = []
-    in_range = [v for v in releases if v > floor and (cap is None or v < cap)]
-    if in_range:
+    patch = [v for v in releases if v > current and v < next_minor]
+    if patch:
         plans.append(
-            {"package": package, "match": match, "target": max(in_range), "widens_cap": False}
+            {"package": package, "match": match, "target": max(patch), "crosses_minor": False}
         )
-    if cap is not None:
-        beyond = [v for v in releases if v >= cap]
-        if beyond:
-            plans.append(
-                {"package": package, "match": match, "target": max(beyond), "widens_cap": True}
-            )
+    beyond = [v for v in releases if v >= next_minor]
+    if beyond:
+        plans.append(
+            {"package": package, "match": match, "target": max(beyond), "crosses_minor": True}
+        )
     if not plans:
-        print(f"{package}: pin >={floor}" + (f",<{cap}" if cap else "") + " is current.")
+        print(f"{package}: pin =={current} is current.")
     return plans
 
 
-def bumped_line(match: re.Match, target: Version, widens_cap: bool) -> str:
-    cap = match.group("cap")
-    if widens_cap:
-        cap = f"{target.major}.{target.minor + 1}"
-    line = f"{match.group('name')}{match.group('extras') or ''}>={target}"
-    if cap:
-        line += f",<{cap}"
-    return line
+def bumped_line(match: re.Match, target: Version) -> str:
+    return f"{match.group('name')}{match.group('extras') or ''}=={target}"
 
 
 def branch_exists(branch: str) -> bool:
@@ -151,9 +147,9 @@ def branch_exists(branch: str) -> bool:
 
 def open_pr(content: str, plan: dict) -> None:
     package, match, target = plan["package"], plan["match"], plan["target"]
-    widens_cap = plan["widens_cap"]
+    crosses_minor = plan["crosses_minor"]
     old_line = match.group(0)
-    new_line = bumped_line(match, target, widens_cap)
+    new_line = bumped_line(match, target)
     branch = f"auto/bump-{package}-{target}"
 
     if branch_exists(branch):
@@ -169,26 +165,26 @@ def open_pr(content: str, plan: dict) -> None:
         run("git", "push", "-u", "origin", branch)
 
         title = f"chore: bump {package} to {target}"
-        if widens_cap:
-            title += " (widens version cap)"
+        if crosses_minor:
+            title += " (crosses minor version)"
         body_lines = [
             f"Automated bump of the `{package}` pin in `{REQ_PATH}`:",
             "",
             f"```diff\n-{old_line}\n+{new_line}\n```",
             "",
         ]
-        if widens_cap:
+        if crosses_minor:
             body_lines += [
-                f"⚠️ **{target} is outside the previous upper cap** — the cap was raised to "
-                "admit it, and upstream may have shipped breaking changes. Review the upstream "
-                "changelog and CI results before merging; auto-merge is intentionally not "
-                "requested.",
+                f"⚠️ **{target} crosses a minor version boundary** — upstream may have "
+                "shipped breaking changes. Review the upstream changelog and CI results "
+                "before merging; auto-merge is intentionally not requested.",
             ]
         else:
             body_lines += [
-                "The release is within the existing upper cap. Auto-merge is requested, so "
-                "this lands once CI passes (if the repository allows auto-merge); the merge "
-                "to `main` then triggers the normal deploy workflow.",
+                "The release stays within the pinned minor version. Auto-merge is "
+                "requested, so this lands once CI passes (if the repository allows "
+                "auto-merge); the merge to `main` then triggers the normal deploy "
+                "workflow.",
             ]
         pr = run(
             "gh", "pr", "create",
@@ -201,7 +197,7 @@ def open_pr(content: str, plan: dict) -> None:
         pr_url = pr.stdout.strip().splitlines()[-1]
         print(f"{package}: opened {pr_url}")
 
-        if not widens_cap:
+        if not crosses_minor:
             enable = subprocess.run(
                 ["gh", "pr", "merge", "--auto", "--squash", pr_url],
                 capture_output=True,
@@ -236,7 +232,7 @@ def main() -> None:
 
     for name in packages:
         for plan in plan_bumps(content, name, version if name == package else ""):
-            marker = " (widens cap)" if plan["widens_cap"] else ""
+            marker = " (crosses minor)" if plan["crosses_minor"] else ""
             print(f"{name}: planned bump to {plan['target']}{marker}")
             if dry_run:
                 continue
