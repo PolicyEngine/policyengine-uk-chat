@@ -1,0 +1,70 @@
+name: Dependency bump PRs
+
+# Release-driven dependency updates. Upstream release pipelines (e.g.
+# policyengine-uk-v2, which publishes policyengine-uk-compiled) send a
+# repository_dispatch event after their PyPI publish completes; this workflow
+# answers it by opening a bump PR against backend/requirements.txt. CI runs on
+# the PR, and merging to main triggers the normal deploy workflow — new engine
+# versions are never committed straight to main untested.
+#
+# The daily schedule is only a fallback sweep: repository_dispatch is
+# fire-and-forget, so a dispatch lost to an outage would otherwise be missed.
+
+on:
+  repository_dispatch:
+    types: [package-release]
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "PyPI package pinned in backend/requirements.txt (empty = sweep all policyengine-* pins)"
+        required: false
+        default: ""
+      version:
+        description: "Target version (empty = newest suitable release on PyPI; requires package)"
+        required: false
+        default: ""
+  schedule:
+    - cron: "0 6 * * *"
+
+concurrency:
+  group: dependency-bump
+  cancel-in-progress: false
+
+jobs:
+  bump:
+    name: Open bump PR if a newer release exists
+    runs-on: ubuntu-latest
+    if: github.repository == 'PolicyEngine/policyengine-uk-chat'
+    steps:
+      # PRs opened with the default GITHUB_TOKEN don't trigger CI, so the
+      # bump PRs would sit untested; use the PolicyEngine GitHub App instead
+      # (same pattern as policyengine-api's package updater).
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v6
+        with:
+          ref: main
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install script dependencies
+        run: pip install packaging --quiet
+
+      - name: Open bump PRs
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PACKAGE: ${{ github.event.client_payload.package || inputs.package }}
+          VERSION: ${{ github.event.client_payload.version || inputs.version }}
+        run: |
+          git config user.name "policyengine[bot]"
+          git config user.email "policyengine[bot]@users.noreply.github.com"
+          python .github/scripts/dependency_bump.py
