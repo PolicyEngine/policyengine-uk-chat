@@ -1555,24 +1555,32 @@ export default function ChatPage() {
   return (
     <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <style>{`
-        [data-tip],[data-tip-right]{position:relative}
-        [data-tip]::after,[data-tip-right]::after{
+        [data-tip],[data-tip-left],[data-tip-right]{position:relative}
+        [data-tip]::after,[data-tip-left]::after,[data-tip-right]::after{
+          /* content:none until :hover so the hidden box is never laid out —
+             an opacity:0 tooltip below/right of the last in-flow element
+             stretches the document's scrollable area (dead space). */
+          content:none;
           position:absolute;
           background:var(--text); color:var(--bg);
           padding:4px 8px; border-radius:6px; font-size:11px; line-height:1.3;
           white-space:normal; max-width:240px; width:max-content; text-align:center;
-          opacity:0; pointer-events:none; z-index:60;
-          transition:opacity 60ms ease;
+          pointer-events:none; z-index:60;
+          animation:tip-fade 60ms ease;
         }
         [data-tip]::after{
-          content:attr(data-tip);
           left:50%; top:calc(100% + 6px); transform:translateX(-50%);
         }
+        [data-tip-left]::after{
+          right:calc(100% + 8px); top:50%; transform:translateY(-50%);
+        }
         [data-tip-right]::after{
-          content:attr(data-tip-right);
           left:calc(100% + 8px); top:50%; transform:translateY(-50%);
         }
-        [data-tip]:hover::after,[data-tip-right]:hover::after{opacity:1}
+        [data-tip]:hover::after{content:attr(data-tip)}
+        [data-tip-left]:hover::after{content:attr(data-tip-left)}
+        [data-tip-right]:hover::after{content:attr(data-tip-right)}
+        @keyframes tip-fade{from{opacity:0}to{opacity:1}}
       `}</style>
       {/* Body */}
       <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", minHeight: "100dvh" }}>
@@ -1920,7 +1928,7 @@ export default function ChatPage() {
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isStreaming}
-                    data-tip="Attach an image (JPG, PNG, WEBP, or GIF, up to 5MB)"
+                    data-tip-left="Attach an image (JPG, PNG, WEBP, or GIF, up to 5MB)"
                     aria-label="Attach image"
                     style={{ width: "32px", height: "32px", borderRadius: "999px", background: "transparent", color: "var(--text-3)", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, opacity: isStreaming ? 0.5 : 1, transition: "background 120ms, color 120ms" }}
                   >
@@ -1930,7 +1938,7 @@ export default function ChatPage() {
                     type="button"
                     onClick={() => setChartsMode((v) => !v)}
                     disabled={isStreaming}
-                    data-tip={chartsMode
+                    data-tip-right={chartsMode
                       ? "Charts mode on — the agent will prefer to include a chart when the question is plot-worthy."
                       : "Charts mode off — turn on to bias answers toward including a chart for distributions, comparisons, or trends."}
                     style={{
