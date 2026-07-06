@@ -228,6 +228,13 @@ const slugify = (s: string): string =>
 
 // ---- /Export helpers --------------------------------------------------------
 
+/** Parse a Retry-After header into whole seconds. The header may be an
+ * HTTP-date (which parseInt turns into NaN) or missing — fall back to 60. */
+function parseRetryAfterSeconds(header: string | null): number {
+  const parsed = header ? parseInt(header, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
+}
+
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
   const url = new URL(getBackendEndpoint(endpoint), window.location.origin);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -293,11 +300,20 @@ export default function ChatPage() {
     if (next === "dark") document.documentElement.setAttribute("data-theme", "dark");
     else document.documentElement.removeAttribute("data-theme");
   };
-  const scrollRef = useRef<HTMLDivElement>(null);
+  const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sessionId = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const draftRestoredRef = useRef(false);
+  // Monotonic stream generation. Incremented whenever the visible conversation
+  // changes (new chat, load, delete-active) so any in-flight sendMessage /
+  // continueMessage callbacks can detect they are stale and stop writing state.
+  const streamGeneration = useRef(0);
+  // Title of the currently displayed conversation (null until known), plus a
+  // memoized in-flight title generation so a turn's double save (done +
+  // suggestions) only ever POSTs chat/title once per conversation.
+  const conversationTitleRef = useRef<string | null>(null);
+  const titleGenPromiseRef = useRef<Promise<string> | null>(null);
 
   // Restore draft from localStorage on initial mount only. Runs once, so it
   // can't interfere with later state changes (streaming, conversation loads).
@@ -384,10 +400,18 @@ export default function ChatPage() {
     }
   }, [user, authLoading]);
 
+  // The transcript scrolls with the document (the messages div itself is not
+  // scrollable), so auto-scroll targets a bottom sentinel. Only follow when the
+  // user is already near the bottom — never fight someone reading earlier
+  // messages mid-stream.
+  const isNearBottom = () => {
+    if (typeof window === "undefined" || typeof document === "undefined") return true;
+    return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 200;
+  };
+
   useEffect(() => {
-    if (scrollRef.current) {
-      scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-    }
+    if (!isNearBottom()) return;
+    bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
 
   // iOS Safari does not honor `interactive-widget=resizes-content`; it uses the
@@ -406,9 +430,28 @@ export default function ChatPage() {
     return () => vv.removeEventListener("resize", onResize);
   }, []);
 
+  // Kill any in-flight stream before the visible conversation changes: bump
+  // the generation so stale callbacks bail, abort the request, and reset the
+  // streaming UI state (the stale stream's own resets are generation-guarded).
+  const invalidateStream = () => {
+    streamGeneration.current += 1;
+    abortRef.current?.abort();
+    abortRef.current = null;
+    setIsStreaming(false);
+    setIsWaiting(false);
+  };
+
   const loadConversation = async (conv: ConversationSummary) => {
+    invalidateStream();
+    conversationTitleRef.current = null;
+    titleGenPromiseRef.current = null;
+    // If the user switches again (or starts a new chat) while this fetch is in
+    // flight, a later invalidateStream bumps the generation — bail instead of
+    // applying this conversation's state out of order.
+    const generation = streamGeneration.current;
     try {
       const data = conversationCache.current.get(conv.id) || await apiRequest<ConversationDetail>("GET", `conversations/${conv.id}`);
+      if (streamGeneration.current !== generation) return;
       if (!data?.messages?.length) { console.error("No messages in conversation", data); return; }
       const loaded: Message[] = data.messages.map((m) => {
         const raw = m as { role: string; content: string; events?: StreamEvent[]; stop_reason?: string; stopped?: boolean; cost_gbp?: number; suggestions?: string[] };
@@ -425,13 +468,14 @@ export default function ChatPage() {
       });
       const collapsed = new Set(loaded.map((m, i) => (m.role === "assistant" && m.events?.some((e) => e.type === "tool") ? i : -1)).filter((i) => i >= 0));
       sessionId.current = data.session_id;
+      conversationTitleRef.current = data.title || conv.title || null;
       setActiveConversationId(data.id);
       setCollapsedWorking(collapsed);
       setMessages(loaded);
       setHistoryOpen(true);
     } catch (e) {
       console.error("Failed to load conversation", e);
-      setMessages([{ role: "assistant", content: `Failed to load conversation: ${e instanceof Error ? e.message : "Unknown error"}` }]);
+      if (streamGeneration.current === generation) setMessages([{ role: "assistant", content: `Failed to load conversation: ${e instanceof Error ? e.message : "Unknown error"}` }]);
     }
   };
 
@@ -453,11 +497,24 @@ export default function ChatPage() {
     try {
       await apiRequest("DELETE", `conversations/${id}`);
       setConversations((prev) => prev.filter((c) => c.id !== id));
-      if (activeConversationId === id) setActiveConversationId(null);
+      conversationCache.current.delete(id);
+      if (activeConversationId === id) {
+        // Deleting the conversation on screen: kill any in-flight stream and
+        // fully reset chat state so the next send starts a fresh session
+        // instead of resurrecting the just-deleted conversation.
+        invalidateStream();
+        conversationTitleRef.current = null;
+        titleGenPromiseRef.current = null;
+        setMessages([]);
+        sessionId.current = null;
+        setActiveConversationId(null);
+        setCollapsedWorking(new Set());
+      }
     } catch (e) { console.error(e); }
   };
 
   const saveConversation = useCallback(async (msgs: Message[], sid: string): Promise<ConversationDetail | null> => {
+    const generation = streamGeneration.current;
     const firstUserMsg = msgs.find((m) => m.role === "user");
     if (!firstUserMsg) return null;
     const firstAssistantMsg = msgs.find((m) => m.role === "assistant");
@@ -468,11 +525,20 @@ export default function ChatPage() {
       return firstAssistantMsg.content;
     })();
 
-    let title = firstUserMsg.content.slice(0, 60);
-    try {
-      const { title: generated } = await apiRequest<{ title: string }>("POST", "chat/title", undefined, { first_user_message: firstUserMsg.content, first_assistant_message: firstAssistantContent || "" });
-      if (generated) title = generated;
-    } catch (e) { console.error("Title generation failed", e); }
+    // Generate a title only when the conversation doesn't already have one.
+    // Concurrent saves (done + suggestions arrive close together) share the
+    // same in-flight generation instead of POSTing chat/title twice.
+    let title = conversationTitleRef.current;
+    if (!title) {
+      if (!titleGenPromiseRef.current) {
+        const fallback = firstUserMsg.content.slice(0, 60);
+        titleGenPromiseRef.current = apiRequest<{ title: string }>("POST", "chat/title", undefined, { first_user_message: firstUserMsg.content, first_assistant_message: firstAssistantContent || "" })
+          .then(({ title: generated }) => generated || fallback)
+          .catch((e) => { console.error("Title generation failed", e); return fallback; });
+      }
+      title = await titleGenPromiseRef.current;
+      if (streamGeneration.current === generation) conversationTitleRef.current = title;
+    }
 
     const apiMessages = msgs.map((m) => {
       const base: Record<string, unknown> = { role: m.role, content: m.content };
@@ -488,7 +554,9 @@ export default function ChatPage() {
 
     try {
       const saved = await apiRequest<ConversationDetail>("POST", "conversations", undefined, { session_id: sid, title, messages: apiMessages, user_id: user?.id, user_email: user?.email });
-      setActiveConversationId(saved.id);
+      // The sidebar list and cache stay correct regardless, but only mark this
+      // conversation active if the user hasn't switched away in the meantime.
+      if (streamGeneration.current === generation) setActiveConversationId(saved.id);
       conversationCache.current.set(saved.id, saved);
       setConversations((prev) => {
         const filtered = prev.filter((c) => c.session_id !== sid);
@@ -530,6 +598,9 @@ export default function ChatPage() {
   }, [ensureConversationForReport, reportNote, user]);
 
   const startNewChat = () => {
+    invalidateStream();
+    conversationTitleRef.current = null;
+    titleGenPromiseRef.current = null;
     setMessages([]);
     sessionId.current = null;
     setActiveConversationId(null);
@@ -540,6 +611,12 @@ export default function ChatPage() {
 
   const sendMessage = async () => {
     if ((!input.trim() && !attachedImage) || isStreaming) return;
+    // Capture the stream generation for this send. If the user starts a new
+    // chat, loads another conversation, or deletes the active one while this
+    // stream is in flight, the generation bumps and every state write below
+    // bails instead of corrupting the newly displayed conversation.
+    const generation = streamGeneration.current;
+    const isStale = () => streamGeneration.current !== generation;
     // If the user attached an image but didn't type anything, give the model
     // a minimal nudge so the request still has a coherent user turn.
     const displayContent = input.trim() || (attachedImage ? `[Attached image: ${attachedImage.name}]` : "");
@@ -572,8 +649,13 @@ export default function ChatPage() {
     let displayedText = "";
     let drainTimer: ReturnType<typeof setInterval> | null = null;
     const toolsMap = new Map<string, ToolData>();
+    // Turn metadata from the `done` event, hoisted so the later `suggestions`
+    // save persists the same cost/truncation flags as the on-screen message.
+    let msgCost: number | undefined;
+    let stopReason: string | undefined;
 
     const updateMessage = () => {
+      if (isStale()) return;
       setMessages((prev) => {
         const newMsgs = [...prev];
         const lastIdx = newMsgs.length - 1;
@@ -586,6 +668,10 @@ export default function ChatPage() {
     const startDrain = () => {
       if (drainTimer) return;
       drainTimer = setInterval(() => {
+        if (isStale()) {
+          if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
+          return;
+        }
         if (displayedText.length >= currentText.length) {
           if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
           return;
@@ -636,15 +722,12 @@ export default function ChatPage() {
       });
       if (response.status === 402) {
         const err = await response.json().catch(() => ({ error: "No credit remaining" }));
-        setMessages((prev) => [...prev, { role: "assistant", content: err.error || "No credit remaining. Please top up to continue." }]);
-        setIsStreaming(false); setIsWaiting(false);
+        if (!isStale()) setMessages((prev) => [...prev, { role: "assistant", content: err.error || "No credit remaining. Please top up to continue." }]);
         return;
       }
       if (response.status === 429) {
-        const retryAfterHeader = response.headers.get("retry-after");
-        const seconds = retryAfterHeader ? parseInt(retryAfterHeader, 10) : 60;
-        setMessages((prev) => [...prev, { role: "assistant", content: `You're sending messages a bit fast — please wait ~${seconds}s and try again.`, isComplete: true }]);
-        setIsStreaming(false); setIsWaiting(false);
+        const seconds = parseRetryAfterSeconds(response.headers.get("retry-after"));
+        if (!isStale()) setMessages((prev) => [...prev, { role: "assistant", content: `You're sending messages a bit fast — please wait ~${seconds}s and try again.`, isComplete: true }]);
         return;
       }
       if (!response.ok) throw new Error("Request failed");
@@ -661,6 +744,7 @@ export default function ChatPage() {
         buffer = lines.pop() || "";
 
         for (const line of lines) {
+          if (isStale()) return;
           if (!line.startsWith("data: ")) continue;
           try {
             const data = JSON.parse(line.slice(6));
@@ -697,8 +781,8 @@ export default function ChatPage() {
               displayedText = currentText;
               updateMessage();
               if (data.session_id) sessionId.current = data.session_id;
-              const msgCost = typeof data.cost_gbp === "number" ? data.cost_gbp : undefined;
-              const stopReason = typeof data.stop_reason === "string" ? data.stop_reason : undefined;
+              msgCost = typeof data.cost_gbp === "number" ? data.cost_gbp : undefined;
+              stopReason = typeof data.stop_reason === "string" ? data.stop_reason : undefined;
               const hasTools = events.some((e) => e.type === "tool");
               if (hasTools) {
                 setMessages((prev) => {
@@ -717,12 +801,17 @@ export default function ChatPage() {
                 });
               }
               if (data.session_id) {
-                const finalMsgs = [...allMessages, { role: "assistant" as const, content: currentText, isComplete: true, events: [...events] }];
+                // Save the same metadata the on-screen message carries so a
+                // reload keeps the cost line and the Continue affordance for
+                // max_tokens-truncated turns.
+                const finalMsgs = [...allMessages, { role: "assistant" as const, content: currentText, isComplete: true, events: [...events], cost_gbp: msgCost, stop_reason: stopReason }];
                 saveConversation(finalMsgs, data.session_id);
               }
               if (data.balance) setBalance(data.balance);
               else fetchBalance();
-              setTimeout(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" }), 100);
+              setTimeout(() => {
+                if (!isStale() && isNearBottom()) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+              }, 100);
             } else if (data.type === "suggestions") {
               // Best-effort follow-up chips. Backend may emit this AFTER the
               // `done` event (the turn is already complete by the time these
@@ -738,11 +827,12 @@ export default function ChatPage() {
                   }
                   return newMsgs;
                 });
-                // Persist suggestions alongside the saved conversation.
+                // Persist suggestions alongside the saved conversation,
+                // keeping the metadata from `done` intact.
                 if (sessionId.current) {
                   const finalMsgs = [
                     ...allMessages,
-                    { role: "assistant" as const, content: currentText, isComplete: true, events: [...events], suggestions: cleaned },
+                    { role: "assistant" as const, content: currentText, isComplete: true, events: [...events], cost_gbp: msgCost, stop_reason: stopReason, suggestions: cleaned },
                   ];
                   saveConversation(finalMsgs, sessionId.current);
                 }
@@ -762,26 +852,42 @@ export default function ChatPage() {
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        // User stopped the stream — flush what we have, mark `stopped`
-        // so the UI shows a Continue affordance.
         if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
-        displayedText = currentText;
-        updateMessage();
-        setMessages((prev) => {
-          const newMsgs = [...prev];
-          const lastIdx = newMsgs.length - 1;
-          if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true, stopped: true };
-          return newMsgs;
-        });
-      } else {
+        if (!isStale()) {
+          displayedText = currentText;
+          const hasContent = currentText.trim().length > 0 || events.some((e) => e.type === "tool");
+          if (hasContent) {
+            // User stopped the stream — flush what we have, mark `stopped`
+            // so the UI shows a Continue affordance.
+            updateMessage();
+            setMessages((prev) => {
+              const newMsgs = [...prev];
+              const lastIdx = newMsgs.length - 1;
+              if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true, stopped: true };
+              return newMsgs;
+            });
+          } else {
+            // Stopped before the first token — there is nothing to continue
+            // from, so drop the empty assistant bubble if one was created.
+            setMessages((prev) => {
+              const last = prev[prev.length - 1];
+              if (last?.role === "assistant" && !last.content && !last.events?.some((e) => e.type === "tool")) return prev.slice(0, -1);
+              return prev;
+            });
+          }
+        }
+      } else if (!isStale()) {
         setMessages((prev) => [...prev, { role: "assistant", content: `Something went wrong: ${error instanceof Error ? error.message : "Unknown error"}` }]);
       }
     } finally {
-      abortRef.current = null;
+      // A newer stream may already own abortRef — only clear our own controller.
+      if (abortRef.current === controller) abortRef.current = null;
       if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
-      setIsStreaming(false);
-      setIsWaiting(false);
-      setTimeout(() => inputRef.current?.focus(), 0);
+      if (!isStale()) {
+        setIsStreaming(false);
+        setIsWaiting(false);
+        setTimeout(() => inputRef.current?.focus(), 0);
+      }
     }
   };
 
@@ -797,6 +903,10 @@ export default function ChatPage() {
    */
   const continueMessage = async (idx: number) => {
     if (isStreaming) return;
+    // Same stream-generation guard as sendMessage: bail out of every state
+    // write if the visible conversation changes while this is in flight.
+    const generation = streamGeneration.current;
+    const isStale = () => streamGeneration.current !== generation;
     const target = messages[idx];
     if (!target || target.role !== "assistant" || !target.isComplete) return;
     // Refuse if a tool is still pending in this message — re-triggering
@@ -820,6 +930,14 @@ export default function ChatPage() {
     prefill.content = prefill.content.trimEnd();
     if (!prefill.content) return;
 
+    // Snapshot the flags we are about to clear so early-exit paths (402, 429,
+    // fetch failure) can restore them instead of leaving the message stuck
+    // incomplete with no Continue affordance.
+    const prevFlags = { isComplete: target.isComplete, stop_reason: target.stop_reason, stopped: target.stopped };
+    const restoreTargetFlags = () => {
+      setMessages((prev) => prev.map((m, i) => i === idx ? { ...m, ...prevFlags } : m));
+    };
+
     // Optimistic: clear truncation/stopped flags and mark in-flight.
     setMessages((prev) => prev.map((m, i) => i === idx ? { ...m, isComplete: false, stop_reason: undefined, stopped: undefined } : m));
     setIsStreaming(true);
@@ -836,6 +954,7 @@ export default function ChatPage() {
     const baseCost = target.cost_gbp || 0;
 
     const flushTarget = () => {
+      if (isStale()) return;
       setMessages((prev) => prev.map((m, i) => i === idx ? {
         ...m,
         content: baseContent + appendedText,
@@ -852,24 +971,20 @@ export default function ChatPage() {
         body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, charts_mode: chartsMode }),
         signal: controller.signal,
       });
-      // The message was optimistically marked in-flight (isComplete: false) at
-      // the top of continueMessage. On an early bail (no credit / rate limited)
-      // we never stream anything back, so restore its completed state — otherwise
-      // the finished answer collapses into the "Working…" section and disappears.
-      const restoreTarget = () =>
-        setMessages((prev) => prev.map((m, i) => i === idx ? {
-          ...m, isComplete: true, stop_reason: target.stop_reason, stopped: target.stopped,
-        } : m));
       if (response.status === 402) {
         const err = await response.json().catch(() => ({ error: "No credit remaining" }));
-        restoreTarget();
-        setMessages((prev) => [...prev, { role: "assistant", content: err.error || "No credit remaining. Please top up to continue.", isComplete: true }]);
+        if (!isStale()) {
+          restoreTargetFlags();
+          setMessages((prev) => [...prev, { role: "assistant", content: err.error || "No credit remaining. Please top up to continue.", isComplete: true }]);
+        }
         return;
       }
       if (response.status === 429) {
-        const seconds = parseInt(response.headers.get("retry-after") || "60", 10);
-        restoreTarget();
-        setMessages((prev) => [...prev, { role: "assistant", content: `You're sending messages a bit fast — please wait ~${seconds}s and try again.`, isComplete: true }]);
+        const seconds = parseRetryAfterSeconds(response.headers.get("retry-after"));
+        if (!isStale()) {
+          restoreTargetFlags();
+          setMessages((prev) => [...prev, { role: "assistant", content: `You're sending messages a bit fast — please wait ~${seconds}s and try again.`, isComplete: true }]);
+        }
         return;
       }
       if (!response.ok) throw new Error("Request failed");
@@ -885,6 +1000,7 @@ export default function ChatPage() {
         const lines = buffer.split("\n");
         buffer = lines.pop() || "";
         for (const line of lines) {
+          if (isStale()) return;
           if (!line.startsWith("data: ")) continue;
           try {
             const data = JSON.parse(line.slice(6));
@@ -961,26 +1077,35 @@ export default function ChatPage() {
       }
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
-        setMessages((prev) => prev.map((m, i) => i === idx ? {
-          ...m,
-          isComplete: true,
-          content: baseContent + appendedText,
-          events: [...baseEvents, ...newEvents],
-          stopped: true,
-        } : m));
-      } else {
+        if (!isStale()) {
+          setMessages((prev) => prev.map((m, i) => i === idx ? {
+            ...m,
+            isComplete: true,
+            content: baseContent + appendedText,
+            events: [...baseEvents, ...newEvents],
+            stopped: true,
+          } : m));
+        }
+      } else if (!isStale()) {
         const errorText = `Continuation failed: ${error instanceof Error ? error.message : "Unknown error"}`;
+        // Restore the pre-continuation truncation/stopped flags so the
+        // Continue affordance survives a failed attempt.
         setMessages((prev) => prev.map((m, i) => i === idx ? {
           ...m,
           isComplete: true,
           content: baseContent + appendedText + "\n\n" + errorText,
           events: [...baseEvents, ...newEvents],
+          stop_reason: prevFlags.stop_reason,
+          stopped: prevFlags.stopped,
         } : m));
       }
     } finally {
-      abortRef.current = null;
-      setIsStreaming(false);
-      setIsWaiting(false);
+      // A newer stream may already own abortRef — only clear our own controller.
+      if (abortRef.current === controller) abortRef.current = null;
+      if (!isStale()) {
+        setIsStreaming(false);
+        setIsWaiting(false);
+      }
     }
   };
 
@@ -1430,24 +1555,32 @@ export default function ChatPage() {
   return (
     <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <style>{`
-        [data-tip],[data-tip-right]{position:relative}
-        [data-tip]::after,[data-tip-right]::after{
+        [data-tip],[data-tip-left],[data-tip-right]{position:relative}
+        [data-tip]::after,[data-tip-left]::after,[data-tip-right]::after{
+          /* content:none until :hover so the hidden box is never laid out —
+             an opacity:0 tooltip below/right of the last in-flow element
+             stretches the document's scrollable area (dead space). */
+          content:none;
           position:absolute;
           background:var(--text); color:var(--bg);
           padding:4px 8px; border-radius:6px; font-size:11px; line-height:1.3;
           white-space:normal; max-width:240px; width:max-content; text-align:center;
-          opacity:0; pointer-events:none; z-index:60;
-          transition:opacity 60ms ease;
+          pointer-events:none; z-index:60;
+          animation:tip-fade 60ms ease;
         }
         [data-tip]::after{
-          content:attr(data-tip);
           left:50%; top:calc(100% + 6px); transform:translateX(-50%);
         }
+        [data-tip-left]::after{
+          right:calc(100% + 8px); top:50%; transform:translateY(-50%);
+        }
         [data-tip-right]::after{
-          content:attr(data-tip-right);
           left:calc(100% + 8px); top:50%; transform:translateY(-50%);
         }
-        [data-tip]:hover::after,[data-tip-right]:hover::after{opacity:1}
+        [data-tip]:hover::after{content:attr(data-tip)}
+        [data-tip-left]:hover::after{content:attr(data-tip-left)}
+        [data-tip-right]:hover::after{content:attr(data-tip-right)}
+        @keyframes tip-fade{from{opacity:0}to{opacity:1}}
       `}</style>
       {/* Body */}
       <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", minHeight: "100dvh" }}>
@@ -1608,7 +1741,7 @@ export default function ChatPage() {
           )}
 
           {hasMessages && (
-            <div ref={scrollRef} style={{ width: "100%", maxWidth: "760px", margin: "0 auto", marginBottom: "20px" }}>
+            <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", marginBottom: "20px" }}>
               {messages.map((msg, idx) => (
                 <div key={idx} style={{ marginBottom: "8px" }}>
                   {msg.role === "user" ? (
@@ -1715,6 +1848,7 @@ export default function ChatPage() {
                   </div>
                 </div>
               )}
+              <div ref={bottomRef} aria-hidden="true" />
             </div>
           )}
 
@@ -1794,7 +1928,7 @@ export default function ChatPage() {
                     type="button"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isStreaming}
-                    data-tip="Attach an image (JPG, PNG, WEBP, or GIF, up to 5MB)"
+                    data-tip-left="Attach an image (JPG, PNG, WEBP, or GIF, up to 5MB)"
                     aria-label="Attach image"
                     style={{ width: "32px", height: "32px", borderRadius: "999px", background: "transparent", color: "var(--text-3)", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", display: "inline-flex", alignItems: "center", justifyContent: "center", padding: 0, opacity: isStreaming ? 0.5 : 1, transition: "background 120ms, color 120ms" }}
                   >
@@ -1804,7 +1938,7 @@ export default function ChatPage() {
                     type="button"
                     onClick={() => setChartsMode((v) => !v)}
                     disabled={isStreaming}
-                    data-tip={chartsMode
+                    data-tip-right={chartsMode
                       ? "Charts mode on — the agent will prefer to include a chart when the question is plot-worthy."
                       : "Charts mode off — turn on to bias answers toward including a chart for distributions, comparisons, or trends."}
                     style={{

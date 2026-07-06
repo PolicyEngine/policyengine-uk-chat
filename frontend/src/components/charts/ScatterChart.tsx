@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback, useId } from "react";
+import { useRef, useEffect, useState, useCallback, useId, useMemo } from "react";
 import * as d3 from "d3";
 import { ScatterChartSpec, TooltipData, CHART_COLORS, CHART_TYPOGRAPHY } from "./types";
 import { formatValue, getSeriesColor, CHART_MARGINS, getNiceDomain } from "./utils";
@@ -18,14 +18,21 @@ export function ScatterChart({ spec, width = 540, height = 340 }: ScatterChartPr
   const [tooltip, setTooltip] = useState<TooltipData | null>(null);
   const clipId = useId().replace(/:/g, "");
 
-  const margins = { ...CHART_MARGINS };
+  // Memoize derived values so the draw effect below only re-runs when the spec
+  // or dimensions actually change — not on every tooltip-driven render, which
+  // previously tore down and redrew the SVG at mousemove frequency.
+  const margins = useMemo(() => ({ ...CHART_MARGINS }), []);
   const innerWidth = width - margins.left - margins.right;
   const innerHeight = height - margins.top - margins.bottom;
 
-  const allX = spec.series.flatMap((s) => spec.data.map((d) => Number(d[s.xField])));
-  const allY = spec.series.flatMap((s) => spec.data.map((d) => Number(d[s.yField])));
-  const xDomain = getNiceDomain([d3.min(allX) || 0, d3.max(allX) || 0], spec.x.min, spec.x.max, 0.1);
-  const yDomain = getNiceDomain([d3.min(allY) || 0, d3.max(allY) || 0], spec.y.min, spec.y.max, 0.1);
+  const xDomain = useMemo(() => {
+    const allX = spec.series.flatMap((s) => spec.data.map((d) => Number(d[s.xField])));
+    return getNiceDomain([d3.min(allX) || 0, d3.max(allX) || 0], spec.x.min, spec.x.max, 0.1);
+  }, [spec]);
+  const yDomain = useMemo(() => {
+    const allY = spec.series.flatMap((s) => spec.data.map((d) => Number(d[s.yField])));
+    return getNiceDomain([d3.min(allY) || 0, d3.max(allY) || 0], spec.y.min, spec.y.max, 0.1);
+  }, [spec]);
 
   const handleMouseMove = useCallback((event: React.MouseEvent<SVGSVGElement>) => {
     const svg = svgRef.current;
