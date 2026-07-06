@@ -131,7 +131,6 @@ interface BalanceSummary {
   balance_gbp: number;
   free_tier_used_gbp: number;
   free_tier_remaining_gbp: number;
-  spent_this_month_gbp: number;
   total_available_gbp: number;
 }
 
@@ -235,6 +234,9 @@ function parseRetryAfterSeconds(header: string | null): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
 }
 
+/** Fixed label for the collapsed working section of an assistant message. */
+const WORKING_SUMMARY_LABEL = "Worked through the problem";
+
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
   const url = new URL(getBackendEndpoint(endpoint), window.location.origin);
   if (params) Object.entries(params).forEach(([k, v]) => url.searchParams.set(k, v));
@@ -243,7 +245,7 @@ async function apiRequest<T>(method: string, endpoint: string, params?: Record<s
   const res = await fetch(url.toString(), options);
   if (!res.ok) {
     let detail = "";
-    try { const body = await res.json(); detail = body.details || body.error || ""; } catch {}
+    try { const errorBody = await res.json(); detail = errorBody.details || errorBody.error || ""; } catch {}
     throw new Error(`API error ${res.status}: ${detail}`);
   }
   if (res.status === 204) return undefined as T;
@@ -260,7 +262,7 @@ export default function ChatPage() {
   const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
   const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
   const [copiedMessageIdx, setCopiedMessageIdx] = useState<number | null>(null);
-  const [historyOpen, setHistoryOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const conversationCache = useRef<Map<number, ConversationDetail>>(new Map());
@@ -472,7 +474,7 @@ export default function ChatPage() {
       setActiveConversationId(data.id);
       setCollapsedWorking(collapsed);
       setMessages(loaded);
-      setHistoryOpen(true);
+      setSidebarOpen(true);
     } catch (e) {
       console.error("Failed to load conversation", e);
       if (streamGeneration.current === generation) setMessages([{ role: "assistant", content: `Failed to load conversation: ${e instanceof Error ? e.message : "Unknown error"}` }]);
@@ -605,7 +607,7 @@ export default function ChatPage() {
     sessionId.current = null;
     setActiveConversationId(null);
     setCollapsedWorking(new Set());
-    setHistoryOpen(false);
+    setSidebarOpen(false);
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
@@ -623,7 +625,7 @@ export default function ChatPage() {
     const userMessage: Message = { role: "user", content: displayContent };
     const allMessages = [...messages, userMessage];
     setMessages((prev) => [...prev, userMessage]);
-    if (messages.length === 0 && user) setHistoryOpen(true);
+    if (messages.length === 0 && user) setSidebarOpen(true);
     // Snapshot the attachment for this send, then clear it from the input.
     const sendingImage = attachedImage;
     setInput("");
@@ -1488,9 +1490,6 @@ export default function ChatPage() {
     );
   };
 
-  /** Return a fixed label for the collapsed working section. */
-  const getWorkingSummary = (_events: StreamEvent[]): string => "Worked through the problem";
-
   const renderAssistantMessage = (msg: Message, msgIdx: number) => {
     if (!msg.events?.length) return renderMarkdown(msg.content);
 
@@ -1518,7 +1517,6 @@ export default function ChatPage() {
     }
 
     const toggleWorking = () => setCollapsedWorking((prev) => { const next = new Set(prev); if (next.has(msgIdx)) next.delete(msgIdx); else next.add(msgIdx); return next; });
-    const summary = hasTools ? getWorkingSummary(workingEvents) : "";
 
     return (
       <>
@@ -1526,7 +1524,7 @@ export default function ChatPage() {
           <>
             <div onClick={toggleWorking} style={{ display: "flex", alignItems: "baseline", gap: "6px", color: THEME.muted, fontSize: "12px", cursor: "pointer", userSelect: "none", margin: "6px 0", padding: "2px 0" }}>
               <IconChevronDown size={12} style={{ opacity: 0.5, transform: isWorkingCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", flexShrink: 0, position: "relative", top: "1px" }} />
-              <span style={{ color: THEME.text3, fontStyle: "italic" }}>{summary || "Working\u2026"}</span>
+              <span style={{ color: THEME.text3, fontStyle: "italic" }}>{WORKING_SUMMARY_LABEL}</span>
             </div>
             {!isWorkingCollapsed && (
               <div style={{ margin: "8px 0 16px", paddingLeft: "4px", borderLeft: `2px solid ${THEME.border}` }}>
@@ -1584,10 +1582,10 @@ export default function ChatPage() {
       `}</style>
       {/* Body */}
       <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", minHeight: "100dvh" }}>
-        {!isEmbed && !historyOpen && (
+        {!isEmbed && !sidebarOpen && (
           /* Rail */
           <div data-pe-sidebar style={{ width: "60px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 0", position: "sticky", top: 0, height: "100dvh", boxSizing: "border-box" }}>
-            <button onClick={() => setHistoryOpen(true)} data-tip-right="Open sidebar" aria-label="Open sidebar" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "8px", borderRadius: "10px", display: "flex", color: "var(--text)", marginBottom: "4px" }}
+            <button onClick={() => setSidebarOpen(true)} data-tip-right="Open sidebar" aria-label="Open sidebar" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "8px", borderRadius: "10px", display: "flex", color: "var(--text)", marginBottom: "4px" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
             >
@@ -1599,7 +1597,7 @@ export default function ChatPage() {
             >
               <IconEdit size={20} />
             </button>
-            <button onClick={() => setHistoryOpen(true)} data-tip-right="Chats" aria-label="Chats" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)" }}
+            <button onClick={() => setSidebarOpen(true)} data-tip-right="Chats" aria-label="Chats" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
             >
@@ -1624,7 +1622,7 @@ export default function ChatPage() {
           </div>
         )}
         {/* Sidebar */}
-        {!isEmbed && historyOpen && (
+        {!isEmbed && sidebarOpen && (
           <div data-pe-sidebar style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: 0, height: "100dvh", alignSelf: "flex-start", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", gap: "4px" }}>
               <button onClick={startNewChat} style={{ flex: 1, fontSize: "14px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", fontWeight: 500, justifyContent: "flex-start" }}
@@ -1633,7 +1631,7 @@ export default function ChatPage() {
               >
                 <IconPlus size={16} /> New chat
               </button>
-              <button onClick={() => setHistoryOpen(false)} data-tip="Collapse sidebar" aria-label="Collapse sidebar" style={{ background: "transparent", border: "none", borderRadius: "8px", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "8px" }}
+              <button onClick={() => setSidebarOpen(false)} data-tip="Collapse sidebar" aria-label="Collapse sidebar" style={{ background: "transparent", border: "none", borderRadius: "8px", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "8px" }}
                 onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
                 onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
               >

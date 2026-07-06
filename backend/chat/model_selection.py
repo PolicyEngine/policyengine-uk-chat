@@ -144,7 +144,7 @@ def _detect_reform_signal(text: str) -> str | None:
     return None
 
 
-def _select_chat_model(
+def select_chat_model(
     messages: List[dict],
     *,
     charts_mode: bool = False,
@@ -152,7 +152,7 @@ def _select_chat_model(
 ) -> str:
     signal = _detect_gateway_reasoning_signal(gateway_verdict)
     if signal is None:
-        signal = _detect_reform_signal(_last_user_text(messages))
+        signal = _detect_reform_signal(last_user_text(messages))
     if signal:
         logger.info("[MODEL] Routed to reasoning model (signal=%r)", signal)
         return DEFAULT_REASONING_MODEL
@@ -171,7 +171,7 @@ def _select_chat_model(
     return DEFAULT_FAST_MODEL
 
 
-def _last_user_text(conversation: List[dict]) -> str:
+def last_user_text(conversation: List[dict]) -> str:
     """Latest user message as plain text (flattening any image+text content)."""
     for msg in reversed(conversation):
         if msg.get("role") != "user":
@@ -186,7 +186,7 @@ def _last_user_text(conversation: List[dict]) -> str:
     return ""
 
 
-def _is_followup(conversation: List[dict]) -> bool:
+def is_followup(conversation: List[dict]) -> bool:
     """True once the conversation contains an assistant turn — i.e. this is not
     the opening user message. The gateway runs only on the opening turn; a
     single-message classifier can't see the context a follow-up depends on, and

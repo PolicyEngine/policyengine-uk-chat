@@ -126,10 +126,10 @@ def test_secondary_model_prompts_use_neutral_wording():
 def test_system_blocks_preserve_cache_breakpoints_after_prompt_refactor():
     pytest.importorskip("anthropic")
 
-    from chat.system_blocks import _build_system_blocks
+    from chat.system_blocks import build_system_blocks
 
-    on = _build_system_blocks(charts_mode=True)
-    off = _build_system_blocks(charts_mode=False)
+    on = build_system_blocks(charts_mode=True)
+    off = build_system_blocks(charts_mode=False)
     assert on[0] == off[0]
     assert on[0]["text"] == SYSTEM_PROMPT
     assert on[0]["cache_control"] == {"type": "ephemeral"}

@@ -10,7 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from gateway.policy import (
-    TOOL_SLOT_KIND,
+    TOOL_SLOT_REQUIREMENT,
     SlotFact,
     criticality,
     gate,
@@ -26,18 +26,18 @@ class TestSlotInventory:
     """The slot inventory is derived from TOOL_DEFINITIONS so it can't drift."""
 
     def test_required_slots_detected(self):
-        assert TOOL_SLOT_KIND[("calculate_household", "person")] == "required"
-        assert TOOL_SLOT_KIND[("analyse_microdata", "entity")] == "required"
-        assert TOOL_SLOT_KIND[("analyse_microdata", "operation")] == "required"
-        assert TOOL_SLOT_KIND[("lookup_parameter", "query")] == "required"
+        assert TOOL_SLOT_REQUIREMENT[("calculate_household", "person")] == "required"
+        assert TOOL_SLOT_REQUIREMENT[("analyse_microdata", "entity")] == "required"
+        assert TOOL_SLOT_REQUIREMENT[("analyse_microdata", "operation")] == "required"
+        assert TOOL_SLOT_REQUIREMENT[("lookup_parameter", "query")] == "required"
 
     def test_defaulted_slots_detected(self):
-        assert TOOL_SLOT_KIND[("run_economy_simulation", "dataset")] == "defaulted"
-        assert TOOL_SLOT_KIND[("calculate_household", "year")] == "defaulted"
-        assert TOOL_SLOT_KIND[("lookup_parameter", "year")] == "defaulted"
+        assert TOOL_SLOT_REQUIREMENT[("run_economy_simulation", "dataset")] == "defaulted"
+        assert TOOL_SLOT_REQUIREMENT[("calculate_household", "year")] == "defaulted"
+        assert TOOL_SLOT_REQUIREMENT[("lookup_parameter", "year")] == "defaulted"
 
     def test_optional_undefaulted_slots_detected(self):
-        assert TOOL_SLOT_KIND[("calculate_household", "reform")] == "optional"
+        assert TOOL_SLOT_REQUIREMENT[("calculate_household", "reform")] == "optional"
 
 
 class TestCriticality:

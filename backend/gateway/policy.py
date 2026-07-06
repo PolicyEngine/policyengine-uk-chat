@@ -52,8 +52,8 @@ class GateResult:
 # schemas. Each (tool, slot) is classified required / defaulted / optional.
 # ---------------------------------------------------------------------------
 
-def _build_slot_kinds() -> dict:
-    kinds: dict = {}
+def _build_slot_requirements() -> dict:
+    requirements: dict = {}
     for tool in TOOL_DEFINITIONS:
         name = tool["name"]
         schema = tool.get("input_schema", {})
@@ -61,15 +61,15 @@ def _build_slot_kinds() -> dict:
         props = schema.get("properties", {}) or {}
         for slot, spec in props.items():
             if slot in required:
-                kinds[(name, slot)] = "required"
+                requirements[(name, slot)] = "required"
             elif isinstance(spec, dict) and "default" in spec:
-                kinds[(name, slot)] = "defaulted"
+                requirements[(name, slot)] = "defaulted"
             else:
-                kinds[(name, slot)] = "optional"
-    return kinds
+                requirements[(name, slot)] = "optional"
+    return requirements
 
 
-TOOL_SLOT_KIND = _build_slot_kinds()
+TOOL_SLOT_REQUIREMENT = _build_slot_requirements()
 
 # Curated overrides where the schema's required/default flags don't match the
 # real importance. Kept tiny and commented to limit drift.
@@ -163,8 +163,8 @@ def _base_criticality(tool: Optional[str], slot: SlotFact) -> Criticality:
     key = (tool, slot.name)
     if key in _CRITICALITY_OVERRIDES:
         return _CRITICALITY_OVERRIDES[key]
-    kind = TOOL_SLOT_KIND.get(key)
-    if kind == "required":
+    requirement = TOOL_SLOT_REQUIREMENT.get(key)
+    if requirement == "required":
         return "high"
     # defaulted, optional, or an unrecognised (possibly hallucinated) slot.
     return "low"

@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from chat.model_selection import _detect_reform_signal, _select_chat_model
+from chat.model_selection import _detect_reform_signal, select_chat_model
 from config import DEFAULT_FAST_MODEL, DEFAULT_REASONING_MODEL
 
 
@@ -25,7 +25,7 @@ class TestSelectChatModel:
         verdict = _verdict("run_economy_simulation", [_slot("reform")])
 
         assert (
-            _select_chat_model(_messages("Model the policy change"), gateway_verdict=verdict)
+            select_chat_model(_messages("Model the policy change"), gateway_verdict=verdict)
             == DEFAULT_REASONING_MODEL
         )
 
@@ -36,7 +36,7 @@ class TestSelectChatModel:
         )
 
         assert (
-            _select_chat_model(_messages("Show the distribution"), gateway_verdict=verdict)
+            select_chat_model(_messages("Show the distribution"), gateway_verdict=verdict)
             == DEFAULT_REASONING_MODEL
         )
 
@@ -51,31 +51,31 @@ class TestSelectChatModel:
         )
 
         assert (
-            _select_chat_model(_messages("How much does child benefit cost?"), gateway_verdict=verdict)
+            select_chat_model(_messages("How much does child benefit cost?"), gateway_verdict=verdict)
             == DEFAULT_FAST_MODEL
         )
 
     def test_decile_reform_text_routes_to_reasoning_model(self):
         prompt = "Show me the decile impact of a reform raising the personal allowance by 5%"
 
-        assert _select_chat_model(_messages(prompt)) == DEFAULT_REASONING_MODEL
+        assert select_chat_model(_messages(prompt)) == DEFAULT_REASONING_MODEL
 
     def test_plain_question_routes_to_fast_model(self):
         assert (
-            _select_chat_model(_messages("What is the personal allowance for 2025?"))
+            select_chat_model(_messages("What is the personal allowance for 2025?"))
             == DEFAULT_FAST_MODEL
         )
 
     def test_charts_mode_upgrades_without_reform_signal(self):
         assert (
-            _select_chat_model(_messages("Plot the income tax schedule"), charts_mode=True)
+            select_chat_model(_messages("Plot the income tax schedule"), charts_mode=True)
             == DEFAULT_REASONING_MODEL
         )
 
     def test_policy_rate_change_pattern_routes_to_reasoning_model(self):
         prompt = "What happens if the basic rate goes from 20% to 25%?"
 
-        assert _select_chat_model(_messages(prompt)) == DEFAULT_REASONING_MODEL
+        assert select_chat_model(_messages(prompt)) == DEFAULT_REASONING_MODEL
 
 
 @pytest.mark.parametrize(
@@ -91,7 +91,7 @@ class TestSelectChatModel:
 )
 def test_generic_change_language_does_not_trigger_reform_signal(prompt):
     assert _detect_reform_signal(prompt) is None
-    assert _select_chat_model(_messages(prompt)) == DEFAULT_FAST_MODEL
+    assert select_chat_model(_messages(prompt)) == DEFAULT_FAST_MODEL
 
 
 def test_attached_image_does_not_inflate_token_estimate():
@@ -112,5 +112,5 @@ def test_attached_image_does_not_inflate_token_estimate():
             {"type": "text", "text": "What is the personal allowance for 2025?"},
         ],
     }
-    assert _select_chat_model([image_message]) == DEFAULT_FAST_MODEL
+    assert select_chat_model([image_message]) == DEFAULT_FAST_MODEL
 

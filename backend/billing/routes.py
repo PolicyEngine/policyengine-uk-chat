@@ -3,7 +3,7 @@
 from fastapi import APIRouter, Request
 
 from billing.credits import get_balance_summary, get_supabase
-from billing.stripe import CheckoutRequest, apply_webhook, create_checkout_session
+from billing.stripe_integration import CheckoutRequest, apply_webhook, create_checkout_session
 
 router = APIRouter(prefix="/billing", tags=["billing"])
 

@@ -83,7 +83,6 @@ def get_balance_summary(user_id: str) -> dict[str, float]:
         "balance_gbp": balance,
         "free_tier_used_gbp": float(credits["free_tier_used_gbp"]),
         "free_tier_remaining_gbp": free_remaining,
-        "spent_this_month_gbp": float(credits["free_tier_used_gbp"]),
         "total_available_gbp": balance + free_remaining,
     }
 
