@@ -74,8 +74,9 @@ tool registration.
 `lookup_parameter` reads year-scoped values from
 `policyengine_uk_compiled.Simulation.get_baseline_params()`.
 
-`policyengine-uk-compiled` 0.44.0 is the minimum supported output contract for
-microdata-backed tools. When reform is omitted, `run_microdata()`,
+`policyengine-uk-compiled` 0.65.0 is the minimum supported output contract for
+microdata-backed tools. Since 0.45, `Simulation` has no default dataset — every
+construction must pass `dataset=`, `data_dir=`, or synthetic household frames. When reform is omitted, `run_microdata()`,
 `calculate_household`, and `analyse_microdata` outputs use plain calculated
 column names such as `income_tax`, `universal_credit`, and `net_income`. When a
 reform is supplied, including an empty no-op object (`{}`), calculations use
