@@ -1000,7 +1000,9 @@ result = [
         assert result["result"] == {"ok": True}
 
     def test_rejects_frs_row_level_microdata(self):
-        result = run_python("sim = Simulation(year=2025)\nresult = sim.run_microdata()")
+        result = run_python(
+            "sim = Simulation(year=2025, dataset='frs')\nresult = sim.run_microdata()"
+        )
 
         assert "error" in result
         assert "FRS row-level microdata" in result["error"]

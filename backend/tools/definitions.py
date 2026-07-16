@@ -165,7 +165,9 @@ RUN_PYTHON_INPUT_SCHEMA = {
             "description": (
                 "Python code to execute. Must assign the final answer to `result`. "
                 "Use the preloaded PolicyEngine interface directly, for example: "
-                "`sim = Simulation(year=2025)` or `policy = Parameters.model_validate({...})`."
+                "`sim = Simulation(year=2025, dataset='efrs')` or "
+                "`policy = Parameters.model_validate({...})`. Simulation requires an "
+                "explicit data source (dataset= or synthetic household frames)."
             ),
         },
     },
