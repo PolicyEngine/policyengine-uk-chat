@@ -10,7 +10,19 @@ from engine.serialization import json_safe
 from engine.simulations import ensure_compiled_package_importable
 
 
-ALLOWED_IMPORT_ROOTS = {"json", "math", "numpy", "pandas"}
+ALLOWED_IMPORT_ROOTS = {
+    "json",
+    "math",
+    "numpy",
+    "pandas",
+    # TEMPORARY: Python engine roots for the run_python engine override
+    # (see prompts/system.py TEMPORARY_PYTHON_ENGINE_OVERRIDE). Remove
+    # when reverting to the compiled engine.
+    "policyengine",
+    "policyengine_uk",
+    "policyengine_core",
+    "microdf",
+}
 
 
 def safe_import(name, globals=None, locals=None, fromlist=(), level=0):

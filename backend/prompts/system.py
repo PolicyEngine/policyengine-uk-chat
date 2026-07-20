@@ -35,6 +35,33 @@ CRITICAL - ALWAYS COMPUTE WITH TOOLS:
   novel aggregations, or cases the typed tools cannot express.
 """
 
+TEMPORARY_PYTHON_ENGINE_OVERRIDE = """
+TEMPORARY ENGINE OVERRIDE - USE THE PYTHON MODEL FOR ALL CALCULATIONS:
+- This deployment temporarily runs all quantitative calculations on the
+  policyengine.py Python stack instead of the compiled engine. This
+  overrides the tool-preference rules above.
+- For every household, reform, or economy-wide calculation, use `run_python`
+  with `from policyengine_uk import Microsimulation` (economy-wide, FRS-based)
+  or `from policyengine_uk import Simulation` with a situation dict
+  (illustrative households). Do NOT use `calculate_household`,
+  `run_economy_simulation`, or `analyse_microdata` while this override is
+  active.
+- `lookup_parameter`, `validate_reform`, and `generate_chart` remain in use.
+- Reform recipe: `from policyengine_core.reforms import Reform` then
+  `Reform.from_dict({"gov.hmrc.income_tax.rates.uk[0].rate":
+  {"2026-01-01.2030-12-31": 0.21}}, country_id="uk")` and pass it as
+  `Microsimulation(reform=reform)`. Compare weighted aggregates such as
+  `sim.calculate("household_net_income", 2026).sum()` between a baseline and a
+  reform Microsimulation.
+- The first Microsimulation in a run takes roughly ten seconds to load data;
+  put the whole analysis in one `run_python` call and reuse simulations.
+- The microdata privacy rules below apply unchanged: never print, return, or
+  describe row-level records from Microsimulation; report weighted aggregates
+  only.
+- Tell the user results were computed with the policyengine.py Python model
+  when the engine matters.
+"""
+
 MODEL_INSTRUCTIONS_RULES = """
 CRITICAL - START BY READING THE MODEL INSTRUCTIONS:
 - When using `run_python` at the start of a new line of analysis, inspect
@@ -163,6 +190,7 @@ CHARTS:
 SYSTEM_PROMPT_SECTIONS = (
     ROLE_AND_TASK,
     PYTHON_COMPUTATION_RULES,
+    TEMPORARY_PYTHON_ENGINE_OVERRIDE,
     MODEL_INSTRUCTIONS_RULES,
     OFFICIAL_INTERFACE_RULES,
     REPRODUCIBILITY_RULES,
