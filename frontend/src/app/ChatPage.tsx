@@ -371,8 +371,14 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
-    apiRequest<{ policyengine_uk_compiled: string }>("GET", "version")
-      .then((v) => setModelVersion(v.policyengine_uk_compiled))
+    apiRequest<{ engine?: string; engine_version?: string; policyengine_uk_compiled: string }>("GET", "version")
+      .then((v) =>
+        setModelVersion(
+          v.engine && v.engine_version
+            ? `${v.engine} v${v.engine_version}`
+            : `policyengine-uk v${v.policyengine_uk_compiled}`,
+        ),
+      )
       .catch(() => {});
     // Refresh balance after Stripe redirect
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("topup") === "success") {
@@ -1701,7 +1707,7 @@ export default function ChatPage() {
             </div>
             {modelVersion && (
               <div style={{ paddingTop: "8px", textAlign: "center", color: "var(--faint)", fontSize: "11px" }}>
-                policyengine-uk v{modelVersion}
+                {modelVersion}
               </div>
             )}
           </div>

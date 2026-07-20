@@ -76,9 +76,21 @@ def health():
 
 @app.get("/version")
 def version():
-    try:
-        from importlib.metadata import version as pkg_version
-        compiled_version = pkg_version("policyengine-uk-compiled")
-    except Exception:
-        compiled_version = "unknown"
-    return {"policyengine_uk_compiled": compiled_version}
+    from importlib.metadata import version as pkg_version
+
+    def _pkg_version(name: str) -> str:
+        try:
+            return pkg_version(name)
+        except Exception:
+            return "unknown"
+
+    # TEMPORARY: while the Python engine override is active (see
+    # prompts/system.py TEMPORARY_PYTHON_ENGINE_OVERRIDE), calculations run
+    # on policyengine.py, so the badge reports that stack. Restore
+    # engine/engine_version to the compiled package when reverting.
+    return {
+        "engine": "policyengine.py",
+        "engine_version": _pkg_version("policyengine"),
+        "policyengine_uk": _pkg_version("policyengine-uk"),
+        "policyengine_uk_compiled": _pkg_version("policyengine-uk-compiled"),
+    }
