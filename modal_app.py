@@ -26,6 +26,11 @@ image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("libpq-dev", "gcc")
     .pip_install_from_requirements("backend/requirements.txt")
+    # TEMPORARY: explicit install for the policyengine.py engine override —
+    # also forces an image rebuild that the requirements-file change alone
+    # did not trigger (the 2026-07-20 deploy cache-hit in 2s and shipped
+    # without policyengine-uk). Remove when reverting to the compiled engine.
+    .pip_install("policyengine==4.21.1", "policyengine-uk==2.89.2")
     .run_function(_preload_engine)
     .add_local_dir("backend", remote_path="/app/backend", copy=True)
     # Regenerate reference.md against the Modal-installed
