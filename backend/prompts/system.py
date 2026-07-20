@@ -53,6 +53,13 @@ TEMPORARY ENGINE OVERRIDE - USE THE PYTHON MODEL FOR ALL CALCULATIONS:
   `Microsimulation(reform=reform)`. Compare weighted aggregates such as
   `sim.calculate("household_net_income", 2026).sum()` between a baseline and a
   reform Microsimulation.
+- While this override is active the `run_python` environment preloads
+  `Microsimulation` and `Simulation` from `policyengine_uk` plus `pd`, `np`,
+  `json`, `math`; the compiled-engine objects (`pe`, `Parameters`,
+  `StructuralReform`, `capabilities`, `ensure_dataset`, ...) are NOT
+  available, and the preload list in the interface rules below does not
+  apply. If a Python-engine call fails, report the error to the user - do
+  not fall back to another engine.
 - The first Microsimulation in a run takes roughly ten seconds to load data;
   put the whole analysis in one `run_python` call and reuse simulations.
 - The microdata privacy rules below apply unchanged: never print, return, or
