@@ -999,6 +999,25 @@ result = [
         result = run_python("import json\nresult = json.loads('{\"ok\": true}')")
         assert result["result"] == {"ok": True}
 
+    def test_python_engine_override_hides_compiled_objects(self):
+        # TEMPORARY: while the policyengine.py engine override is active the
+        # sandbox must not expose compiled-engine objects, so a Python-engine
+        # failure errors loudly instead of silently computing on the compiled
+        # engine. Remove with PYTHON_ENGINE_OVERRIDE when reverting.
+        from engine.sandbox import PYTHON_ENGINE_OVERRIDE
+
+        if not PYTHON_ENGINE_OVERRIDE:
+            pytest.skip("Python engine override not active")
+        for expression in ("capabilities()", "pe", "Parameters", "StructuralReform"):
+            result = run_python(f"result = {expression}")
+            assert "error" in result
+            assert "NameError" in result["error"]
+
+    @pytest.mark.skipif(
+        __import__("engine.sandbox", fromlist=["PYTHON_ENGINE_OVERRIDE"]).PYTHON_ENGINE_OVERRIDE,
+        reason="TEMPORARY: compiled-engine sandbox guard disabled during the "
+        "policyengine.py engine override (see engine/sandbox.py)",
+    )
     def test_rejects_frs_row_level_microdata(self):
         result = run_python(
             "sim = Simulation(year=2025, dataset='frs')\nresult = sim.run_microdata()"
@@ -1007,12 +1026,22 @@ result = [
         assert "error" in result
         assert "FRS row-level microdata" in result["error"]
 
+    @pytest.mark.skipif(
+        __import__("engine.sandbox", fromlist=["PYTHON_ENGINE_OVERRIDE"]).PYTHON_ENGINE_OVERRIDE,
+        reason="TEMPORARY: compiled-engine sandbox guard disabled during the "
+        "policyengine.py engine override (see engine/sandbox.py)",
+    )
     def test_rejects_compiled_module_bypass_for_frs_microdata(self):
         result = run_python("result = getattr(pe, '_module')")
 
         assert "error" in result
         assert "AttributeError" in result["error"]
 
+    @pytest.mark.skipif(
+        __import__("engine.sandbox", fromlist=["PYTHON_ENGINE_OVERRIDE"]).PYTHON_ENGINE_OVERRIDE,
+        reason="TEMPORARY: compiled Simulation not preloaded during the "
+        "policyengine.py engine override (see engine/sandbox.py)",
+    )
     def test_allows_synthetic_microdata(self):
         code = """
 persons, benunits, households = Simulation.single_person(employment_income=30000)

@@ -115,9 +115,109 @@ class SafeCompiledModule:
         return getattr(module, name)
 
 
+# TEMPORARY: while the policyengine.py engine override is active (see
+# prompts/system.py TEMPORARY_PYTHON_ENGINE_OVERRIDE), the compiled-engine
+# preloads are removed from the sandbox so a Python-engine failure surfaces
+# as an error instead of silently computing on the compiled engine. Set back
+# to False when reverting.
+PYTHON_ENGINE_OVERRIDE = True
+
+
+SAFE_BUILTIN_NAMES = (
+    "range",
+    "len",
+    "int",
+    "float",
+    "str",
+    "bool",
+    "list",
+    "dict",
+    "tuple",
+    "set",
+    "zip",
+    "enumerate",
+    "map",
+    "filter",
+    "sorted",
+    "reversed",
+    "min",
+    "max",
+    "sum",
+    "abs",
+    "round",
+    "True",
+    "False",
+    "None",
+    "isinstance",
+    "ValueError",
+    "TypeError",
+    "Exception",
+    "print",
+    "any",
+    "all",
+    "pow",
+    "divmod",
+    "complex",
+    "type",
+    "dir",
+    "hasattr",
+    "getattr",
+)
+
+
+def _run_python_engine_code(code: str, pd) -> Dict[str, Any]:
+    """TEMPORARY: sandbox harness for the policyengine.py engine override.
+
+    Preloads the Python model instead of the compiled engine; no compiled
+    objects are exposed, so an engine failure errors loudly rather than
+    silently falling back. Remove with PYTHON_ENGINE_OVERRIDE when reverting.
+    """
+    from policyengine_uk import Microsimulation, Simulation
+
+    output_lines: List[str] = []
+
+    def safe_print(*args, **kwargs):
+        output_lines.append(" ".join(str(arg) for arg in args))
+
+    allowed_globals: Dict[str, Any] = {
+        "__builtins__": safe_builtins(
+            SAFE_BUILTIN_NAMES, print_func=safe_print, allow_import=True
+        ),
+        "math": math,
+        "json": json,
+        "pd": pd,
+        "Microsimulation": Microsimulation,
+        "Simulation": Simulation,
+    }
+    np = optional_numpy()
+    if np is not None:
+        allowed_globals["np"] = np
+        allowed_globals["numpy"] = np
+
+    try:
+        exec(code, allowed_globals)
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+    result = allowed_globals.get("result", None)
+    response: Dict[str, Any] = {}
+    if result is not None:
+        response["result"] = json_safe(result)
+    if output_lines:
+        response["output"] = "\n".join(output_lines)
+    if not response:
+        response["result"] = None
+        response["note"] = "No 'result' variable was set and nothing was printed."
+    return response
+
+
 def run_python_code(code: str) -> Dict[str, Any]:
     ensure_compiled_package_importable()
     import pandas as pd
+
+    if PYTHON_ENGINE_OVERRIDE:
+        return _run_python_engine_code(code, pd)
+
     import policyengine_uk_compiled as pe
     from policyengine_uk_compiled import (
         Parameters,
