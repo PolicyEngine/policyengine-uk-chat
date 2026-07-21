@@ -1,4 +1,5 @@
 import importlib
+from pathlib import Path
 import sys
 from types import SimpleNamespace
 
@@ -77,3 +78,13 @@ def test_modal_deployment_definition_imports_without_remote_calls(monkeypatch):
         ]
     finally:
         sys.modules.pop("modal_app", None)
+
+
+def test_preview_deploy_forwards_hugging_face_token_to_both_modal_secrets():
+    repo_root = Path(__file__).resolve().parents[2]
+    workflow = (repo_root / ".github/workflows/pr-beta-deploy.yml").read_text()
+
+    assert workflow.count(
+        "HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}"
+    ) == 2
+    assert workflow.count('HUGGING_FACE_TOKEN="$HUGGING_FACE_TOKEN"') == 2
