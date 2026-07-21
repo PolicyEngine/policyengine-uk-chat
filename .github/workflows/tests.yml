@@ -9,6 +9,9 @@ jobs:
   backend:
     name: Backend pytest
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout
@@ -31,14 +34,18 @@ jobs:
         uses: codecov/codecov-action@v6
         with:
           files: ./coverage.xml
-          fail_ci_if_error: false
+          fail_ci_if_error: true
           flags: backend
           name: backend
+          use_oidc: true
           verbose: true
 
   frontend:
     name: Frontend tests and build
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
 
     steps:
       - name: Checkout
@@ -63,9 +70,10 @@ jobs:
         uses: codecov/codecov-action@v6
         with:
           files: ./frontend/coverage/lcov.info
-          fail_ci_if_error: false
+          fail_ci_if_error: true
           flags: frontend
           name: frontend
+          use_oidc: true
           verbose: true
 
       - name: Build frontend
