@@ -66,9 +66,10 @@ that no test imports.
 Pull-request and main-branch CI upload these reports to Codecov under separate
 `backend` and `frontend` flags. The backend project status enforces 80%; frontend
 coverage is reported for visibility and is intentionally non-blocking. Uploads
-authenticate with short-lived GitHub OIDC tokens and fail CI if Codecov rejects
-them. Repository branch protection must explicitly require the backend Codecov
-status after its first upload creates that check.
+authenticate with short-lived GitHub OIDC tokens. A rejected backend upload fails
+CI; the frontend upload runs after the production build and remains non-blocking.
+Repository branch protection must explicitly require the backend Codecov status
+after its first upload creates that check.
 
 For an authenticated end-to-end check of the Enhanced FRS society lifecycle
 and every official derivative adapter, run:

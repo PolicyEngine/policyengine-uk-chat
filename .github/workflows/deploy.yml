@@ -69,21 +69,21 @@ jobs:
         working-directory: frontend
         run: npm run test:coverage
 
-      - name: Upload frontend coverage to Codecov
-        uses: codecov/codecov-action@v6
-        with:
-          files: ./frontend/coverage/lcov.info
-          fail_ci_if_error: true
-          flags: frontend
-          name: frontend
-          use_oidc: true
-          verbose: true
-
       - name: Build frontend
         working-directory: frontend
         env:
           NEXT_TELEMETRY_DISABLED: "1"
         run: npm run build
+
+      - name: Upload frontend coverage to Codecov
+        uses: codecov/codecov-action@v6
+        with:
+          files: ./frontend/coverage/lcov.info
+          fail_ci_if_error: false
+          flags: frontend
+          name: frontend
+          use_oidc: true
+          verbose: true
 
   deploy:
     name: Deploy to Modal
