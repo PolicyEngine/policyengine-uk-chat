@@ -50,8 +50,12 @@ export function extractChartSpecs(content: string): { charts: ChartSpec[]; clean
     return match;
   });
 
-  if (/```chart\s*[\s\S]*$/.test(cleanContent)) {
-    cleanContent = cleanContent.replace(/```chart\s*[\s\S]*$/, "[CHART_LOADING]");
+  const finalOpenFence = cleanContent.lastIndexOf("```chart");
+  if (finalOpenFence !== -1) {
+    const closingFence = cleanContent.indexOf("```", finalOpenFence + "```chart".length);
+    if (closingFence === -1) {
+      cleanContent = `${cleanContent.slice(0, finalOpenFence)}[CHART_LOADING]`;
+    }
   }
 
   return { charts, cleanContent };

@@ -1,0 +1,16 @@
+[run]
+branch = True
+relative_files = True
+source =
+    backend
+    .github/scripts
+    modal_app
+
+[report]
+show_missing = True
+skip_empty = True
+omit =
+    backend/tests/*
+
+[xml]
+output = coverage.xml

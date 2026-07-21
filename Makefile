@@ -47,9 +47,10 @@ init:
 test: test-backend test-frontend
 
 test-backend:
-	PYTHONPATH=backend python -m pytest backend/tests
+	PYTHONPATH=backend python -m pytest backend/tests --cov --cov-config=.coveragerc --cov-report=term-missing --cov-report=xml --cov-fail-under=80
 
 test-frontend:
+	cd frontend && npm run test:coverage
 	cd frontend && npm run build
 
 sync-policyengine-uk-evals:

@@ -369,7 +369,9 @@ def test_runtime_files_do_not_reference_compiled_package():
         root / "prompts",
         root / "tools",
         root / "Dockerfile",
+        root / ".dockerignore",
         root / "requirements.txt",
+        root.parent / ".gitignore",
         root.parent / "modal_app.py",
     ]
     hits = []

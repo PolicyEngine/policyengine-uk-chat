@@ -5,7 +5,9 @@ Use this skill whenever adding, moving, or reviewing tests.
 ## Layout
 
 - Backend tests live under `backend/tests/`.
-- Frontend checks currently run through the frontend build.
+- Frontend unit and component tests live beside their source under
+  `frontend/src/`; the frontend check runs Vitest with coverage before the
+  production build.
 - Keep fixtures in `backend/tests/conftest.py` only when they are broadly useful
   across backend tests. Prefer named fixtures over broad autouse fixtures when
   only a subset of tests needs isolation.
@@ -23,6 +25,13 @@ Use this skill whenever adding, moving, or reviewing tests.
   than a shared developer database.
 
 ## Commands
+
+Install backend test dependencies separately from runtime dependencies:
+
+```bash
+python -m pip install -r backend/requirements.txt \
+  -r backend/requirements-test.txt
+```
 
 Before handing off backend changes, run the focused backend tests that cover the
 changed code. For broader verification, use:
@@ -42,6 +51,23 @@ For changes spanning both sides, run:
 ```bash
 make test
 ```
+
+`make test-backend` writes branch-aware Python coverage to `coverage.xml` and
+prints missing lines. Its coverage boundary includes all repository Python:
+`backend/`, `.github/scripts/`, and `modal_app.py`, excluding
+`backend/tests/`. The command fails when total backend coverage is below 80%,
+and the backend Codecov project status enforces the same minimum.
+
+`make test-frontend` writes frontend coverage to
+`frontend/coverage/lcov.info` before running the production build. Vitest
+includes all TypeScript and TSX files under `frontend/src/`, including files
+that no test imports.
+
+Pull-request and main-branch CI upload these reports to Codecov under separate
+`backend` and `frontend` flags. The backend project status enforces 80%; frontend
+coverage is reported for visibility and is intentionally non-blocking. Repository
+branch protection must explicitly require the backend Codecov status after its
+first upload creates that check.
 
 For an authenticated end-to-end check of the Enhanced FRS society lifecycle
 and every official derivative adapter, run:
