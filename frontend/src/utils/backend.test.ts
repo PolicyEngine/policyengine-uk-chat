@@ -14,16 +14,17 @@ afterEach(() => {
 });
 
 describe("getBackendBase", () => {
-  it("maps Vercel preview hostnames to the matching Modal preview", () => {
+  it.each([
+    "policyengine-uk-chat-git-chart-tests-policy-engine.vercel.app",
+    "policyengine-uk-chat-np3428jxf-policy-engine.vercel.app",
+    "policyengine-uk-chat.vercel.app",
+  ])("routes Vercel hostname %s through the same-origin proxy", (hostname) => {
     vi.stubGlobal("window", {
-      location: {
-        hostname: "policyengine-uk-chat-git-chart-tests-policy-engine.vercel.app",
-      },
+      location: { hostname },
     });
+    process.env.NEXT_PUBLIC_BACKEND_URL = "https://production-backend.example";
 
-    expect(getBackendBase()).toBe(
-      "https://policyengine--peukchat-chart-tests-web.modal.run",
-    );
+    expect(getBackendBase()).toBe("/api/proxy");
   });
 
   it("uses the configured backend outside preview deployments", () => {

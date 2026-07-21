@@ -11,16 +11,16 @@ function slugifyBranchName(value: string): string {
     .replace(/-{2,}/g, "-");
 }
 
-function getBackendUrl(): string {
-  if (process.env.BACKEND_URL) {
-    return process.env.BACKEND_URL;
-  }
-
+export function getBackendUrl(): string {
   const vercelEnv = process.env.VERCEL_ENV;
   const gitRef = process.env.VERCEL_GIT_COMMIT_REF;
   if (vercelEnv === "preview" && gitRef) {
     const branchSlug = slugifyBranchName(gitRef);
     return `https://policyengine--peukchat-${branchSlug}-web.modal.run`;
+  }
+
+  if (process.env.BACKEND_URL) {
+    return process.env.BACKEND_URL;
   }
 
   if (vercelEnv === "production") {

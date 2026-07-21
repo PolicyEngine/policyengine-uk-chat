@@ -1,17 +1,10 @@
-function getPreviewBackendBase(): string | null {
-  if (typeof window === "undefined") return null;
-
-  const match = window.location.hostname.match(
-    /^policyengine-uk-chat-git-(.+)-policy-engine\.vercel\.app$/,
-  );
-  if (!match) return null;
-
-  return `https://policyengine--peukchat-${match[1]}-web.modal.run`;
-}
-
 export function getBackendBase(): string {
-  const previewBackend = getPreviewBackendBase();
-  if (previewBackend) return previewBackend;
+  if (
+    typeof window !== "undefined" &&
+    window.location.hostname.endsWith(".vercel.app")
+  ) {
+    return "/api/proxy";
+  }
 
   return process.env.NEXT_PUBLIC_BACKEND_URL || "/api/proxy";
 }
