@@ -80,11 +80,21 @@ def test_modal_deployment_definition_imports_without_remote_calls(monkeypatch):
         sys.modules.pop("modal_app", None)
 
 
-def test_preview_deploy_forwards_hugging_face_token_to_both_modal_secrets():
+def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
     repo_root = Path(__file__).resolve().parents[2]
     workflow = (repo_root / ".github/workflows/pr-beta-deploy.yml").read_text()
 
     assert workflow.count(
         "HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}"
-    ) == 2
-    assert workflow.count('HUGGING_FACE_TOKEN="$HUGGING_FACE_TOKEN"') == 2
+    ) == 1
+    assert workflow.count('HUGGING_FACE_TOKEN="$HUGGING_FACE_TOKEN"') == 1
+    assert "FRONTEND_URL: ${{ steps.names.outputs.frontend_url }}" in workflow
+    assert 'HOSTNAMES="$FRONTEND_URL"' in workflow
+    assert 'PUBLIC_BASE_URL="$FRONTEND_URL"' in workflow
+    assert '-X OPTIONS "$backend_url/chat/message"' in workflow
+    assert 'Access-Control-Request-Method: POST' in workflow
+    assert workflow.index('modal app stop "$MODAL_APP_NAME"') < workflow.index(
+        'modal secret create "$MODAL_SECRET_NAME"'
+    )
+    assert "Update Modal secret with preview frontend URL" not in workflow
+    assert "Refresh backend preview with preview frontend URL" not in workflow
