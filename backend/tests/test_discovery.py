@@ -46,6 +46,11 @@ def fake_model():
     )
     return SimpleNamespace(
         variables_by_name=variables,
+        entity_variables={
+            "person": ["employment_income"],
+            "benunit": [],
+            "household": [],
+        },
         parameters_by_name={
             "gov.hmrc.income_tax.allowances.personal_allowance.amount": parameter,
         },
@@ -70,7 +75,10 @@ def test_match_and_variable_discovery(monkeypatch):
     result = discovery.search_variables("earn", entity="person", limit=1)
     assert result["variables"][0]["name"] == "employment_income"
     assert result["variables"][0]["value_type"] == "float"
-    assert discovery.search_variables(entity="household")["variables"][0]["name"] == "rent"
+    assert result["variables"][0]["is_default_society_output"] is True
+    rent = discovery.search_variables(entity="household")["variables"][0]
+    assert rent["name"] == "rent"
+    assert rent["is_default_society_output"] is False
 
 
 def test_get_variable_reports_details_and_suggestions(monkeypatch):
@@ -81,6 +89,23 @@ def test_get_variable_reports_details_and_suggestions(monkeypatch):
     missing = discovery.get_variable("employment_incom")
     assert missing["status"] == "error"
     assert "employment_income" in missing["suggestions"]
+
+
+def test_list_society_output_variables_uses_model_version_defaults(monkeypatch):
+    monkeypatch.setattr(discovery, "uk_model_version", fake_model)
+
+    result = discovery.list_society_output_variables(entity="person")
+
+    assert result["status"] == "success"
+    assert result["default_variables_by_entity"] == {
+        "person": ["employment_income"]
+    }
+    assert result["default_variable_count"] == 1
+    assert "cannot define new variables" in result["extra_variables_contract"]
+
+    missing = discovery.list_society_output_variables(entity="company")
+    assert missing["status"] == "error"
+    assert missing["available_entities"] == ["person", "benunit", "household"]
 
 
 def test_parameter_discovery_resolves_year_and_aliases(monkeypatch):

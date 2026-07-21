@@ -51,8 +51,8 @@ dispatched by `execute_tool()`. At present, the exposed tools are:
 
 - Discovery: `list_datasets`, `list_entities`, `search_variables`,
   `get_variable`, `search_parameters`, `get_parameter`,
-  `list_reform_targets`, `list_household_input_variables`, and
-  `list_supported_outputs`.
+  `list_reform_targets`, `list_household_input_variables`,
+  `list_society_output_variables`, and `list_supported_outputs`.
 - Validation: `validate_reform` and `validate_household`.
 - Simulation: `run_household_simulation` for illustrative synthetic households
   and `run_society_simulation` for aggregate society-wide simulations.
@@ -84,6 +84,15 @@ needed.
 The public runtime does not expose row-level survey records or a broad
 model-facing Python execution tool. Use discovery and derivative tools rather
 than asking the model to write arbitrary code.
+
+Before a society simulation uses variable-level outputs, inspect the model
+version's authoritative `entity_variables` defaults through
+`list_society_output_variables`. Verify every required non-default variable
+with `search_variables` or `get_variable`, then pass only those non-default
+names through `extra_variables` under the entity reported by discovery.
+`extra_variables` materializes existing model variables; it does not create
+expressions, aliases, filters, or derived variables. Use `aggregate_result`'s
+official policyengine.py filter arguments for conditional weighted aggregates.
 
 ## Deterministic And Non-Deterministic Segments
 

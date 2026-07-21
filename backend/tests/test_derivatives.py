@@ -62,6 +62,8 @@ def test_aggregate_result_uses_policyengine_output_classes(monkeypatch):
         entity="person",
         variable="income_tax",
         operation="mean",
+        filter_variable="age",
+        filter_variable_geq=18,
     )
 
     assert baseline["value"] == 12_345
@@ -70,6 +72,10 @@ def test_aggregate_result_uses_policyengine_output_classes(monkeypatch):
     assert calls[1]["baseline_simulation"] == "baseline"
     assert calls[1]["reform_simulation"] == "reform"
     assert calls[1]["aggregate_type"] == "mean"
+    assert calls[1]["filter_variable"] == "age"
+    assert calls[1]["filter_variable_geq"] == 18
+    assert change["filter_variable"] == "age"
+    assert change["filter_variable_geq"] == 18
 
 
 def test_budgetary_impact_uses_official_change_aggregates(monkeypatch):

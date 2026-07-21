@@ -21,7 +21,16 @@ def _matches(query: str, *values: str | None) -> bool:
     return bool(get_close_matches(q, [v.lower() for v in values if v], n=1, cutoff=0.65))
 
 
-def _variable_item(name: str, variable: Any) -> dict[str, Any]:
+def _default_output_entities(model: Any, name: str) -> list[str]:
+    return [
+        entity
+        for entity, variables in model.entity_variables.items()
+        if name in variables
+    ]
+
+
+def _variable_item(name: str, variable: Any, model: Any) -> dict[str, Any]:
+    default_output_entities = _default_output_entities(model, name)
     return {
         "name": name,
         "label": getattr(variable, "label", None),
@@ -32,6 +41,8 @@ def _variable_item(name: str, variable: Any) -> dict[str, Any]:
         or str(getattr(variable, "value_type", "")),
         "default_value": json_safe(getattr(variable, "default_value", None)),
         "possible_values": json_safe(getattr(variable, "possible_values", None)),
+        "is_default_society_output": bool(default_output_entities),
+        "default_output_entities": default_output_entities,
     }
 
 
@@ -55,7 +66,7 @@ def search_variables(
     model = uk_model_version()
     rows: list[dict[str, Any]] = []
     for name, variable in model.variables_by_name.items():
-        item = _variable_item(name, variable)
+        item = _variable_item(name, variable, model)
         if entity and item["entity"] != entity:
             continue
         if not _matches(query, name, item.get("label"), item.get("description")):
@@ -77,7 +88,44 @@ def get_variable(name: str) -> dict[str, Any]:
     if variable is None:
         suggestions = get_close_matches(name, list(model.variables_by_name), n=5, cutoff=0.6)
         return {"status": "error", "error": f"Unknown variable: {name}", "suggestions": suggestions}
-    return {"status": "success", "variable": _variable_item(name, variable)}
+    return {
+        "status": "success",
+        "variable": _variable_item(name, variable, model),
+    }
+
+
+def list_society_output_variables(
+    entity: str | None = None,
+) -> dict[str, Any]:
+    """List variables materialized by a default policyengine.py UK simulation."""
+
+    model = uk_model_version()
+    defaults = model.entity_variables
+    if entity is not None and entity not in defaults:
+        return {
+            "status": "error",
+            "error": f"Unknown society output entity: {entity}",
+            "available_entities": list(defaults),
+        }
+
+    selected = (
+        {entity: list(defaults[entity])}
+        if entity is not None
+        else {name: list(variables) for name, variables in defaults.items()}
+    )
+    return {
+        "status": "success",
+        "entity": entity,
+        "default_variables_by_entity": selected,
+        "default_variable_count": sum(len(variables) for variables in selected.values()),
+        "extra_variables_contract": (
+            "Do not put these default variables in extra_variables. For any other "
+            "required output or aggregate filter, first verify its exact name with "
+            "search_variables or get_variable, then add it under the variable's "
+            "declared entity. extra_variables cannot define new variables, "
+            "expressions, aliases, or derived concepts."
+        ),
+    }
 
 
 def _parameter_value(parameter: Any, year: int) -> Any:

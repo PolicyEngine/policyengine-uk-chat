@@ -30,17 +30,21 @@ from tools.definitions import (
     GENERATE_CHART_DESCRIPTION,
     GENERATE_CHART_INPUT_SCHEMA,
     GET_PARAMETER_INPUT_SCHEMA,
+    GET_VARIABLE_DESCRIPTION,
     GET_VARIABLE_INPUT_SCHEMA,
     LIST_DATASETS_INPUT_SCHEMA,
     LIST_ENTITIES_INPUT_SCHEMA,
     LIST_HOUSEHOLD_INPUT_VARIABLES_INPUT_SCHEMA,
     LIST_REFORM_TARGETS_INPUT_SCHEMA,
+    LIST_SOCIETY_OUTPUT_VARIABLES_DESCRIPTION,
+    LIST_SOCIETY_OUTPUT_VARIABLES_INPUT_SCHEMA,
     LIST_SUPPORTED_OUTPUTS_INPUT_SCHEMA,
     RUN_HOUSEHOLD_SIMULATION_DESCRIPTION,
     RUN_HOUSEHOLD_SIMULATION_INPUT_SCHEMA,
     RUN_SOCIETY_SIMULATION_DESCRIPTION,
     RUN_SOCIETY_SIMULATION_INPUT_SCHEMA,
     SEARCH_PARAMETERS_INPUT_SCHEMA,
+    SEARCH_VARIABLES_DESCRIPTION,
     SEARCH_VARIABLES_INPUT_SCHEMA,
     VALIDATE_HOUSEHOLD_DESCRIPTION,
     VALIDATE_HOUSEHOLD_INPUT_SCHEMA,
@@ -72,6 +76,7 @@ __all__ = [
     "list_entities",
     "list_household_input_variables",
     "list_reform_targets",
+    "list_society_output_variables",
     "list_supported_outputs",
     "run_household_simulation",
     "run_society_simulation",
@@ -109,12 +114,20 @@ def list_entities() -> Dict[str, Any]:
     return discovery.list_entities()
 
 
-@register_tool(name="search_variables", description=DISCOVERY_DESCRIPTION, input_schema=SEARCH_VARIABLES_INPUT_SCHEMA)
+@register_tool(
+    name="search_variables",
+    description=SEARCH_VARIABLES_DESCRIPTION,
+    input_schema=SEARCH_VARIABLES_INPUT_SCHEMA,
+)
 def search_variables(query: str = "", entity: str | None = None, limit: int = 25) -> Dict[str, Any]:
     return discovery.search_variables(query=query, entity=entity, limit=limit)
 
 
-@register_tool(name="get_variable", description=DISCOVERY_DESCRIPTION, input_schema=GET_VARIABLE_INPUT_SCHEMA)
+@register_tool(
+    name="get_variable",
+    description=GET_VARIABLE_DESCRIPTION,
+    input_schema=GET_VARIABLE_INPUT_SCHEMA,
+)
 def get_variable(name: str) -> Dict[str, Any]:
     return discovery.get_variable(name)
 
@@ -137,6 +150,15 @@ def list_reform_targets(query: str = "", limit: int = 25) -> Dict[str, Any]:
 @register_tool(name="list_household_input_variables", description=DISCOVERY_DESCRIPTION, input_schema=LIST_HOUSEHOLD_INPUT_VARIABLES_INPUT_SCHEMA)
 def list_household_input_variables(entity: str | None = None) -> Dict[str, Any]:
     return discovery.list_household_input_variables(entity=entity)
+
+
+@register_tool(
+    name="list_society_output_variables",
+    description=LIST_SOCIETY_OUTPUT_VARIABLES_DESCRIPTION,
+    input_schema=LIST_SOCIETY_OUTPUT_VARIABLES_INPUT_SCHEMA,
+)
+def list_society_output_variables(entity: str | None = None) -> Dict[str, Any]:
+    return discovery.list_society_output_variables(entity=entity)
 
 
 @register_tool(name="list_supported_outputs", description=DISCOVERY_DESCRIPTION, input_schema=LIST_SUPPORTED_OUTPUTS_INPUT_SCHEMA)
@@ -313,6 +335,10 @@ def aggregate_result(
     variable: str,
     operation: str,
     target: str = "reform",
+    filter_variable: str | None = None,
+    filter_variable_eq: Any = None,
+    filter_variable_leq: Any = None,
+    filter_variable_geq: Any = None,
     _context: ToolExecutionContext | None = None,
 ) -> Dict[str, Any]:
     payload = _society_payload(_context, simulation_id)
@@ -325,6 +351,10 @@ def aggregate_result(
             entity=entity,
             variable=variable,
             operation=operation,
+            filter_variable=filter_variable,
+            filter_variable_eq=filter_variable_eq,
+            filter_variable_leq=filter_variable_leq,
+            filter_variable_geq=filter_variable_geq,
         ),
         "privacy": "Aggregate only; no row-level records returned.",
     }

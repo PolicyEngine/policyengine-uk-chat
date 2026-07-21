@@ -28,6 +28,7 @@ def test_tool_inventory_matches_py_lifecycle():
         "get_parameter",
         "list_reform_targets",
         "list_household_input_variables",
+        "list_society_output_variables",
         "list_supported_outputs",
         "validate_reform",
         "validate_household",
@@ -69,6 +70,11 @@ def test_list_datasets_exposes_enhanced_frs_and_certified_standard():
 
 def test_discovery_tools_are_split_by_catalog_area():
     assert agent_tools.list_supported_outputs()["status"] == "success"
+    society_outputs = agent_tools.list_society_output_variables(entity="household")
+    assert society_outputs["status"] == "success"
+    assert "household_net_income" in society_outputs[
+        "default_variables_by_entity"
+    ]["household"]
     targets = agent_tools.list_reform_targets(query="personal allowance")["targets"]
     assert any("personal_allowance" in target["path"] for target in targets)
     assert "input_only" not in _tool("search_variables")["input_schema"]["properties"]
@@ -261,7 +267,42 @@ def test_aggregate_schema_only_exposes_official_weighted_operations():
     properties = _tool("aggregate_result")["input_schema"]["properties"]
     assert properties["operation"]["enum"] == ["sum", "mean", "count"]
     assert properties["target"]["enum"] == ["baseline", "reform", "change"]
+    assert properties["filter_variable_geq"]["type"] == [
+        "number",
+        "string",
+        "boolean",
+    ]
     assert "group_by" not in properties
+
+
+def test_aggregate_tool_forwards_official_filter_arguments(monkeypatch):
+    context = new_tool_context("test-session")
+    simulation_id = context.result_store.put(
+        "society_simulation",
+        object(),
+        {"status": "success"},
+    )
+    captured = {}
+
+    def fake_aggregate(_payload, **kwargs):
+        captured.update(kwargs)
+        return {"value": 1_234}
+
+    monkeypatch.setattr(agent_tools.derivatives, "aggregate_result", fake_aggregate)
+
+    result = agent_tools.aggregate_result(
+        simulation_id=simulation_id,
+        entity="household",
+        variable="household_id",
+        operation="count",
+        filter_variable="benunit_count_children",
+        filter_variable_geq=3,
+        _context=context,
+    )
+
+    assert result["result"]["value"] == 1_234
+    assert captured["filter_variable"] == "benunit_count_children"
+    assert captured["filter_variable_geq"] == 3
 
 
 def test_simulation_schema_has_no_executable_reform_escape_hatch():
@@ -270,10 +311,13 @@ def test_simulation_schema_has_no_executable_reform_escape_hatch():
     assert "structural_reform" not in properties
     assert "code" not in properties
     assert schema["additionalProperties"] is False
-    assert properties["extra_variables"]["additionalProperties"] == {
-        "type": "array",
-        "items": {"type": "string"},
+    assert properties["extra_variables"]["additionalProperties"] is False
+    assert set(properties["extra_variables"]["properties"]) == {
+        "person",
+        "benunit",
+        "household",
     }
+    assert "invented names" in properties["extra_variables"]["description"]
 
 
 def test_generate_chart_supports_explicit_generic_kinds():

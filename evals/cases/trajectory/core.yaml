@@ -586,6 +586,61 @@ cases:
             year: 2026
             dataset: enhanced_frs_2023_24
 
+  - id: trajectory_society_custom_output_discovers_variable_first
+    suite: trajectory
+    description: A custom society output must be discovered before simulation.
+    tags: [economy_wide, variable_discovery]
+    prompt: How many UK households have three or more children in 2026?
+    expected_tools:
+      - name: list_society_output_variables
+      - name: search_variables
+        input_contains:
+          query: count children
+    forbidden_tools:
+      - run_society_simulation
+      - aggregate_result
+    offline_response:
+      tool_calls:
+        - name: list_society_output_variables
+          input: {}
+        - name: search_variables
+          input:
+            query: count children
+
+  - id: trajectory_society_custom_output_uses_verified_extra
+    suite: trajectory
+    description: A previously verified non-default variable should be materialized under its declared entity.
+    tags: [economy_wide, variable_discovery, multi_turn]
+    prompt: Continue after variable discovery.
+    messages:
+      - role: user
+        content: How many UK households have three or more children in 2026?
+      - role: assistant
+        content: >
+          Variable discovery found benunit_count_children on the benunit entity.
+          It is a valid model variable and is not a default society output.
+      - role: user
+        content: Continue with the simulation.
+    expected_tools:
+      - name: run_society_simulation
+        input_contains:
+          year: 2026
+          dataset: enhanced_frs_2023_24
+          extra_variables:
+            benunit: [benunit_count_children]
+    forbidden_tools:
+      - list_society_output_variables
+      - search_variables
+      - aggregate_result
+    offline_response:
+      tool_calls:
+        - name: run_society_simulation
+          input:
+            year: 2026
+            dataset: enhanced_frs_2023_24
+            extra_variables:
+              benunit: [benunit_count_children]
+
   - id: trajectory_missing_year_asks_followup
     suite: trajectory
     description: Quantitative reform prompts with missing year and household details should ask for clarification.

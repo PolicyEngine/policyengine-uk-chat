@@ -18,6 +18,10 @@ REFORM_SCHEMA = {
 }
 
 STRING_ARRAY_SCHEMA = {"type": "array", "items": {"type": "string"}}
+FILTER_VALUE_SCHEMA = {
+    "type": ["number", "string", "boolean"],
+    "description": "Comparison value interpreted using the filter variable's type.",
+}
 
 DATASET_SCHEMA = {
     "type": "string",
@@ -95,6 +99,15 @@ LIST_REFORM_TARGETS_INPUT_SCHEMA = _object_schema(
     {"query": {"type": "string", "default": ""}, "limit": FILTER_LIMIT_SCHEMA}
 )
 LIST_HOUSEHOLD_INPUT_VARIABLES_INPUT_SCHEMA = _object_schema({"entity": {"type": "string"}})
+LIST_SOCIETY_OUTPUT_VARIABLES_INPUT_SCHEMA = _object_schema(
+    {
+        "entity": {
+            "type": "string",
+            "enum": ["person", "benunit", "household"],
+            "description": "Optional output entity to inspect.",
+        }
+    }
+)
 LIST_SUPPORTED_OUTPUTS_INPUT_SCHEMA = _object_schema(
     {
         "scope": {
@@ -130,8 +143,20 @@ RUN_SOCIETY_SIMULATION_INPUT_SCHEMA = _object_schema(
         "dataset": DATASET_SCHEMA,
         "extra_variables": {
             "type": "object",
-            "description": "Optional extra variables by entity for materialization.",
-            "additionalProperties": STRING_ARRAY_SCHEMA,
+            "description": (
+                "Existing policyengine-uk variables to materialize in addition to "
+                "the defaults reported by list_society_output_variables. Before "
+                "using this field, verify every exact variable name with "
+                "search_variables or get_variable and place it under the entity "
+                "reported by discovery. Do not put default variables, invented "
+                "names, expressions, aliases, or derived concepts here."
+            ),
+            "properties": {
+                "person": STRING_ARRAY_SCHEMA,
+                "benunit": STRING_ARRAY_SCHEMA,
+                "household": STRING_ARRAY_SCHEMA,
+            },
+            "additionalProperties": False,
         },
     }
 )
@@ -176,6 +201,16 @@ AGGREGATE_RESULT_INPUT_SCHEMA = _object_schema(
         "entity": {"type": "string", "enum": ["person", "benunit", "household"]},
         "variable": {"type": "string"},
         "operation": {"type": "string", "enum": ["sum", "mean", "count"]},
+        "filter_variable": {
+            "type": "string",
+            "description": (
+                "Optional verified model variable used to filter the weighted "
+                "aggregate. It must be materialized by the simulation."
+            ),
+        },
+        "filter_variable_eq": FILTER_VALUE_SCHEMA,
+        "filter_variable_leq": FILTER_VALUE_SCHEMA,
+        "filter_variable_geq": FILTER_VALUE_SCHEMA,
     },
     ["simulation_id", "entity", "variable", "operation"],
 )
@@ -213,6 +248,20 @@ GENERATE_CHART_INPUT_SCHEMA = _object_schema(
 )
 
 DISCOVERY_DESCRIPTION = "Discover model metadata from policyengine.py without running a simulation."
+SEARCH_VARIABLES_DESCRIPTION = (
+    "Search the policyengine.py UK variable registry. Use this before passing a "
+    "variable to run_society_simulation.extra_variables or aggregate_result; "
+    "never invent variable names. Results identify default society outputs."
+)
+GET_VARIABLE_DESCRIPTION = (
+    "Verify one exact policyengine.py UK variable and inspect its entity and "
+    "whether it is a default society output."
+)
+LIST_SOCIETY_OUTPUT_VARIABLES_DESCRIPTION = (
+    "List the policyengine.py UK variables automatically materialized by a "
+    "society simulation, grouped by output entity. Call this before choosing "
+    "run_society_simulation.extra_variables."
+)
 VALIDATE_REFORM_DESCRIPTION = (
     "Validate flat policyengine.py reform JSON without running a simulation. "
     "Use for drafting or debugging reform parameter paths, not as routine preflight."
@@ -225,7 +274,9 @@ RUN_HOUSEHOLD_SIMULATION_DESCRIPTION = (
 )
 RUN_SOCIETY_SIMULATION_DESCRIPTION = (
     "Run baseline and reform policyengine.py UK simulations and return metadata plus a turn-local result handle. "
-    "Use derivative tools to calculate outputs from that handle."
+    "Use derivative tools to calculate outputs from that handle. Before adding "
+    "extra_variables, inspect the default set with list_society_output_variables "
+    "and verify every non-default name with search_variables or get_variable."
 )
 DERIVATIVE_DESCRIPTION = (
     "Compute an official policyengine.py aggregate or derivative output from a prior simulation result handle. "

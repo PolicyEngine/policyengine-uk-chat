@@ -21,6 +21,10 @@ def aggregate_result(
     entity: str,
     variable: str,
     operation: AggregateOperation,
+    filter_variable: str | None = None,
+    filter_variable_eq: Any = None,
+    filter_variable_leq: Any = None,
+    filter_variable_geq: Any = None,
 ) -> dict[str, Any]:
     """Run policyengine.py's weighted Aggregate or ChangeAggregate output."""
 
@@ -31,6 +35,16 @@ def aggregate_result(
         ChangeAggregateType,
     )
 
+    filter_kwargs = {
+        "filter_variable": filter_variable,
+        "filter_variable_eq": filter_variable_eq,
+        "filter_variable_leq": filter_variable_leq,
+        "filter_variable_geq": filter_variable_geq,
+    }
+    filter_kwargs = {
+        key: value for key, value in filter_kwargs.items() if value is not None
+    }
+
     if target == "change":
         output = ChangeAggregate(
             baseline_simulation=run.baseline,
@@ -38,6 +52,7 @@ def aggregate_result(
             variable=variable,
             aggregate_type=ChangeAggregateType(operation),
             entity=entity,
+            **filter_kwargs,
         )
     else:
         simulation = run.baseline if target == "baseline" else run.reform_simulation
@@ -46,6 +61,7 @@ def aggregate_result(
             variable=variable,
             aggregate_type=AggregateType(operation),
             entity=entity,
+            **filter_kwargs,
         )
     output.run()
     return {
@@ -53,6 +69,7 @@ def aggregate_result(
         "entity": entity,
         "variable": variable,
         "operation": operation,
+        **filter_kwargs,
         "value": float(output.result),
     }
 

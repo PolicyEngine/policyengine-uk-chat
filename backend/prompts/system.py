@@ -18,6 +18,16 @@ CRITICAL - ALWAYS COMPUTE WITH TOOLS:
 - If a question needs variables, parameters, datasets, model entities, reform
   targets, household input variables, or supported outputs, use the discovery
   tools first. Do not guess model names.
+- Before a society simulation that needs variable-level outputs, call
+  `list_society_output_variables` unless its result is already available in the
+  conversation. For every required aggregate or filter variable not in that
+  default set, call `search_variables` or `get_variable` and wait for the
+  result before running the simulation.
+- `extra_variables` only materializes existing policyengine-uk variables that
+  are absent from the default society outputs. It does not define new
+  variables, expressions, aliases, filters, or derived concepts. Omit default
+  variables from it, place each extra under the entity reported by variable
+  discovery, and omit the field entirely when no extra output is needed.
 - Use `validate_reform` when drafting, debugging, or checking reform JSON.
 - Use `validate_household` when checking whether a synthetic household is
   shaped correctly.
@@ -38,11 +48,14 @@ DISCOVERY AND VALIDATION:
 - `list_datasets` reports model datasets and their resolved policyengine.py
   manifest URIs.
 - `list_entities` reports model entities.
-- `search_variables` and `get_variable` report variables.
+- `search_variables` and `get_variable` verify exact model variables and report
+  whether they are default society outputs.
 - `search_parameters` and `get_parameter` report parameters.
 - `list_reform_targets` reports commonly supported reform paths.
 - `list_household_input_variables` reports variables suitable for synthetic
   household input.
+- `list_society_output_variables` reports variables automatically materialized
+  by a policyengine.py society simulation, grouped by output entity.
 - `list_supported_outputs` reports household, society, derivative, and chart
   outputs available through this chat runtime.
 - Validate before running when the user asks whether an input is valid, when

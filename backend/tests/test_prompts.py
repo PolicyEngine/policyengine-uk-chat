@@ -48,6 +48,7 @@ def test_main_prompt_describes_py_lifecycle_tools():
         "list_datasets",
         "list_entities",
         "search_variables",
+        "list_society_output_variables",
         "search_parameters",
         "list_reform_targets",
         "validate_reform",
@@ -60,6 +61,8 @@ def test_main_prompt_describes_py_lifecycle_tools():
     ):
         assert f"`{name}`" in SYSTEM_PROMPT
     assert "Do not run broad Python code for normal analysis" in SYSTEM_PROMPT
+    assert "It does not define new" in SYSTEM_PROMPT
+    assert "wait for the\n  result before running the simulation" in SYSTEM_PROMPT
 
 
 def test_public_tools_exclude_removed_public_tools():
