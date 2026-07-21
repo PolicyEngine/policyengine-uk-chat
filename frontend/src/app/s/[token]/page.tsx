@@ -87,7 +87,7 @@ function renderMarkdown(content: string) {
         if (segment.type === "loading") return <div key={idx} style={{ margin: "16px 0", padding: "40px", background: "#f9f8f6", border: `1px solid ${THEME.border}`, display: "flex", alignItems: "center", justifyContent: "center", color: THEME.muted, fontSize: "13px" }}>Chart unavailable</div>;
         if (segment.chartIdx !== undefined) {
           const chart = charts[segment.chartIdx];
-          if (chart) return <div key={idx} style={{ margin: "16px 0" }}><Chart spec={chart} width={680} height={400} /></div>;
+          if (chart) return <div key={idx} style={{ margin: "16px 0", maxWidth: "100%", minWidth: 0 }}><Chart spec={chart} height={400} /></div>;
         }
         return null;
       })}

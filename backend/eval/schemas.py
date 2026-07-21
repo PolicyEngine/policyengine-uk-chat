@@ -25,7 +25,7 @@ class CaseSource(StrictModel):
 
 
 class CaseSkip(StrictModel):
-    code: Literal["compiled_coverage_gap"]
+    code: Literal["policyengine_py_coverage_gap"]
     reason: str = Field(min_length=1)
     remove_when: str = Field(min_length=1)
 

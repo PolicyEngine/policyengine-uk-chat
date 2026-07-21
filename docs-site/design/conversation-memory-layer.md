@@ -8,7 +8,7 @@ Scope: backend (`backend/chat/`, `backend/tools/`, `backend/conversations/`, `ba
 
 > **Refresh note (re-grounded after #94, #112 and #116; incorporates @anth-volk's review).** The original draft was written against the pre-`#116` layout (`backend/routes/chatbot.py`, `backend/agent_tools.py`, `backend/routes/conversations.py`) and before the gateway. Four things changed the design, not just the file paths:
 > 1. **The backend was repackaged (#116).** The monolithic `routes/chatbot.py` is now the `chat/` package (`orchestrator.py`, `system_blocks.py`, `schemas.py`); tools are the `tools/` package (`definitions.py`, `dispatch.py`); conversations are the `conversations/` package; system prompts are the `prompts/` package. All refs below point at the new tree (this is one step past the refs in @anth-volk's review, which predate #116).
-> 2. **Typed tools landed (#94).** `TOOL_DEFINITIONS` now registers **six** tools — `validate_reform`, `calculate_household`, `run_economy_simulation`, `analyse_microdata`, `run_python`, `generate_chart` (`backend/tools/definitions.py`) — dispatched via `TOOL_HANDLERS[name](**input)` (`backend/tools/dispatch.py`). The original "typed tools exist but aren't registered, defer the schema" assumption (old Q4) is obsolete: the schema is settled, so the scenario's `reform`/`household` shape is aligned to the **live** `run_economy_simulation` / `calculate_household` signatures now.
+> 2. **Typed tools landed and were later split into a policyengine.py lifecycle.** `TOOL_DEFINITIONS` now registers discovery, validation, simulation, derivative, and artifact tools (`backend/tools/definitions.py`) dispatched through the registry-backed `execute_tool` path (`backend/tools/dispatch.py`). The scenario's `reform`/`household` shape should align to `run_household_simulation` and `run_society_simulation`.
 > 3. **The gateway landed (#112).** A cheap pre-pass (`backend/gateway/`) grounds a per-turn *plan* (tool + slot values) before the heavy model runs — overlapping directly with the scenario this doc proposes. See the new [§3.6](#36-reconciliation-with-the-gateway-112). **Plan mode was removed**; its "ask before doing" role is now the gateway's `needs_plan` outcome, so the old "conflict with Plan mode" question is recast in [Q3](#5-open-questions-issue-items--recommendations).
 > 4. **Tool surface tightened to one write tool (per review §3).** Dropped `get_scenario`; the always-injected snapshot already gives the agent the state for free, so a separate read tool is dead weight. See [§3.2](#32-the-update_scenario-tool-one-write-tool--passive-snapshot).
 
@@ -18,7 +18,7 @@ Scope: backend (`backend/chat/`, `backend/tools/`, `backend/conversations/`, `ba
 
 Today every chat turn is effectively one-shot. The agent has no structured memory of the household or reform it analysed on the previous turn — the only "memory" is the raw message transcript, which the model re-reads each turn.
 
-Concretely, the streaming loop `stream_chat` (`backend/chat/orchestrator.py`) rebuilds the request from `chat_request.messages` (`ChatRequest`, `backend/chat/schemas.py`) every turn, prepends the cached system prompt via `_build_system_blocks` (`backend/chat/system_blocks.py`), and the agent answers quantitative questions through the six registered tools (`backend/tools/definitions.py`) — typically `calculate_household` / `run_economy_simulation` or fresh Python in `run_python` (`backend/tools/dispatch.py`). When a user says:
+Concretely, the streaming loop `stream_chat` (`backend/chat/orchestrator.py`) rebuilds the request from `chat_request.messages` (`ChatRequest`, `backend/chat/schemas.py`) every turn, prepends the cached system prompt via `_build_system_blocks` (`backend/chat/system_blocks.py`), and the agent answers quantitative questions through registered lifecycle tools (`backend/tools/definitions.py`) — typically `run_household_simulation`, `run_society_simulation`, derivative tools, and `generate_chart` (`backend/tools/dispatch.py`). When a user says:
 
 > "Single earner, £45,000, in Scotland — what's the marginal rate at £60k?"
 
@@ -43,11 +43,11 @@ The proposal: persist a structured **active scenario** (household + reform + com
 - Round-trip the scenario through the existing conversation save/load path (`backend/conversations/`) so it is durable and shareable.
 - Show a subtle "active scenario" pill in the input chrome of `ChatPage.tsx`, with clear/reset.
 - **Seed the gateway from the scenario** so inherited slots count as grounded and the gateway stops re-asking on follow-ups ([§3.6](#36-reconciliation-with-the-gateway-112)).
-- Align the scenario's `household`/`reform` shape to the now-live typed tools (`calculate_household`, `run_economy_simulation`) so a persisted scenario feeds a typed call with no translation.
+- Align the scenario's `household`/`reform` shape to the now-live simulation tools (`run_household_simulation`, `run_society_simulation`) so a persisted scenario feeds a typed call with no translation.
 - Land the canonical `single → married` regression as an **eval case in PR 1**, so the memory behaviour is enforced deterministically, not just prompted.
 
 ### Non-goals (for v1)
-- **Not** building the typed `household`/`reform` execution tools — those have already landed (#94). This layer *persists* structured args; it does not replace `run_python`.
+- **Not** building the typed `household`/`reform` execution tools — those have already landed. This layer *persists* structured args; it does not change the tool lifecycle.
 - **Not** multi-scenario / named-scenario management (A vs B vs C side by side). One active scenario per conversation; forking is a future extension.
 - **Not** server-authoritative scenario derivation from microsim *outputs*. The agent (and the gateway plan) own the scenario contents; the server stores and relays them in v1. We do not parse the household back out of computed results. (Server-*authoritative storage* keyed by `session_id` is a named v2 target — see [§3.4](#34-server-side-persistence).)
 - **Not** auto-running simulations when the scenario changes. `update_scenario` records intent; the agent still calls a compute tool.
@@ -77,7 +77,7 @@ A free-ish JSON object the agent reads and patches. We keep it deliberately loos
 }
 ```
 
-The `reform` field intentionally mirrors the structure the compute path already accepts — `build_compiled_policy` (aliased `_build_compiled_policy`, `backend/tools/dispatch.py`) keys reforms by programme (`income_tax`, `national_insurance`, `universal_credit`, …). That means a persisted `reform` can be handed straight to the live typed `run_economy_simulation` / `calculate_household` tools (`backend/tools/definitions.py`) or splatted into a `Parameters(...)` call inside `run_python`, with no translation. Typed args make the scenario *expressible*; this issue makes them *durable*.
+The `reform` field intentionally mirrors the flat policyengine.py parameter-path reform structure the compute path accepts. That means a persisted `reform` can be handed straight to `validate_reform`, `run_household_simulation`, or `run_society_simulation` (`backend/tools/definitions.py`) with no translation. Typed args make the scenario *expressible*; this issue makes them *durable*.
 
 **Schema home (per review — "schema home" structural ask).** The canonical shape above and the `_merge_scenario` helper land in the `tools/` package alongside the tool schemas they mirror (`backend/tools/`), **not** inline in the orchestrator loop; the static prompt rules land in `backend/prompts/system.py`; the per-turn injection lives in `backend/chat/system_blocks.py`. This keeps the #94/#116 split intact (schemas/helpers in `tools/`, prompt text in `prompts/`, assembly in `chat/`).
 
@@ -144,7 +144,7 @@ Change `execute_tool(name, input, context=None)` and register a stateful handler
 
 ### 3.3 System prompt instructions
 
-The system prompt is assembled by `_build_system_blocks` (`backend/chat/system_blocks.py`): a cached `SYSTEM_PROMPT` block (`backend/prompts/system.py`, assembled from `SYSTEM_PROMPT_SECTIONS`), a cached reference-doc block, then optional **per-turn** directives appended *after* both cache breakpoints — Charts mode (`backend/chat/system_blocks.py`) and the **gateway plan** (fed by `serialise_plan_for_system`) — so toggling them never invalidates the cache.
+The system prompt is assembled by `_build_system_blocks` (`backend/chat/system_blocks.py`): a cached `SYSTEM_PROMPT` block (`backend/prompts/system.py`, assembled from `SYSTEM_PROMPT_SECTIONS`), then optional **per-turn** directives appended after the cache breakpoint — Charts mode (`backend/chat/system_blocks.py`) and the **gateway plan** (fed by `serialise_plan_for_system`) — so toggling them never invalidates the cache.
 
 We add scenario guidance in two parts:
 
@@ -162,7 +162,7 @@ We add scenario guidance in two parts:
                       "text": "ACTIVE SCENARIO (current persisted state):\n"
                               + json.dumps(scenario, indent=2)})
    ```
-   This passive snapshot is the safety net: the agent sees the state for free every turn, so the feature is robust even if the model forgets to write back. It is also why there is no `get_scenario` (§3.2). Because it's after the cache breakpoint, a changing scenario never busts the cached prompt/reference — it mirrors the existing per-turn-directive pattern precisely.
+   This passive snapshot is the safety net: the agent sees the state for free every turn, so the feature is robust even if the model forgets to write back. It is also why there is no `get_scenario` (§3.2). Because it's after the cache breakpoint, a changing scenario never busts the cached prompt — it mirrors the existing per-turn-directive pattern precisely.
 
 ### 3.4 Server-side persistence
 
@@ -172,7 +172,7 @@ We add one nullable column, `active_scenario` (TEXT, JSON-encoded), to `ChatConv
 
 **Who owns the canonical scenario at rest? (review §4 — make this choice explicit.)**
 
-- **v1 — client-owned, resent each turn (recommended to ship).** The chat loop holds the live scenario during a streamed turn; the `done` event (`backend/chat/orchestrator.py`) returns it; the frontend stores it and includes it in the next request and in `saveConversation`. This keeps the server stateless between requests and mirrors exactly how `messages` already flow — the client owns the transcript and resends it each turn (`ChatRequest.messages`, `backend/chat/schemas.py`; `frontend/src/app/ChatPage.tsx`). Single writer (the client's `saveConversation` upsert), so no write race. The tamper surface is genuinely small: the scenario re-enters only as advisory prompt text (and gateway slot hints), never executed — sandboxed `run_python` is the sole execution path.
+- **v1 — client-owned, resent each turn (recommended to ship).** The chat loop holds the live scenario during a streamed turn; the `done` event (`backend/chat/orchestrator.py`) returns it; the frontend stores it and includes it in the next request and in `saveConversation`. This keeps the server stateless between requests and mirrors exactly how `messages` already flow — the client owns the transcript and resends it each turn (`ChatRequest.messages`, `backend/chat/schemas.py`; `frontend/src/app/ChatPage.tsx`). Single writer (the client's `saveConversation` upsert), so no write race. The tamper surface is genuinely small: the scenario re-enters only as advisory prompt text and gateway slot hints, then must still pass normal validation before calculation.
 - **v2 — server-authoritative, keyed by `session_id` (named target, not dismissed).** The more robust pattern, and where agent frameworks generally point, is server-side state: `chat_conversations` is *already* keyed by `session_id` with an idempotent migration, so a server-authoritative scenario (single writer on one nullable column, last-write-wins, not touching `messages`) is natural here, not exotic. The "two racing writers" objection is solvable by making the server the sole writer of that column. We ship client-owned for v1 for consistency and minimal surface, but **call server-authoritative the explicit v2 target** so we don't bake the client-owned assumption in permanently. This requires adding `active_scenario` to `ChatRequest` (`backend/chat/schemas.py`) for v1; v2 would drop it from the request and read from the row.
 
 Round-trip (v1): client sends `active_scenario` → loop seeds the live scenario → agent (and/or gateway, §3.6) patches it → `done` returns it → client stores + POSTs it alongside `messages`. On reload, `get_conversation` returns it; the client re-seeds it next turn.
@@ -219,7 +219,7 @@ User turn 1: **"Single earner £45k Scotland — marginal rate at £60k?"**
 1. Frontend POSTs `/chat/message` with `messages`, `active_scenario: null` (`frontend/src/app/ChatPage.tsx`).
 2. The gateway grounds a plan from the message (income/region present → `source: prompt`), outcome `ready` (`backend/gateway/runtime.py`). Loop seeds `scenario = None`; `_build_system_blocks` injects the gateway-plan block but no scenario snapshot (`backend/chat/orchestrator.py`).
 3. Agent calls `update_scenario({"patch": {"household": {"earners": [{"employment_income": 45000, "marital_status": "single"}], "children": 0, "country": "Scotland", "year": 2025}}})` — or the loop derives the same from the grounded plan (§3.6.2). The loop merges it synchronously (§3.2) and returns the new state.
-4. Agent calls a compute tool (`calculate_household` / `run_python`, `backend/tools/definitions.py` / `backend/tools/dispatch.py`) for the marginal rate at £60k, answers in prose.
+4. Agent calls lifecycle tools (`run_household_simulation` and, if needed, derivative/chart tools) for the marginal rate at £60k, answers in prose.
 5. The `done` event (`backend/chat/orchestrator.py`) carries `active_scenario`. Frontend `setActiveScenario(...)`, renders the pill "Single earner, £45k, Scotland", and `saveConversation` persists `{messages, active_scenario}` to Postgres (`backend/conversations/store.py`).
 
 User turn 2: **"What if they were married?"**
@@ -246,7 +246,7 @@ The issue leans per-conversation with forking. **Recommendation: per-conversatio
 Plan mode has been removed; its "ask before doing" role is now the gateway's `needs_plan` outcome. Because non-`ready` outcomes route to the no-tool lightweight writer (`backend/chat/system_blocks.py`), the agent **cannot** patch the scenario on a clarifying turn — it can only *read* the injected snapshot and ask its question, applying the change on the next `ready` turn. **Recommendation: this is the correct behaviour**, and the gateway seeding in §3.6.1 makes `needs_plan` fire *less* on follow-ups, which is the better fix than any prompt wording. No structural conflict; the only prompt work is a line in `GATEWAY_NEEDS_PLAN_DIRECTIVE` (`backend/prompts/gateway.py`) noting the agent may reference the active scenario when forming its question.
 
 **Q4 — Relationship to the typed tools (now live, #94).**
-`TOOL_DEFINITIONS` registers six tools including `calculate_household` and `run_economy_simulation` (`backend/tools/definitions.py`), dispatched via `TOOL_HANDLERS` (`backend/tools/dispatch.py`), with reforms keyed by programme through `build_compiled_policy`. **Recommendation: the scenario's `household`/`reform` shape is exactly the args those tools accept**, designed to their live signatures from day one. The earlier "sequence after typed tools land / don't assume they're registered" caveat is fully resolved — they are live.
+`TOOL_DEFINITIONS` registers lifecycle tools including `run_household_simulation` and `run_society_simulation` (`backend/tools/definitions.py`), dispatched through `execute_tool` (`backend/tools/dispatch.py`). Reforms are flat policyengine.py parameter-path dictionaries. **Recommendation: the scenario's `household`/`reform` shape is exactly the args those tools accept**, designed to their live signatures from day one.
 
 **Q5 — Is even one tool too many? (was: how much of `update_scenario` survives)**
 Given §3.6.2, the gateway can populate household/reform slots from its grounded plan without any writer tool call. **Recommendation: keep the single `update_scenario`, make the gateway plan the default writer.** The tool still earns its place for intent the single-message gateway can't infer (comparison baseline, "use last year's figures", clearing a reform) and is the only mutation path on a tools-present turn. The read side is already covered by the passive snapshot (§3.2/§3.3), so we are at the minimal surface: one write tool + one injected block. Revisit collapsing the write tool entirely only if eval data shows the gateway plan alone suffices.
@@ -282,7 +282,7 @@ Each phase is an independently shippable PR.
 
 **Risk: unvalidated JSON blob grows / gets malformed.** The scenario is advisory and free-ish. Mitigation: a hard size cap (e.g. 8 KB) and a JSON-shape check in `_merge_scenario`; reject patches that aren't objects. We deliberately *don't* Pydantic-validate in v1 (alternative below). **Note the coupling to §3.2:** if we ever hit the cap and start *truncating* the injected snapshot, that is the one scenario where a `get_scenario` read tool earns its place (the agent needs the full object the snapshot omits) — so the cap decision and the read-tool decision are made together, not separately.
 
-**Risk: client-owned state can be tampered with.** Since the client resends `active_scenario`, a malicious client could inject arbitrary JSON. But it only flows back into the prompt as advisory text (and into the gateway as slot hints) and is never `exec`'d — the sandboxed `run_python` (`backend/tools/dispatch.py`) is the only execution path and is unaffected. Acceptable for v1; same trust model as the client already resending `messages`. Server-authoritative storage (§3.4 v2) removes this surface entirely.
+**Risk: client-owned state can be tampered with.** Since the client resends `active_scenario`, a malicious client could inject arbitrary JSON. But it only flows back into the prompt as advisory text and gateway slot hints; any calculation still goes through validation and typed tool schemas. Acceptable for v1; same trust model as the client already resending `messages`. Server-authoritative storage (§3.4 v2) removes this surface entirely.
 
 **Risk: concurrent dispatch races the scenario write.** Tool dispatch is concurrent (`asyncio.as_completed` over `execute_tool_async`, `backend/chat/orchestrator.py`). Mitigation: handle `update_scenario` synchronously in the loop *outside* the gather (§3.2) so the shared `scenario` dict is never patched from racing tasks. This is why the tool is loop-handled rather than a `TOOL_HANDLERS` entry.
 

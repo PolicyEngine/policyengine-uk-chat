@@ -4,12 +4,15 @@ cases:
     description: Household answer stays neutral and grounded in tool output.
     prompt: Summarise the household result.
     tool_calls:
-      - name: calculate_household
+      - name: run_household_simulation
         input:
           year: 2025
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
+          people:
+            - employment_income: 30000
+          benunit: {}
+          household: {}
         output_fixture: household_personal_allowance.json
     expect:
       required:
@@ -59,18 +62,42 @@ cases:
     description: Economy-wide answer reports measured aggregates without value labels.
     prompt: Summarise the society-wide result.
     tool_calls:
-      - name: run_economy_simulation
+      - name: run_society_simulation
         input:
-          year: 2025
-          dataset: frs
+          year: 2026
+          dataset: enhanced_frs_2023_24
           reform:
-            income_tax:
-              personal_allowance: 15000
-        output_fixture: economy_personal_allowance.json
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
+        output:
+          status: success
+          year: 2026
+          dataset:
+            name: enhanced_frs_2023_24
+            label: Enhanced FRS
+          reform_applied: true
+          result_id: society_simulation_1
+      - name: compute_budgetary_impact
+        input:
+          simulation_id: society_simulation_1
+        output:
+          status: success
+          simulation_id: society_simulation_1
+          net_budgetary_impact: 1200000000
+          result_id: budgetary_impact_2
+      - name: compute_decile_impacts
+        input:
+          simulation_id: society_simulation_1
+        output:
+          status: success
+          simulation_id: society_simulation_1
+          deciles:
+            - decile: 10
+              absolute_change: 120
+          result_id: decile_impacts_3
     expect:
       required:
         - FRS
-        - "2025"
+        - "2026"
         - £1.2 billion
         - decile
       forbidden:
@@ -83,11 +110,11 @@ cases:
         - generous
         - punitive
       grounded_numbers: true
-      allowed_numbers: [2025, 1.2, 10, 120]
+      allowed_numbers: [2026, 1.2, 10, 120]
       number_tolerance: 0.01
     offline_response:
       text: >
-        Using FRS aggregate outputs for 2025, the reform changes the budgetary
+        Using Enhanced FRS aggregate outputs for 2026, the reform changes the budgetary
         position by £1.2 billion. The reported decile impacts range up to £120
         per year in decile 10.
 
@@ -96,24 +123,26 @@ cases:
     description: Parameter lookup answers should distinguish raw taxable-income thresholds from standard gross-income thresholds.
     prompt: What is the basic rate threshold in 2025?
     tool_calls:
-      - name: lookup_parameter
+      - name: get_parameter
         input:
-          query: basic rate threshold
+          path: gov.hmrc.income_tax.rates.uk[1].threshold
           year: 2025
         output:
           status: success
-          year: 2025
-          query: basic rate threshold
-          primary_match:
-            path: income_tax.uk_brackets.1.threshold
+          parameter:
+            path: gov.hmrc.income_tax.rates.uk[1].threshold
             value: 37700.0
-            label: income tax uk brackets 1 threshold
-            program: income_tax
-            context:
-              threshold_basis: taxable_income_after_personal_allowance
-              personal_allowance: 12570.0
-              standard_gross_income_threshold: 50270.0
-          matches: []
+            year: 2025
+      - name: get_parameter
+        input:
+          path: gov.hmrc.income_tax.allowances.personal_allowance.amount
+          year: 2025
+        output:
+          status: success
+          parameter:
+            path: gov.hmrc.income_tax.allowances.personal_allowance.amount
+            value: 12570.0
+            year: 2025
     expect:
       required:
         - "2025"
@@ -145,39 +174,17 @@ cases:
     description: Ambiguous lookup results should ask the user to choose an option rather than answer with a value.
     prompt: What is the Universal Credit standard allowance?
     tool_calls:
-      - name: lookup_parameter
+      - name: search_parameters
         input:
           query: universal credit standard allowance
-          year: 2025
         output:
-          status: needs_confirmation
-          needs_confirmation: true
-          year: 2025
+          status: success
           query: universal credit standard allowance
-          match_certainty: 1.0
-          confirmation_reason: close_string_match_certainty_margin
-          message: Multiple parameter matches are plausible. Ask the user which option they mean before answering.
-          options:
-            - path: universal_credit.standard_allowance_couple_over25
-              value: 628.1
-              label: universal credit standard allowance couple over25
-              program: universal_credit
-              match_certainty: 1.0
-            - path: universal_credit.standard_allowance_couple_under25
-              value: 497.55
-              label: universal credit standard allowance couple under25
-              program: universal_credit
-              match_certainty: 1.0
-            - path: universal_credit.standard_allowance_single_over25
-              value: 400.14
-              label: universal credit standard allowance single over25
-              program: universal_credit
-              match_certainty: 1.0
-            - path: universal_credit.standard_allowance_single_under25
-              value: 316.98
-              label: universal credit standard allowance single under25
-              program: universal_credit
-              match_certainty: 1.0
+          parameters:
+            - path: gov.dwp.universal_credit.standard_allowance.amount.SINGLE_YOUNG
+            - path: gov.dwp.universal_credit.standard_allowance.amount.SINGLE_OLD
+            - path: gov.dwp.universal_credit.standard_allowance.amount.COUPLE_YOUNG
+            - path: gov.dwp.universal_credit.standard_allowance.amount.COUPLE_OLD
     expect:
       required:
         - choose
@@ -209,32 +216,25 @@ cases:
     description: Current-policy household answers should stay illustrative and grounded.
     prompt: Summarise the current-policy household result.
     tool_calls:
-      - name: calculate_household
+      - name: run_household_simulation
         input:
           year: 2025
-          person:
-            - person_id: 0
-              benunit_id: 0
-              household_id: 0
-              age: 35
+          people:
+            - age: 35
               employment_income: 30000
-          benunit:
-            - benunit_id: 0
-              household_id: 0
-          household:
-            - household_id: 0
+          benunit: {}
+          household: {}
         output:
           status: success
           year: 2025
           reform_applied: false
           person:
-            - person_id: 0
-              employment_income: 30000
+            - employment_income: 30000
               income_tax: 3486
-              employee_ni: 1394.40
+              national_insurance: 1394.40
+          benunit: {}
           household:
-            - household_id: 0
-              net_income: 25119.60
+            household_net_income: 25119.60
     expect:
       required:
         - illustrative
@@ -266,7 +266,7 @@ cases:
     tool_calls:
       - name: generate_chart
         input:
-          chart_type: bar
+          chart_kind: generic_bar
           title: Baseline and reform net income
           data:
             - scenario: Baseline
@@ -330,20 +330,19 @@ cases:
       - name: validate_reform
         input:
           reform:
-            income_tax:
-              made_up_field: 1
+            gov.made_up.parameter: 1
         output:
           valid: false
           errors:
-            - path: income_tax.made_up_field
-              message: Unknown field 'made_up_field' for reform program 'income_tax'.
-          valid_programs:
-            - income_tax
+            - path: reform
+              message: Reform contains parameter paths that do not exist in the model.
+          valid_targets_sample:
+            - gov.hmrc.income_tax.allowances.personal_allowance.amount
     expect:
       required:
         - not valid
-        - income_tax.made_up_field
-        - made_up_field
+        - gov.made_up.parameter
+        - parameter path
       forbidden:
         - good
         - bad
@@ -355,20 +354,21 @@ cases:
         - punitive
     offline_response:
       text: >
-        The reform JSON is not valid because income_tax.made_up_field is not a
-        recognised field. Remove made_up_field or replace it with a supported
-        income_tax parameter.
+        The reform JSON is not valid because gov.made_up.parameter is not a
+        recognised policyengine.py parameter path. Replace it with a supported
+        parameter path before running the reform.
 
   - id: answer_unsupported_calculation_error
     suite: answer
     description: Unsupported calculations should report the tool limitation without inventing results.
     prompt: Explain the calculation result.
     tool_calls:
-      - name: run_python
+      - name: get_variable
         input:
-          code: result = unsupported_program()
+          name: unsupported_program
         output:
-          error: "NameError: name 'unsupported_program' is not defined"
+          status: error
+          error: "Unknown variable: unsupported_program"
     expect:
       required:
         - could not calculate
@@ -397,27 +397,40 @@ cases:
     description: Winners and losers outputs should be reported mechanically without value labels.
     prompt: Summarise the winners and losers result.
     tool_calls:
-      - name: run_economy_simulation
+      - name: run_society_simulation
         input:
-          year: 2025
-          dataset: frs
+          year: 2026
+          dataset: enhanced_frs_2023_24
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
         output:
-          dataset: FRS
-          year: 2025
-          winners_losers:
-            winners: 10000000
-            losers: 0
-            unchanged: 18000000
+          status: success
+          year: 2026
+          dataset:
+            name: enhanced_frs_2023_24
+            label: Enhanced FRS
+          result_id: society_simulation_1
+      - name: compute_winners_losers
+        input:
+          simulation_id: society_simulation_1
+        output:
+          status: success
+          simulation_id: society_simulation_1
+          basis: income
+          deciles:
+            - decile: 0
+              lose_more_than_5pct: 0
+              lose_less_than_5pct: 0
+              no_change: 0.642
+              gain_less_than_5pct: 0.318
+              gain_more_than_5pct: 0.04
     expect:
       required:
         - FRS
         - winners
         - losers
-        - 10 million
-        - "0"
+        - 35.8%
+        - 64.2%
       forbidden:
         - good
         - bad
@@ -428,34 +441,44 @@ cases:
         - generous
         - punitive
       grounded_numbers: true
-      allowed_numbers: [2025, 10, 0, 18]
+      allowed_numbers: [2026, 35.8, 64.2, 0]
       number_tolerance: 0.01
     offline_response:
       text: >
-        Using FRS model outputs for 2025, the result reports 10 million winners,
-        0 losers, and 18 million households with no modelled change.
+        Using Enhanced FRS model outputs for 2026, the result reports 35.8% winners,
+        0% losers, and 64.2% with no modelled change.
 
   - id: answer_decile_distribution_neutral
     suite: answer
     description: Decile impact answers should summarize distributional mechanics without value labels.
     prompt: Summarise the decile impacts.
     tool_calls:
-      - name: run_economy_simulation
+      - name: run_society_simulation
         input:
-          year: 2025
-          dataset: frs
+          year: 2026
+          dataset: enhanced_frs_2023_24
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
         output:
-          dataset: FRS
-          decile_impacts:
+          status: success
+          year: 2026
+          dataset:
+            name: enhanced_frs_2023_24
+            label: Enhanced FRS
+          result_id: society_simulation_1
+      - name: compute_decile_impacts
+        input:
+          simulation_id: society_simulation_1
+        output:
+          status: success
+          simulation_id: society_simulation_1
+          deciles:
             - decile: 1
-              average_change: 0
+              absolute_change: 0
             - decile: 5
-              average_change: 40
+              absolute_change: 40
             - decile: 10
-              average_change: 120
+              absolute_change: 120
     expect:
       required:
         - decile
@@ -476,7 +499,7 @@ cases:
       number_tolerance: 0.01
     offline_response:
       text: >
-        The FRS decile outputs show an average change of £0 in decile 1, £40
+        The Enhanced FRS decile outputs show an average change of £0 in decile 1, £40
         in decile 5, and £120 in decile 10.
 
   - id: answer_poverty_metric_neutral
@@ -484,19 +507,30 @@ cases:
     description: Poverty metric answers should report baseline and reform values with model-output caveats.
     prompt: Summarise the poverty result.
     tool_calls:
-      - name: run_economy_simulation
+      - name: run_society_simulation
         input:
-          year: 2025
-          dataset: frs
+          year: 2026
+          dataset: enhanced_frs_2023_24
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
         output:
-          dataset: FRS
-          baseline_poverty:
-            poverty_rate: 14.2
-          reform_poverty:
-            poverty_rate: 13.9
+          status: success
+          year: 2026
+          dataset:
+            name: enhanced_frs_2023_24
+            label: Enhanced FRS
+          result_id: society_simulation_1
+      - name: compute_poverty_metrics
+        input:
+          simulation_id: society_simulation_1
+        output:
+          status: success
+          simulation_id: society_simulation_1
+          rates:
+            - poverty_type: relative_bhc
+              group: all
+              baseline_rate: 0.142
+              reform_rate: 0.139
     expect:
       required:
         - FRS
@@ -515,84 +549,87 @@ cases:
         - generous
         - punitive
       grounded_numbers: true
-      allowed_numbers: [2025, 14.2, 13.9]
+      allowed_numbers: [2026, 14.2, 13.9]
       number_tolerance: 0.01
     offline_response:
       text: >
-        In these FRS model outputs for 2025, the baseline poverty rate is
+        In these Enhanced FRS model outputs for 2026, the baseline poverty rate is
         14.2% and the reform poverty rate is 13.9%.
 
-  - id: answer_aggregate_microdata_summary
+  - id: answer_weighted_aggregate_summary
     suite: answer
-    description: Aggregate microdata answers should summarize groups without implying row-level access.
-    prompt: Summarise the aggregate microdata result.
+    description: Official weighted aggregate answers should not imply row-level access.
+    prompt: Summarise the aggregate result.
     tool_calls:
-      - name: analyse_microdata
+      - name: run_society_simulation
         input:
-          entity: households
-          operation: group_by
-          dataset: efrs
-          group_by: [region]
-          columns: [net_income]
+          year: 2026
+          dataset: enhanced_frs_2023_24
         output:
-          entity: households
-          operation: group_by
-          dataset: Enhanced FRS
+          status: success
+          year: 2026
+          dataset:
+            name: enhanced_frs_2023_24
+            label: Enhanced FRS
+          result_id: society_simulation_1
+      - name: aggregate_result
+        input:
+          simulation_id: society_simulation_1
+          entity: household
+          variable: household_net_income
+          operation: sum
+          target: baseline
+        output:
+          status: success
+          simulation_id: society_simulation_1
           result:
-            - region: London
-              net_income: 32000
-              weighted_population: 1000000
-            - region: Wales
-              net_income: 28000
-              weighted_population: 800000
+            target: baseline
+            entity: household
+            variable: household_net_income
+            operation: sum
+            value: 1000000000
+          privacy: Aggregate only; no row-level records returned.
     expect:
       required:
         - aggregate
         - Enhanced FRS
-        - London
-        - Wales
+        - £1 billion
         - no row-level
       forbidden:
         - real FRS household
         - actual survey row
         - here are real households
-        - baseline
       grounded_numbers: true
-      allowed_numbers: [32000, 28000, 1000000, 800000]
+      allowed_numbers: [2026, 1]
       number_tolerance: 0.01
     offline_response:
       text: >
-        This is an aggregate Enhanced FRS result with no row-level records
-        exposed. London has modelled average net income under current policy
-        of £32000 across a weighted population of 1000000, while Wales has
-        £28000 across 800000.
+        This is an official weighted Enhanced FRS aggregate for 2026 with no
+        row-level records exposed. Baseline household net income totals £1 billion.
 
   - id: answer_tool_error_requests_valid_structure
     suite: answer
     description: Household tool errors should ask for corrected structure rather than inventing numbers.
     prompt: Explain the household calculation error.
     tool_calls:
-      - name: calculate_household
+      - name: run_household_simulation
         input:
           year: 2025
-          person:
-            - person_id: 0
-              benunit_id: 999
-              household_id: 0
+          people:
+            - household_net_income: 10000
         output:
-          error: "999"
+          error: household_net_income is a household variable, not a person variable
     expect:
       required:
-        - benunit_id
-        - "999"
-        - valid benefit unit
+        - household_net_income
+        - person
       forbidden_regex:
         - "£\\s?\\d"
         - "\\b\\d+(?:\\.\\d+)?%"
     offline_response:
       text: >
-        The calculation did not run because benunit_id 999 does not match a
-        valid benefit unit in the supplied household structure.
+        The calculation did not run because household_net_income is a household
+        variable and cannot be supplied on a person.
 
   - id: answer_chart_missing_data
     suite: answer
@@ -601,7 +638,7 @@ cases:
     tool_calls:
       - name: generate_chart
         input:
-          chart_type: bar
+          chart_kind: generic_bar
           title: Empty chart
           data: []
           x_field: scenario
@@ -663,32 +700,33 @@ cases:
     description: Household answers with several figures should use only numbers grounded in tool output.
     prompt: Summarise the main household numbers.
     tool_calls:
-      - name: calculate_household
+      - name: run_household_simulation
         input:
           year: 2025
           reform:
-            income_tax:
-              personal_allowance: 15000
-          person:
-            - person_id: 0
-              benunit_id: 0
-              household_id: 0
-              employment_income: 30000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
+          people:
+            - employment_income: 30000
         output:
           status: success
           year: 2025
           reform_applied: true
-          person:
-            - employment_income: 30000
-              baseline_income_tax: 3486
-              reform_income_tax: 2994.20
-              baseline_employee_ni: 1394.40
-              reform_employee_ni: 1392.08
-          household:
-            - baseline_net_income: 25119.60
-              reform_net_income: 25584.70
-              baseline_total_tax: 6936.89
-              reform_total_tax: 6477.24
+          baseline:
+            person:
+              - employment_income: 30000
+                income_tax: 3486
+                national_insurance: 1394.40
+            household:
+              household_net_income: 25119.60
+              household_tax: 6936.89
+          reform:
+            person:
+              - employment_income: 30000
+                income_tax: 2994.20
+                national_insurance: 1392.08
+            household:
+              household_net_income: 25584.70
+              household_tax: 6477.24
     expect:
       required:
         - illustrative
@@ -696,7 +734,7 @@ cases:
         - £25584.70
         - £465.10
         - income tax
-        - employee NI
+        - National Insurance
       forbidden:
         - good
         - bad
@@ -714,5 +752,5 @@ cases:
       text: >
         For this illustrative 2025 household earning £30000, baseline net
         income is £25119.60 and reform net income is £25584.70, a change of
-        £465.10. Income tax changes from £3486 to £2994.20, and employee NI
-        changes from £1394.40 to £1392.08.
+        £465.10. Income tax changes from £3486 to £2994.20, and National
+        Insurance changes from £1394.40 to £1392.08.

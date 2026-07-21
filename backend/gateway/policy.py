@@ -74,19 +74,19 @@ TOOL_SLOT_REQUIREMENT = _build_slot_requirements()
 # Curated overrides where the schema's required/default flags don't match the
 # real importance. Kept tiny and commented to limit drift.
 _CRITICALITY_OVERRIDES: dict = {
-    # run_economy_simulation has required=[] in the schema, but a society-wide
+    # run_society_simulation has required=[] in the schema, but a society-wide
     # simulation with no reform is just a baseline snapshot — almost never the
     # intent. Treat the reform as load-bearing.
-    ("run_economy_simulation", "reform"): "high",
+    ("run_society_simulation", "reform"): "high",
 }
 
 # Schema-required (or otherwise high) slots that the model can reliably INFER
 # rather than ask the user about. Without this, every household calc would ask
 # "which benefit unit?" — this is the primary bound on over-asking.
 INFERABLE: set = {
-    ("calculate_household", "benunit"),
-    ("calculate_household", "household"),
-    ("generate_chart", "chart_type"),
+    ("run_household_simulation", "benunit"),
+    ("run_household_simulation", "household"),
+    ("generate_chart", "chart_kind"),
     ("generate_chart", "title"),
     ("generate_chart", "x_field"),
     ("generate_chart", "y_fields"),
@@ -102,6 +102,7 @@ OUTPUT_VOCAB = (
     "tax_revenue",
     "benefit_spending",
     "poverty_impact",
+    "inequality_impact",
     "decile_impact",
     "winners_losers",
     "caseload",
@@ -114,35 +115,14 @@ OUTPUT_VOCAB = (
 
 
 # ---------------------------------------------------------------------------
-# Context promotions: raise criticality when a default would be *actively
-# wrong*, not merely absent. Deterministic keyword scans over the prompt.
+# Context promotions: raise criticality when a default would be actively wrong,
+# not merely absent. Deterministic keyword scans over the prompt.
 # ---------------------------------------------------------------------------
-
-# A non-default survey is required when the question is about a dimension the
-# default datasets (FRS/EFRS) don't carry. Silently keeping the default here
-# yields a wrong number, not a defaulted one — so dataset becomes load-bearing.
-#
-# These must be SPECIFIC to the non-default dimension. Bare "spending" was
-# dropped deliberately: ordinary in-scope questions ("how does this affect
-# benefit/welfare/government spending?") contain it, so it caused false LCFS
-# promotions. The consumption signal is carried by the more specific phrases
-# below (consumer/household spending, expenditure, VAT, living costs).
-_DATASET_SIGNAL_KEYWORDS = (
-    "wealth", "net worth", "net wealth", "assets", "estate", "inheritance",  # WAS
-    "consumption", "expenditure", "vat", "living costs",                      # LCFS
-    "consumer spending", "household spending", "spending patterns",           # LCFS
-    "top income", "additional rate", "very high earner", "highest earner",    # SPI
-)
 
 _REFORM_INTENT_KEYWORDS = (
     "reform", "raise", "cut", "increase", "decrease", "abolish", "scrap",
     "introduce", "freeze", "uprate", "replace", "change the", "set the",
 )
-
-
-def _prompt_implies_special_dataset(prompt: str) -> bool:
-    p = prompt.lower()
-    return any(kw in p for kw in _DATASET_SIGNAL_KEYWORDS)
 
 
 def _prompt_names_reform(prompt: str) -> bool:
@@ -175,8 +155,6 @@ def criticality(tool: Optional[str], slot: SlotFact, prompt: str = "") -> Critic
     base = _base_criticality(tool, slot)
     if slot.kind == "output":
         return base
-    if slot.name == "dataset" and _prompt_implies_special_dataset(prompt):
-        return "high"
     if slot.name == "reform" and _prompt_names_reform(prompt):
         return "high"
     if slot.name == "year" and base == "low" and _prompt_implies_nondefault_year(prompt):

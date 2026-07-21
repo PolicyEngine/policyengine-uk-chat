@@ -12,8 +12,8 @@ It hosts the chat agent and persists conversations. In production it runs as a
   `FastAPI(title="Microsim Public Chatbot API", default_response_class=NaNSafeJSONResponse)`.
 - **Three routers** are mounted: `billing` and `conversations` at the root, and
   `chat` under the `/chat` prefix.
-- **CORS** is driven by the `HOSTNAMES` environment variable (comma-separated;
-  defaults to `*`), with credentials and all methods/headers allowed.
+- **CORS** is driven by the comma-separated `HOSTNAMES` environment variable.
+  An unset value fails closed and allows no cross-origin requests.
 - **`NaNSafeJSONResponse`** (`api/errors.py`) is the default response class — it
   converts `NaN`/`Inf` floats (which appear in microsimulation output) to `null`
   so responses are valid JSON.
@@ -34,33 +34,21 @@ It hosts the chat agent and persists conversations. In production it runs as a
 * - `GET /health`
   - Liveness check — returns `{"status": "ok"}`.
 * - `GET /version`
-  - Returns `{"policyengine_uk_compiled": "<version>"}` (or `"unknown"`).
+  - Returns `engine`, `engine_version`, and `policyengine_uk` (or `"unknown"` for an unavailable package version).
 ```
 
-The `/version` endpoint is how you confirm which engine build a given
-deployment is serving — useful because the agent's `reference.md` is stamped to
-match.
+The `/version` endpoint confirms which policyengine.py and UK package versions a
+deployment is serving.
 
-## The API reference (`reference.md`) and scope descriptor
+## Model catalog and scope
 
-`backend/reference.md` is a cached, version-stamped reference document
-describing the PolicyEngine UK API surface (capabilities snapshot, public API,
-reform recipes, the `Parameters` JSON schema). It is injected into the compute
-agent's context so it can write correct code without guessing.
+The compute agent discovers the live model through typed tools. Variable,
+parameter, entity, dataset, reform-target, household-input, and output discovery
+are separate calls so the model retrieves only the catalog area it needs.
 
-A companion `backend/scope_descriptor.md` is a compact descriptor of the
-modelled programmes, datasets, years, and the "not modelled" boundary. It feeds
-the lightweight gateway prompts where the full reference would be too heavy.
-
-Both are **generated**, not hand-edited — `backend/engine/reference.py` rebuilds
-them against the installed engine. This happens:
-
-- in the **Docker image** build (`RUN python engine/reference.py`), and
-- in the **Modal image** build (`modal_app.py` runs the same script after
-  installing the engine),
-
-so the deployed agent always reads a reference that matches the engine it will
-execute against. Both files are git-ignored — they only exist at build time.
+The lightweight gateway uses the curated scope descriptor in
+`backend/prompts/gateway.py`. No generated engine reference or scope file is
+required at image-build time.
 
 ## Rate limits
 

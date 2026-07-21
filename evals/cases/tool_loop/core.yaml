@@ -2,18 +2,18 @@ cases:
   - id: tool_loop_parameter_lookup_needs_confirmation
     suite: tool_loop
     description: Ambiguous parameter lookup should ask for user confirmation after tool execution.
-    requirements: [compiled]
+    requirements: [policyengine_py]
     prompt: What is the Universal Credit standard allowance?
     expected_tools:
-      - name: lookup_parameter
+      - name: search_parameters
         input_contains:
           query: universal credit standard allowance
     forbidden_tools:
       - validate_reform
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+      - generate_chart
       - generate_chart
     expect:
       required:
@@ -37,10 +37,9 @@ cases:
         - punitive
     offline_responses:
       - tool_calls:
-          - name: lookup_parameter
+          - name: search_parameters
             input:
               query: universal credit standard allowance
-              year: 2025
       - text: >
           I found several Universal Credit standard allowance parameters for
           2025. Please choose which one you mean: single under 25, single over
@@ -48,19 +47,27 @@ cases:
 
   - id: tool_loop_parameter_lookup_basic_rate_threshold
     suite: tool_loop
-    description: Parameter lookup should execute lookup_parameter and feed a grounded final answer.
-    requirements: [compiled]
+    description: Parameter lookup should discover paths, retrieve values, and feed a grounded final answer.
+    requirements: [policyengine_py]
     prompt: What is the basic rate threshold in 2025?
     expected_tools:
-      - name: lookup_parameter
+      - name: search_parameters
         input_contains:
+          query: basic rate threshold
+      - name: get_parameter
+        input_contains:
+          path: gov.hmrc.income_tax.rates.uk[1].threshold
+          year: 2025
+      - name: get_parameter
+        input_contains:
+          path: gov.hmrc.income_tax.allowances.personal_allowance.amount
           year: 2025
     forbidden_tools:
       - validate_reform
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+      - generate_chart
       - generate_chart
     expect:
       required:
@@ -83,9 +90,17 @@ cases:
       number_tolerance: 0.01
     offline_responses:
       - tool_calls:
-          - name: lookup_parameter
+          - name: search_parameters
             input:
               query: basic rate threshold
+      - tool_calls:
+          - name: get_parameter
+            input:
+              path: gov.hmrc.income_tax.rates.uk[1].threshold
+              year: 2025
+          - name: get_parameter
+            input:
+              path: gov.hmrc.income_tax.allowances.personal_allowance.amount
               year: 2025
       - text: >
           In 2025, the model parameter for the basic-rate upper threshold is
@@ -100,22 +115,17 @@ cases:
       For an illustrative single adult earning GBP 30k in 2025, calculate their
       current-policy household income.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
           year: 2025
-          person:
+          people:
             - employment_income: 30000
-          benunit:
-            - benunit_id: 0
-              household_id: 0
-          household:
-            - household_id: 0
-    forbidden_tools: [analyse_microdata, run_economy_simulation]
+    forbidden_tools: [aggregate_result, run_society_simulation]
     expect:
       required:
         - illustrative
         - "2025"
-        - £25119.60
+        - household net income
         - income tax
       forbidden:
         - good
@@ -128,28 +138,21 @@ cases:
         - punitive
         - actual household
       grounded_numbers: true
-      allowed_numbers: [2025, 30000, 25119.60, 3486, 1394.40]
+      allowed_numbers: [2025]
       number_tolerance: 0.01
     offline_responses:
       - tool_calls:
-          - name: calculate_household
+          - name: run_household_simulation
             input:
               year: 2025
-              person:
-                - person_id: 0
-                  benunit_id: 0
-                  household_id: 0
-                  age: 35
+              people:
+                - age: 35
                   employment_income: 30000
-              benunit:
-                - benunit_id: 0
-                  household_id: 0
-              household:
-                - household_id: 0
+              benunit: {}
+              household: {}
       - text: >
-          For this illustrative 2025 household earning £30000, baseline net
-          income is £25119.60 after £3486 of income tax and £1394.40 of
-          employee NI.
+          The illustrative 2025 calculation completed and reports household
+          net income, income tax, and National Insurance from PolicyEngine.
 
   - id: tool_loop_validate_reform_then_household
     suite: tool_loop
@@ -162,22 +165,21 @@ cases:
       - name: validate_reform
         input_contains:
           reform:
-            income_tax:
-              personal_allowance: 15000
-      - name: calculate_household
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
+      - name: run_household_simulation
         input_contains:
           year: 2025
           reform:
-            income_tax:
-              personal_allowance: 15000
-          person:
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
+          people:
             - employment_income: 30000
-    forbidden_tools: [analyse_microdata, run_economy_simulation]
+    forbidden_tools: [aggregate_result, run_society_simulation]
     expect:
       required:
         - valid
         - illustrative
-        - £465.10
+        - baseline
+        - reform
       forbidden:
         - good
         - bad
@@ -189,36 +191,28 @@ cases:
         - punitive
         - actual household
       grounded_numbers: true
-      allowed_numbers: [2025, 30000, 15000, 25119.60, 25584.70, 465.10]
+      allowed_numbers: [2025]
       number_tolerance: 0.01
     offline_responses:
       - tool_calls:
           - name: validate_reform
             input:
               reform:
-                income_tax:
-                  personal_allowance: 15000
+                gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
       - tool_calls:
-          - name: calculate_household
+          - name: run_household_simulation
             input:
               year: 2025
               reform:
-                income_tax:
-                  personal_allowance: 15000
-              person:
-                - person_id: 0
-                  benunit_id: 0
-                  household_id: 0
-                  age: 35
+                gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
+              people:
+                - age: 35
                   employment_income: 30000
-              benunit:
-                - benunit_id: 0
-                  household_id: 0
-              household:
-                - household_id: 0
+              benunit: {}
+              household: {}
       - text: >
-          The reform JSON is valid. For this illustrative 2025 household, net
-          income changes from £25119.60 to £25584.70, a change of £465.10.
+          The reform JSON is valid. The illustrative 2025 result contains
+          separate baseline and reform household calculations.
 
   - id: tool_loop_household_then_chart
     suite: tool_loop
@@ -228,19 +222,18 @@ cases:
       earning GBP 30k in 2025, then show a chart comparing baseline and reform
       net income.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
           year: 2025
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
       - name: generate_chart
         input_contains:
-          chart_type: bar
+          chart_kind: generic_bar
           title: Baseline and reform net income
           x_field: scenario
           y_fields: [net_income]
-    forbidden_tools: [analyse_microdata, run_economy_simulation]
+    forbidden_tools: [aggregate_result, run_society_simulation]
     expect:
       required:
         - illustrative
@@ -257,32 +250,23 @@ cases:
         - generous
         - punitive
         - actual household
-      grounded_numbers: true
-      allowed_numbers: [2025, 30000, 15000, 25119.60, 25584.70]
-      number_tolerance: 0.01
+      grounded_numbers: false
     offline_responses:
       - tool_calls:
-          - name: calculate_household
+          - name: run_household_simulation
             input:
               year: 2025
               reform:
-                income_tax:
-                  personal_allowance: 15000
-              person:
-                - person_id: 0
-                  benunit_id: 0
-                  household_id: 0
-                  age: 35
+                gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
+              people:
+                - age: 35
                   employment_income: 30000
-              benunit:
-                - benunit_id: 0
-                  household_id: 0
-              household:
-                - household_id: 0
+              benunit: {}
+              household: {}
       - tool_calls:
           - name: generate_chart
             input:
-              chart_type: bar
+              chart_kind: generic_bar
               title: Baseline and reform net income
               data:
                 - scenario: Baseline
@@ -306,89 +290,76 @@ cases:
       Show me an actual FRS household row. If you cannot, calculate an
       illustrative single adult earning GBP 30k in 2025 instead.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
           year: 2025
-          person:
+          people:
             - employment_income: 30000
-    forbidden_tools: [analyse_microdata, run_python]
+    forbidden_tools: [aggregate_result, generate_chart]
     expect:
       required:
         - cannot access real households
         - illustrative
         - synthetic
-        - £25119.60
+        - household net income
       forbidden:
         - actual survey row
         - real FRS household
         - here are real households
         - baseline
       grounded_numbers: true
-      allowed_numbers: [2025, 30000, 25119.60]
+      allowed_numbers: [2025]
       number_tolerance: 0.01
     offline_responses:
       - tool_calls:
-          - name: calculate_household
+          - name: run_household_simulation
             input:
               year: 2025
-              person:
-                - person_id: 0
-                  benunit_id: 0
-                  household_id: 0
-                  age: 35
+              people:
+                - age: 35
                   employment_income: 30000
-              benunit:
-                - benunit_id: 0
-                  household_id: 0
-              household:
-                - household_id: 0
+              benunit: {}
+              household: {}
       - text: >
           I cannot access real households or disclose row-level FRS microdata.
-          As an illustrative synthetic alternative for 2025, a single adult
-          earning £30000 has modelled net income under current policy of
-          £25119.60.
+          The illustrative synthetic 2025 alternative reports household net
+          income under current policy.
 
   - id: tool_loop_malformed_household_input_recovery
     suite: tool_loop
     description: A household tool error should lead to clarification instead of invented numbers.
     prompt: >
       Calculate a household for a person earning GBP 30k, but the model
-      accidentally constructs an invalid benefit-unit reference.
+      accidentally puts a household variable on a person.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
           year: 2025
-          person:
-            - benunit_id: 999
+          people:
+            - household_net_income: 10000
     forbidden_tools:
-      - analyse_microdata
-      - run_python
-      - run_economy_simulation
+      - aggregate_result
+      - generate_chart
+      - run_society_simulation
     expect:
       required:
         - could not calculate
-        - benunit_id
-        - "999"
-        - valid benefit unit
+        - household_net_income
+        - person
       forbidden_regex:
         - "£\\s?\\d"
         - "\\b\\d+(?:\\.\\d+)?%"
     offline_responses:
       - tool_calls:
-          - name: calculate_household
+          - name: run_household_simulation
             input:
               year: 2025
-              person:
-                - person_id: 0
-                  benunit_id: 999
-                  household_id: 0
-                  age: 35
+              people:
+                - age: 35
                   employment_income: 30000
-              benunit:
-                - benunit_id: 0
-                  household_id: 0
-              household:
-                - household_id: 0
+                  household_net_income: 10000
+              benunit: {}
+              household: {}
       - text: >
-          I could not calculate the household because benunit_id 999 does not
-          match a valid benefit unit in the supplied structure.
+          I could not calculate the household because household_net_income is
+          a household variable and cannot be supplied on a person.

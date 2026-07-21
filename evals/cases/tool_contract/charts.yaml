@@ -4,7 +4,7 @@ cases:
     description: generate_chart returns parseable grouped bar chart JSON.
     tool_name: generate_chart
     input:
-      chart_type: bar
+      chart_kind: generic_bar
       title: Decile impact
       data:
         - decile: 1
@@ -33,7 +33,7 @@ cases:
     description: generate_chart returns multi-series line chart JSON with legend enabled.
     tool_name: generate_chart
     input:
-      chart_type: line
+      chart_kind: generic_line
       title: Baseline and reform net income
       data:
         - income: 0
@@ -60,7 +60,7 @@ cases:
     description: generate_chart preserves requested series line styles and curves.
     tool_name: generate_chart
     input:
-      chart_type: line
+      chart_kind: generic_line
       title: Schedule
       data:
         - income: 0
@@ -88,7 +88,7 @@ cases:
     description: generate_chart preserves axis formats and explicit bounds.
     tool_name: generate_chart
     input:
-      chart_type: scatter
+      chart_kind: generic_scatter
       title: Income and tax
       data:
         - income: 10000
@@ -120,10 +120,10 @@ cases:
     description: generate_chart preserves subtitle and source fields.
     tool_name: generate_chart
     input:
-      chart_type: area
+      chart_kind: generic_area
       title: Programme composition
       subtitle: Baseline modelled values
-      source: PolicyEngine UK compiled output
+      source: PolicyEngine UK policyengine_py output
       data:
         - programme: Income tax
           value: 100
@@ -133,14 +133,14 @@ cases:
       chart_contains:
         type: area
         subtitle: Baseline modelled values
-        source: PolicyEngine UK compiled output
+        source: PolicyEngine UK policyengine_py output
 
   - id: chart_contract_markdown_contains_parseable_json
     suite: tool_contract
     description: generate_chart emits a fenced chart JSON block.
     tool_name: generate_chart
     input:
-      chart_type: line
+      chart_kind: generic_line
       title: Net income
       data:
         - income: 0

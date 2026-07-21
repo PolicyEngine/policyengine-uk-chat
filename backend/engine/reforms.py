@@ -1,201 +1,173 @@
-"""Parametric reform validation and compiled-policy construction."""
+"""Reform validation for the policyengine.py UK runtime."""
 
-from typing import Any, Dict, List, Optional, Tuple
+from __future__ import annotations
 
-from engine.simulations import ensure_compiled_package_importable
+from collections.abc import Mapping
+from difflib import get_close_matches
+from typing import Any, Dict, List, Optional
+
+from engine.py_runtime import uk_model_version
 
 
-DEFAULT_VALID_PROGRAMS = [
-    "income_tax",
-    "national_insurance",
-    "universal_credit",
-    "child_benefit",
-    "state_pension",
-    "pension_credit",
-    "benefit_cap",
-    "housing_benefit",
-    "tax_credits",
-    "scottish_child_payment",
-    "stamp_duty",
-    "capital_gains_tax",
-    "wealth_tax",
-]
+COMMON_REFORM_TARGETS = {
+    "gov.hmrc.income_tax.allowances.personal_allowance.amount": (
+        "personal allowance",
+        "tax free allowance",
+        "income tax allowance",
+    ),
+    "gov.hmrc.income_tax.rates.uk[0].rate": (
+        "basic rate",
+        "basic income tax rate",
+    ),
+    "gov.hmrc.income_tax.rates.uk[1].threshold": (
+        "basic rate threshold",
+        "higher rate threshold",
+        "higher rate starts",
+    ),
+    "gov.hmrc.income_tax.rates.uk[1].rate": (
+        "higher rate",
+        "higher income tax rate",
+    ),
+    "gov.hmrc.income_tax.rates.uk[2].threshold": (
+        "additional rate threshold",
+        "additional rate starts",
+    ),
+    "gov.hmrc.income_tax.rates.uk[2].rate": (
+        "additional rate",
+        "additional income tax rate",
+    ),
+    "gov.hmrc.vat.standard_rate": (
+        "standard rate of VAT",
+        "VAT standard rate",
+        "standard VAT rate",
+    ),
+    "gov.dwp.universal_credit.standard_allowance.amount.SINGLE_OLD": (
+        "universal credit standard allowance",
+        "UC standard allowance single over 25",
+    ),
+}
+
 
 class ReformValidationError(ValueError):
     """Validation error carrying JSON-friendly reform errors."""
 
     def __init__(self, errors: List[Dict[str, str]]):
         self.errors = errors
-        message = errors[0]["message"] if errors else "Invalid reform"
-        super().__init__(message)
+        super().__init__(errors[0]["message"] if errors else "Invalid reform")
 
 
-def _parameter_classes():
-    ensure_compiled_package_importable()
-    from policyengine_uk_compiled import (
-        BenefitCapParams,
-        CapitalGainsTaxParams,
-        ChildBenefitParams,
-        HousingBenefitParams,
-        IncomeTaxParams,
-        NationalInsuranceParams,
-        PensionCreditParams,
-        ScottishChildPaymentParams,
-        StampDutyBand,
-        StampDutyParams,
-        StatePensionParams,
-        TaxCreditsParams,
-        UniversalCreditParams,
-        WealthTaxParams,
-    )
+def normalize_reform_dict(reform: Optional[Mapping[str, Any]]) -> dict[str, Any]:
+    """Validate the outer reform shape and remove unset parameter values."""
 
-    return (
-        {
-            "income_tax": IncomeTaxParams,
-            "national_insurance": NationalInsuranceParams,
-            "universal_credit": UniversalCreditParams,
-            "child_benefit": ChildBenefitParams,
-            "state_pension": StatePensionParams,
-            "pension_credit": PensionCreditParams,
-            "benefit_cap": BenefitCapParams,
-            "housing_benefit": HousingBenefitParams,
-            "tax_credits": TaxCreditsParams,
-            "scottish_child_payment": ScottishChildPaymentParams,
-            "stamp_duty": StampDutyParams,
-            "capital_gains_tax": CapitalGainsTaxParams,
-            "wealth_tax": WealthTaxParams,
-        },
-        StampDutyParams,
-        StampDutyBand,
-    )
-
-
-def get_valid_programs() -> List[str]:
-    try:
-        param_cls_map, _, _ = _parameter_classes()
-    except ModuleNotFoundError:
-        return DEFAULT_VALID_PROGRAMS
-    return list(param_cls_map)
-
-
-def build_reform_schema(valid_programs: Optional[List[str]] = None) -> Dict[str, Any]:
-    programs = valid_programs or get_valid_programs()
-    return {
-        "type": "object",
-        "description": (
-            "Parametric reform. Top-level keys are programmes; values are the "
-            "parameter changes for that programme. Valid programmes include "
-            f"{', '.join(programs[:-1])}, and {programs[-1]}. "
-            "Field names within each programme match the corresponding *Params "
-            "constructor. For structural reforms, use run_python instead."
-        ),
-        "additionalProperties": True,
-    }
-
-
-REFORM_SCHEMA = build_reform_schema()
-
-
-def normalise_reform(
-    reform: Optional[Dict[str, Any]],
-) -> Tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
-    """Validate and normalize a reform dict, returning JSON and model objects."""
     if reform is None:
-        return {}, {}
-    if not isinstance(reform, dict):
+        return {}
+    if not isinstance(reform, Mapping):
         raise ReformValidationError(
-            [{"path": "reform", "message": f"Reform must be a dict, got {type(reform).__name__}"}]
-        )
-    if not reform:
-        return {}, {}
-
-    param_cls_map, stamp_duty_cls, stamp_duty_band_cls = _parameter_classes()
-    normalized: Dict[str, Dict[str, Any]] = {}
-    model_kwargs: Dict[str, Any] = {}
-    errors: List[Dict[str, str]] = []
-
-    for program, fields in reform.items():
-        if program not in param_cls_map:
-            errors.append(
+            [
                 {
-                    "path": str(program),
-                    "message": f"Unknown reform program '{program}'. Valid: {list(param_cls_map)}",
+                    "path": "reform",
+                    "message": (
+                        f"Reform must be an object mapping parameter paths to values, "
+                        f"got {type(reform).__name__}."
+                    ),
                 }
-            )
-            continue
-        if not isinstance(fields, dict):
-            errors.append(
-                {
-                    "path": str(program),
-                    "message": f"Reform program '{program}' must be a dict, got {type(fields).__name__}",
-                }
-            )
-            continue
-
-        cls = param_cls_map[program]
-        valid_fields = set(cls.model_fields)
-        unknown = sorted(k for k in fields if k not in valid_fields and fields[k] is not None)
-        if unknown:
-            for field in unknown:
-                errors.append(
-                    {
-                        "path": f"{program}.{field}",
-                        "message": (
-                            f"Unknown field(s) for '{program}': {unknown}. "
-                            f"Valid: {sorted(valid_fields)}"
-                        ),
-                    }
-                )
-            continue
-
-        cleaned_fields = {k: v for k, v in fields.items() if v is not None}
-        model_fields = dict(cleaned_fields)
-        if cls is stamp_duty_cls and "bands" in model_fields:
-            model_fields["bands"] = [
-                stamp_duty_band_cls(**band) if isinstance(band, dict) else band
-                for band in model_fields["bands"]
             ]
-        try:
-            model_kwargs[program] = cls(**model_fields)
-        except Exception as exc:
-            errors.append({"path": str(program), "message": f"{type(exc).__name__}: {exc}"})
-            continue
-        if cleaned_fields:
-            normalized[program] = cleaned_fields
+        )
 
+    cleaned: dict[str, Any] = {}
+    errors: list[dict[str, str]] = []
+    for path, value in reform.items():
+        if not isinstance(path, str) or not path:
+            errors.append(
+                {"path": str(path), "message": "Reform parameter paths must be non-empty strings."}
+            )
+            continue
+        if value is None:
+            continue
+        cleaned[path] = value
     if errors:
         raise ReformValidationError(errors)
-    return normalized, model_kwargs
+    return cleaned
 
 
-def build_compiled_policy(reform: Optional[Dict[str, Any]]):
-    _, model_kwargs = normalise_reform(reform)
-    if reform is None:
+def compile_reform_dict(
+    reform: Optional[Mapping[str, Any]],
+    *,
+    year: int,
+) -> Optional[dict[str, dict[str, Any]]]:
+    """Convert flat reform JSON to the policyengine.py reform structure."""
+
+    cleaned = normalize_reform_dict(reform)
+    if not cleaned:
         return None
-    ensure_compiled_package_importable()
-    from policyengine_uk_compiled import Parameters
 
-    # Match policyengine-uk-compiled's output-shape switch: policy=None means
-    # plain baseline output, while any supplied Parameters object, including an
-    # empty no-op policy, means baseline_*/reform_* comparison output.
-    return Parameters(**model_kwargs)
+    from policyengine.tax_benefit_models.common import compile_reform
 
-
-def validate_reform_dict(reform: Optional[Dict[str, Any]]) -> Dict[str, Any]:
     try:
-        normalized, _ = normalise_reform(reform)
+        return compile_reform(cleaned, year=year, model_version=uk_model_version())
+    except ValueError as exc:
+        raise ReformValidationError(
+            [{"path": "reform", "message": str(exc)}]
+        ) from exc
+
+
+def validate_reform_dict(
+    reform: Optional[Mapping[str, Any]],
+    *,
+    year: int,
+) -> Dict[str, Any]:
+    try:
+        cleaned = normalize_reform_dict(reform)
+        reform_object = compile_reform_dict(cleaned, year=year) if cleaned else None
     except ReformValidationError as exc:
-        return {"valid": False, "errors": exc.errors, "valid_programs": get_valid_programs()}
+        return {
+            "valid": False,
+            "errors": exc.errors,
+            "valid_targets_sample": list(COMMON_REFORM_TARGETS),
+        }
     except Exception as exc:
         return {
             "valid": False,
             "errors": [{"path": "reform", "message": f"{type(exc).__name__}: {exc}"}],
-            "valid_programs": get_valid_programs(),
+            "valid_targets_sample": list(COMMON_REFORM_TARGETS),
         }
 
     return {
         "valid": True,
-        "normalized_reform": normalized,
-        "programs": list(normalized),
+        "normalized_reform": cleaned,
+        "reform_object": reform_object,
+        "parameter_paths": list(cleaned),
         "warnings": [],
     }
+
+
+def search_reform_targets(query: str = "", limit: int = 25) -> list[dict[str, Any]]:
+    """Search reformable parameter paths by path, label, description, or alias."""
+
+    query_norm = (query or "").strip().lower()
+    rows: list[dict[str, Any]] = []
+    try:
+        parameters = uk_model_version().parameters_by_name.items()
+    except Exception:
+        parameters = ((path, None) for path in COMMON_REFORM_TARGETS)
+    for path, parameter in parameters:
+        label = getattr(parameter, "label", None) if parameter is not None else None
+        label = label or path
+        description = getattr(parameter, "description", None) if parameter is not None else None
+        aliases = COMMON_REFORM_TARGETS.get(path, ())
+        haystack = " ".join([path, label or "", description or "", *aliases]).lower()
+        if query_norm and query_norm not in haystack:
+            close = get_close_matches(query_norm, [path.lower(), label.lower()], n=1, cutoff=0.65)
+            if not close:
+                continue
+        rows.append(
+            {
+                "path": path,
+                "label": label,
+                "description": description,
+                "aliases": list(aliases),
+            }
+        )
+        if len(rows) >= limit:
+            break
+    return rows

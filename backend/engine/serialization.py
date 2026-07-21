@@ -1,5 +1,6 @@
 """Serialization helpers for tool outputs."""
 
+import math
 from typing import Any, Dict, List
 
 
@@ -14,22 +15,26 @@ def json_safe(obj: Any) -> Any:
     except ImportError:
         pd = None
 
-    if obj is None or isinstance(obj, (str, int, float, bool)):
+    if obj is None or isinstance(obj, (str, int, bool)):
         return obj
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
     if np is not None:
         if isinstance(obj, np.ndarray):
             return obj.tolist()
         if isinstance(obj, np.integer):
             return int(obj)
         if isinstance(obj, np.floating):
-            return float(obj)
+            value = float(obj)
+            return value if math.isfinite(value) else None
         if isinstance(obj, np.bool_):
             return bool(obj)
     if pd is not None:
-        if isinstance(obj, pd.DataFrame):
-            return obj.to_dict(orient="records")
-        if isinstance(obj, pd.Series):
-            return obj.to_list()
+        if isinstance(obj, (pd.DataFrame, pd.Series)):
+            raise TypeError(
+                "Tool outputs must serialize typed result fields, not tabular "
+                "simulation data."
+            )
     if isinstance(obj, dict):
         return {str(k): json_safe(v) for k, v in obj.items()}
     if isinstance(obj, (list, tuple, set)):
@@ -46,20 +51,6 @@ def json_safe(obj: Any) -> Any:
     except Exception:
         pass
     return str(obj)
-
-
-def dataframe_to_records(df) -> List[Dict[str, Any]]:
-    return [
-        {
-            key: (
-                None
-                if (hasattr(value, "__class__") and value.__class__.__name__ == "float" and str(value) == "nan")
-                else value
-            )
-            for key, value in row.items()
-        }
-        for row in df.to_dict(orient="records")
-    ]
 
 
 def explore_tabular_data(data: List[Dict[str, Any]], max_unique_values: int = 20) -> Dict[str, Any]:
@@ -93,4 +84,3 @@ def explore_tabular_data(data: List[Dict[str, Any]], max_unique_values: int = 20
                 col_info["max"] = max(numeric)
         columns.append(col_info)
     return {"row_count": row_count, "columns": columns}
-

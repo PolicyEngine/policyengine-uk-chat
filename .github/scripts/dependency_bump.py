@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Open dependency bump PRs for policyengine-* pins in backend/requirements.txt.
+"""Open dependency bump PRs for PolicyEngine pins in backend/requirements.txt.
 
 Invoked by .github/workflows/dependency-update-pr.yml on:
 - repository_dispatch (package-release) from an upstream release pipeline,
@@ -21,7 +21,7 @@ which only reports the newest release overall and would hide a same-minor
 patch behind a newer cross-minor release.
 
 Environment:
-  PACKAGE  optional; a single package to bump (empty = all policyengine-*
+  PACKAGE  optional; a single package to bump (empty = all PolicyEngine
            pins found in backend/requirements.txt).
   VERSION  optional; exact target version (requires PACKAGE). Empty means
            "newest suitable release on PyPI".
@@ -43,7 +43,7 @@ from packaging.version import InvalidVersion, Version
 
 REQ_PATH = "backend/requirements.txt"
 PIN_RE = re.compile(
-    r"^(?P<name>policyengine-[a-z0-9-]+)"
+    r"^(?P<name>policyengine(?:-[a-z0-9-]+)?)"
     r"(?P<extras>\[[^\]]*\])?"
     r"==(?P<version>[0-9]+(?:\.[0-9]+)*)$"
 )
@@ -227,7 +227,7 @@ def main() -> None:
 
     packages = [package] if package else pinned_packages(content)
     if not packages:
-        print(f"No policyengine-* pins found in {REQ_PATH}; nothing to do.")
+        print(f"No PolicyEngine pins found in {REQ_PATH}; nothing to do.")
         return
 
     for name in packages:

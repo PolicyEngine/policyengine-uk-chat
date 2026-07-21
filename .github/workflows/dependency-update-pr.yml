@@ -1,11 +1,10 @@
 name: Dependency bump PRs
 
-# Release-driven dependency updates. Upstream release pipelines (e.g.
-# policyengine-uk-v2, which publishes policyengine-uk-compiled) send a
-# repository_dispatch event after their PyPI publish completes; this workflow
-# answers it by opening a bump PR against backend/requirements.txt. CI runs on
-# the PR, and merging to main triggers the normal deploy workflow — new engine
-# versions are never committed straight to main untested.
+# Release-driven dependency updates. The policyengine.py release pipeline sends
+# a repository_dispatch event after publishing a certified country bundle; this
+# workflow answers it by opening a bump PR against backend/requirements.txt. CI
+# runs on the PR, and merging to main triggers the normal deploy workflow — new
+# engine versions are never committed straight to main untested.
 #
 # The daily schedule is only a fallback sweep: repository_dispatch is
 # fire-and-forget, so a dispatch lost to an outage would otherwise be missed.
@@ -16,7 +15,7 @@ on:
   workflow_dispatch:
     inputs:
       package:
-        description: "PyPI package pinned in backend/requirements.txt (empty = sweep all policyengine-* pins)"
+        description: "PyPI package pinned in backend/requirements.txt (empty = sweep all PolicyEngine pins)"
         required: false
         default: ""
       version:

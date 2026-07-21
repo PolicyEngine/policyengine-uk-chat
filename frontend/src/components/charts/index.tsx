@@ -4,6 +4,7 @@ import { ChartSpec } from "./types";
 import { LineChart } from "./LineChart";
 import { BarChart } from "./BarChart";
 import { ScatterChart } from "./ScatterChart";
+import { PresetChart } from "./PresetChart";
 
 export { type ChartSpec } from "./types";
 
@@ -23,6 +24,8 @@ export function Chart({ spec, width, height }: ChartProps) {
       return <LineChart spec={{ ...spec, type: "line", areaFill: true }} width={width} height={height} />;
     case "scatter":
       return <ScatterChart spec={spec} width={width} height={height} />;
+    case "preset":
+      return <PresetChart spec={spec} width={width} height={height} />;
     default:
       return <div style={{ padding: "20px", color: "#666" }}>Unknown chart type</div>;
   }
@@ -31,7 +34,7 @@ export function Chart({ spec, width, height }: ChartProps) {
 function parseChartSpec(json: string): ChartSpec | null {
   try {
     const spec = JSON.parse(json);
-    if (spec?.type && ["line", "bar", "area", "scatter"].includes(spec.type)) return spec as ChartSpec;
+    if (spec?.type && ["line", "bar", "area", "scatter", "preset"].includes(spec.type)) return spec as ChartSpec;
     return null;
   } catch {
     return null;

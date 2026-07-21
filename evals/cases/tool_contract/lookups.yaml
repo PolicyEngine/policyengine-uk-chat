@@ -1,93 +1,72 @@
 cases:
-  - id: lookup_parameter_personal_allowance_2025
+  - id: get_parameter_personal_allowance_2025
     suite: tool_contract
-    description: lookup_parameter returns the canonical personal allowance parameter value.
-    requirements: [compiled]
-    tool_name: lookup_parameter
+    description: get_parameter returns the canonical personal allowance value for a year.
+    requirements: [policyengine_py]
+    tool_name: get_parameter
     input:
-      query: income_tax.personal_allowance
+      path: gov.hmrc.income_tax.allowances.personal_allowance.amount
       year: 2025
     expect:
       contains:
         status: success
-        needs_confirmation: false
-        year: 2025
-        primary_match:
-          path: income_tax.personal_allowance
-          value: 12570.0
-          program: income_tax
+        parameter:
+          path: gov.hmrc.income_tax.allowances.personal_allowance.amount
+          year: 2025
       numeric:
-        - path: primary_match.value
+        - path: parameter.value
           equals: 12570
           tolerance: 0
 
-  - id: lookup_parameter_basic_rate_threshold_2025
+  - id: get_parameter_basic_rate_threshold_2025
     suite: tool_contract
-    description: lookup_parameter resolves a common phrase to the income tax bracket threshold and contextual gross threshold.
-    requirements: [compiled]
-    tool_name: lookup_parameter
+    description: get_parameter returns the canonical higher-rate starting threshold.
+    requirements: [policyengine_py]
+    tool_name: get_parameter
     input:
-      query: basic rate threshold
+      path: gov.hmrc.income_tax.rates.uk[1].threshold
       year: 2025
     expect:
       contains:
         status: success
-        needs_confirmation: false
-        year: 2025
-        primary_match:
-          path: income_tax.uk_brackets.1.threshold
-          value: 37700.0
-          context:
-            threshold_basis: taxable_income_after_personal_allowance
-            personal_allowance: 12570.0
-            standard_gross_income_threshold: 50270.0
+        parameter:
+          path: gov.hmrc.income_tax.rates.uk[1].threshold
+          year: 2025
       numeric:
-        - path: primary_match.value
+        - path: parameter.value
           equals: 37700
           tolerance: 0
-        - path: primary_match.context.standard_gross_income_threshold
-          equals: 50270
-          tolerance: 0
 
-  - id: lookup_parameter_standard_rate_vat_2025
+  - id: get_parameter_standard_rate_vat_2025
     suite: tool_contract
-    description: lookup_parameter resolves a natural-language VAT query to the standard rate parameter.
-    requirements: [compiled]
-    tool_name: lookup_parameter
+    description: get_parameter returns the canonical standard VAT rate.
+    requirements: [policyengine_py]
+    tool_name: get_parameter
     input:
-      query: standard rate of VAT
+      path: gov.hmrc.vat.standard_rate
       year: 2025
     expect:
       contains:
         status: success
-        needs_confirmation: false
-        primary_match:
-          path: vat.standard_rate
-          value: 0.2
-          program: vat
+        parameter:
+          path: gov.hmrc.vat.standard_rate
+          year: 2025
       numeric:
-        - path: primary_match.value
+        - path: parameter.value
           equals: 0.2
           tolerance: 0
 
-  - id: lookup_parameter_uc_standard_allowance_confirmation
+  - id: search_parameters_uc_standard_allowance_variants
     suite: tool_contract
-    description: lookup_parameter asks for confirmation when a query maps to several Universal Credit standard allowance variants.
-    requirements: [compiled]
-    tool_name: lookup_parameter
+    description: search_parameters discovers the Universal Credit standard allowance variants.
+    requirements: [policyengine_py]
+    tool_name: search_parameters
     input:
       query: universal credit standard allowance
-      year: 2025
-      limit: 1
+      limit: 10
     expect:
       contains:
-        status: needs_confirmation
-        needs_confirmation: true
-        confirmation_reason: close_string_match_certainty_margin
-        options:
-          - program: universal_credit
+        status: success
+        query: universal credit standard allowance
       required_paths:
-        - options.0.path
-        - options.1.path
-      absent_paths:
-        - primary_match
+        - parameters.0.path

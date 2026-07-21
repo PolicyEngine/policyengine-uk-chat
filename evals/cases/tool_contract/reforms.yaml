@@ -1,75 +1,73 @@
 cases:
-  - id: validate_reform_rejects_unknown_program
+  - id: validate_reform_rejects_unknown_parameter
     suite: tool_contract
-    description: validate_reform rejects unknown top-level programmes.
-    requirements: [compiled]
+    description: validate_reform rejects an unknown policyengine.py parameter path.
+    requirements: [policyengine_py]
     tool_name: validate_reform
     input:
       reform:
-        made_up_program:
-          threshold: 1
+        gov.made_up.parameter: 1
     expect:
       contains:
         valid: false
-        errors:
-          - path: made_up_program
       required_paths:
-        - valid_programs
+        - errors.0.path
+        - errors.0.message
 
-  - id: validate_reform_rejects_unknown_field
-    suite: tool_contract
-    description: validate_reform rejects unknown fields for a known programme.
-    requirements: [compiled]
-    tool_name: validate_reform
-    input:
-      reform:
-        income_tax:
-          made_up_field: 1
-    expect:
-      contains:
-        valid: false
-        errors:
-          - path: income_tax.made_up_field
-
-  - id: validate_reform_rejects_non_dict_reform
+  - id: validate_reform_rejects_non_object
     suite: tool_contract
     description: validate_reform rejects a reform payload that is not an object.
-    requirements: [compiled]
+    tags: [schema_negative]
+    requirements: [policyengine_py]
     tool_name: validate_reform
     input:
-      reform:
-        - bad
+      reform: [bad]
     expect:
       contains:
         valid: false
         errors:
           - path: reform
 
-  - id: validate_reform_rejects_non_dict_program_payload
+  - id: validate_reform_accepts_scalar_parameter
     suite: tool_contract
-    description: validate_reform rejects non-object programme payloads.
-    requirements: [compiled]
+    description: validate_reform accepts a canonical flat scalar reform.
+    requirements: [policyengine_py]
     tool_name: validate_reform
     input:
+      year: 2026
       reform:
-        income_tax: 15000
+        gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     expect:
       contains:
-        valid: false
-        errors:
-          - path: income_tax
+        valid: true
+        normalized_reform:
+          gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
+      required_paths:
+        - reform_object
 
-  - id: validate_reform_strips_null_fields
+  - id: validate_reform_accepts_dated_parameter
     suite: tool_contract
-    description: validate_reform strips null fields from otherwise valid reform payloads.
-    requirements: [compiled]
+    description: validate_reform accepts an explicit date-to-value mapping.
+    requirements: [policyengine_py]
+    tool_name: validate_reform
+    input:
+      year: 2026
+      reform:
+        gov.hmrc.income_tax.allowances.personal_allowance.amount:
+          2026-01-01: 15000
+    expect:
+      contains:
+        valid: true
+
+  - id: validate_reform_strips_null_parameter
+    suite: tool_contract
+    description: validate_reform strips null-valued parameter paths.
+    requirements: [policyengine_py]
     tool_name: validate_reform
     input:
       reform:
-        income_tax:
-          personal_allowance:
+        gov.hmrc.income_tax.allowances.personal_allowance.amount:
     expect:
       contains:
         valid: true
         normalized_reform: {}
-        programs: []

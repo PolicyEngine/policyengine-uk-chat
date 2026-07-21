@@ -6,45 +6,30 @@ cases:
       How would a single parent earning 30000 with two children be affected
       by increasing the personal allowance to 15000 in 2025?
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
           year: 2025
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
         required_input_paths:
-          - person
+          - people
           - benunit
           - household
-    forbidden_tools: [analyse_microdata]
+    forbidden_tools: [aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
             reform:
-              income_tax:
-                personal_allowance: 15000
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
+              gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
+            people:
+              - age: 35
                 employment_income: 30000
-              - person_id: 1
-                benunit_id: 0
-                household_id: 0
-                age: 8
-              - person_id: 2
-                benunit_id: 0
-                household_id: 0
-                age: 5
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-            household:
-              - household_id: 0
-
+              - age: 8
+              - age: 5
+            benunit: {}
+            household: {}
   - id: trajectory_society_wide_reform
     suite: trajectory
     description: Economy-wide reform prompt should select aggregate simulation.
@@ -52,22 +37,20 @@ cases:
       What is the society-wide impact of increasing the personal allowance to
       15000 in 2025?
     expected_tools:
-      - name: run_economy_simulation
+      - name: run_society_simulation
         input_contains:
           year: 2025
           reform:
-            income_tax:
-              personal_allowance: 15000
-    forbidden_tools: [analyse_microdata]
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
+    forbidden_tools: [aggregate_result]
     offline_response:
       tool_calls:
-        - name: run_economy_simulation
+        - name: run_society_simulation
           input:
             year: 2025
-            dataset: frs
+            dataset: enhanced_frs_2023_24
             reform:
-              income_tax:
-                personal_allowance: 15000
+              gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
   - id: trajectory_no_tool_for_definition
     suite: trajectory
@@ -76,54 +59,58 @@ cases:
     expected_tools: []
     forbidden_tools:
       - validate_reform
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - lookup_parameter
-      - run_python
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+      - search_parameters
+      - generate_chart
       - generate_chart
     offline_response:
       text: The personal allowance is the amount of income that can be received before income tax is due.
 
   - id: trajectory_parameter_lookup_personal_allowance
     suite: trajectory
-    description: Current parameter value questions should select lookup_parameter, not Python or simulations.
+    description: Current parameter value questions should select get_parameter, not a simulation.
     prompt: What is the current UK personal allowance?
     expected_tools:
-      - name: lookup_parameter
+      - name: get_parameter
+        input_contains:
+          path: gov.hmrc.income_tax.allowances.personal_allowance.amount
     forbidden_tools:
       - validate_reform
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+      - generate_chart
       - generate_chart
     offline_response:
       tool_calls:
-        - name: lookup_parameter
+        - name: get_parameter
           input:
-            query: personal allowance
+            path: gov.hmrc.income_tax.allowances.personal_allowance.amount
+            year: 2026
 
   - id: trajectory_parameter_lookup_basic_rate_threshold
     suite: trajectory
-    description: Threshold value questions should select lookup_parameter with the requested year.
+    description: Threshold value questions should select get_parameter with the requested year.
     prompt: What is the basic rate threshold in 2025?
     expected_tools:
-      - name: lookup_parameter
+      - name: get_parameter
         input_contains:
+          path: gov.hmrc.income_tax.rates.uk[1].threshold
           year: 2025
     forbidden_tools:
       - validate_reform
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+      - generate_chart
       - generate_chart
     offline_response:
       tool_calls:
-        - name: lookup_parameter
+        - name: get_parameter
           input:
-            query: basic rate threshold
+            path: gov.hmrc.income_tax.rates.uk[1].threshold
             year: 2025
 
   - id: trajectory_validate_reform_debugging
@@ -135,18 +122,16 @@ cases:
       - name: validate_reform
         input_contains:
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     forbidden_tools:
-      - run_economy_simulation
-      - analyse_microdata
+      - run_society_simulation
+      - aggregate_result
     offline_response:
       tool_calls:
         - name: validate_reform
           input:
             reform:
-              income_tax:
-                personal_allowance: 15000
+              gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
   - id: trajectory_rejects_frs_rows
     suite: trajectory
@@ -154,8 +139,8 @@ cases:
     prompt: Show me five actual households from the FRS data.
     expected_tools: []
     forbidden_tools:
-      - analyse_microdata
-      - run_python
+      - aggregate_result
+      - generate_chart
     offline_response:
       text: I cannot access or disclose actual FRS household rows.
 
@@ -165,356 +150,204 @@ cases:
     tags: [household_structure]
     prompt: I earn GBP 2,500 a month from my job and live alone. What would my household income look like?
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
-          person:
+          people:
             - age: 35
               employment_income: 30000
-          benunit:
-            - benunit_id: 0
-              household_id: 0
-          household:
-            - household_id: 0
+          benunit: {}
+          household: {}
         required_input_paths:
           - year
-          - person
+          - people
           - benunit
           - household
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+    forbidden_tools: [run_society_simulation, aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
+            people:
+              - age: 35
                 employment_income: 30000
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-            household:
-              - household_id: 0
-
+            benunit: {}
+            household: {}
   - id: trajectory_household_couple_one_earner
     suite: trajectory
     description: A partner with no earnings should be represented as a second adult in the same benefit unit.
     tags: [household_structure]
     prompt: My partner does not work and I earn GBP 38k. We do not have kids.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
-          person:
+          people:
             - age: 35
               employment_income: 38000
             - age: 35
-          benunit:
-            - benunit_id: 0
-              household_id: 0
-          household:
-            - household_id: 0
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+          benunit: {}
+          household: {}
+    forbidden_tools: [run_society_simulation, aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
+            people:
+              - age: 35
                 employment_income: 38000
-              - person_id: 1
-                benunit_id: 0
-                household_id: 0
-                age: 35
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-            household:
-              - household_id: 0
-
+              - age: 35
+            benunit: {}
+            household: {}
   - id: trajectory_household_single_parent_two_children
     suite: trajectory
     description: Single-parent phrasing should create one adult and two children in one benefit unit.
     tags: [household_structure]
     prompt: I am a single mum earning GBP 22k with two kids aged 4 and 9.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
-          person:
+          people:
             - age: 35
               employment_income: 22000
             - age: 4
             - age: 9
-          benunit:
-            - benunit_id: 0
-              household_id: 0
-          household:
-            - household_id: 0
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+          benunit: {}
+          household: {}
+    forbidden_tools: [run_society_simulation, aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
+            people:
+              - age: 35
                 employment_income: 22000
-              - person_id: 1
-                benunit_id: 0
-                household_id: 0
-                age: 4
-              - person_id: 2
-                benunit_id: 0
-                household_id: 0
-                age: 9
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-            household:
-              - household_id: 0
-
+              - age: 4
+              - age: 9
+            benunit: {}
+            household: {}
   - id: trajectory_household_flatmates_separate_benunits
     suite: trajectory
-    description: Unpartnered adults sharing a flat should remain separate benefit units in one household.
+    description: The model should not silently combine unrelated adults into one benefit unit.
     tags: [household_structure]
     prompt: I share a flat with another adult, but we are not a couple. I earn GBP 28k, they earn GBP 20k.
-    expected_tools:
-      - name: calculate_household
-        input_contains:
-          person:
-            - benunit_id: 0
-              household_id: 0
-              employment_income: 28000
-            - benunit_id: 1
-              household_id: 0
-              employment_income: 20000
-          benunit:
-            - benunit_id: 0
-              household_id: 0
-            - benunit_id: 1
-              household_id: 0
-          household:
-            - household_id: 0
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+    expected_tools: []
+    forbidden_tools: [run_household_simulation, run_society_simulation, aggregate_result]
     offline_response:
-      tool_calls:
-        - name: calculate_household
-          input:
-            year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
-                employment_income: 28000
-              - person_id: 1
-                benunit_id: 1
-                household_id: 0
-                age: 35
-                employment_income: 20000
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-              - benunit_id: 1
-                household_id: 0
-            household:
-              - household_id: 0
-
+      text: The household tool models one benefit unit per call, so I cannot combine unrelated flatmates as a couple. I can calculate each adult separately.
   - id: trajectory_household_adult_child_separate_benunit
     suite: trajectory
-    description: An adult child with earnings should be represented as another adult in the household, not a young child.
+    description: An adult child requires benefit-unit clarification before using the single-benefit-unit tool.
     tags: [household_structure]
     prompt: I am 52, earn GBP 35k, and my 19-year-old child lives with me and works part-time earning GBP 6k.
-    expected_tools:
-      - name: calculate_household
-        input_contains:
-          person:
-            - age: 52
-              employment_income: 35000
-              household_id: 0
-            - age: 19
-              employment_income: 6000
-              household_id: 0
-          household:
-            - household_id: 0
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+    expected_tools: []
+    forbidden_tools: [run_household_simulation, run_society_simulation, aggregate_result]
     offline_response:
-      tool_calls:
-        - name: calculate_household
-          input:
-            year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 52
-                employment_income: 35000
-              - person_id: 1
-                benunit_id: 1
-                household_id: 0
-                age: 19
-                employment_income: 6000
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-              - benunit_id: 1
-                household_id: 0
-            household:
-              - household_id: 0
-
+      text: I need to establish whether the 19-year-old belongs in the same benefit unit; otherwise I should calculate the two benefit units separately.
   - id: trajectory_household_child_over_16_in_education
     suite: trajectory
     description: A 17-year-old in full-time education should be represented with age and education status.
     tags: [household_structure]
     prompt: We have a 17-year-old still in full-time education and a 12-year-old. I earn GBP 45k.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
-          person:
+          people:
             - age: 40
               employment_income: 45000
             - age: 17
-              current_education: FULL_TIME
+              current_education: POST_SECONDARY
             - age: 12
-          benunit:
-            - benunit_id: 0
-              household_id: 0
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+          benunit: {}
+    forbidden_tools: [run_society_simulation, aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 40
+            people:
+              - age: 40
                 employment_income: 45000
-              - person_id: 1
-                benunit_id: 0
-                household_id: 0
-                age: 17
-                current_education: FULL_TIME
-              - person_id: 2
-                benunit_id: 0
-                household_id: 0
-                age: 12
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-            household:
-              - household_id: 0
-
+              - age: 17
+                current_education: POST_SECONDARY
+              - age: 12
+            benunit: {}
+            household: {}
   - id: trajectory_household_pensioner_couple
     suite: trajectory
     description: Pensioner couple phrasing should use older ages and pension income rather than employment income.
     tags: [household_structure]
     prompt: We are a retired couple, both 68, with GBP 18k private pension income between us.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
-          person:
+          people:
             - age: 68
               private_pension_income: 9000
             - age: 68
               private_pension_income: 9000
-          benunit:
-            - benunit_id: 0
-              household_id: 0
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+          benunit: {}
+    forbidden_tools: [run_society_simulation, aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 68
+            people:
+              - age: 68
                 private_pension_income: 9000
-              - person_id: 1
-                benunit_id: 0
-                household_id: 0
-                age: 68
+              - age: 68
                 private_pension_income: 9000
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-            household:
-              - household_id: 0
-
+            benunit: {}
+            household: {}
   - id: trajectory_household_mixed_employment_self_employment
     suite: trajectory
     description: Mixed work income should map to employment and self-employment fields separately.
     tags: [household_structure]
     prompt: I earn GBP 18k from employment and about GBP 12k from self-employed work.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
-          person:
+          people:
             - employment_income: 18000
               self_employment_income: 12000
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+    forbidden_tools: [run_society_simulation, aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
+            people:
+              - age: 35
                 employment_income: 18000
                 self_employment_income: 12000
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-            household:
-              - household_id: 0
-
+            benunit: {}
+            household: {}
   - id: trajectory_household_scotland_region
     suite: trajectory
     description: Scotland phrasing should set Scottish location fields for the household calculation.
     tags: [household_structure]
     prompt: I live in Scotland and earn GBP 50k. How different is income tax?
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
-          person:
+          people:
             - employment_income: 50000
-              is_in_scotland: true
           household:
-            - region: Scotland
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+            region: SCOTLAND
+    forbidden_tools: [run_society_simulation, aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
+            people:
+              - age: 35
                 employment_income: 50000
-                is_in_scotland: true
-            benunit:
-              - benunit_id: 0
-                household_id: 0
+            benunit: {}
             household:
-              - household_id: 0
-                region: Scotland
+              region: SCOTLAND
 
   - id: trajectory_household_renter_monthly_rent_child
     suite: trajectory
@@ -522,194 +355,137 @@ cases:
     tags: [household_structure]
     prompt: I am a renter paying GBP 900 a month, earning GBP 19k, with one child.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
-          person:
+          people:
             - employment_income: 19000
             - age: 8
-          benunit:
-            - rent_monthly: 900
+          benunit: {}
           household:
-            - tenure_type: RENT
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+            tenure_type: RENT_PRIVATELY
+            rent: 10800
+    forbidden_tools: [run_society_simulation, aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
+            people:
+              - age: 35
                 employment_income: 19000
-              - person_id: 1
-                benunit_id: 0
-                household_id: 0
-                age: 8
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-                rent_monthly: 900
+              - age: 8
+            benunit: {}
             household:
-              - household_id: 0
-                tenure_type: RENT
-
+              tenure_type: RENT_PRIVATELY
+              rent: 10800
   - id: trajectory_household_childcare_costs_monthly
     suite: trajectory
     description: Childcare costs should be annualized and attached to the adult/household input.
     tags: [household_structure]
     prompt: I am a lone parent earning GBP 24k and paying GBP 600 a month in childcare.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
-          person:
+          people:
             - employment_income: 24000
               childcare_expenses: 7200
             - age: 4
           benunit:
-            - is_lone_parent: true
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+            is_lone_parent: true
+    forbidden_tools: [run_society_simulation, aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
+            people:
+              - age: 35
                 employment_income: 24000
                 childcare_expenses: 7200
-              - person_id: 1
-                benunit_id: 0
-                household_id: 0
-                age: 4
+              - age: 4
             benunit:
-              - benunit_id: 0
-                household_id: 0
-                is_lone_parent: true
-            household:
-              - household_id: 0
-
+              is_lone_parent: true
+            household: {}
   - id: trajectory_household_disabled_adult
     suite: trajectory
     description: Disability phrasing should set the disabled flag on the illustrative adult.
     tags: [household_structure]
     prompt: I am disabled, live alone, and earn GBP 12k part time.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
-          person:
+          people:
             - employment_income: 12000
-              is_disabled: true
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+              is_disabled_for_benefits: true
+    forbidden_tools: [run_society_simulation, aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
+            people:
+              - age: 35
                 employment_income: 12000
-                is_disabled: true
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-            household:
-              - household_id: 0
-
+                is_disabled_for_benefits: true
+            benunit: {}
+            household: {}
   - id: trajectory_household_carer_disabled_partner
     suite: trajectory
     description: Carer and disabled-partner phrasing should map to two adults with different flags.
     tags: [household_structure]
     prompt: I care for my disabled partner. I earn GBP 10k and they do not work.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
-          person:
+          people:
             - employment_income: 10000
-              is_carer: true
-            - is_disabled: true
-          benunit:
-            - benunit_id: 0
-              household_id: 0
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+              is_carer_for_benefits: true
+            - is_disabled_for_benefits: true
+          benunit: {}
+    forbidden_tools: [run_society_simulation, aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
+            people:
+              - age: 35
                 employment_income: 10000
-                is_carer: true
-              - person_id: 1
-                benunit_id: 0
-                household_id: 0
-                age: 35
-                is_disabled: true
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-            household:
-              - household_id: 0
-
+                is_carer_for_benefits: true
+              - age: 35
+                is_disabled_for_benefits: true
+            benunit: {}
+            household: {}
   - id: trajectory_household_high_income_child_benefit
     suite: trajectory
     description: High-income child benefit phrasing should create a couple with children and one high earner.
     tags: [household_structure]
     prompt: I earn GBP 65k and my partner earns nothing. We have two children.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
-          person:
+          people:
             - employment_income: 65000
             - age: 35
             - age: 8
             - age: 5
           benunit:
-            - benunit_id: 0
-              household_id: 0
-              would_claim_child_benefit: true
-    forbidden_tools: [run_economy_simulation, analyse_microdata]
+            would_claim_child_benefit: true
+    forbidden_tools: [run_society_simulation, aggregate_result]
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
+            people:
+              - age: 35
                 employment_income: 65000
-              - person_id: 1
-                benunit_id: 0
-                household_id: 0
-                age: 35
-              - person_id: 2
-                benunit_id: 0
-                household_id: 0
-                age: 8
-              - person_id: 3
-                benunit_id: 0
-                household_id: 0
-                age: 5
+              - age: 35
+              - age: 8
+              - age: 5
             benunit:
-              - benunit_id: 0
-                household_id: 0
-                would_claim_child_benefit: true
-            household:
-              - household_id: 0
-
+              would_claim_child_benefit: true
+            household: {}
   - id: trajectory_household_ambiguous_dependants_asks_followup
     suite: trajectory
     description: Ambiguous dependant descriptions should ask for missing ages rather than guessing a household.
@@ -718,10 +494,10 @@ cases:
     expected_tools: []
     forbidden_tools:
       - validate_reform
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+      - generate_chart
       - generate_chart
     offline_response:
       text: To calculate an illustrative household, I need the dependants' ages and whether they are children, adults, or students.
@@ -736,7 +512,7 @@ cases:
     expected_tools:
       - name: generate_chart
         input_contains:
-          chart_type: bar
+          chart_kind: generic_bar
           title: Household net income
           data:
             - scenario: Baseline
@@ -746,15 +522,14 @@ cases:
           x_field: scenario
           y_fields: [net_income]
     forbidden_tools:
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
     offline_response:
       tool_calls:
         - name: generate_chart
           input:
-            chart_type: bar
+            chart_kind: generic_bar
             title: Household net income
             data:
               - scenario: Baseline
@@ -765,60 +540,51 @@ cases:
             y_fields: [net_income]
             y_format: currency
 
-  - id: trajectory_run_python_for_custom_schedule
+  - id: trajectory_household_for_single_earnings_point
     suite: trajectory
-    description: Custom calculation requests outside typed tool scope should use run_python as fallback.
-    tags: [python_fallback]
+    description: A single earnings point should use the typed household simulation tool.
     prompt: >
-      Using PolicyEngine UK, write a reproducible calculation for net income at
-      incomes from GBP 0 to GBP 60k in GBP 10k steps for a single adult.
+      Using PolicyEngine UK, calculate net income for a single adult earning
+      GBP 60k in 2026.
     expected_tools:
-      - name: run_python
+      - name: run_household_simulation
         required_input_paths:
-          - code
+          - people
+          - year
     forbidden_tools:
-      - analyse_microdata
-      - run_economy_simulation
+      - aggregate_result
+      - run_society_simulation
+      - generate_chart
     offline_response:
       tool_calls:
-        - name: run_python
+        - name: run_household_simulation
           input:
-            code: |
-              rows = []
-              for income in range(0, 60001, 10000):
-                  persons, benunits, households = Simulation.single_person(employment_income=income)
-                  sim = Simulation(year=2025, persons=persons, benunits=benunits, households=households)
-                  md = sim.run_microdata()
-                  rows.append({"employment_income": income, "net_income": md.households["net_income"].iloc[0]})
-              result = rows
+            year: 2026
+            people:
+              - age: 30
+                employment_income: 60000
 
-  - id: trajectory_non_frs_microdata_aggregate
+  - id: trajectory_weighted_aggregate_starts_society_simulation
     suite: trajectory
-    description: Allowed non-FRS aggregate microdata requests should use analyse_microdata.
-    tags: [microdata_aggregate]
+    description: A weighted aggregate request must first create a society simulation handle.
+    tags: [weighted_aggregate]
     prompt: >
-      In the Enhanced FRS model data, group households by region and show the
-      average net income under current policy.
+      In the Enhanced FRS model data, show total household net income under
+      current policy in 2026.
     expected_tools:
-      - name: analyse_microdata
+      - name: run_society_simulation
         input_contains:
-          entity: households
-          operation: group_by
-          dataset: efrs
-          group_by: [region]
-          columns: [net_income]
+          year: 2026
+          dataset: enhanced_frs_2023_24
     forbidden_tools:
-      - run_python
-      - run_economy_simulation
+      - generate_chart
+      - aggregate_result
     offline_response:
       tool_calls:
-        - name: analyse_microdata
+        - name: run_society_simulation
           input:
-            entity: households
-            operation: group_by
-            dataset: efrs
-            group_by: [region]
-            columns: [net_income]
+            year: 2026
+            dataset: enhanced_frs_2023_24
 
   - id: trajectory_missing_year_asks_followup
     suite: trajectory
@@ -828,10 +594,10 @@ cases:
     expected_tools: []
     forbidden_tools:
       - validate_reform
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+      - generate_chart
       - generate_chart
     offline_response:
       text: To calculate this, I need the tax year, household structure, income, and the new personal allowance amount.
@@ -847,7 +613,7 @@ cases:
     expected_tools:
       - name: generate_chart
         input_contains:
-          chart_type: bar
+          chart_kind: generic_bar
           title: Net income comparison
           data:
             - scenario: Baseline
@@ -857,15 +623,14 @@ cases:
           x_field: scenario
           y_fields: [net_income]
     forbidden_tools:
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
     offline_response:
       tool_calls:
         - name: generate_chart
           input:
-            chart_type: bar
+            chart_kind: generic_bar
             title: Net income comparison
             data:
               - scenario: Baseline
@@ -884,26 +649,24 @@ cases:
       What would increasing the personal allowance to GBP 15k do to poverty
       rates across the UK in 2025?
     expected_tools:
-      - name: run_economy_simulation
+      - name: run_society_simulation
         input_contains:
           year: 2025
-          dataset: frs
+          dataset: enhanced_frs_2023_24
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     forbidden_tools:
-      - calculate_household
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - aggregate_result
+      - generate_chart
     offline_response:
       tool_calls:
-        - name: run_economy_simulation
+        - name: run_society_simulation
           input:
             year: 2025
-            dataset: frs
+            dataset: enhanced_frs_2023_24
             reform:
-              income_tax:
-                personal_allowance: 15000
+              gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
   - id: trajectory_economy_decile_distribution
     suite: trajectory
@@ -913,26 +676,24 @@ cases:
       Show the decile-by-decile impact of raising the personal allowance to
       GBP 15k in 2025.
     expected_tools:
-      - name: run_economy_simulation
+      - name: run_society_simulation
         input_contains:
           year: 2025
-          dataset: frs
+          dataset: enhanced_frs_2023_24
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     forbidden_tools:
-      - calculate_household
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - aggregate_result
+      - generate_chart
     offline_response:
       tool_calls:
-        - name: run_economy_simulation
+        - name: run_society_simulation
           input:
             year: 2025
-            dataset: frs
+            dataset: enhanced_frs_2023_24
             reform:
-              income_tax:
-                personal_allowance: 15000
+              gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
   - id: trajectory_economy_child_benefit_budgetary
     suite: trajectory
@@ -942,26 +703,24 @@ cases:
       What is the budgetary impact in 2025 of increasing child benefit for the
       first child to GBP 30 per week?
     expected_tools:
-      - name: run_economy_simulation
+      - name: run_society_simulation
         input_contains:
           year: 2025
-          dataset: frs
+          dataset: enhanced_frs_2023_24
           reform:
-            child_benefit:
-              eldest_weekly: 30
+            gov.hmrc.child_benefit.amount.eldest: 30
     forbidden_tools:
-      - calculate_household
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - aggregate_result
+      - generate_chart
     offline_response:
       tool_calls:
-        - name: run_economy_simulation
+        - name: run_society_simulation
           input:
             year: 2025
-            dataset: frs
+            dataset: enhanced_frs_2023_24
             reform:
-              child_benefit:
-                eldest_weekly: 30
+              gov.hmrc.child_benefit.amount.eldest: 30
 
   - id: trajectory_conflict_validate_only
     suite: trajectory
@@ -974,20 +733,18 @@ cases:
       - name: validate_reform
         input_contains:
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     forbidden_tools:
-      - calculate_household
-      - run_economy_simulation
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+      - generate_chart
     offline_response:
       tool_calls:
         - name: validate_reform
           input:
             reform:
-              income_tax:
-                personal_allowance: 15000
+              gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
   - id: trajectory_conflict_simulate_without_validate
     suite: trajectory
@@ -997,27 +754,25 @@ cases:
       Calculate the society-wide impact in 2025 of this reform:
       {"income_tax": {"personal_allowance": 15000}}
     expected_tools:
-      - name: run_economy_simulation
+      - name: run_society_simulation
         input_contains:
           year: 2025
-          dataset: frs
+          dataset: enhanced_frs_2023_24
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     forbidden_tools:
       - validate_reform
-      - calculate_household
-      - analyse_microdata
-      - run_python
+      - run_household_simulation
+      - aggregate_result
+      - generate_chart
     offline_response:
       tool_calls:
-        - name: run_economy_simulation
+        - name: run_society_simulation
           input:
             year: 2025
-            dataset: frs
+            dataset: enhanced_frs_2023_24
             reform:
-              income_tax:
-                personal_allowance: 15000
+              gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
   - id: trajectory_conflict_frs_aggregate_not_microdata
     suite: trajectory
@@ -1027,26 +782,24 @@ cases:
       Using FRS, show the winners and losers from increasing the personal
       allowance to GBP 15k in 2025.
     expected_tools:
-      - name: run_economy_simulation
+      - name: run_society_simulation
         input_contains:
           year: 2025
-          dataset: frs
+          dataset: enhanced_frs_2023_24
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     forbidden_tools:
-      - analyse_microdata
-      - run_python
-      - calculate_household
+      - aggregate_result
+      - generate_chart
+      - run_household_simulation
     offline_response:
       tool_calls:
-        - name: run_economy_simulation
+        - name: run_society_simulation
           input:
             year: 2025
-            dataset: frs
+            dataset: enhanced_frs_2023_24
             reform:
-              income_tax:
-                personal_allowance: 15000
+              gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
   - id: trajectory_multiturn_child_ages_followup
     suite: trajectory
@@ -1061,48 +814,31 @@ cases:
       - role: user
         content: They are 4, 9, and 17, and the 17-year-old is in full-time education.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
           year: 2025
-          person:
+          people:
             - employment_income: 30000
             - age: 4
             - age: 9
             - age: 17
-              current_education: FULL_TIME
-          benunit:
-            - benunit_id: 0
-              household_id: 0
+              current_education: POST_SECONDARY
+          benunit: {}
     forbidden_tools:
-      - run_economy_simulation
-      - analyse_microdata
-      - run_python
+      - run_society_simulation
+      - aggregate_result
+      - generate_chart
     offline_response:
       tool_calls:
-        - name: calculate_household
+        - name: run_household_simulation
           input:
             year: 2025
-            person:
-              - person_id: 0
-                benunit_id: 0
-                household_id: 0
-                age: 35
+            people:
+              - age: 35
                 employment_income: 30000
-              - person_id: 1
-                benunit_id: 0
-                household_id: 0
-                age: 4
-              - person_id: 2
-                benunit_id: 0
-                household_id: 0
-                age: 9
-              - person_id: 3
-                benunit_id: 0
-                household_id: 0
-                age: 17
-                current_education: FULL_TIME
-            benunit:
-              - benunit_id: 0
-                household_id: 0
-            household:
-              - household_id: 0
+              - age: 4
+              - age: 9
+              - age: 17
+                current_education: POST_SECONDARY
+            benunit: {}
+            household: {}

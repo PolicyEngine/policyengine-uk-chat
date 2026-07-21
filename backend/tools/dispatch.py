@@ -1,386 +1,601 @@
-"""
-Agent tools for the microsim chatbot.
+"""Model-facing tools for the UK chat runtime."""
 
-This module owns the public LLM-facing tool functions and dispatcher.
-Tool schemas live in backend/tools/definitions.py; shared deterministic helpers
-live under backend/engine.
-"""
+from __future__ import annotations
 
+import inspect
 import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from engine import derivatives, discovery
+from engine.households import calculate_household, validate_household_dict
+from engine.reforms import validate_reform_dict
+from engine.serialization import explore_tabular_data, json_safe
+from engine.simulations import (
+    SocietySimulationRun,
+    build_society_simulation,
+)
+from tools.context import ToolExecutionContext
 from tools.definitions import (
-    ANALYSE_MICRODATA_DESCRIPTION,
-    ANALYSE_MICRODATA_INPUT_SCHEMA,
-    CALCULATE_HOUSEHOLD_DESCRIPTION,
-    CALCULATE_HOUSEHOLD_INPUT_SCHEMA,
+    AGGREGATE_RESULT_INPUT_SCHEMA,
+    COMPUTE_BUDGETARY_IMPACT_INPUT_SCHEMA,
+    COMPUTE_DECILE_IMPACTS_INPUT_SCHEMA,
+    COMPUTE_INEQUALITY_METRICS_INPUT_SCHEMA,
+    COMPUTE_POVERTY_METRICS_INPUT_SCHEMA,
+    COMPUTE_PROGRAM_BREAKDOWN_INPUT_SCHEMA,
+    COMPUTE_WINNERS_LOSERS_INPUT_SCHEMA,
     DEFAULT_SIMULATION_YEAR,
+    DERIVATIVE_DESCRIPTION,
+    DISCOVERY_DESCRIPTION,
     GENERATE_CHART_DESCRIPTION,
     GENERATE_CHART_INPUT_SCHEMA,
-    LOOKUP_PARAMETER_DESCRIPTION,
-    LOOKUP_PARAMETER_INPUT_SCHEMA,
-    RUN_ECONOMY_SIMULATION_DESCRIPTION,
-    RUN_ECONOMY_SIMULATION_INPUT_SCHEMA,
-    RUN_PYTHON_DESCRIPTION,
-    RUN_PYTHON_INPUT_SCHEMA,
+    GET_PARAMETER_INPUT_SCHEMA,
+    GET_VARIABLE_INPUT_SCHEMA,
+    LIST_DATASETS_INPUT_SCHEMA,
+    LIST_ENTITIES_INPUT_SCHEMA,
+    LIST_HOUSEHOLD_INPUT_VARIABLES_INPUT_SCHEMA,
+    LIST_REFORM_TARGETS_INPUT_SCHEMA,
+    LIST_SUPPORTED_OUTPUTS_INPUT_SCHEMA,
+    RUN_HOUSEHOLD_SIMULATION_DESCRIPTION,
+    RUN_HOUSEHOLD_SIMULATION_INPUT_SCHEMA,
+    RUN_SOCIETY_SIMULATION_DESCRIPTION,
+    RUN_SOCIETY_SIMULATION_INPUT_SCHEMA,
+    SEARCH_PARAMETERS_INPUT_SCHEMA,
+    SEARCH_VARIABLES_INPUT_SCHEMA,
+    VALIDATE_HOUSEHOLD_DESCRIPTION,
+    VALIDATE_HOUSEHOLD_INPUT_SCHEMA,
     VALIDATE_REFORM_DESCRIPTION,
     VALIDATE_REFORM_INPUT_SCHEMA,
 )
-from engine.constants import FRS_DATASET
-from engine.households import build_household_frames
-from engine.lookup.parameters import lookup_parameter_metadata
-from engine.microdata import analyse_microdata_result, get_cached_microdata, hash_reform
-from engine.reforms import build_compiled_policy, validate_reform_dict
-from engine.sandbox import (
-    run_python_code,
-    safe_import,
-)
-from engine.serialization import dataframe_to_records, explore_tabular_data, json_safe
-from engine.simulations import DATASET_LABELS, build_simulation, ensure_compiled_package_importable
-from engine.simulations import get_capabilities as _engine_capabilities
 from tools.registry import register_tool, tool_definitions, tool_handlers
 
 logger = logging.getLogger(__name__)
 
-# Compatibility aliases for tests and existing imports. They remain internal
-# unless registered with @register_tool.
-_ensure_compiled_package_importable = ensure_compiled_package_importable
-_safe_import = safe_import
 _json_safe = json_safe
-_hash_reform = hash_reform
-_get_cached_microdata = get_cached_microdata
-_build_compiled_policy = build_compiled_policy
-_build_simulation = build_simulation
 
 __all__ = [
     "TOOL_DEFINITIONS",
     "TOOL_HANDLERS",
-    "analyse_microdata",
-    "calculate_household",
+    "aggregate_result",
+    "compute_budgetary_impact",
+    "compute_decile_impacts",
+    "compute_inequality_metrics",
+    "compute_poverty_metrics",
+    "compute_program_breakdown",
+    "compute_winners_losers",
     "execute_tool",
     "explore_tabular_data",
     "generate_chart",
-    "get_baseline_parameters",
-    "get_capabilities",
-    "lookup_parameter",
-    "run_economy_simulation",
-    "run_python",
+    "get_parameter",
+    "get_variable",
+    "list_datasets",
+    "list_entities",
+    "list_household_input_variables",
+    "list_reform_targets",
+    "list_supported_outputs",
+    "run_household_simulation",
+    "run_society_simulation",
+    "search_parameters",
+    "search_variables",
+    "validate_household",
     "validate_reform",
 ]
 
 
-def get_capabilities() -> Dict[str, Any]:
-    try:
-        return _engine_capabilities()
-    except Exception as exc:
-        logger.error(f"Error getting capabilities: {exc}")
-        return {"error": str(exc)}
+def _store(
+    context: ToolExecutionContext | None,
+    kind: str,
+    payload: Any,
+    summary: dict[str, Any],
+) -> str:
+    if context is None:
+        raise RuntimeError("Result-producing tools require a shared tool execution context.")
+    return context.result_store.put(kind, payload, summary)
 
 
-def get_baseline_parameters(year: int = DEFAULT_SIMULATION_YEAR) -> Dict[str, Any]:
-    try:
-        _ensure_compiled_package_importable()
-        from policyengine_uk_compiled import Simulation
-
-        # The engine requires an explicit data source since 0.45, but
-        # get_baseline_params() only shells out for parameters; no data loads.
-        sim = Simulation(year=year, dataset=FRS_DATASET)
-        return {"year": year, "parameters": sim.get_baseline_params()}
-    except Exception as exc:
-        logger.error(f"Error getting baseline parameters: {exc}")
-        return {"error": str(exc)}
+def _get_stored(context: ToolExecutionContext | None, result_id: str, expected: str | tuple[str, ...]):
+    if context is None:
+        raise KeyError("Tool result handles are only available within a chat turn.")
+    return context.result_store.get(result_id, expected)
 
 
-@register_tool(
-    name="validate_reform",
-    description=VALIDATE_REFORM_DESCRIPTION,
-    input_schema=VALIDATE_REFORM_INPUT_SCHEMA,
-)
-def validate_reform(reform: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-    """Validate parametric reform JSON without running a simulation."""
-    return validate_reform_dict(reform)
+@register_tool(name="list_datasets", description=DISCOVERY_DESCRIPTION, input_schema=LIST_DATASETS_INPUT_SCHEMA)
+def list_datasets() -> Dict[str, Any]:
+    return discovery.list_datasets()
 
 
-@register_tool(
-    name="calculate_household",
-    description=CALCULATE_HOUSEHOLD_DESCRIPTION,
-    input_schema=CALCULATE_HOUSEHOLD_INPUT_SCHEMA,
-)
-def calculate_household(
-    person: List[Dict[str, Any]],
-    benunit: List[Dict[str, Any]],
-    household: List[Dict[str, Any]],
+@register_tool(name="list_entities", description=DISCOVERY_DESCRIPTION, input_schema=LIST_ENTITIES_INPUT_SCHEMA)
+def list_entities() -> Dict[str, Any]:
+    return discovery.list_entities()
+
+
+@register_tool(name="search_variables", description=DISCOVERY_DESCRIPTION, input_schema=SEARCH_VARIABLES_INPUT_SCHEMA)
+def search_variables(query: str = "", entity: str | None = None, limit: int = 25) -> Dict[str, Any]:
+    return discovery.search_variables(query=query, entity=entity, limit=limit)
+
+
+@register_tool(name="get_variable", description=DISCOVERY_DESCRIPTION, input_schema=GET_VARIABLE_INPUT_SCHEMA)
+def get_variable(name: str) -> Dict[str, Any]:
+    return discovery.get_variable(name)
+
+
+@register_tool(name="search_parameters", description=DISCOVERY_DESCRIPTION, input_schema=SEARCH_PARAMETERS_INPUT_SCHEMA)
+def search_parameters(query: str = "", limit: int = 25) -> Dict[str, Any]:
+    return discovery.search_parameters(query=query, limit=limit)
+
+
+@register_tool(name="get_parameter", description=DISCOVERY_DESCRIPTION, input_schema=GET_PARAMETER_INPUT_SCHEMA)
+def get_parameter(path: str, year: int = DEFAULT_SIMULATION_YEAR) -> Dict[str, Any]:
+    return discovery.get_parameter(path=path, year=year)
+
+
+@register_tool(name="list_reform_targets", description=DISCOVERY_DESCRIPTION, input_schema=LIST_REFORM_TARGETS_INPUT_SCHEMA)
+def list_reform_targets(query: str = "", limit: int = 25) -> Dict[str, Any]:
+    return discovery.list_reform_targets(query=query, limit=limit)
+
+
+@register_tool(name="list_household_input_variables", description=DISCOVERY_DESCRIPTION, input_schema=LIST_HOUSEHOLD_INPUT_VARIABLES_INPUT_SCHEMA)
+def list_household_input_variables(entity: str | None = None) -> Dict[str, Any]:
+    return discovery.list_household_input_variables(entity=entity)
+
+
+@register_tool(name="list_supported_outputs", description=DISCOVERY_DESCRIPTION, input_schema=LIST_SUPPORTED_OUTPUTS_INPUT_SCHEMA)
+def list_supported_outputs(scope: str | None = None) -> Dict[str, Any]:
+    return discovery.list_supported_outputs(scope=scope)
+
+
+@register_tool(name="validate_reform", description=VALIDATE_REFORM_DESCRIPTION, input_schema=VALIDATE_REFORM_INPUT_SCHEMA)
+def validate_reform(reform: Optional[Dict[str, Any]] = None, year: int = DEFAULT_SIMULATION_YEAR) -> Dict[str, Any]:
+    return validate_reform_dict(reform, year=year)
+
+
+@register_tool(name="validate_household", description=VALIDATE_HOUSEHOLD_DESCRIPTION, input_schema=VALIDATE_HOUSEHOLD_INPUT_SCHEMA)
+def validate_household(
+    people: list[dict[str, Any]],
+    benunit: Optional[Dict[str, Any]] = None,
+    household: Optional[Dict[str, Any]] = None,
     year: int = DEFAULT_SIMULATION_YEAR,
     reform: Optional[Dict[str, Any]] = None,
+    extra_variables: Optional[list[str]] = None,
 ) -> Dict[str, Any]:
-    try:
-        _ensure_compiled_package_importable()
-        from policyengine_uk_compiled import Simulation
-
-        persons_df, benunits_df, households_df = build_household_frames(person, benunit, household)
-        sim = Simulation(year=year, persons=persons_df, benunits=benunits_df, households=households_df)
-        policy = _build_compiled_policy(reform)
-        result = sim.run_microdata(policy=policy)
-
-        return {
-            "status": "success",
-            "year": year,
-            "reform_applied": reform is not None,
-            "person": dataframe_to_records(result.persons),
-            "benunit": dataframe_to_records(result.benunits),
-            "household": dataframe_to_records(result.households),
-        }
-    except Exception as exc:
-        logger.error(f"Error in calculate_household: {exc}")
-        import traceback
-
-        logger.error(traceback.format_exc())
-        return {"error": str(exc)}
+    return validate_household_dict(
+        people=people,
+        benunit=benunit,
+        household=household,
+        year=year,
+        reform=reform,
+        extra_variables=extra_variables,
+    )
 
 
-@register_tool(
-    name="run_economy_simulation",
-    description=RUN_ECONOMY_SIMULATION_DESCRIPTION,
-    input_schema=RUN_ECONOMY_SIMULATION_INPUT_SCHEMA,
-)
-def run_economy_simulation(
+@register_tool(name="run_household_simulation", description=RUN_HOUSEHOLD_SIMULATION_DESCRIPTION, input_schema=RUN_HOUSEHOLD_SIMULATION_INPUT_SCHEMA)
+def run_household_simulation(
+    people: list[dict[str, Any]],
+    benunit: Optional[Dict[str, Any]] = None,
+    household: Optional[Dict[str, Any]] = None,
     year: int = DEFAULT_SIMULATION_YEAR,
     reform: Optional[Dict[str, Any]] = None,
-    dataset: str = FRS_DATASET,
+    extra_variables: Optional[list[str]] = None,
+    _context: ToolExecutionContext | None = None,
 ) -> Dict[str, Any]:
-    # Structural reforms are intentionally run_python-only; this tool covers
-    # parametric reforms.
+    result = calculate_household(
+        people=people,
+        benunit=benunit,
+        household=household,
+        year=year,
+        reform=reform,
+        extra_variables=extra_variables,
+    )
+    if "error" not in result:
+        result_id = _store(_context, "household_simulation", result, result)
+        result["result_id"] = result_id
+    return result
+
+
+@register_tool(name="run_society_simulation", description=RUN_SOCIETY_SIMULATION_DESCRIPTION, input_schema=RUN_SOCIETY_SIMULATION_INPUT_SCHEMA)
+def run_society_simulation(
+    year: int = DEFAULT_SIMULATION_YEAR,
+    reform: Optional[Dict[str, Any]] = None,
+    dataset: Optional[str] = None,
+    extra_variables: Optional[Dict[str, List[str]]] = None,
+    _context: ToolExecutionContext | None = None,
+) -> Dict[str, Any]:
     try:
-        policy = _build_compiled_policy(reform)
-        sim = _build_simulation(year, dataset)
-        baseline_result = sim.run()
-        reform_result = sim.run(policy=policy) if policy is not None else baseline_result
-
-        baseline_breakdown = baseline_result.program_breakdown.model_dump()
-        reform_breakdown = reform_result.program_breakdown.model_dump()
-        program_changes = {
-            key: {
-                "baseline": baseline_breakdown[key],
-                "reform": reform_breakdown[key],
-                "change": reform_breakdown[key] - baseline_breakdown[key],
-            }
-            for key in baseline_breakdown
-        }
-
-        return {
-            "fiscal_year": reform_result.fiscal_year,
-            "dataset": DATASET_LABELS.get(dataset, dataset),
-            "budgetary_impact": reform_result.budgetary_impact.model_dump(),
-            "program_breakdown_changes": program_changes,
-            "decile_impacts": [d.model_dump() for d in reform_result.decile_impacts],
-            "winners_losers": reform_result.winners_losers.model_dump(),
-            "caseloads": reform_result.caseloads.model_dump(),
-            "baseline_hbai_incomes": baseline_result.baseline_hbai_incomes.model_dump(),
-            "reform_hbai_incomes": reform_result.reform_hbai_incomes.model_dump(),
-            "baseline_poverty": baseline_result.baseline_poverty.model_dump(),
-            "reform_poverty": reform_result.reform_poverty.model_dump(),
-        }
+        payload = build_society_simulation(
+            year=year,
+            reform=reform,
+            dataset=dataset,
+            extra_variables=extra_variables,
+        )
     except FileNotFoundError as exc:
-        return {
-            "error": f"{dataset.upper()} microdata not available",
-            "detail": str(exc),
-            "hint": "Ensure POLICYENGINE_UK_DATA_TOKEN is set.",
-        }
+        return {"error": "Dataset file not available", "detail": str(exc)}
     except Exception as exc:
-        logger.error(f"Error in run_economy_simulation: {exc}")
-        import traceback
+        logger.exception("Error in run_society_simulation")
+        return {"error": f"{type(exc).__name__}: {exc}"}
+    result = payload.metadata()
+    result_id = _store(_context, "society_simulation", payload, result)
+    result["result_id"] = result_id
+    return result
 
-        logger.error(traceback.format_exc())
-        return {"error": str(exc)}
+
+def _society_payload(context: ToolExecutionContext | None, simulation_id: str) -> SocietySimulationRun:
+    return _get_stored(context, simulation_id, "society_simulation").payload
 
 
-@register_tool(
-    name="analyse_microdata",
-    description=ANALYSE_MICRODATA_DESCRIPTION,
-    input_schema=ANALYSE_MICRODATA_INPUT_SCHEMA,
-)
-def analyse_microdata(
+def _derivative_result(
+    context: ToolExecutionContext | None,
+    kind: str,
+    summary: dict[str, Any],
+) -> dict[str, Any]:
+    result = dict(summary)
+    result["result_id"] = _store(context, kind, result, summary)
+    return result
+
+
+@register_tool(name="compute_budgetary_impact", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_BUDGETARY_IMPACT_INPUT_SCHEMA)
+def compute_budgetary_impact(simulation_id: str, _context: ToolExecutionContext | None = None) -> Dict[str, Any]:
+    payload = _society_payload(_context, simulation_id)
+    summary = {
+        "status": "success",
+        "simulation_id": simulation_id,
+        **derivatives.budgetary_impact(payload),
+    }
+    return _derivative_result(_context, "budgetary_impact", summary)
+
+
+@register_tool(name="compute_program_breakdown", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_PROGRAM_BREAKDOWN_INPUT_SCHEMA)
+def compute_program_breakdown(
+    simulation_id: str,
+    programs: Optional[list[str]] = None,
+    _context: ToolExecutionContext | None = None,
+) -> Dict[str, Any]:
+    payload = _society_payload(_context, simulation_id)
+    summary = {
+        "status": "success",
+        "simulation_id": simulation_id,
+        **derivatives.program_breakdown(payload, programs=programs),
+    }
+    return _derivative_result(_context, "program_breakdown", summary)
+
+
+@register_tool(name="compute_decile_impacts", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_DECILE_IMPACTS_INPUT_SCHEMA)
+def compute_decile_impacts(simulation_id: str, basis: str = "income", _context: ToolExecutionContext | None = None) -> Dict[str, Any]:
+    payload = _society_payload(_context, simulation_id)
+    summary = {
+        "status": "success",
+        "simulation_id": simulation_id,
+        **derivatives.decile_impacts(payload, basis=basis),
+    }
+    return _derivative_result(_context, "decile_impacts", summary)
+
+
+@register_tool(name="compute_winners_losers", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_WINNERS_LOSERS_INPUT_SCHEMA)
+def compute_winners_losers(
+    simulation_id: str,
+    basis: str = "income",
+    _context: ToolExecutionContext | None = None,
+) -> Dict[str, Any]:
+    payload = _society_payload(_context, simulation_id)
+    summary = {
+        "status": "success",
+        "simulation_id": simulation_id,
+        **derivatives.winners_losers(payload, basis=basis),
+    }
+    return _derivative_result(_context, "winners_losers", summary)
+
+
+@register_tool(name="compute_poverty_metrics", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_POVERTY_METRICS_INPUT_SCHEMA)
+def compute_poverty_metrics(simulation_id: str, _context: ToolExecutionContext | None = None) -> Dict[str, Any]:
+    payload = _society_payload(_context, simulation_id)
+    summary = {
+        "status": "success",
+        "simulation_id": simulation_id,
+        **derivatives.poverty_metrics(payload),
+    }
+    return _derivative_result(_context, "poverty_metrics", summary)
+
+
+@register_tool(name="compute_inequality_metrics", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_INEQUALITY_METRICS_INPUT_SCHEMA)
+def compute_inequality_metrics(simulation_id: str, _context: ToolExecutionContext | None = None) -> Dict[str, Any]:
+    payload = _society_payload(_context, simulation_id)
+    summary = {
+        "status": "success",
+        "simulation_id": simulation_id,
+        **derivatives.inequality_metrics(payload),
+    }
+    return _derivative_result(_context, "inequality_metrics", summary)
+
+
+@register_tool(name="aggregate_result", description=DERIVATIVE_DESCRIPTION, input_schema=AGGREGATE_RESULT_INPUT_SCHEMA)
+def aggregate_result(
+    simulation_id: str,
     entity: str,
+    variable: str,
     operation: str,
-    year: int = DEFAULT_SIMULATION_YEAR,
-    reform: Optional[Dict[str, Any]] = None,
-    filters: Optional[Dict[str, Any]] = None,
-    columns: Optional[List[str]] = None,
-    group_by: Optional[List[str]] = None,
-    n: int = 5,
-    dataset: str = "efrs",
+    target: str = "reform",
+    _context: ToolExecutionContext | None = None,
 ) -> Dict[str, Any]:
-    try:
-        dataset_key = (dataset or "").lower()
-        if dataset_key == FRS_DATASET:
-            return {
-                "error": "analyse_microdata does not support FRS row-level access",
-                "hint": (
-                    "Use run_economy_simulation for aggregate FRS outputs, or choose "
-                    "a non-FRS dataset for analyse_microdata."
-                ),
-            }
-        # Enhanced FRS rows derive from FRS respondents, so the FRS row-level
-        # restriction extends to sampling efrs.
-        if dataset_key == "efrs" and operation == "sample":
-            return {
-                "error": "analyse_microdata does not support row-level sampling of the Enhanced FRS",
-                "hint": (
-                    "Use aggregate operations (mean, sum, count, group_by, describe) "
-                    "on efrs, or sample a non-FRS-derived dataset (spi, lcfs, was)."
-                ),
-            }
-
-        microdata = _get_cached_microdata(year, reform, dataset_key)
-
-        return analyse_microdata_result(
-            microdata=microdata,
+    payload = _society_payload(_context, simulation_id)
+    summary = {
+        "status": "success",
+        "simulation_id": simulation_id,
+        "result": derivatives.aggregate_result(
+            payload,
+            target=target,
             entity=entity,
+            variable=variable,
             operation=operation,
-            year=year,
-            dataset_key=dataset_key,
-            reform_applied=reform is not None,
-            filters=filters,
-            columns=columns,
-            group_by=group_by,
-            n=n,
-        )
-    except Exception as exc:
-        logger.error(f"Error in analyse_microdata: {exc}")
-        import traceback
-
-        logger.error(traceback.format_exc())
-        return {"error": str(exc)}
+        ),
+        "privacy": "Aggregate only; no row-level records returned.",
+    }
+    return _derivative_result(_context, "aggregate", summary)
 
 
-@register_tool(
-    name="lookup_parameter",
-    description=LOOKUP_PARAMETER_DESCRIPTION,
-    input_schema=LOOKUP_PARAMETER_INPUT_SCHEMA,
-)
-def lookup_parameter(
-    query: str,
-    year: int = DEFAULT_SIMULATION_YEAR,
-    limit: int = 5,
-) -> Dict[str, Any]:
-    """Look up baseline model parameter values by path or natural query."""
-    try:
-        _ensure_compiled_package_importable()
-        from policyengine_uk_compiled import Simulation
-
-        sim = Simulation(year=year, dataset=FRS_DATASET)
-        return lookup_parameter_metadata(
-            parameters=sim.get_baseline_params(),
-            query=query,
-            year=year,
-            limit=limit,
-        )
-    except Exception as exc:
-        logger.error(f"Error looking up parameter: {exc}")
-        return {"error": str(exc)}
+def _chart_markdown(spec: dict[str, Any]) -> Dict[str, Any]:
+    return {
+        "status": "success",
+        "chart_markdown": f"```chart\n{json.dumps(json_safe(spec), indent=2)}\n```",
+        "spec": json_safe(spec),
+        "message": "Chart generated. Include chart_markdown verbatim in the response.",
+    }
 
 
-@register_tool(
-    name="run_python",
-    description=RUN_PYTHON_DESCRIPTION,
-    input_schema=RUN_PYTHON_INPUT_SCHEMA,
-)
-def run_python(code: str) -> Dict[str, Any]:
-    """Execute Python code with the PolicyEngine UK compiled interface preloaded."""
-    return run_python_code(code)
+def _generic_chart_spec(
+    chart_kind: str,
+    title: str | None,
+    subtitle: str | None,
+    source: str | None,
+    data: Any,
+    x_field: str | None,
+    y_fields: list[str] | None,
+    x_label: str | None,
+    y_label: str | None,
+    x_format: str | None,
+    y_format: str | None,
+    x_min: float | None,
+    x_max: float | None,
+    y_min: float | None,
+    y_max: float | None,
+    series_labels: list[str] | None,
+    series_styles: list[str] | None,
+    series_curves: list[str] | None,
+    arrangement: str | None,
+) -> dict[str, Any]:
+    chart_type = chart_kind.removeprefix("generic_")
+    y_fields = y_fields or []
+    return {
+        "type": chart_type,
+        "title": title,
+        "subtitle": subtitle,
+        "source": source,
+        "x": {
+            "field": x_field,
+            "label": x_label or x_field,
+            **({"format": x_format} if x_format else {}),
+            **({"min": x_min} if x_min is not None else {}),
+            **({"max": x_max} if x_max is not None else {}),
+        },
+        "y": {
+            "field": y_fields[0] if len(y_fields) == 1 else "value",
+            "label": y_label or (y_fields[0] if y_fields else "Value"),
+            **({"format": y_format} if y_format else {}),
+            **({"min": y_min} if y_min is not None else {}),
+            **({"max": y_max} if y_max is not None else {}),
+        },
+        "series": [
+            {
+                "field": field,
+                "label": series_labels[index] if series_labels and index < len(series_labels) else field,
+                **(
+                    {"lineStyle": series_styles[index]}
+                    if series_styles and index < len(series_styles)
+                    else {}
+                ),
+                **(
+                    {"curve": series_curves[index]}
+                    if series_curves and index < len(series_curves)
+                    else {}
+                ),
+            }
+            for index, field in enumerate(y_fields)
+        ],
+        "data": data or [],
+        "showLegend": len(y_fields) > 1,
+        "showGrid": True,
+        **({"arrangement": arrangement} if arrangement else {}),
+    }
 
 
-@register_tool(
-    name="generate_chart",
-    description=GENERATE_CHART_DESCRIPTION,
-    input_schema=GENERATE_CHART_INPUT_SCHEMA,
-)
-def generate_chart(
-    chart_type: str,
-    title: str,
-    data: List[Dict[str, Any]],
-    x_field: str,
-    y_fields: List[str],
-    x_label: Optional[str] = None,
-    y_label: Optional[str] = None,
-    x_format: Optional[str] = None,
-    y_format: Optional[str] = None,
-    x_min: Optional[float] = None,
-    x_max: Optional[float] = None,
-    y_min: Optional[float] = None,
-    y_max: Optional[float] = None,
-    series_labels: Optional[List[str]] = None,
-    series_styles: Optional[List[str]] = None,
-    series_curves: Optional[List[str]] = None,
-    subtitle: Optional[str] = None,
-    source: Optional[str] = None,
-    arrangement: Optional[str] = None,
-    area_fill: Optional[bool] = None,
-) -> Dict[str, Any]:
-    try:
-        series = []
-        for index, y_field in enumerate(y_fields):
-            item = {"field": y_field, "label": series_labels[index] if series_labels and index < len(series_labels) else y_field}
-            if series_styles and index < len(series_styles):
-                item["lineStyle"] = series_styles[index]
-            if series_curves and index < len(series_curves):
-                item["curve"] = series_curves[index]
-            series.append(item)
+_PRESET_RESULT_KINDS = {
+    "budget_waterfall": "budgetary_impact",
+    "program_budget_waterfall": "program_breakdown",
+    "decile_absolute_bar": "decile_impacts",
+    "decile_relative_bar": "decile_impacts",
+    "winners_losers_stacked_bar": "winners_losers",
+    "poverty_relative_bar": "poverty_metrics",
+    "inequality_relative_bar": "inequality_metrics",
+}
 
-        spec = {
-            "type": chart_type,
-            "title": title,
-            "x": {"field": x_field, "label": x_label or x_field},
-            "y": {
-                "field": y_fields[0] if len(y_fields) == 1 else "value",
-                "label": y_label or (y_fields[0] if len(y_fields) == 1 else "Value"),
+_EXPLICIT_DATA_PRESETS = {"earnings_variation_line"}
+_GENERIC_CHART_KINDS = {
+    "generic_area",
+    "generic_bar",
+    "generic_line",
+    "generic_scatter",
+}
+
+
+def _preset_chart_data(chart_kind: str, result: dict[str, Any]) -> list[dict[str, Any]]:
+    if chart_kind == "budget_waterfall":
+        return [
+            {"label": "Tax revenue", "value": result["tax_revenue"]["change"]},
+            {"label": "Benefit spending", "value": -result["benefit_spending"]["change"]},
+            {
+                "label": "Net impact",
+                "value": result["net_budgetary_impact"],
+                "total": True,
             },
-            "series": series,
-            "data": data,
-            "showLegend": len(y_fields) > 1,
-            "showGrid": True,
-        }
-        if x_format:
-            spec["x"]["format"] = x_format
-        if y_format:
-            spec["y"]["format"] = y_format
-        if x_min is not None:
-            spec["x"]["min"] = x_min
-        if x_max is not None:
-            spec["x"]["max"] = x_max
-        if y_min is not None:
-            spec["y"]["min"] = y_min
-        if y_max is not None:
-            spec["y"]["max"] = y_max
-        if subtitle:
-            spec["subtitle"] = subtitle
-        if source:
-            spec["source"] = source
-        if arrangement and chart_type == "bar":
-            spec["arrangement"] = arrangement
-        if area_fill and chart_type == "line":
-            spec["areaFill"] = area_fill
+        ]
+    if chart_kind == "program_budget_waterfall":
+        return [
+            {
+                "label": row["program"].replace("_", " ").title(),
+                "value": row["change"] if row["is_tax"] else -row["change"],
+            }
+            for row in result["programs"]
+            if row["change"] != 0
+        ] + [
+            {
+                "label": "Total",
+                "value": result["net_budgetary_impact"],
+                "total": True,
+            }
+        ]
+    if chart_kind in {"decile_absolute_bar", "decile_relative_bar"}:
+        field = (
+            "absolute_change"
+            if chart_kind == "decile_absolute_bar"
+            else "relative_change"
+        )
+        return [
+            {"label": str(row["decile"]), "value": row[field]}
+            for row in result["deciles"]
+        ]
+    if chart_kind == "winners_losers_stacked_bar":
+        return list(result["deciles"])
+    if chart_kind == "poverty_relative_bar":
+        return [
+            {"label": row["group"], "value": row["relative_change"] * 100}
+            for row in result["rates"]
+            if row["poverty_type"] == "relative_bhc"
+            and row["relative_change"] is not None
+        ]
+    if chart_kind == "inequality_relative_bar":
+        return [
+            {
+                "label": metric.replace("_share", "").replace("_", " ").title(),
+                "value": values["relative_change"] * 100,
+            }
+            for metric, values in result["metrics"].items()
+            if values["relative_change"] is not None
+        ]
+    return result if isinstance(result, list) else []
 
-        return {
-            "status": "success",
-            "chart_markdown": f"```chart\n{json.dumps(spec, indent=2)}\n```",
-            "message": "Chart generated. Include the chart_markdown in your response to display it.",
-        }
-    except Exception as exc:
-        return {"error": str(exc)}
+
+@register_tool(name="generate_chart", description=GENERATE_CHART_DESCRIPTION, input_schema=GENERATE_CHART_INPUT_SCHEMA)
+def generate_chart(
+    chart_kind: str,
+    result_id: str | None = None,
+    data: Any = None,
+    title: str | None = None,
+    subtitle: str | None = None,
+    source: str | None = None,
+    x_field: str | None = None,
+    y_fields: Optional[list[str]] = None,
+    x_label: str | None = None,
+    y_label: str | None = None,
+    x_format: str | None = None,
+    y_format: str | None = None,
+    x_min: float | None = None,
+    x_max: float | None = None,
+    y_min: float | None = None,
+    y_max: float | None = None,
+    series_labels: Optional[list[str]] = None,
+    series_styles: Optional[list[str]] = None,
+    series_curves: Optional[list[str]] = None,
+    arrangement: str | None = None,
+    _context: ToolExecutionContext | None = None,
+) -> Dict[str, Any]:
+    if chart_kind not in (
+        _GENERIC_CHART_KINDS | set(_PRESET_RESULT_KINDS) | _EXPLICIT_DATA_PRESETS
+    ):
+        return {"error": f"Unknown chart kind: {chart_kind}"}
+    if chart_kind in _GENERIC_CHART_KINDS:
+        if result_id:
+            stored = _get_stored(
+                _context,
+                result_id,
+                (
+                    "aggregate",
+                    "budgetary_impact",
+                    "program_breakdown",
+                    "decile_impacts",
+                    "winners_losers",
+                    "poverty_metrics",
+                    "inequality_metrics",
+                    "household_simulation",
+                ),
+            )
+            data = data if data is not None else stored.summary
+        if not x_field or not y_fields:
+            return {"error": "Generic charts require x_field and y_fields."}
+        if not isinstance(data, list) or not data:
+            return {"error": "Generic chart data must contain at least one row."}
+        return _chart_markdown(
+            _generic_chart_spec(
+                chart_kind,
+                title,
+                subtitle,
+                source,
+                data,
+                x_field,
+                y_fields,
+                x_label,
+                y_label,
+                x_format,
+                y_format,
+                x_min,
+                x_max,
+                y_min,
+                y_max,
+                series_labels,
+                series_styles,
+                series_curves,
+                arrangement,
+            )
+        )
+    expected_kind = _PRESET_RESULT_KINDS.get(chart_kind)
+    if expected_kind is not None:
+        if not result_id:
+            return {
+                "error": (
+                    f"{chart_kind} requires a result_id from a "
+                    f"{expected_kind} derivative tool."
+                )
+            }
+        stored = _get_stored(_context, result_id, expected_kind)
+        data = _preset_chart_data(chart_kind, stored.summary)
+    elif data is None:
+        return {"error": f"{chart_kind} requires chart data."}
+    spec = {
+        "type": "preset",
+        "preset": chart_kind,
+        "title": title,
+        "subtitle": subtitle,
+        "data": data,
+        "source": source or "PolicyEngine UK via policyengine.py",
+    }
+    return _chart_markdown(spec)
 
 
 TOOL_DEFINITIONS = tool_definitions()
 TOOL_HANDLERS = tool_handlers()
 
 
-def execute_tool(tool_name: str, tool_input: Dict[str, Any]) -> Dict[str, Any]:
+def execute_tool(
+    tool_name: str,
+    tool_input: Dict[str, Any],
+    context: ToolExecutionContext | None = None,
+) -> Dict[str, Any]:
     logger.info(f"[TOOLS] Executing {tool_name}")
     if tool_name not in TOOL_HANDLERS:
         return {"error": f"Unknown tool: {tool_name}"}
     try:
-        result = TOOL_HANDLERS[tool_name](**tool_input)
+        handler = TOOL_HANDLERS[tool_name]
+        if "_context" in inspect.signature(handler).parameters:
+            result = handler(**tool_input, _context=context)
+        else:
+            result = handler(**tool_input)
         logger.info(f"[TOOLS] {tool_name} completed")
         return result
     except Exception as exc:

@@ -2,8 +2,8 @@ source:
   generated_from: evals/sources/policyengine_uk.yaml
   package: policyengine-uk
   version: 2.89.2
-  compiled_package: policyengine-uk-compiled
-  compiled_version: 0.44.0
+  runtime_package: policyengine
+  runtime_version: 4.21.1
 cases:
 - id: policyengine_uk_tax_no_income
   suite: tool_contract
@@ -13,30 +13,28 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/integration/tax.yaml
     name: No income
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2029
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
+    people:
+    - {}
+    benunit: {}
+    household: {}
+    extra_variables:
+    - income_tax
+    - national_insurance
   expect:
     numeric:
     - path: person[].income_tax
       equals: 0.0
       tolerance: 0.0
-    - path: person[].employee_ni
+    - path: person[].national_insurance
       equals: 0.0
       tolerance: 0.0
 - id: policyengine_uk_tax_some_employed_income
@@ -47,28 +45,25 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/integration/tax.yaml
     name: Some employed income
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2018
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
-      employment_income: 41223
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
+    people:
+    - employment_income: 41223
+    benunit: {}
+    household: {}
+    extra_variables:
+    - income_tax
+    - national_insurance
   expect:
     numeric:
-    - path: person[].employee_ni
+    - path: person[].national_insurance
       equals: 3935.0
       tolerance: 30.0
     - path: person[].income_tax
@@ -82,25 +77,21 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
     name: Income Tax for earner
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2019
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
-      employment_income: 34000
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
+    people:
+    - employment_income: 34000
+    benunit: {}
+    household: {}
+    extra_variables:
+    - income_tax
   expect:
     numeric:
     - path: person[].income_tax
@@ -114,31 +105,27 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
     name: Income Tax for earner with pension contributions
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2019
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
-      employment_income: 34000
+    people:
+    - employment_income: 34000
       personal_pension_contributions: 1200
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled does not currently reproduce this upstream pension-contribution
-      treatment through calculate_household.
-    remove_when: policyengine-uk-compiled supports this upstream case through calculate_household.
+    benunit: {}
+    household: {}
+    extra_variables:
+    - income_tax
+  expect:
+    numeric:
+    - path: person[].income_tax
+      equals: 4060.0
+      tolerance: 10.0
 - id: policyengine_uk_ni_class_1_employee_below_pt
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
@@ -147,31 +134,26 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
     name: NI Class 1 employee contributions - below PT
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2023
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
-      ni_class_1_income: 11000
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled does not currently expose the upstream intermediate
-      NI Class 1 input/output behavior through calculate_household.
-    remove_when: policyengine-uk-compiled exposes this NI Class 1 behavior through
-      the chat household contract.
+    people:
+    - ni_class_1_income: 11000
+    benunit: {}
+    household: {}
+    extra_variables:
+    - ni_class_1_employee
+  expect:
+    numeric:
+    - path: person[].ni_class_1_employee
+      equals: 0.0
+      tolerance: 1.0
 - id: policyengine_uk_ni_class_1_employee_between_pt_and_uel
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
@@ -180,31 +162,26 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
     name: NI Class 1 employee contributions - between PT and UEL
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2023
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
-      ni_class_1_income: 30000
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled does not currently expose the upstream intermediate
-      NI Class 1 input/output behavior through calculate_household.
-    remove_when: policyengine-uk-compiled exposes this NI Class 1 behavior through
-      the chat household contract.
+    people:
+    - ni_class_1_income: 30000
+    benunit: {}
+    household: {}
+    extra_variables:
+    - ni_class_1_employee
+  expect:
+    numeric:
+    - path: person[].ni_class_1_employee
+      equals: 2091.6
+      tolerance: 1.0
 - id: policyengine_uk_ni_class_1_employee_above_uel
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
@@ -213,31 +190,26 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
     name: NI Class 1 employee contributions - above UEL
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2023
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
-      ni_class_1_income: 70000
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled does not currently expose the upstream intermediate
-      NI Class 1 input/output behavior through calculate_household.
-    remove_when: policyengine-uk-compiled exposes this NI Class 1 behavior through
-      the chat household contract.
+    people:
+    - ni_class_1_income: 70000
+    benunit: {}
+    household: {}
+    extra_variables:
+    - ni_class_1_employee
+  expect:
+    numeric:
+    - path: person[].ni_class_1_employee
+      equals: 5165.225
+      tolerance: 1.0
 - id: policyengine_uk_ni_sums_non_employer_contributions
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/national_insurance/national_insurance.yaml
@@ -246,34 +218,29 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/national_insurance/national_insurance.yaml
     name: National Insurance sums non-employer-side contributions.
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2023
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
-      ni_class_1_employee: 1
+    people:
+    - ni_class_1_employee: 1
       ni_class_2: 2
       ni_class_3: 4
       ni_class_4: 8
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled does not currently expose the upstream intermediate
-      NI component inputs through calculate_household.
-    remove_when: policyengine-uk-compiled exposes NI component parity through the
-      chat household contract.
+    benunit: {}
+    household: {}
+    extra_variables:
+    - national_insurance
+  expect:
+    numeric:
+    - path: person[].national_insurance
+      equals: 15.0
+      tolerance: 1.0
 - id: policyengine_uk_child_benefit_no_children
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
@@ -282,35 +249,27 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
     name: Child Benefit with no children
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2021
-    person:
-    - person_id: parent1
-      benunit_id: benunit
-      household_id: household
-      age: 41
-    - person_id: parent2
-      benunit_id: benunit
-      household_id: household
-      age: 42
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled has partial Child Benefit support, but this upstream
-      case is not yet parity-clean through calculate_household.
-    remove_when: policyengine-uk-compiled matches this upstream Child Benefit case
-      through calculate_household.
+    people:
+    - age: 41
+    - age: 42
+    benunit: {}
+    household: {}
+    extra_variables:
+    - child_benefit
+  expect:
+    numeric:
+    - path: benunit.child_benefit
+      equals: 0.0
+      tolerance: 1.0
 - id: policyengine_uk_child_benefit_one_child
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
@@ -319,40 +278,29 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
     name: Child Benefit with one child
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2021
-    person:
-    - person_id: parent1
-      benunit_id: benunit
-      household_id: household
-      age: 41
-    - person_id: parent2
-      benunit_id: benunit
-      household_id: household
-      age: 42
-    - person_id: child1
-      benunit_id: benunit
-      household_id: household
-      age: 15
+    people:
+    - age: 41
+    - age: 42
+    - age: 15
     benunit:
-    - benunit_id: benunit
-      household_id: household
       would_claim_child_benefit: true
-    household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled has partial Child Benefit support, but this upstream
-      case is not yet parity-clean through calculate_household.
-    remove_when: policyengine-uk-compiled matches this upstream Child Benefit case
-      through calculate_household.
+    household: {}
+    extra_variables:
+    - child_benefit
+  expect:
+    numeric:
+    - path: benunit.child_benefit
+      equals: 1098.0
+      tolerance: 10.0
 - id: policyengine_uk_child_benefit_two_children_one_over_16
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
@@ -361,45 +309,31 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
     name: Child Benefit with two children, one over 16
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2020
-    person:
-    - person_id: parent1
-      benunit_id: benunit
-      household_id: household
-      age: 41
-    - person_id: parent2
-      benunit_id: benunit
-      household_id: household
-      age: 42
-    - person_id: child1
-      benunit_id: benunit
-      household_id: household
-      age: 14
-    - person_id: child2
-      benunit_id: benunit
-      household_id: household
-      age: 17
+    people:
+    - age: 41
+    - age: 42
+    - age: 14
+    - age: 17
       current_education: POST_SECONDARY
     benunit:
-    - benunit_id: benunit
-      household_id: household
       would_claim_child_benefit: true
-    household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled has partial Child Benefit support, but this upstream
-      case is not yet parity-clean through calculate_household.
-    remove_when: policyengine-uk-compiled matches this upstream Child Benefit case
-      through calculate_household.
+    household: {}
+    extra_variables:
+    - child_benefit
+  expect:
+    numeric:
+    - path: benunit.child_benefit
+      equals: 1825.2
+      tolerance: 10.0
 - id: policyengine_uk_uc_income_reduction_applies
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
@@ -408,34 +342,30 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
     name: Income reduction applies
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2020
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
+    people:
+    - {}
+    benunit:
       uc_maximum_amount: 1000
       uc_income_reduction: 100
-      is_uc_eligible: true
-    benunit:
-    - benunit_id: benunit
-      household_id: household
       would_claim_uc: true
-    household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled does not currently expose the upstream intermediate
-      Universal Credit variables required by this case through calculate_household.
-    remove_when: policyengine-uk-compiled exposes this Universal Credit behavior through
-      the chat household contract.
+      is_uc_eligible: true
+    household: {}
+    extra_variables:
+    - universal_credit
+  expect:
+    numeric:
+    - path: benunit.universal_credit
+      equals: 900.0
+      tolerance: 0.0
 - id: policyengine_uk_uc_capital_above_upper_limit
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
@@ -444,32 +374,31 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
     name: Capital above the upper limit removes Universal Credit entitlement
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2025
-    person:
-    - person_id: person
-      benunit_id: benunit
-      household_id: household
-      age: 30
-    benunit:
-    - benunit_id: benunit
-      household_id: household
+    people:
+    - age: 30
+    benunit: {}
     household:
-    - household_id: household
       savings: 16001
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled does not currently expose the upstream intermediate
-      Universal Credit variables required by this case through calculate_household.
-    remove_when: policyengine-uk-compiled exposes this Universal Credit behavior through
-      the chat household contract.
+    extra_variables:
+    - universal_credit_pre_benefit_cap
+    - universal_credit
+  expect:
+    numeric:
+    - path: benunit.universal_credit_pre_benefit_cap
+      equals: 0.0
+      tolerance: 0.0
+    - path: benunit.universal_credit
+      equals: 0.0
+      tolerance: 0.0
 - id: policyengine_uk_stamp_duty_first_time_buyer
   suite: tool_contract
   description: "Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml\
@@ -478,32 +407,28 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml
     name: "\xA3445k first-time buyer"
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2021
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
+    people:
+    - {}
+    benunit: {}
+    household:
       main_residential_property_purchased: 445000
       main_residential_property_purchased_is_first_home: true
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled uses a different property-transaction-tax household
-      contract and does not currently expose this upstream SDLT case through calculate_household.
-    remove_when: policyengine-uk-compiled exposes this upstream SDLT behavior through
-      the chat household contract.
+    extra_variables:
+    - stamp_duty_land_tax
+  expect:
+    numeric:
+    - path: household.stamp_duty_land_tax
+      equals: 7250.0
+      tolerance: 1.0
 - id: policyengine_uk_stamp_duty_second_home
   suite: tool_contract
   description: "Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml\
@@ -512,31 +437,27 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml
     name: "\xA3350k second home"
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2022
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
-      additional_residential_property_purchased: 350000
-    benunit:
-    - benunit_id: benunit
-      household_id: household
+    people:
+    - {}
+    benunit: {}
     household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled uses a different property-transaction-tax household
-      contract and does not currently expose this upstream SDLT case through calculate_household.
-    remove_when: policyengine-uk-compiled exposes this upstream SDLT behavior through
-      the chat household contract.
+      additional_residential_property_purchased: 350000
+    extra_variables:
+    - stamp_duty_land_tax
+  expect:
+    numeric:
+    - path: household.stamp_duty_land_tax
+      equals: 18000.0
+      tolerance: 1.0
 - id: policyengine_uk_capital_gains_basic_rate
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
@@ -545,32 +466,27 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
     name: Basic rate capital gains tax
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2024
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
-      adjusted_net_income: 20000
+    people:
+    - adjusted_net_income: 20000
       capital_gains: 23000
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled does not currently expose the upstream capital-gains-tax
-      output through calculate_household.
-    remove_when: policyengine-uk-compiled exposes this upstream capital-gains-tax
-      behavior through the chat household contract.
+    benunit: {}
+    household: {}
+    extra_variables:
+    - capital_gains_tax
+  expect:
+    numeric:
+    - path: person[].capital_gains_tax
+      equals: 2000.0
+      tolerance: 1.0
 - id: policyengine_uk_capital_gains_higher_rate
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
@@ -579,32 +495,27 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
     name: Higher rate capital gains tax
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2024
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
-      adjusted_net_income: 50000
+    people:
+    - adjusted_net_income: 50000
       capital_gains: 50000
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled does not currently expose the upstream capital-gains-tax
-      output through calculate_household.
-    remove_when: policyengine-uk-compiled exposes this upstream capital-gains-tax
-      behavior through the chat household contract.
+    benunit: {}
+    household: {}
+    extra_variables:
+    - capital_gains_tax
+  expect:
+    numeric:
+    - path: person[].capital_gains_tax
+      equals: 9373.0
+      tolerance: 1.0
 - id: policyengine_uk_high_value_council_tax_surcharge
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/council_tax/high_value_council_tax_surcharge.yaml
@@ -613,36 +524,41 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/gov/hmrc/council_tax/high_value_council_tax_surcharge.yaml
     name: High value council tax surcharge applies in England and flows into aggregates
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2028
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
+    people:
+    - {}
+    benunit: {}
+    household:
+      region: LONDON
       main_residence_value: 2554326.811538164
       main_residential_property_purchased: 0
       council_tax: 0
       household_owns_tv: false
+    reform:
       gov.hmrc.stamp_duty.property_sale_rate: 0
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
-      region: LONDON
-  skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled does not currently expose this upstream high-value
-      council-tax surcharge behavior through calculate_household.
-    remove_when: policyengine-uk-compiled exposes this council-tax surcharge behavior
-      through the chat household contract.
+    extra_variables:
+    - high_value_council_tax_surcharge
+    - household_tax
+    - gov_tax
+  expect:
+    numeric:
+    - path: reform.household.high_value_council_tax_surcharge
+      equals: 2500.0
+      tolerance: 1.0
+    - path: reform.household.household_tax
+      equals: 2500.0
+      tolerance: 1.0
+    - path: reform.household.gov_tax
+      equals: 2500.0
+      tolerance: 1.0
 - id: policyengine_uk_council_tax_rebate_bands
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/gov/treasury/energy_bills_rebate/council_tax_rebate.yaml
@@ -651,19 +567,19 @@ cases:
   - policyengine_uk
   - source_synced
   requirements:
-  - compiled
+  - policyengine_py
   source:
     package: policyengine-uk
     version: 2.89.2
     path: tests/policy/baseline/gov/treasury/energy_bills_rebate/council_tax_rebate.yaml
     name: CT bands A-D get full rebate, others don't.
-  tool_name: calculate_household
+  tool_name: run_household_simulation
   input:
     year: 2023
-    person:
-    - person_id: you
-      benunit_id: benunit
-      household_id: household
+    people:
+    - {}
+    benunit: {}
+    household:
       council_tax:
       - 150
       - 150
@@ -684,14 +600,9 @@ cases:
       - G
       - H
       - I
-    benunit:
-    - benunit_id: benunit
-      household_id: household
-    household:
-    - household_id: household
   skip:
-    code: compiled_coverage_gap
-    reason: policyengine-uk-compiled does not currently expose this upstream council-tax
-      rebate behavior through calculate_household.
-    remove_when: policyengine-uk-compiled exposes this council-tax rebate behavior
-      through the chat household contract.
+    code: policyengine_py_coverage_gap
+    reason: The source case supplies categorical vector inputs, while policyengine.py
+      household axes currently support numeric ranges only.
+    remove_when: policyengine.py household simulations support categorical vector
+      axes.

@@ -6,12 +6,15 @@ cases:
     requirements: [live_model]
     prompt: Summarise the household result.
     tool_calls:
-      - name: calculate_household
+      - name: run_household_simulation
         input:
           year: 2025
           reform:
-            income_tax:
-              personal_allowance: 15000
+            gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
+          people:
+            - employment_income: 30000
+          benunit: {}
+          household: {}
         output_fixture: household_personal_allowance.json
     expect:
       required:

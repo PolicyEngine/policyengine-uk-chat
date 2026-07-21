@@ -19,7 +19,7 @@ Request and response shapes below are summarised from the route handlers under
 * - `GET /health`
   - Liveness probe. Returns `{"status": "ok"}`.
 * - `GET /version`
-  - Returns `{"policyengine_uk_compiled": "<version>"}`.
+  - Returns the `policyengine.py` engine version and installed `policyengine-uk` version.
 ```
 
 ## Chat — `/chat`

@@ -1,87 +1,132 @@
-"""Illustrative household input normalization."""
+"""Illustrative household validation and calculation helpers for .py."""
 
-from typing import Any, Dict, List, Tuple
+from __future__ import annotations
 
-from engine.simulations import ensure_compiled_package_importable
+from collections.abc import Mapping
+from typing import Any, Dict, Optional
+
+from engine.py_runtime import calculate_household_py, uk_model_version
+from engine.reforms import (
+    ReformValidationError,
+    compile_reform_dict,
+    normalize_reform_dict,
+)
+from engine.serialization import json_safe
 
 
-def build_household_frames(
-    person: List[Dict[str, Any]],
-    benunit: List[Dict[str, Any]],
-    household: List[Dict[str, Any]],
-) -> Tuple[Any, Any, Any]:
-    ensure_compiled_package_importable()
-    import pandas as pd
-    from policyengine_uk_compiled import BENUNIT_DEFAULTS, HOUSEHOLD_DEFAULTS, PERSON_DEFAULTS
+def validate_household_dict(
+    *,
+    people: list[dict[str, Any]],
+    benunit: dict[str, Any] | None = None,
+    household: dict[str, Any] | None = None,
+    year: int,
+    reform: Optional[Mapping[str, Any]] = None,
+    extra_variables: Optional[list[str]] = None,
+) -> Dict[str, Any]:
+    try:
+        from policyengine.tax_benefit_models.common import (
+            dispatch_extra_variables,
+            validate_annual_household_inputs,
+        )
+        from policyengine.utils.household_validation import validate_household_input
 
-    def fill_defaults(records, defaults):
-        return pd.DataFrame([{**defaults, **rec} for rec in records])
-
-    hh_id_map = {rec["household_id"]: i for i, rec in enumerate(household)}
-    bu_id_map = {rec["benunit_id"]: i for i, rec in enumerate(benunit)}
-    person = [
-        {
-            **rec,
-            "person_id": i,
-            "benunit_id": bu_id_map[rec["benunit_id"]],
-            "household_id": hh_id_map[rec["household_id"]],
+        year = validate_annual_household_inputs(
+            year=year,
+            entities={
+                "people": people,
+                "benunit": [benunit or {}],
+                "household": [household or {}],
+            },
+        )
+        validate_household_input(
+            model_version=uk_model_version(),
+            entities={
+                "person": people,
+                "benunit": [benunit or {}],
+                "household": [household or {}],
+            },
+        )
+        extra_by_entity = dispatch_extra_variables(
+            model_version=uk_model_version(),
+            names=extra_variables or [],
+        )
+        normalized_reform = normalize_reform_dict(reform)
+        reform_object = (
+            compile_reform_dict(normalized_reform, year=year)
+            if normalized_reform
+            else None
+        )
+    except ReformValidationError as exc:
+        return {"valid": False, "errors": exc.errors}
+    except Exception as exc:
+        return {
+            "valid": False,
+            "errors": [{"path": "household", "message": f"{type(exc).__name__}: {exc}"}],
         }
-        for i, rec in enumerate(person)
-    ]
-    benunit = [
-        {
-            **rec,
-            "benunit_id": bu_id_map[rec["benunit_id"]],
-            "household_id": hh_id_map[rec["household_id"]],
-        }
-        for rec in benunit
-    ]
-    household = [{**rec, "household_id": hh_id_map[rec["household_id"]]} for rec in household]
+    return {
+        "valid": True,
+        "year": year,
+        "people_count": len(people),
+        "extra_variables_by_entity": extra_by_entity,
+        "normalized_reform": normalized_reform,
+        "reform_object": reform_object,
+        "warnings": [],
+    }
 
-    seen_bu_heads = set()
-    seen_hh_heads = set()
-    for rec in person:
-        bu_id = rec["benunit_id"]
-        hh_id = rec["household_id"]
-        is_adult = rec.get("age", 30) >= 16
-        rec["is_benunit_head"] = is_adult and bu_id not in seen_bu_heads
-        rec["is_household_head"] = is_adult and hh_id not in seen_hh_heads
-        if rec["is_benunit_head"]:
-            seen_bu_heads.add(bu_id)
-        if rec["is_household_head"]:
-            seen_hh_heads.add(hh_id)
 
-    persons_df = fill_defaults(person, PERSON_DEFAULTS)
-    benunits_df = fill_defaults(benunit, BENUNIT_DEFAULTS)
-    households_df = fill_defaults(household, HOUSEHOLD_DEFAULTS)
+def calculate_household(
+    *,
+    people: list[dict[str, Any]],
+    benunit: dict[str, Any] | None,
+    household: dict[str, Any] | None,
+    year: int,
+    reform: Optional[Mapping[str, Any]] = None,
+    extra_variables: Optional[list[str]] = None,
+) -> Dict[str, Any]:
+    validation = validate_household_dict(
+        people=people,
+        benunit=benunit,
+        household=household,
+        year=year,
+        reform=reform,
+        extra_variables=extra_variables,
+    )
+    if not validation.get("valid"):
+        return {"error": validation["errors"][0]["message"], "validation": validation}
+    normalized_reform = validation["normalized_reform"]
 
-    if "person_ids" not in benunits_df.columns or (
-        benunits_df["person_ids"] == BENUNIT_DEFAULTS.get("person_ids", 0)
-    ).all():
-        bu_to_persons = persons_df.groupby("benunit_id")["person_id"].apply(
-            lambda ids: ",".join(str(i) for i in ids)
+    try:
+        baseline = calculate_household_py(
+            people=people,
+            benunit=benunit,
+            household=household,
+            year=year,
+            extra_variables=extra_variables,
         )
-        benunits_df["person_ids"] = (
-            benunits_df["benunit_id"].map(bu_to_persons).fillna(benunits_df["benunit_id"].astype(str))
-        )
-    if "benunit_ids" not in households_df.columns or (
-        households_df["benunit_ids"] == HOUSEHOLD_DEFAULTS.get("benunit_ids", 0)
-    ).all():
-        hh_to_benunits = benunits_df.groupby("household_id")["benunit_id"].apply(
-            lambda ids: ",".join(str(i) for i in ids)
-        )
-        households_df["benunit_ids"] = (
-            households_df["household_id"].map(hh_to_benunits).fillna(households_df["household_id"].astype(str))
-        )
-    if "person_ids" not in households_df.columns or (
-        households_df["person_ids"] == HOUSEHOLD_DEFAULTS.get("person_ids", 0)
-    ).all():
-        hh_to_persons = persons_df.groupby("household_id")["person_id"].apply(
-            lambda ids: ",".join(str(i) for i in ids)
-        )
-        households_df["person_ids"] = (
-            households_df["household_id"].map(hh_to_persons).fillna(households_df["household_id"].astype(str))
-        )
+        if normalized_reform:
+            reformed = calculate_household_py(
+                people=people,
+                benunit=benunit,
+                household=household,
+                year=year,
+                reform=normalized_reform,
+                extra_variables=extra_variables,
+            )
+        else:
+            reformed = baseline
+    except Exception as exc:
+        return {"error": f"{type(exc).__name__}: {exc}"}
 
-    return persons_df, benunits_df, households_df
-
+    baseline_safe = json_safe(baseline)
+    reform_safe = json_safe(reformed)
+    response: Dict[str, Any] = {
+        "status": "success",
+        "year": year,
+        "reform_applied": bool(normalized_reform),
+    }
+    if not normalized_reform:
+        response.update(baseline_safe)
+    else:
+        response["baseline"] = baseline_safe
+        response["reform"] = reform_safe
+    return response

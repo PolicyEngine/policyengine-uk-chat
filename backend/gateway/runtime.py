@@ -18,7 +18,7 @@ import os
 from dataclasses import dataclass, field
 from typing import List, Optional
 
-from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_sync_client, load_scope_descriptor
+from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_sync_client
 from gateway.policy import OUTPUT_VOCAB, SlotFact, gate
 from prompts import (
     DEFAULT_SCOPE_DESCRIPTOR,
@@ -51,7 +51,7 @@ def _build_tool_summary() -> str:
 
 
 TOOL_SUMMARY = _build_tool_summary()
-SCOPE_DESCRIPTOR = load_scope_descriptor(DEFAULT_SCOPE_DESCRIPTOR)
+SCOPE_DESCRIPTOR = DEFAULT_SCOPE_DESCRIPTOR
 GATEWAY_SYSTEM = gateway_system(
     SCOPE_DESCRIPTOR, TOOL_SUMMARY, ", ".join(OUTPUT_VOCAB), DEFAULT_SIMULATION_YEAR
 )

@@ -1,119 +1,56 @@
-# The engine layer
+# Engine
 
-`backend/engine/` holds the deterministic helpers that sit between the chat
-tools and the compiled `policyengine-uk-compiled` package. These modules
-normalise inputs, run simulations, build reforms, query microdata, and serialise
-results into the shapes the model expects — keeping the tool layer thin and the
-calculation boundary explicit.
+The backend calculation boundary is `policyengine.py` plus the UK country
+package. The pinned runtime dependencies are in `backend/requirements.txt`.
 
-```{important}
-The "engine" here is the Rust-backed **compiled** package
-(`policyengine-uk-compiled`), not the pure-Python `policyengine-uk`. All chat
-calculations run through the compiled package; code paths that reach for the
-pure-Python engine are out of scope for this pathway.
+## Runtime boundary
+
+`backend/engine/py_runtime.py` owns package access:
+
+- resolves dataset names through the policyengine.py release manifest;
+- materializes a certified dataset/year with `pe.uk.ensure_datasets`;
+- creates baseline and reform `policyengine.core.Simulation` objects;
+- runs the UK synthetic-household calculator; and
+- exposes model metadata for discovery.
+
+`backend/engine/simulations.py` stores a baseline/reform pair in
+`SocietySimulationRun`. It returns only metadata to the model. The actual
+simulation objects remain in the turn-local tool result store. Output datasets
+are run in memory rather than persisted into policyengine.py's process cache.
+
+## Datasets
+
+UK Chat defaults to `enhanced_frs_2023_24`. The logical name is resolved to the
+URI certified by the installed policyengine.py release manifest. This preserves
+the app's Enhanced FRS workflow while using policyengine.py provenance and
+materialization.
+
+The standard policyengine.py UK default is `populace_uk_2023`; the constant and
+discovery metadata retain that option so the chat default can be switched to the
+standard bundle default if needed. `frs_2023_24` is also exposed.
+
+Datasets are cached under `POLICYENGINE_DATA_FOLDER`, defaulting to
+`/tmp/policyengine-uk-chat-data`.
+
+## Reforms and households
+
+Reforms use flat policyengine.py parameter paths, for example:
+
+```json
+{
+  "gov.hmrc.income_tax.allowances.personal_allowance.amount": 15000
+}
 ```
 
-## Module map
+`backend/engine/reforms.py` validates and compiles these reforms through the
+policyengine.py reform API. `backend/engine/households.py` validates synthetic
+household inputs and calls the managed UK household calculator.
 
-```{list-table}
-:header-rows: 1
-:widths: 30 70
+## Society outputs
 
-* - Module
-  - Purpose
-* - `sandbox.py`
-  - Restricted Python execution helpers used by chat tools. Backs the
-    `run_python` tool — see [Tools](tools.md).
-* - `simulations.py`
-  - PolicyEngine UK compiled-package and simulation helpers.
-* - `reforms.py`
-  - Parametric reform validation and compiled-policy construction. Reforms are
-    keyed by programme (e.g. `income_tax`, `national_insurance`,
-    `universal_credit`).
-* - `households.py`
-  - Illustrative household input normalization. Backs `calculate_household`.
-* - `microdata.py`
-  - Microdata loading, filtering, and aggregate operations. Backs
-    `analyse_microdata`.
-* - `lookups.py`
-  - Compatibility facade for deterministic metadata lookup helpers.
-* - `serialization.py`
-  - Serialization helpers for tool outputs.
-* - `reference.py`
-  - Generate `reference.md` from the installed `policyengine_uk_compiled`
-    library.
-```
+`backend/engine/derivatives.py` is a thin adapter over official policyengine.py
+output classes. Weighted aggregation belongs to those classes. Runtime code
+must not derive society totals from raw arrays or implement weights locally.
 
-## Generated reference documents
-
-`backend/engine/reference.py` generates **two** documents at build time, run
-against the installed engine so they always describe the exact version that will
-execute:
-
-```{list-table}
-:header-rows: 1
-:widths: 35 65
-
-* - File
-  - Contents
-* - `backend/reference.md`
-  - The full API reference — an engine-capabilities snapshot, the public API
-    docs, reform recipes, and the `Parameters` JSON schema. Injected into the
-    compute agent's context so it can write correct code without guessing.
-* - `backend/scope_descriptor.md`
-  - A compact descriptor (built via `build_scope_descriptor()`) listing the
-    modelled programmes, datasets, years, and the "not modelled" boundary. Used
-    by the lightweight gateway prompts where the full reference would be too
-    heavy.
-```
-
-Both files are git-ignored and regenerated (`python engine/reference.py`) in
-**both** the Docker image build and the Modal image build, so the deployed agent
-always reads a reference that matches the engine it runs against. See
-[Deployment](../deployment.md) and the [Backend overview](overview.md) for how
-the build wiring works.
-
-```{note}
-`GET /version` reports the `policyengine_uk_compiled` version the deployed
-reference documents are stamped to — the quickest way to confirm a deployment's
-engine build.
-```
-
-## Parameter lookup
-
-The `lookup_parameter` tool is backed by the `backend/engine/lookup/` package,
-which resolves baseline parameter values **without running a simulation**:
-
-```{list-table}
-:header-rows: 1
-:widths: 35 65
-
-* - Module
-  - Purpose
-* - `lookup/parameters.py`
-  - `lookup_parameter_metadata(parameters, query, year, limit)` looks up a
-    baseline parameter by exact dotted path (e.g.
-    `income_tax.personal_allowance`) **or** a natural-language query (e.g.
-    "personal allowance").
-* - `lookup/scoring.py`
-  - Deterministic string-similarity (F1-style) matching of the query against
-    parameter names, labels, and hand-authored aliases.
-```
-
-A hand-maintained `_PARAMETER_ALIASES` map in `parameters.py` maps canonical
-parameter paths to natural-language synonyms, improving recall for everyday
-phrasings.
-
-```{important}
-Parameter lookup is **deterministic** — there is no model call. It is a cheap,
-reliable way to fetch a static parameter value when the answer does not require
-a simulation. See [Tools](tools.md).
-```
-
-## The compiled-output contract
-
-The engine layer is where the "compiled-output contract" lives: how
-compiled-engine results are normalised and serialised (`serialization.py`)
-before being handed back to the model as tool results. Centralising that
-contract here keeps tool outputs consistent and shields the agent from the raw
-shapes the compiled package emits.
+The serialization layer rejects pandas tabular objects. This is both a privacy
+boundary and a guard against bypassing the output classes.

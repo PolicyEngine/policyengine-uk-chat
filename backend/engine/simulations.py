@@ -1,61 +1,81 @@
-"""PolicyEngine UK compiled-package and simulation helpers."""
+"""High-level policyengine.py society simulation lifecycle."""
 
-from pathlib import Path
-import sys
-from typing import Any, Dict
+from __future__ import annotations
 
-from engine.constants import FRS_DATASET
+from dataclasses import asdict, dataclass
+from typing import Any
 
-
-DATASET_LABELS = {
-    FRS_DATASET: "Family Resources Survey",
-    "efrs": "Enhanced FRS",
-    "spi": "Survey of Personal Incomes",
-    "lcfs": "Living Costs and Food Survey",
-    "was": "Wealth and Assets Survey",
-}
+from engine.constants import DATASET_LABELS, DEFAULT_UK_DATASET
+from engine.py_runtime import (
+    DatasetSpec,
+    managed_simulation_pair,
+    resolve_dataset,
+)
+from engine.reforms import normalize_reform_dict
 
 
-def ensure_compiled_package_importable() -> None:
-    """Make the local policyengine_uk_compiled package importable in dev setups."""
-    try:
-        import policyengine_uk_compiled  # noqa: F401
-        return
-    except ModuleNotFoundError:
-        pass
+@dataclass(frozen=True)
+class SocietySimulationRun:
+    """A baseline/reform pair backed by policyengine.core.Simulation."""
 
-    repo_parent = Path(__file__).resolve().parents[3]
-    candidates = [
-        repo_parent / "policyengine-uk-rust" / "interfaces" / "python",
-    ]
-    for candidate in candidates:
-        if candidate.is_dir():
-            candidate_str = str(candidate)
-            if candidate_str not in sys.path:
-                sys.path.insert(0, candidate_str)
-            try:
-                import policyengine_uk_compiled  # noqa: F401
-                return
-            except ModuleNotFoundError:
-                continue
+    year: int
+    dataset: DatasetSpec
+    reform_applied: bool
+    reform: dict[str, Any] | None
+    baseline: Any
+    reform_simulation: Any
 
-    raise ModuleNotFoundError(
-        "policyengine_uk_compiled is not importable. Install the package or make sure a local "
-        "policyengine-uk-rust checkout with interfaces/python is available."
+    def metadata(self) -> dict[str, Any]:
+        return {
+            "status": "success",
+            "fiscal_year": str(self.year),
+            "year": self.year,
+            "dataset": asdict(self.dataset),
+            "reform_applied": self.reform_applied,
+        }
+
+
+def build_society_simulation(
+    *,
+    year: int,
+    reform: dict[str, Any] | None,
+    dataset: str | None = None,
+    extra_variables: dict[str, list[str]] | None = None,
+) -> SocietySimulationRun:
+    """Materialize baseline and reform policyengine.py Simulations."""
+
+    normalized_reform = normalize_reform_dict(reform)
+    dataset_spec = resolve_dataset(dataset or DEFAULT_UK_DATASET)
+    baseline, reform_simulation = managed_simulation_pair(
+        year=year,
+        dataset=dataset_spec.name,
+        reform=normalized_reform or None,
+        extra_variables=extra_variables,
+    )
+    return SocietySimulationRun(
+        year=year,
+        dataset=dataset_spec,
+        reform_applied=bool(normalized_reform),
+        reform=normalized_reform or None,
+        baseline=baseline,
+        reform_simulation=reform_simulation,
     )
 
 
-def build_simulation(year: int, dataset: str = FRS_DATASET):
-    """Build a compiled PolicyEngine UK Simulation."""
-    ensure_compiled_package_importable()
-    from policyengine_uk_compiled import Simulation
+def get_capabilities() -> dict[str, Any]:
+    from engine.discovery import supported_outputs
+    from engine.py_runtime import list_dataset_specs
 
-    return Simulation(year=year, dataset=dataset)
+    return {
+        "engine": "policyengine.py",
+        "datasets": [asdict(spec) for spec in list_dataset_specs()],
+        "default_dataset": DEFAULT_UK_DATASET,
+        "supported_outputs": supported_outputs(),
+    }
 
 
-def get_capabilities() -> Dict[str, Any]:
-    ensure_compiled_package_importable()
-    from policyengine_uk_compiled import capabilities
-
-    return capabilities()
-
+def dataset_label(dataset: str | None) -> str:
+    return DATASET_LABELS.get(
+        dataset or DEFAULT_UK_DATASET,
+        dataset or DEFAULT_UK_DATASET,
+    )

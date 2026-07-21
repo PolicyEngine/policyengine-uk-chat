@@ -3,6 +3,7 @@
 import pytest
 
 from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
+from engine.constants import DEFAULT_UK_DATASET
 from prompts import (
     SYSTEM_PROMPT,
     SUGGESTION_SYSTEM,
@@ -34,26 +35,40 @@ def test_main_prompt_contains_factual_neutrality_rules():
 def test_main_prompt_contains_microdata_privacy_rules():
     assert "row-level survey microdata" in SYSTEM_PROMPT
     assert "real households" in SYSTEM_PROMPT
-    assert "cannot access or disclose real households" in SYSTEM_PROMPT
+    assert "cannot access or disclose real household records" in SYSTEM_PROMPT
     assert "illustrative synthetic households" in SYSTEM_PROMPT
-    assert "Simulation.single_person()" in SYSTEM_PROMPT
-    assert "analyse_microdata` must not be used with FRS" in SYSTEM_PROMPT
+    assert "exactly one household containing one benefit unit" in SYSTEM_PROMPT
+    assert "Do not combine unrelated adults" in SYSTEM_PROMPT
 
 
-def test_main_prompt_prefers_typed_tools_before_python():
-    assert "calculate_household" in SYSTEM_PROMPT
-    assert "run_economy_simulation" in SYSTEM_PROMPT
-    assert "analyse_microdata" in SYSTEM_PROMPT
-    assert "lookup_parameter" in SYSTEM_PROMPT
-    assert "validate_reform" in SYSTEM_PROMPT
-    assert "routine" in SYSTEM_PROMPT
-    assert "preflight" in SYSTEM_PROMPT
-    assert "Do not run household or economy" in SYSTEM_PROMPT
-    assert "needs_confirmation" in SYSTEM_PROMPT
-    assert "choose" in SYSTEM_PROMPT
-    assert "string parsing certainty" in SYSTEM_PROMPT
-    assert "confirmation_reason" in SYSTEM_PROMPT
-    assert "Use `run_python` as the fallback" in SYSTEM_PROMPT
+def test_main_prompt_describes_py_lifecycle_tools():
+    assert f"default simulation year is {DEFAULT_SIMULATION_YEAR}" in SYSTEM_PROMPT
+    assert DEFAULT_UK_DATASET in SYSTEM_PROMPT
+    for name in (
+        "list_datasets",
+        "list_entities",
+        "search_variables",
+        "search_parameters",
+        "list_reform_targets",
+        "validate_reform",
+        "validate_household",
+        "run_household_simulation",
+        "run_society_simulation",
+        "compute_budgetary_impact",
+        "compute_decile_impacts",
+        "generate_chart",
+    ):
+        assert f"`{name}`" in SYSTEM_PROMPT
+    assert "Do not run broad Python code for normal analysis" in SYSTEM_PROMPT
+
+
+def test_public_tools_exclude_removed_public_tools():
+    names = {tool["name"] for tool in TOOL_DEFINITIONS}
+    assert "run_python" not in names
+    assert "calculate_household" not in names
+    assert "run_economy_simulation" not in names
+    assert "analyse_microdata" not in names
+    assert "lookup_parameter" not in names
 
 
 def test_validate_reform_tool_is_not_routine_preflight():
@@ -62,53 +77,26 @@ def test_validate_reform_tool_is_not_routine_preflight():
     assert "routine preflight" in description
 
 
-def test_run_python_tool_repeats_microdata_contract():
-    description = _tool("run_python")["description"]
-    assert "row-level survey microdata" in description
-    assert "illustrative synthetic households" in description
-    assert "Simulation.single_person()" in description
-    assert "rather than real households" in description
-    assert "fallback" in description.lower()
-    assert "lookup_parameter" in description
-    assert "parameter introspection" not in description
+def test_dataset_schema_defaults_to_enhanced_frs():
+    schema = _tool("run_society_simulation")["input_schema"]["properties"]["dataset"]
+    assert schema["default"] == DEFAULT_UK_DATASET
+    assert DEFAULT_UK_DATASET in schema["description"]
 
 
-def test_lookup_parameter_describes_metadata_contract():
-    parameter = _tool("lookup_parameter")
-    assert "static parameter questions" in parameter["description"]
-    assert "do not run household or economy simulations" in parameter["description"].lower()
-    assert "needs_confirmation" in parameter["description"]
-    assert "string parsing certainty" in parameter["description"]
-    assert "confirmation_reason" in parameter["description"]
-    assert parameter["input_schema"]["properties"]["year"]["default"] == 2025
-    assert "Confirmation responses return the full bounded option set" in parameter["input_schema"]["properties"]["limit"]["description"]
-
-
-def test_analyse_microdata_tool_excludes_frs():
-    tool = _tool("analyse_microdata")
-    description = tool["description"]
-    dataset_schema = tool["input_schema"]["properties"]["dataset"]
-    assert "does not support FRS" in description
-    assert dataset_schema["default"] == "efrs"
-    assert "frs" not in dataset_schema["enum"]
-
-
-def test_generate_chart_tool_requires_neutral_titles():
+def test_generate_chart_tool_describes_deterministic_presets():
     chart_tool = _tool("generate_chart")
     description = chart_tool["description"]
-    title_description = chart_tool["input_schema"]["properties"]["title"]["description"]
-    assert "factually neutral" in description
-    assert "typed calculation tool or `run_python`" in description
-    assert "factually neutral" in title_description.lower()
+    enum = chart_tool["input_schema"]["properties"]["chart_kind"]["enum"]
+    assert "deterministic app-v2-style choices" in description
+    assert "budget_waterfall" in enum
+    assert "decile_relative_bar" in enum
+    assert "winners_losers_stacked_bar" in enum
 
 
 def test_gateway_prompt_renders_caller_supplied_default_year():
-    # The documented safe default year must flow through the `default_year`
-    # parameter (wired from DEFAULT_SIMULATION_YEAR by gateway/runtime.py), not
-    # sit hardcoded in the prompt text.
     rendered = gateway_system(
         "scope text",
-        "- tool — purpose. Required: none.",
+        "- tool - purpose. Required: none.",
         "label_a, label_b",
         DEFAULT_SIMULATION_YEAR,
     )

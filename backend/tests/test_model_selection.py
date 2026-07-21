@@ -22,7 +22,7 @@ def _verdict(tool: str, slots: list):
 
 class TestSelectChatModel:
     def test_gateway_reform_slot_routes_to_reasoning_model(self):
-        verdict = _verdict("run_economy_simulation", [_slot("reform")])
+        verdict = _verdict("run_society_simulation", [_slot("reform")])
 
         assert (
             select_chat_model(_messages("Model the policy change"), gateway_verdict=verdict)
@@ -31,7 +31,7 @@ class TestSelectChatModel:
 
     def test_gateway_distributional_output_routes_to_reasoning_model(self):
         verdict = _verdict(
-            "run_economy_simulation",
+            "run_society_simulation",
             [_slot("decile_impact", kind="output")],
         )
 
@@ -42,7 +42,7 @@ class TestSelectChatModel:
 
     def test_gateway_baseline_budgetary_query_does_not_force_reasoning_model(self):
         verdict = _verdict(
-            "run_economy_simulation",
+            "run_society_simulation",
             [
                 _slot("year", source="default"),
                 _slot("dataset", source="default"),
@@ -113,4 +113,3 @@ def test_attached_image_does_not_inflate_token_estimate():
         ],
     }
     assert select_chat_model([image_message]) == DEFAULT_FAST_MODEL
-

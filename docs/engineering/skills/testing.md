@@ -16,8 +16,8 @@ Use this skill whenever adding, moving, or reviewing tests.
 
 - Unit tests should mock network, database, and model-client seams unless they
   are explicitly marked as live/integration tests.
-- Tests that depend on `policyengine_uk_compiled` should skip cleanly when that
-  package is not installed locally, while CI should install backend
+- Tests that depend on the policyengine.py UK packages should skip cleanly when
+  they are not installed locally, while CI should install backend
   dependencies before running the full backend suite.
 - Conversation-table tests should use the named isolated table fixture rather
   than a shared developer database.
@@ -42,6 +42,17 @@ For changes spanning both sides, run:
 ```bash
 make test
 ```
+
+For an authenticated end-to-end check of the Enhanced FRS society lifecycle
+and every official derivative adapter, run:
+
+```bash
+HUGGING_FACE_TOKEN=... RUN_DATA_EVALS=1 PYTHONPATH=backend \
+  python -m pytest backend/tests/test_data_integration.py
+```
+
+This test is deliberately excluded from the default suite because it downloads
+managed data and runs a full baseline/reform society simulation.
 
 If a command cannot run locally because dependencies or credentials are missing,
 state that explicitly in the handoff.

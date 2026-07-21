@@ -1,178 +1,94 @@
 # Tools
 
-Tools are the only way the agent produces numbers. The model never recalls
-figures from memory — it calls a tool, the backend runs it against the compiled
-engine, and the result flows back into the conversation. This page describes the
-registry that wires tools up, the seven tools the model can call, and the
-restricted `run_python` sandbox. The agent loop that dispatches them is
-documented in [The chat agent](chat.md).
+The chat runtime exposes typed tools from `backend/tools/definitions.py`. Tool
+implementations are registered in `backend/tools/dispatch.py`; there is no
+model-authored Python execution tool.
 
-## The registry
+## Lifecycle
 
-Tools are registered with a decorator. `backend/tools/registry.py` exposes
-`@register_tool(name=..., description=..., input_schema=...)`, which appends each
-handler to an internal `_TOOL_SPECS` list. Registering two tools under the same
-name raises `ValueError`.
+Society-wide analysis is a multi-step lifecycle:
 
-The registry exposes three read-only accessors:
+1. Discover datasets, entities, variables, parameters, reform targets, household
+   inputs, or supported outputs.
+2. Validate the reform or synthetic household.
+3. Run a household simulation or create a society simulation handle.
+4. Pass the society handle to a derivative tool.
+5. Pass a derivative result handle to a deterministic preset chart.
 
-```{list-table}
-:header-rows: 1
-:widths: 30 70
+`ToolExecutionContext` owns the result store for one chat turn. Handles are
+opaque and turn-local. The model cannot inspect or serialize the underlying
+`policyengine.core.Simulation` objects.
 
-* - Accessor
-  - Returns
-* - `tool_specs()`
-  - The registered specs (name, description, schema, handler).
-* - `tool_definitions()`
-  - The JSON-schema dicts the model sees (name, description, `input_schema`).
-* - `tool_handlers()`
-  - A read-only `MappingProxyType` mapping tool name → handler function.
-```
+## Discovery tools
 
-Each accessor lazily imports `tools.dispatch` so the `@register_tool` decorators
-run (their side effects populate `_TOOL_SPECS`) before the registry is read.
+| Tool | Purpose |
+| --- | --- |
+| `list_datasets` | List the UK datasets deliberately exposed by the app. |
+| `list_entities` | List model entities and variable counts. |
+| `search_variables` | Search variables, optionally by entity. |
+| `get_variable` | Return one variable's metadata. |
+| `search_parameters` | Search policy parameter paths. |
+| `get_parameter` | Return one parameter and its value for a year. |
+| `list_reform_targets` | Search reformable parameter paths and common aliases. |
+| `list_household_input_variables` | List variables accepted in synthetic household input. |
+| `list_supported_outputs` | List supported household, society, derivative, and artifact outputs. |
 
-The code is split by concern:
+The discovery surface is intentionally split by catalog area so the model asks
+for only the metadata it needs.
 
-- `backend/tools/definitions.py` holds the JSON schemas and descriptions (data
-  only).
-- `backend/tools/dispatch.py` holds the `@register_tool`-decorated
-  implementations.
+## Validation and simulation
 
-```{note}
-To add a tool, write a function decorated with `@register_tool(...)` in
-`dispatch.py`. The registry picks it up automatically — no central list to edit.
-```
+| Tool | Purpose |
+| --- | --- |
+| `validate_reform` | Validate a flat policyengine.py parameter-path reform. |
+| `validate_household` | Validate synthetic household structure, variables, and reform. |
+| `run_household_simulation` | Run baseline and reform values for one synthetic household. |
+| `run_society_simulation` | Materialize baseline and reform simulations and return metadata plus a handle. |
 
-## Dispatch
+`run_society_simulation` does not eagerly calculate fiscal, poverty, decile, or
+inequality results. Its `result_id` is consumed by the derivative tools below.
+`run_household_simulation` models one household containing one benefit unit;
+multiple benefit units or unrelated households require separate calls.
 
-Dispatch is synchronous. `execute_tool(tool_name, tool_input)` looks the name up
-in `TOOL_HANDLERS` (sourced from `tool_handlers()`), calls
-`TOOL_HANDLERS[name](**tool_input)`, and returns a dict:
+## Derivative tools
 
-- an unknown tool name returns `{"error": ...}`;
-- any exception raised by a handler is caught and returned as
-  `{"error": str(exc)}`.
+| Tool | policyengine.py implementation |
+| --- | --- |
+| `compute_budgetary_impact` | Weighted `Aggregate` totals and `ChangeAggregate` changes for household tax and benefits. |
+| `compute_program_breakdown` | `build_program_statistics` with the UK program configuration. |
+| `compute_decile_impacts` | Official `DecileImpact` outputs for deciles 1-10. |
+| `compute_winners_losers` | `compute_intra_decile_impacts`. |
+| `compute_poverty_metrics` | `calculate_uk_poverty_rates` and `calculate_uk_poverty_by_age`. |
+| `compute_inequality_metrics` | `calculate_uk_inequality`. |
+| `aggregate_result` | Weighted `Aggregate` or `ChangeAggregate` for `sum`, `mean`, or `count`. |
 
-The chat orchestrator runs these synchronous handlers concurrently by wrapping
-each in an async task, so several tool calls within one turn execute in
-parallel. See [The chat agent](chat.md) for that loop.
-
-## The seven tools
-
-```{list-table}
-:header-rows: 1
-:widths: 24 46 30
-
-* - Tool
-  - Purpose
-  - Key inputs
-* - `validate_reform`
-  - Validate a parametric reform's JSON against the schema without running a
-    simulation.
-  - `reform` (dict, optional)
-* - `calculate_household`
-  - Compute taxes, benefits, and net income for an illustrative household.
-  - `person`, `benunit`, `household` arrays, `year`, optional `reform`
-* - `run_economy_simulation`
-  - Run a UK economy-wide microsimulation; returns budgetary impact, deciles,
-    and poverty.
-  - `year`, optional `reform`, `dataset` (`frs`/`efrs`/`spi`/`lcfs`/`was`)
-* - `analyse_microdata`
-  - Slice, filter, sample, or aggregate microdata with an optional reform.
-  - `entity` (`persons`/`benunits`/`households`), `operation`
-    (`sample`/`mean`/`sum`/`count`/`group_by`/`describe`), `year`, optional
-    `reform`, `filters`, `columns`, `group_by`, `n`, `dataset` (non-FRS)
-* - `lookup_parameter`
-  - Look up a baseline parameter by path or natural-language query (not a
-    simulation).
-  - `query` (string), optional `year`, `limit` (1–10)
-* - `run_python`
-  - Execute reproducible Python against the compiled engine.
-  - `code` (string; must assign to `result`)
-* - `generate_chart`
-  - Turn computed rows into a chart spec the frontend renders.
-  - `chart_type` (`line`/`bar`/`area`/`scatter`), `title`, `data` (array of row
-    dicts), `x_field`, `y_fields`, plus optional formatting args
-```
-
-`lookup_parameter` is implemented via `backend/engine/lookup/` — see
-[The engine](engine.md).
-
-## The `run_python` sandbox
-
-`run_python` executes model-authored Python against the compiled engine inside a
-restricted environment (`backend/engine/sandbox.py`, function
-`run_python_code()`). It exposes only a curated set of safe builtins, and an
-import whitelist allowing just `json`, `math`, `numpy`, and `pandas`.
-
-The namespace is preloaded so the agent uses the official interface rather than
-re-implementing policy logic:
-
-```{list-table}
-:header-rows: 1
-:widths: 28 72
-
-* - Name
-  - What it is
-* - `pe`
-  - A `SafeCompiledModule` wrapper over `policyengine_uk_compiled`.
-* - `Simulation`
-  - A safe wrapper that blocks FRS row-level access from `run_python`.
-* - `Parameters`
-  - Access to baseline parameters.
-* - `StructuralReform`
-  - Build structural (non-parametric) reforms.
-* - `aggregate_microdata`
-  - Aggregate a microdata column.
-* - `combine_microdata`
-  - Combine microdata across entities.
-* - `capabilities`
-  - Report the modelled datasets, years, and programmes.
-* - `ensure_dataset`
-  - Make a dataset available before use.
-* - `pd`
-  - pandas.
-* - `np`
-  - numpy (if available).
-* - `json`, `math`
-  - Standard-library modules.
-```
-
-**Result contract.** The code must assign its final answer to a variable named
-`result`. `print()` output is captured separately as short diagnostics. The tool
-returns a dict with `result` and/or `output` — or a `note` if neither was
-produced.
-
-```{important}
-The system prompt requires calling `capabilities()` first when using
-`run_python`, so the agent grounds in the modelled datasets, years, and
-programmes before simulating. Microdata privacy rules forbid row-level access:
-the `Simulation` wrapper blocks FRS row-level reads from inside the sandbox.
-```
+These adapters may reshape official outputs for the tool contract, but they must
+not call the country microsimulation directly, convert `MicroSeries` to NumPy,
+or implement survey weighting themselves. Row-level society data is never a
+tool result.
 
 ## Charts
 
-`generate_chart` does not draw anything itself — it returns a `chart_markdown`
-field containing a fenced ```` ```chart ```` JSON block.
+`generate_chart` supports generic line, bar, area, and scatter specs for data
+already present in a tool result. It also supports deterministic presets:
 
-```{important}
-The agent must paste the `chart_markdown` block **verbatim** into its next text
-response. The [Frontend](../frontend.md) parses that block to render the chart;
-Matplotlib output produced inside `run_python` is discarded. If the block is not
-echoed exactly, no chart appears.
-```
+- `budget_waterfall`
+- `program_budget_waterfall`
+- `decile_absolute_bar`
+- `decile_relative_bar`
+- `winners_losers_stacked_bar`
+- `poverty_relative_bar`
+- `inequality_relative_bar`
+- `earnings_variation_line`
 
-## Adding or changing tools
+Except for the explicit earnings-series preset, policy-result presets require a
+matching derivative `result_id`. The backend maps the typed derivative output to
+the fixed chart rows; the frontend only renders those rows with the preset
+layout.
 
-1. Decorate a new function with `@register_tool(...)` in
-   `backend/tools/dispatch.py`. The registry and `definitions.py` wire it through
-   automatically.
-2. Add a test under `backend/tests/` (e.g. `test_agent_tools.py`).
+## Privacy boundary
 
-```{note}
-Prompt caching: the Anthropic tool array is cached as one block with
-`cache_control` stamped on the **last** tool only. Keep tool ordering stable so
-the cache stays valid.
-```
+The Enhanced FRS, the standard certified UK dataset, and the standard FRS are
+aggregate-only in chat. `json_safe` rejects pandas `DataFrame` and `Series`
+objects so an accidental raw society payload fails closed instead of becoming a
+tool response.
