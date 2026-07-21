@@ -1,37 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { resolveBackendUrl } from "../backend-url";
+
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
-
-function slugifyBranchName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-{2,}/g, "-");
-}
-
-export function getBackendUrl(): string {
-  const vercelEnv = process.env.VERCEL_ENV;
-  const gitRef = process.env.VERCEL_GIT_COMMIT_REF;
-  if (vercelEnv === "preview" && gitRef) {
-    const branchSlug = slugifyBranchName(gitRef);
-    return `https://policyengine--peukchat-${branchSlug}-web.modal.run`;
-  }
-
-  if (process.env.BACKEND_URL) {
-    return process.env.BACKEND_URL;
-  }
-
-  if (vercelEnv === "production") {
-    // BACKEND_URL must be set in production; falling back to localhost here
-    // means every API call fails inside the serverless function with a
-    // generic 500. Log loudly so the misconfiguration is diagnosable.
-    console.error("BACKEND_URL is not set in production; proxy will fail.");
-  }
-
-  return "http://localhost:8080";
-}
 
 // Request headers to forward to the backend. The backend keys billing and
 // rate limiting on X-User-Id, so dropping it (as the old proxy did) silently
@@ -64,7 +36,7 @@ async function handleRequest(
     return NextResponse.json({ error: "Invalid endpoint path" }, { status: 400 });
   }
 
-  const backendUrl = getBackendUrl();
+  const backendUrl = resolveBackendUrl();
   const url = new URL(`${backendUrl}/${slug.join("/")}`);
   request.nextUrl.searchParams.forEach((value, key) => url.searchParams.append(key, value));
 

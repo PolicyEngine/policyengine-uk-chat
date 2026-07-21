@@ -1,8 +1,9 @@
 {
-  "rewrites": [
+  "redirects": [
     {
-      "source": "/_zones/uk-chat/_next/:path*",
-      "destination": "/_next/:path*"
+      "source": "/",
+      "destination": "/uk/chat",
+      "permanent": false
     }
   ]
 }

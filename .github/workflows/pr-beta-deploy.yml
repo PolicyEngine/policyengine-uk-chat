@@ -108,7 +108,7 @@ jobs:
             OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL="$OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL" \
             OBSERVABILITY_LOG_DESTINATIONS="$OBSERVABILITY_LOG_DESTINATIONS" \
             HOSTNAMES="$FRONTEND_URL" \
-            PUBLIC_BASE_URL="$FRONTEND_URL" \
+            PUBLIC_BASE_URL="$FRONTEND_URL/uk/chat" \
             --force
 
       - name: Deploy backend preview to Modal

@@ -10,7 +10,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Chart, extractChartSpecs } from "@/components/charts";
 import { THEME } from "@/components/theme";
-import { getBackendEndpoint } from "@/utils/backend";
+import { APP_BASE_PATH, getAppBaseUrl, getBackendEndpoint } from "@/utils/backend";
 
 const EXAMPLE_QUERIES = [
   "What's the current personal allowance?",
@@ -468,7 +468,7 @@ export default function ChatPage() {
     e.stopPropagation();
     try {
       const { share_token } = await apiRequest<{ share_token: string }>("POST", `conversations/${id}/share`, user?.id ? { user_id: user.id } : undefined);
-      const url = `${window.location.origin}/s/${share_token}`;
+      const url = `${getAppBaseUrl(window.location.origin)}/s/${share_token}`;
       await navigator.clipboard.writeText(url);
       setCopiedShareId(id);
       setTimeout(() => setCopiedShareId(null), 2000);
@@ -568,7 +568,7 @@ export default function ChatPage() {
       const data = await apiRequest<ReportConversationResponse>("POST", `conversations/${conversationId}/report`, undefined, {
         user_id: user?.id,
         note: reportNote.trim() || null,
-        app_url: window.location.origin,
+        app_url: getAppBaseUrl(window.location.origin),
       });
       window.open(data.issue_url, "_blank", "noopener,noreferrer");
       setReportOpen(false);
@@ -1531,7 +1531,7 @@ export default function ChatPage() {
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
             >
-              <span role="img" aria-label="PolicyEngine" style={{ display: "inline-block", width: "24px", height: "24px", background: "var(--text)", WebkitMaskImage: "url(/favicon.svg)", maskImage: "url(/favicon.svg)", WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskSize: "contain", maskSize: "contain", WebkitMaskPosition: "center", maskPosition: "center" }} />
+              <span role="img" aria-label="PolicyEngine" style={{ display: "inline-block", width: "24px", height: "24px", background: "var(--text)", WebkitMaskImage: `url(${APP_BASE_PATH}/favicon.svg)`, maskImage: `url(${APP_BASE_PATH}/favicon.svg)`, WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskSize: "contain", maskSize: "contain", WebkitMaskPosition: "center", maskPosition: "center" }} />
             </button>
             <button onClick={startNewChat} data-tip-right="New chat" aria-label="New chat" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginTop: "4px" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}

@@ -1,16 +1,13 @@
-export function getBackendBase(): string {
-  if (
-    typeof window !== "undefined" &&
-    window.location.hostname.endsWith(".vercel.app")
-  ) {
-    return "/api/proxy";
-  }
+import appPaths from "../../app-paths.json";
 
-  return process.env.NEXT_PUBLIC_BACKEND_URL || "/api/proxy";
+export const APP_BASE_PATH = appPaths.basePath;
+const BACKEND_PROXY_PATH = `${APP_BASE_PATH}/api/proxy`;
+
+export function getAppBaseUrl(origin: string): string {
+  return `${origin.replace(/\/$/, "")}${APP_BASE_PATH}`;
 }
 
 export function getBackendEndpoint(path: string): string {
-  const base = getBackendBase().replace(/\/$/, "");
   const cleanPath = path.replace(/^\//, "");
-  return `${base}/${cleanPath}`;
+  return `${BACKEND_PROXY_PATH}/${cleanPath}`;
 }

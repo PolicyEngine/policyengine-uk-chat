@@ -90,7 +90,7 @@ def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
     assert workflow.count('HUGGING_FACE_TOKEN="$HUGGING_FACE_TOKEN"') == 1
     assert "FRONTEND_URL: ${{ steps.names.outputs.frontend_url }}" in workflow
     assert 'HOSTNAMES="$FRONTEND_URL"' in workflow
-    assert 'PUBLIC_BASE_URL="$FRONTEND_URL"' in workflow
+    assert 'PUBLIC_BASE_URL="$FRONTEND_URL/uk/chat"' in workflow
     assert '-X OPTIONS "$backend_url/chat/message"' in workflow
     assert 'Access-Control-Request-Method: POST' in workflow
     assert workflow.index('modal app stop "$MODAL_APP_NAME"') < workflow.index(

@@ -77,7 +77,7 @@ Defined in `backend/conversations/` (a router that aggregates the `store`,
     returns its `issue_url` plus a `share_url`.
 ```
 
-Shared conversations are surfaced in the frontend at `/s/[token]`.
+Shared conversations are surfaced in the frontend at `/uk/chat/s/[token]`.
 
 ## Billing — `/billing`
 

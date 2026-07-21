@@ -144,7 +144,7 @@ jobs:
             OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL="$OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL" \
             OBSERVABILITY_LOG_DESTINATIONS="$OBSERVABILITY_LOG_DESTINATIONS" \
             HOSTNAMES="https://policyengine-uk-chat.vercel.app,https://policyengine-uk-chat-bmxyy36r1-policy-engine.vercel.app" \
-            PUBLIC_BASE_URL="https://policyengine-uk-chat.vercel.app" \
+            PUBLIC_BASE_URL="https://policyengine-uk-chat.vercel.app/uk/chat" \
             --force
 
       - name: Deploy to Modal
