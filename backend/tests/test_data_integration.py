@@ -96,3 +96,51 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
         context,
     )
     assert math.isfinite(aggregate["result"]["value"])
+
+
+def test_cgt_basic_rate_reaches_default_income_deciles():
+    """CGT changes reach household net income but not equivalised HBAI income."""
+
+    context = new_tool_context("enhanced-frs-cgt-deciles")
+    simulation = _execute(
+        "run_society_simulation",
+        {
+            "year": 2026,
+            "dataset": "enhanced_frs_2023_24",
+            "reform": {"gov.hmrc.cgt.basic_rate": 0.20},
+        },
+        context,
+    )
+    simulation_id = simulation["result_id"]
+
+    budget = _execute(
+        "compute_budgetary_impact",
+        {"simulation_id": simulation_id},
+        context,
+    )
+    default_deciles = _execute(
+        "compute_decile_impacts",
+        {"simulation_id": simulation_id, "basis": "income"},
+        context,
+    )
+    hbai_deciles = _execute(
+        "compute_decile_impacts",
+        {
+            "simulation_id": simulation_id,
+            "basis": "income",
+            "income_concept": "equiv_hbai_household_net_income",
+        },
+        context,
+    )
+
+    assert budget["net_budgetary_impact"] > 0
+    assert default_deciles["income_variable"] == "household_net_income"
+    assert any(
+        not math.isclose(row["absolute_change"], 0, abs_tol=1e-9)
+        for row in default_deciles["deciles"]
+    )
+    assert hbai_deciles["income_variable"] == "equiv_hbai_household_net_income"
+    assert all(
+        math.isclose(row["absolute_change"], 0, abs_tol=1e-9)
+        for row in hbai_deciles["deciles"]
+    )

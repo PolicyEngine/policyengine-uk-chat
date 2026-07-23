@@ -766,6 +766,72 @@ cases:
             reform:
               gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
+  - id: trajectory_income_deciles_default_to_household_net_income
+    suite: trajectory
+    description: Ordinary income-decile requests should select household net income.
+    tags: [economy_wide, multi_turn, income_concept]
+    prompt: Continue from an existing society simulation.
+    messages:
+      - role: user
+        content: Raise the basic rate of capital gains tax to 20% in 2026.
+      - role: assistant
+        content: >
+          The society simulation completed with result handle
+          society_simulation_1.
+      - role: user
+        content: Now show the impact by income decile.
+    expected_tools:
+      - name: compute_decile_impacts
+        input_contains:
+          simulation_id: society_simulation_1
+          basis: income
+          income_concept: household_net_income
+    forbidden_tools:
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+    offline_response:
+      tool_calls:
+        - name: compute_decile_impacts
+          input:
+            simulation_id: society_simulation_1
+            basis: income
+            income_concept: household_net_income
+
+  - id: trajectory_explicit_hbai_deciles_select_hbai_income
+    suite: trajectory
+    description: Explicit HBAI requests should select equivalised HBAI net income.
+    tags: [economy_wide, multi_turn, income_concept]
+    prompt: Continue from an existing society simulation.
+    messages:
+      - role: user
+        content: Raise the basic rate of capital gains tax to 20% in 2026.
+      - role: assistant
+        content: >
+          The society simulation completed with result handle
+          society_simulation_1.
+      - role: user
+        content: >
+          Now show the impact by equivalised HBAI net income decile
+          specifically.
+    expected_tools:
+      - name: compute_decile_impacts
+        input_contains:
+          simulation_id: society_simulation_1
+          basis: income
+          income_concept: equiv_hbai_household_net_income
+    forbidden_tools:
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+    offline_response:
+      tool_calls:
+        - name: compute_decile_impacts
+          input:
+            simulation_id: society_simulation_1
+            basis: income
+            income_concept: equiv_hbai_household_net_income
+
   - id: trajectory_economy_child_benefit_budgetary
     suite: trajectory
     description: Benefit-specific budgetary-impact prompts should use aggregate simulation.

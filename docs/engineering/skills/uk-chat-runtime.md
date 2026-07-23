@@ -66,6 +66,19 @@ dispatched by `execute_tool()`. At present, the exposed tools are:
   budget waterfalls, programme waterfalls, decile bars, winners/losers stacks,
   poverty/inequality relative bars, and earnings lines.
 
+`compute_decile_impacts` deliberately pins its analytical meaning instead of
+inheriting policyengine.py defaults:
+
+- Income deciles measure and rank by `household_net_income` by default.
+- When the user explicitly requests equivalised HBAI net income, income deciles
+  measure and rank by `equiv_hbai_household_net_income`.
+- Wealth deciles measure `household_net_income`, group by
+  `household_wealth_decile`, and use the household entity.
+
+Keep the income variable, decile variable, and entity explicit at the
+policyengine.py boundary so dependency upgrades cannot silently change these
+meanings.
+
 Helper functions in `backend/engine/` are implementation details unless they
 are exposed through `@register_tool`.
 
