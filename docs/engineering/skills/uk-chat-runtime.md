@@ -67,13 +67,15 @@ dispatched by `execute_tool()`. At present, the exposed tools are:
   poverty/inequality relative bars, and earnings lines.
 
 `compute_decile_impacts` deliberately pins its analytical meaning instead of
-inheriting policyengine.py defaults:
+inheriting policyengine.py defaults. Its single `decile_concept` input is a
+runtime-enforced three-state choice, so callers cannot construct inconsistent
+combinations of basis and income measure:
 
-- Income deciles measure and rank by `household_net_income` by default.
-- When the user explicitly requests equivalised HBAI net income, income deciles
-  measure and rank by `equiv_hbai_household_net_income`.
-- Wealth deciles measure `household_net_income`, group by
-  `household_wealth_decile`, and use the household entity.
+- `household_net_income` measures and ranks by `household_net_income`.
+- `equivalised_hbai_net_income` measures and ranks by
+  `equiv_hbai_household_net_income`.
+- `wealth` measures `household_net_income`, groups by
+  `household_wealth_decile`, and uses the household entity.
 
 Keep the income variable, decile variable, and entity explicit at the
 policyengine.py boundary so dependency upgrades cannot silently change these

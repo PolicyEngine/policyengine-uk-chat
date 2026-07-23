@@ -769,7 +769,7 @@ cases:
   - id: trajectory_income_deciles_default_to_household_net_income
     suite: trajectory
     description: Ordinary income-decile requests should select household net income.
-    tags: [economy_wide, multi_turn, income_concept]
+    tags: [economy_wide, multi_turn, decile_concept]
     prompt: Continue from an existing society simulation.
     messages:
       - role: user
@@ -784,8 +784,7 @@ cases:
       - name: compute_decile_impacts
         input_contains:
           simulation_id: society_simulation_1
-          basis: income
-          income_concept: household_net_income
+          decile_concept: household_net_income
     forbidden_tools:
       - run_household_simulation
       - run_society_simulation
@@ -795,13 +794,12 @@ cases:
         - name: compute_decile_impacts
           input:
             simulation_id: society_simulation_1
-            basis: income
-            income_concept: household_net_income
+            decile_concept: household_net_income
 
   - id: trajectory_explicit_hbai_deciles_select_hbai_income
     suite: trajectory
     description: Explicit HBAI requests should select equivalised HBAI net income.
-    tags: [economy_wide, multi_turn, income_concept]
+    tags: [economy_wide, multi_turn, decile_concept]
     prompt: Continue from an existing society simulation.
     messages:
       - role: user
@@ -818,8 +816,7 @@ cases:
       - name: compute_decile_impacts
         input_contains:
           simulation_id: society_simulation_1
-          basis: income
-          income_concept: equiv_hbai_household_net_income
+          decile_concept: equivalised_hbai_net_income
     forbidden_tools:
       - run_household_simulation
       - run_society_simulation
@@ -829,8 +826,7 @@ cases:
         - name: compute_decile_impacts
           input:
             simulation_id: society_simulation_1
-            basis: income
-            income_concept: equiv_hbai_household_net_income
+            decile_concept: equivalised_hbai_net_income
 
   - id: trajectory_economy_child_benefit_budgetary
     suite: trajectory

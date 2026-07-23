@@ -8,6 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from engine import derivatives, discovery
+from engine.decile_concepts import DEFAULT_DECILE_CONCEPT
 from engine.households import calculate_household, validate_household_dict
 from engine.reforms import validate_reform_dict
 from engine.serialization import explore_tabular_data, json_safe
@@ -279,8 +280,7 @@ def compute_program_breakdown(
 )
 def compute_decile_impacts(
     simulation_id: str,
-    basis: str = "income",
-    income_concept: str = "household_net_income",
+    decile_concept: str = DEFAULT_DECILE_CONCEPT.value,
     _context: ToolExecutionContext | None = None,
 ) -> Dict[str, Any]:
     payload = _society_payload(_context, simulation_id)
@@ -289,8 +289,7 @@ def compute_decile_impacts(
         "simulation_id": simulation_id,
         **derivatives.decile_impacts(
             payload,
-            basis=basis,
-            income_concept=income_concept,
+            decile_concept=decile_concept,
         ),
     }
     return _derivative_result(_context, "decile_impacts", summary)

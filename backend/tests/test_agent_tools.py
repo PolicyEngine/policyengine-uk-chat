@@ -71,34 +71,37 @@ def test_simulation_schema_uses_fixed_dataset():
     ).parameters
 
 
-def test_decile_tool_exposes_controlled_income_concepts():
+def test_decile_tool_exposes_three_state_concept():
     tool = _tool("compute_decile_impacts")
     properties = tool["input_schema"]["properties"]
 
-    assert properties["basis"]["enum"] == ["income", "wealth"]
-    assert properties["income_concept"] == {
+    assert set(properties) == {"simulation_id", "decile_concept"}
+    assert properties["decile_concept"] == {
         "type": "string",
         "enum": [
             "household_net_income",
-            "equiv_hbai_household_net_income",
+            "equivalised_hbai_net_income",
+            "wealth",
         ],
         "default": "household_net_income",
-        "description": properties["income_concept"]["description"],
+        "description": properties["decile_concept"]["description"],
     }
-    assert "explicitly requests" in properties["income_concept"]["description"]
+    assert "Select exactly one" in properties["decile_concept"]["description"]
+    assert "explicitly requests" in properties["decile_concept"]["description"]
     assert "equivalised HBAI net income" in tool["description"]
     assert "Wealth deciles" in tool["description"]
 
 
-def test_decile_tool_passes_explicit_income_concept_to_derivative(monkeypatch):
+def test_decile_tool_passes_explicit_decile_concept_to_derivative(monkeypatch):
     captured = {}
 
     def fake_decile_impacts(payload, **kwargs):
         captured["payload"] = payload
         captured.update(kwargs)
         return {
-            "basis": kwargs["basis"],
-            "income_variable": kwargs["income_concept"],
+            "decile_concept": kwargs["decile_concept"],
+            "basis": "income",
+            "income_variable": "equiv_hbai_household_net_income",
             "decile_variable": None,
             "entity": "household",
             "deciles": [],
@@ -119,17 +122,40 @@ def test_decile_tool_passes_explicit_income_concept_to_derivative(monkeypatch):
 
     result = agent_tools.compute_decile_impacts(
         simulation_id,
-        basis="income",
-        income_concept="equiv_hbai_household_net_income",
+        decile_concept="equivalised_hbai_net_income",
         _context=context,
     )
 
     assert captured == {
         "payload": payload,
-        "basis": "income",
-        "income_concept": "equiv_hbai_household_net_income",
+        "decile_concept": "equivalised_hbai_net_income",
     }
     assert result["income_variable"] == "equiv_hbai_household_net_income"
+
+
+def test_decile_tool_rejects_concepts_outside_three_states():
+    context = new_tool_context("invalid-decile-concept")
+    simulation_id = context.result_store.put(
+        "society_simulation",
+        object(),
+        {},
+    )
+
+    result = agent_tools.execute_tool(
+        "compute_decile_impacts",
+        {
+            "simulation_id": simulation_id,
+            "decile_concept": "household_tax",
+        },
+        context=context,
+    )
+
+    assert result == {
+        "error": (
+            "Unknown decile_concept 'household_tax'; expected one of: "
+            "household_net_income, equivalised_hbai_net_income, wealth."
+        )
+    }
 
 
 def test_discovery_tools_are_split_by_catalog_area():

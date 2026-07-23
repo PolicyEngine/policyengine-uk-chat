@@ -4,16 +4,16 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from engine.decile_concepts import (
+    DEFAULT_DECILE_CONCEPT,
+    DecileConcept,
+    resolve_decile_concept,
+)
 from engine.simulations import SocietySimulationRun
 
 
 AggregateOperation = Literal["sum", "mean", "count"]
 SimulationTarget = Literal["baseline", "reform", "change"]
-DecileBasis = Literal["income", "wealth"]
-DecileIncomeConcept = Literal[
-    "household_net_income",
-    "equiv_hbai_household_net_income",
-]
 
 _TAX_CREDIT_AGGREGATE = "tax_credits"
 _TAX_CREDIT_COMPONENTS = frozenset({"working_tax_credit", "child_tax_credit"})
@@ -174,34 +174,20 @@ def program_breakdown(
 def decile_impacts(
     run: SocietySimulationRun,
     *,
-    basis: DecileBasis = "income",
-    income_concept: DecileIncomeConcept = "household_net_income",
+    decile_concept: DecileConcept | str = DEFAULT_DECILE_CONCEPT,
 ) -> dict[str, Any]:
     """Return official policyengine.py decile-impact rows."""
 
+    concept, config = resolve_decile_concept(decile_concept)
     from policyengine.outputs import DecileImpact
 
-    if basis == "wealth":
-        if income_concept != "household_net_income":
-            raise ValueError(
-                "income_concept is only configurable for income deciles; "
-                "wealth deciles measure household_net_income."
-            )
-        # Keep the wealth grouping and measured income explicit. Changes to
-        # policyengine.py defaults must not silently change UK Chat results.
-        kwargs = {
-            "income_variable": "household_net_income",
-            "decile_variable": "household_wealth_decile",
-            "entity": "household",
-        }
-    else:
-        # Keep the income concept, grouping, and entity explicit. Changes to
-        # policyengine.py defaults must not silently change UK Chat results.
-        kwargs = {
-            "income_variable": income_concept,
-            "decile_variable": None,
-            "entity": "household",
-        }
+    # Keep all three arguments explicit. Changes to policyengine.py defaults
+    # must not silently change the analytical meaning of a public concept.
+    kwargs = {
+        "income_variable": config.income_variable,
+        "decile_variable": config.decile_variable,
+        "entity": config.entity,
+    }
     outputs = []
     for decile in range(1, 11):
         output = DecileImpact(
@@ -226,7 +212,8 @@ def decile_impacts(
         for output in outputs
     ]
     return {
-        "basis": basis,
+        "decile_concept": concept.value,
+        "basis": config.basis,
         "income_variable": kwargs["income_variable"],
         "decile_variable": kwargs["decile_variable"],
         "grouping_variable": (

@@ -97,11 +97,12 @@ ANALYTICAL_NOTES = """
 ANALYTICAL NOTES:
 - Decile impacts are policyengine.py decile-level averages, not economy-wide means.
 - For income-decile impacts, measure household net income and rank households
-  by that income by default. Only when the user explicitly requests equivalised
-  HBAI net income, pass `equiv_hbai_household_net_income` to measure and rank
-  households by that income.
-- Wealth-decile impacts group households by wealth and measure household net
-  income; do not describe them as income deciles.
+  by that income by default, using `decile_concept="household_net_income"`.
+  Only when the user explicitly requests equivalised HBAI net income, use
+  `decile_concept="equivalised_hbai_net_income"`.
+- For wealth-decile impacts, use `decile_concept="wealth"` to group households
+  by wealth: group households by wealth and measure household net income. Do
+  not describe wealth deciles as income deciles.
 - Poverty outputs report decimal rates and both absolute and relative changes.
 - If a result is counterintuitive, explain the mechanism briefly.
 - If something is not modelled well enough for a quantitative answer, say so

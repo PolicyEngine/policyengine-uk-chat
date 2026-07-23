@@ -210,17 +210,19 @@ def test_decile_and_winners_losers_use_official_output_rows(monkeypatch):
         compute_intra_decile_impacts=compute_intra_decile_impacts,
     )
 
-    deciles = derivatives.decile_impacts(_run(), basis="income")
+    deciles = derivatives.decile_impacts(_run())
     default_income_call = decile_calls[0]
     decile_calls.clear()
     hbai_deciles = derivatives.decile_impacts(
         _run(),
-        basis="income",
-        income_concept="equiv_hbai_household_net_income",
+        decile_concept="equivalised_hbai_net_income",
     )
     hbai_income_call = decile_calls[0]
     decile_calls.clear()
-    wealth_deciles = derivatives.decile_impacts(_run(), basis="wealth")
+    wealth_deciles = derivatives.decile_impacts(
+        _run(),
+        decile_concept="wealth",
+    )
     wealth_call = decile_calls[0]
     winners = derivatives.winners_losers(_run(), basis="wealth")
 
@@ -250,6 +252,12 @@ def test_decile_and_winners_losers_use_official_output_rows(monkeypatch):
         "decile_variable": "household_wealth_decile",
         "entity": "household",
     }
+    assert deciles["decile_concept"] == "household_net_income"
+    assert hbai_deciles["decile_concept"] == "equivalised_hbai_net_income"
+    assert wealth_deciles["decile_concept"] == "wealth"
+    assert deciles["basis"] == "income"
+    assert hbai_deciles["basis"] == "income"
+    assert wealth_deciles["basis"] == "wealth"
     assert deciles["income_variable"] == "household_net_income"
     assert hbai_deciles["income_variable"] == "equiv_hbai_household_net_income"
     assert wealth_deciles["decile_variable"] == "household_wealth_decile"
@@ -262,11 +270,16 @@ def test_decile_and_winners_losers_use_official_output_rows(monkeypatch):
     assert winners["deciles"][0]["gain_more_than_5pct"] == 0.2
     assert winners_calls[0]["decile_variable"] == "household_wealth_decile"
 
-    with pytest.raises(ValueError, match="only configurable for income deciles"):
+    with pytest.raises(
+        ValueError,
+        match=(
+            "Unknown decile_concept 'household_tax'; expected one of: "
+            "household_net_income, equivalised_hbai_net_income, wealth"
+        ),
+    ):
         derivatives.decile_impacts(
             _run(),
-            basis="wealth",
-            income_concept="equiv_hbai_household_net_income",
+            decile_concept="household_tax",
         )
 
 

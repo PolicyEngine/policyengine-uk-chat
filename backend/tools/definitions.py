@@ -1,6 +1,10 @@
 """Model-facing tool definitions for the UK chat runtime."""
 
 from engine.constants import HOUSEHOLD_COUNTRY_IDS
+from engine.decile_concepts import (
+    DECILE_CONCEPT_VALUES,
+    DEFAULT_DECILE_CONCEPT,
+)
 
 
 DEFAULT_SIMULATION_YEAR = 2026
@@ -171,27 +175,16 @@ COMPUTE_PROGRAM_BREAKDOWN_INPUT_SCHEMA = _object_schema(
 COMPUTE_DECILE_IMPACTS_INPUT_SCHEMA = _object_schema(
     {
         "simulation_id": RESULT_ID_INPUT_SCHEMA,
-        "basis": {
+        "decile_concept": {
             "type": "string",
-            "enum": ["income", "wealth"],
-            "default": "income",
+            "enum": list(DECILE_CONCEPT_VALUES),
+            "default": DEFAULT_DECILE_CONCEPT.value,
             "description": (
-                "Use income deciles unless the user explicitly requests wealth "
-                "deciles."
-            ),
-        },
-        "income_concept": {
-            "type": "string",
-            "enum": [
-                "household_net_income",
-                "equiv_hbai_household_net_income",
-            ],
-            "default": "household_net_income",
-            "description": (
-                "Income measure and ranking variable for income-decile impacts. "
-                "Keep the default `household_net_income` unless the user "
-                "explicitly requests equivalised HBAI net income. Wealth-decile "
-                "impacts always measure `household_net_income` and rank by wealth."
+                "Select exactly one analytical concept. Use "
+                "`household_net_income` for ordinary income-decile requests, "
+                "`equivalised_hbai_net_income` only when the user explicitly "
+                "requests equivalised HBAI net income, or `wealth` when the user "
+                "requests wealth deciles."
             ),
         },
     },
@@ -305,11 +298,10 @@ DERIVATIVE_DESCRIPTION = (
     "This never returns row-level survey records."
 )
 DECILE_IMPACTS_DESCRIPTION = (
-    "Compute policyengine.py changes in mean income by decile. By default, "
-    "measure household net income and rank households by that income. Only when "
-    "explicitly requested, measure equivalised HBAI net income and rank "
-    "households by that income. Wealth deciles rank households by wealth and "
-    "measure household net income."
+    "Compute policyengine.py changes in mean income for exactly one of three "
+    "decile concepts. Household net income is the default; equivalised HBAI net "
+    "income is used only when explicitly requested. Wealth deciles rank "
+    "households by wealth and measure household net income."
 )
 GENERATE_CHART_DESCRIPTION = (
     "Generate frontend-renderable chart markdown. For preset chart kinds, the layout, "

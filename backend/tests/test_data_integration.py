@@ -52,7 +52,10 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
 
     deciles = _execute(
         "compute_decile_impacts",
-        {"simulation_id": simulation_id, "basis": "income"},
+        {
+            "simulation_id": simulation_id,
+            "decile_concept": "household_net_income",
+        },
         context,
     )
     assert [row["decile"] for row in deciles["deciles"]] == list(range(1, 11))
@@ -120,15 +123,17 @@ def test_cgt_basic_rate_reaches_default_income_deciles():
     )
     default_deciles = _execute(
         "compute_decile_impacts",
-        {"simulation_id": simulation_id, "basis": "income"},
+        {
+            "simulation_id": simulation_id,
+            "decile_concept": "household_net_income",
+        },
         context,
     )
     hbai_deciles = _execute(
         "compute_decile_impacts",
         {
             "simulation_id": simulation_id,
-            "basis": "income",
-            "income_concept": "equiv_hbai_household_net_income",
+            "decile_concept": "equivalised_hbai_net_income",
         },
         context,
     )
