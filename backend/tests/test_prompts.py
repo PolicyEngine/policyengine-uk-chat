@@ -3,7 +3,7 @@
 import pytest
 
 from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
-from engine.constants import DEFAULT_UK_DATASET
+from engine.constants import DEFAULT_UK_DATASET, HOUSEHOLD_COUNTRY_IDS
 from prompts import (
     SYSTEM_PROMPT,
     SUGGESTION_SYSTEM,
@@ -42,7 +42,13 @@ def test_main_prompt_contains_microdata_privacy_rules():
 
 
 def test_main_prompt_describes_household_country_ids():
-    for country_id in ("ENGLAND", "NORTHERN_IRELAND", "SCOTLAND", "WALES"):
+    assert HOUSEHOLD_COUNTRY_IDS == (
+        "ENGLAND",
+        "NORTHERN_IRELAND",
+        "SCOTLAND",
+        "WALES",
+    )
+    for country_id in HOUSEHOLD_COUNTRY_IDS:
         assert f"`{country_id}`" in SYSTEM_PROMPT
     assert "do not use ONS codes such as `E92000001`" in SYSTEM_PROMPT
 

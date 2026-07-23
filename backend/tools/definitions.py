@@ -1,6 +1,6 @@
 """Model-facing tool definitions for the UK chat runtime."""
 
-from engine.constants import DEFAULT_UK_DATASET
+from engine.constants import DEFAULT_UK_DATASET, HOUSEHOLD_COUNTRY_IDS
 
 
 DEFAULT_SIMULATION_YEAR = 2026
@@ -18,6 +18,17 @@ REFORM_SCHEMA = {
 }
 
 STRING_ARRAY_SCHEMA = {"type": "array", "items": {"type": "string"}}
+HOUSEHOLD_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "country": {
+            "type": "string",
+            "enum": list(HOUSEHOLD_COUNTRY_IDS),
+            "description": "Exact PolicyEngine categorical country ID.",
+        }
+    },
+    "additionalProperties": True,
+}
 FILTER_VALUE_SCHEMA = {
     "type": ["number", "string", "boolean"],
     "description": "Comparison value interpreted using the filter variable's type.",
@@ -126,7 +137,7 @@ VALIDATE_HOUSEHOLD_INPUT_SCHEMA = _object_schema(
     {
         "people": {"type": "array", "items": {"type": "object"}},
         "benunit": {"type": "object"},
-        "household": {"type": "object"},
+        "household": HOUSEHOLD_SCHEMA,
         "year": YEAR_SCHEMA,
         "reform": REFORM_SCHEMA,
         "extra_variables": STRING_ARRAY_SCHEMA,

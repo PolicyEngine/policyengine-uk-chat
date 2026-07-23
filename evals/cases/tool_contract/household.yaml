@@ -147,3 +147,43 @@ cases:
         valid: false
       required_paths:
         - errors.0.message
+
+  - id: household_invalid_ons_country_code
+    suite: tool_contract
+    description: validate_household rejects ONS geography codes in the categorical country field.
+    tags: [schema_negative]
+    tool_name: validate_household
+    input:
+      year: 2025
+      people:
+        - age: 35
+      benunit: {}
+      household:
+        country: E92000001
+    expect:
+      contains:
+        valid: false
+        errors:
+          - path: household.country
+      required_paths:
+        - errors.0.message
+
+  - id: household_england_country_id
+    suite: tool_contract
+    description: run_household_simulation accepts the exact categorical England country ID.
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
+    input:
+      year: 2025
+      people:
+        - age: 35
+          employment_income: 30000
+      benunit: {}
+      household:
+        country: ENGLAND
+    expect:
+      contains:
+        status: success
+      required_paths:
+        - person.0.income_tax
+        - household.household_net_income

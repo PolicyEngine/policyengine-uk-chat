@@ -9,6 +9,7 @@ from engine import simulations as simulation_engine
 from engine.constants import (
     DEFAULT_UK_DATASET,
     DEFAULT_UK_DATASET_URI,
+    HOUSEHOLD_COUNTRY_IDS,
     STANDARD_POLICYENGINE_UK_DATASET,
 )
 from engine.py_runtime import DatasetSpec
@@ -115,6 +116,33 @@ def test_run_household_simulation_passes_policyengine_py_shape_unchanged(monkeyp
     assert captured["benunit"] == {"is_married": False}
     assert captured["household"] == {"region": "LONDON"}
     assert captured["year"] == 2026
+
+
+def test_household_country_schema_only_accepts_categorical_ids():
+    household_schema = _tool("run_household_simulation")["input_schema"][
+        "properties"
+    ]["household"]
+
+    assert household_schema["properties"]["country"]["enum"] == list(
+        HOUSEHOLD_COUNTRY_IDS
+    )
+    assert household_schema["additionalProperties"] is True
+
+
+def test_validate_household_rejects_non_categorical_country_values():
+    for country in ("E92000001", "England", "england", "UNKNOWN"):
+        result = household_engine.validate_household_dict(
+            people=[{"age": 40}],
+            benunit={},
+            household={"country": country},
+            year=2026,
+        )
+
+        assert result["valid"] is False
+        assert result["errors"][0]["path"] == "household.country"
+        assert "ENGLAND, NORTHERN_IRELAND, SCOTLAND, WALES" in result["errors"][0][
+            "message"
+        ]
 
 
 def test_society_simulation_result_handle_feeds_derivative_and_chart_tools(monkeypatch):

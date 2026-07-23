@@ -93,6 +93,17 @@ def test_production_deploy_seeds_pinned_default_dataset_reference():
     )
 
 
+def test_local_docker_exposes_enhanced_frs_configuration():
+    repo_root = Path(__file__).resolve().parents[2]
+    env_example = (repo_root / ".env.example").read_text()
+    compose = (repo_root / "docker-compose.yml").read_text()
+
+    assert "HUGGING_FACE_TOKEN=your_token_here" in env_example
+    assert f"# POLICYENGINE_UK_DEFAULT_DATASET={DEFAULT_UK_DATASET_URI}" in env_example
+    assert "HUGGING_FACE_TOKEN=${HUGGING_FACE_TOKEN}" in compose
+    assert "- POLICYENGINE_UK_DEFAULT_DATASET" in compose
+
+
 def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
     repo_root = Path(__file__).resolve().parents[2]
     workflow = (repo_root / ".github/workflows/pr-beta-deploy.yml").read_text()

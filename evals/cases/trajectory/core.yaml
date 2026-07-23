@@ -349,6 +349,31 @@ cases:
             household:
               region: SCOTLAND
 
+  - id: trajectory_household_england_country
+    suite: trajectory
+    description: England phrasing should use the exact categorical household country ID.
+    tags: [household_structure]
+    prompt: I live in England and earn GBP 30k. What income tax would I pay?
+    expected_tools:
+      - name: run_household_simulation
+        input_contains:
+          people:
+            - employment_income: 30000
+          household:
+            country: ENGLAND
+    forbidden_tools: [run_society_simulation, aggregate_result]
+    offline_response:
+      tool_calls:
+        - name: run_household_simulation
+          input:
+            year: 2025
+            people:
+              - age: 35
+                employment_income: 30000
+            benunit: {}
+            household:
+              country: ENGLAND
+
   - id: trajectory_household_renter_monthly_rent_child
     suite: trajectory
     description: Monthly rent and one child should map to rent and child household fields.

@@ -6,6 +6,13 @@ DEFAULT_UK_DATASET_URI = (
     "enhanced_frs_2024_25.h5@1.56.13"
 )
 
+HOUSEHOLD_COUNTRY_IDS = (
+    "ENGLAND",
+    "NORTHERN_IRELAND",
+    "SCOTLAND",
+    "WALES",
+)
+
 # policyengine.py's certified standard UK default is currently
 # ``populace_uk_2023``. UK Chat defaults to Enhanced FRS for continuity with
 # existing analysis workflows; this can be changed to the standard default if

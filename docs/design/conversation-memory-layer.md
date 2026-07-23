@@ -68,7 +68,7 @@ A free-ish JSON object the agent reads and patches. We keep it deliberately loos
       { "employment_income": 45000, "marital_status": "single" }
     ],
     "children": 0,
-    "country": "Scotland",   // England | Scotland | Wales | Northern Ireland
+    "country": "SCOTLAND",   // ENGLAND | NORTHERN_IRELAND | SCOTLAND | WALES
     "year": 2025
   },
   "reform": null,            // null = current law, else a reform dict (see below)
@@ -218,7 +218,7 @@ User turn 1: **"Single earner £45k Scotland — marginal rate at £60k?"**
 
 1. Frontend POSTs `/chat/message` with `messages`, `active_scenario: null` (`frontend/src/app/ChatPage.tsx`).
 2. The gateway grounds a plan from the message (income/region present → `source: prompt`), outcome `ready` (`backend/gateway/runtime.py`). Loop seeds `scenario = None`; `_build_system_blocks` injects the gateway-plan block but no scenario snapshot (`backend/chat/orchestrator.py`).
-3. Agent calls `update_scenario({"patch": {"household": {"earners": [{"employment_income": 45000, "marital_status": "single"}], "children": 0, "country": "Scotland", "year": 2025}}})` — or the loop derives the same from the grounded plan (§3.6.2). The loop merges it synchronously (§3.2) and returns the new state.
+3. Agent calls `update_scenario({"patch": {"household": {"earners": [{"employment_income": 45000, "marital_status": "single"}], "children": 0, "country": "SCOTLAND", "year": 2025}}})` — or the loop derives the same from the grounded plan (§3.6.2). The loop merges it synchronously (§3.2) and returns the new state.
 4. Agent calls lifecycle tools (`run_household_simulation` and, if needed, derivative/chart tools) for the marginal rate at £60k, answers in prose.
 5. The `done` event (`backend/chat/orchestrator.py`) carries `active_scenario`. Frontend `setActiveScenario(...)`, renders the pill "Single earner, £45k, Scotland", and `saveConversation` persists `{messages, active_scenario}` to Postgres (`backend/conversations/store.py`).
 
