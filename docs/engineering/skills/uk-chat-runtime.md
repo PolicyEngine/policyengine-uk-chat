@@ -81,6 +81,15 @@ Keep the income variable, decile variable, and entity explicit at the
 policyengine.py boundary so dependency upgrades cannot silently change these
 meanings.
 
+Income-decile grouping is the sole narrow exception to the general derivative
+delegation rule above. Until policyengine.py provides weighted fallback groups,
+UK Chat temporarily materializes baseline decile assignments with microdf,
+weighted by `household_weight * household_count_people`, then passes that
+grouping column to policyengine.py's `DecileImpact`. UK Chat must remove the
+temporary column after the output completes and must not calculate the
+within-decile statistics itself. Wealth deciles continue to use the
+precomputed `household_wealth_decile` model variable.
+
 Helper functions in `backend/engine/` are implementation details unless they
 are exposed through `@register_tool`.
 

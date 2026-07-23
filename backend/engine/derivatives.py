@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from typing import Any, Literal
 
 from engine.decile_concepts import (
@@ -9,6 +10,7 @@ from engine.decile_concepts import (
     DecileConcept,
     resolve_decile_concept,
 )
+from engine.decile_grouping import person_weighted_income_decile
 from engine.simulations import SocietySimulationRun
 
 
@@ -181,23 +183,34 @@ def decile_impacts(
     concept, config = resolve_decile_concept(decile_concept)
     from policyengine.outputs import DecileImpact
 
+    grouping_context = (
+        nullcontext(config.decile_variable)
+        if config.decile_variable is not None
+        else person_weighted_income_decile(
+            run.baseline,
+            income_variable=config.income_variable,
+            entity=config.entity,
+        )
+    )
+
     # Keep all three arguments explicit. Changes to policyengine.py defaults
     # must not silently change the analytical meaning of a public concept.
-    kwargs = {
-        "income_variable": config.income_variable,
-        "decile_variable": config.decile_variable,
-        "entity": config.entity,
-    }
     outputs = []
-    for decile in range(1, 11):
-        output = DecileImpact(
-            baseline_simulation=run.baseline,
-            reform_simulation=run.reform_simulation,
-            decile=decile,
-            **kwargs,
-        )
-        output.run()
-        outputs.append(output)
+    with grouping_context as decile_variable:
+        kwargs = {
+            "income_variable": config.income_variable,
+            "decile_variable": decile_variable,
+            "entity": config.entity,
+        }
+        for decile in range(1, 11):
+            output = DecileImpact(
+                baseline_simulation=run.baseline,
+                reform_simulation=run.reform_simulation,
+                decile=decile,
+                **kwargs,
+            )
+            output.run()
+            outputs.append(output)
     rows = [
         {
             "decile": output.decile,
@@ -214,12 +227,22 @@ def decile_impacts(
     return {
         "decile_concept": concept.value,
         "basis": config.basis,
-        "income_variable": kwargs["income_variable"],
-        "decile_variable": kwargs["decile_variable"],
+        "income_variable": config.income_variable,
+        "decile_variable": config.decile_variable,
         "grouping_variable": (
-            kwargs["decile_variable"] or kwargs["income_variable"]
+            config.decile_variable or config.income_variable
         ),
-        "entity": kwargs["entity"],
+        "grouping_method": (
+            "precomputed_variable"
+            if config.decile_variable is not None
+            else "person_weighted_rank"
+        ),
+        "grouping_weight_variables": (
+            []
+            if config.decile_variable is not None
+            else ["household_weight", "household_count_people"]
+        ),
+        "entity": config.entity,
         "deciles": rows,
     }
 

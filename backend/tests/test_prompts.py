@@ -81,6 +81,7 @@ def test_main_prompt_distinguishes_three_decile_concepts():
     assert '`decile_concept="household_net_income"`' in SYSTEM_PROMPT
     assert '`decile_concept="equivalised_hbai_net_income"`' in SYSTEM_PROMPT
     assert '`decile_concept="wealth"`' in SYSTEM_PROMPT
+    assert "Income-decile groups are\n  person-weighted" in SYSTEM_PROMPT
     assert "group households by wealth" in SYSTEM_PROMPT
     assert "not describe wealth deciles as income deciles" in SYSTEM_PROMPT
 

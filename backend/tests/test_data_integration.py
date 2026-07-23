@@ -62,6 +62,11 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
     assert deciles["income_variable"] == "household_net_income"
     assert deciles["decile_variable"] is None
     assert deciles["grouping_variable"] == "household_net_income"
+    assert deciles["grouping_method"] == "person_weighted_rank"
+    assert deciles["grouping_weight_variables"] == [
+        "household_weight",
+        "household_count_people",
+    ]
     assert deciles["entity"] == "household"
 
     winners_losers = _execute(
