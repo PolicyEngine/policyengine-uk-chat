@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Dict, Optional
 
+from engine.constants import HOUSEHOLD_COUNTRY_IDS
 from engine.py_runtime import calculate_household_py, uk_model_version
 from engine.reforms import (
     ReformValidationError,
@@ -23,6 +24,22 @@ def validate_household_dict(
     reform: Optional[Mapping[str, Any]] = None,
     extra_variables: Optional[list[str]] = None,
 ) -> Dict[str, Any]:
+    household = household or {}
+    if "country" in household and household["country"] not in HOUSEHOLD_COUNTRY_IDS:
+        valid_values = ", ".join(HOUSEHOLD_COUNTRY_IDS)
+        return {
+            "valid": False,
+            "errors": [
+                {
+                    "path": "household.country",
+                    "message": (
+                        f"country must be one of {valid_values}; "
+                        f"received {household['country']!r}."
+                    ),
+                }
+            ],
+        }
+
     try:
         from policyengine.tax_benefit_models.common import (
             dispatch_extra_variables,
@@ -35,7 +52,7 @@ def validate_household_dict(
             entities={
                 "people": people,
                 "benunit": [benunit or {}],
-                "household": [household or {}],
+                "household": [household],
             },
         )
         validate_household_input(
@@ -43,7 +60,7 @@ def validate_household_dict(
             entities={
                 "person": people,
                 "benunit": [benunit or {}],
-                "household": [household or {}],
+                "household": [household],
             },
         )
         extra_by_entity = dispatch_extra_variables(

@@ -116,7 +116,7 @@ def _managed_dataset_folder() -> str:
 
 @lru_cache(maxsize=16)
 def _managed_dataset(reference: str, year: int, data_folder: str):
-    """Load one certified policyengine.py dataset/year combination."""
+    """Load one configured policyengine.py dataset/year combination."""
 
     datasets = _policyengine_module().uk.ensure_datasets(
         datasets=[reference],
@@ -132,7 +132,7 @@ def _managed_dataset(reference: str, year: int, data_folder: str):
 
 
 def managed_dataset(*, dataset: str | None = None, year: int):
-    """Return a certified policyengine.py Dataset ready for Simulation."""
+    """Return a configured policyengine.py Dataset ready for Simulation."""
 
     name = dataset or DEFAULT_UK_DATASET
     spec = resolve_dataset(name)

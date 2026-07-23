@@ -8,7 +8,8 @@ locally with Docker.
 - Docker and Docker Compose
 - An **Anthropic API key** (the agent calls Claude models)
 - A **Supabase** project (URL + anon/service-role keys) for auth and billing
-- Optionally a `POLICYENGINE_UK_DATA_TOKEN` for gated economy-wide datasets
+- A `HUGGING_FACE_TOKEN` with access to the private Enhanced FRS dataset for
+  economy-wide simulations
 
 ## 1. Configure environment
 
@@ -31,7 +32,8 @@ Then edit `.env`. The key variables (see `.env.example` and
 | `DATABASE_URL` | Postgres connection string for conversation history |
 | `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend Supabase auth |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Backend Supabase access (billing/credits) |
-| `POLICYENGINE_UK_DATA_TOKEN` | Access to gated PolicyEngine UK datasets |
+| `HUGGING_FACE_TOKEN` | Access to the private Enhanced FRS dataset |
+| `POLICYENGINE_UK_DEFAULT_DATASET` | Optional direct dataset-reference override |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Billing (optional locally) |
 
 ## 2. Start the stack

@@ -90,12 +90,12 @@ tool registration.
 
 The runtime uses policyengine.py with the UK country package. The default year
 is `2026`. Society-wide tools default to `enhanced_frs_2024_25`. Its logical
-name maps to the pinned PolicyEngine UK data release in
-`backend/engine/constants.py`, with `POLICYENGINE_UK_DEFAULT_DATASET` as the
-deployment override; other named datasets resolve through policyengine.py's
-dataset manifest. The standard certified UK dataset exposed by policyengine.py
-is `populace_uk_2023`; keep these mappings documented so the default can be
-switched if needed.
+name maps to a pinned direct Enhanced FRS release URI in
+`backend/engine/constants.py`. This is intentional: UK Chat does not use the
+certified Populace dataset as its default. `POLICYENGINE_UK_DEFAULT_DATASET`
+overrides the pinned reference at deployment time; other named datasets resolve
+through policyengine.py's dataset manifest. The standard certified UK dataset
+exposed by policyengine.py is `populace_uk_2023`; keep both choices explicit.
 
 The public runtime does not expose row-level survey records or a broad
 model-facing Python execution tool. Use discovery and derivative tools rather
