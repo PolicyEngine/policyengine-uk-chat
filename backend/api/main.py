@@ -84,13 +84,8 @@ def version():
         except Exception:
             return "unknown"
 
-    # TEMPORARY: while the Python engine override is active (see
-    # prompts/system.py TEMPORARY_PYTHON_ENGINE_OVERRIDE), calculations run
-    # on policyengine.py, so the badge reports that stack. Restore
-    # engine/engine_version to the compiled package when reverting.
     return {
         "engine": "policyengine.py",
         "engine_version": _pkg_version("policyengine"),
         "policyengine_uk": _pkg_version("policyengine-uk"),
-        "policyengine_uk_compiled": _pkg_version("policyengine-uk-compiled"),
     }

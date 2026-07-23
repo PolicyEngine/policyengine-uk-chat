@@ -3,12 +3,7 @@ uvicorn[standard]
 sqlmodel
 psycopg2-binary
 anthropic
-policyengine-uk-compiled==0.66.0
-# TEMPORARY: Python engine for the run_python engine override (see
-# prompts/system.py TEMPORARY_PYTHON_ENGINE_OVERRIDE). Remove when
-# reverting to the compiled engine.
-policyengine==4.21.1
-policyengine-uk==2.89.2
+policyengine[uk]==4.21.1
 pandas
 pyyaml
 httpx

@@ -26,65 +26,65 @@ class TestSlotInventory:
     """The slot inventory is derived from TOOL_DEFINITIONS so it can't drift."""
 
     def test_required_slots_detected(self):
-        assert TOOL_SLOT_REQUIREMENT[("calculate_household", "person")] == "required"
-        assert TOOL_SLOT_REQUIREMENT[("analyse_microdata", "entity")] == "required"
-        assert TOOL_SLOT_REQUIREMENT[("analyse_microdata", "operation")] == "required"
-        assert TOOL_SLOT_REQUIREMENT[("lookup_parameter", "query")] == "required"
+        assert TOOL_SLOT_REQUIREMENT[("run_household_simulation", "people")] == "required"
+        assert TOOL_SLOT_REQUIREMENT[("validate_reform", "reform")] == "required"
+        assert TOOL_SLOT_REQUIREMENT[("aggregate_result", "simulation_id")] == "required"
+        assert TOOL_SLOT_REQUIREMENT[("aggregate_result", "operation")] == "required"
 
     def test_defaulted_slots_detected(self):
-        assert TOOL_SLOT_REQUIREMENT[("run_economy_simulation", "dataset")] == "defaulted"
-        assert TOOL_SLOT_REQUIREMENT[("calculate_household", "year")] == "defaulted"
-        assert TOOL_SLOT_REQUIREMENT[("lookup_parameter", "year")] == "defaulted"
+        assert TOOL_SLOT_REQUIREMENT[("run_society_simulation", "dataset")] == "defaulted"
+        assert TOOL_SLOT_REQUIREMENT[("run_household_simulation", "year")] == "defaulted"
+        assert TOOL_SLOT_REQUIREMENT[("get_parameter", "year")] == "defaulted"
 
     def test_optional_undefaulted_slots_detected(self):
-        assert TOOL_SLOT_REQUIREMENT[("calculate_household", "reform")] == "optional"
+        assert TOOL_SLOT_REQUIREMENT[("run_household_simulation", "reform")] == "optional"
 
 
 class TestCriticality:
     def test_required_is_high(self):
-        assert criticality("calculate_household", sf("person", "assumed")) == "high"
+        assert criticality("run_household_simulation", sf("people", "assumed")) == "high"
 
     def test_defaulted_is_low(self):
-        assert criticality("run_economy_simulation", sf("dataset", "default")) == "low"
+        assert criticality("run_society_simulation", sf("dataset", "default")) == "low"
 
     def test_output_is_high(self):
-        assert criticality("run_economy_simulation", sf("output", "assumed", kind="output")) == "high"
+        assert criticality("run_society_simulation", sf("output", "assumed", kind="output")) == "high"
 
     def test_econ_reform_override_high(self):
         # Schema marks reform optional, but the curated override makes it high:
         # a society-wide sim with no reform is never the intent.
-        assert criticality("run_economy_simulation", sf("reform", "assumed")) == "high"
+        assert criticality("run_society_simulation", sf("reform", "assumed")) == "high"
 
-    def test_dataset_promoted_for_wealth(self):
+    def test_enhanced_frs_default_is_not_overridden_for_wealth(self):
         assert criticality(
-            "run_economy_simulation", sf("dataset", "assumed"), prompt="model a wealth tax"
-        ) == "high"
+            "run_society_simulation", sf("dataset", "assumed"), prompt="model a wealth tax"
+        ) == "low"
 
     def test_dataset_not_promoted_for_income(self):
         assert criticality(
-            "run_economy_simulation", sf("dataset", "assumed"),
+            "run_society_simulation", sf("dataset", "assumed"),
             prompt="raise the personal allowance to 15000",
         ) == "low"
 
     def test_year_promoted_to_medium_on_nondefault(self):
         assert criticality(
-            "calculate_household", sf("year", "assumed"), prompt="their benefits in 2023"
+            "run_household_simulation", sf("year", "assumed"), prompt="their benefits in 2023"
         ) == "medium"
 
 
 class TestInferable:
     def test_benunit_household_inferable(self):
-        assert is_inferable("calculate_household", "benunit")
-        assert is_inferable("calculate_household", "household")
+        assert is_inferable("run_household_simulation", "benunit")
+        assert is_inferable("run_household_simulation", "household")
 
-    def test_person_not_inferable(self):
-        assert not is_inferable("calculate_household", "person")
+    def test_people_not_inferable(self):
+        assert not is_inferable("run_household_simulation", "people")
 
 
 class TestGate:
     def test_ready_all_grounded(self):
         r = gate(
-            True, "run_economy_simulation",
+            True, "run_society_simulation",
             [sf("reform", "prompt"), sf("dataset", "default"), sf("output", "prompt", kind="output")],
             [],
         )
@@ -92,7 +92,7 @@ class TestGate:
 
     def test_needs_plan_assumed_required(self):
         r = gate(
-            True, "run_economy_simulation",
+            True, "run_society_simulation",
             [sf("reform", "assumed"), sf("output", "assumed", kind="output")],
             [], prompt="compare the two reforms",
         )
@@ -102,36 +102,36 @@ class TestGate:
     def test_inferable_slots_do_not_gate(self):
         # benunit/household assumed, but inferable → no question → ready.
         r = gate(
-            True, "calculate_household",
-            [sf("person", "prompt"), sf("benunit", "assumed"), sf("household", "assumed")],
+            True, "run_household_simulation",
+            [sf("people", "prompt"), sf("benunit", "assumed"), sf("household", "assumed")],
             [],
         )
         assert r.outcome == "ready"
 
     def test_default_source_does_not_gate(self):
         r = gate(
-            True, "run_economy_simulation",
+            True, "run_society_simulation",
             [sf("reform", "prompt"), sf("dataset", "default")], [],
         )
         assert r.outcome == "ready"
 
     def test_low_criticality_assumed_does_not_gate(self):
         r = gate(
-            True, "analyse_microdata",
-            [sf("entity", "prompt"), sf("operation", "prompt"), sf("filters", "assumed")], [],
+            True, "aggregate_result",
+            [sf("simulation_id", "prompt"), sf("entity", "prompt"), sf("variable", "prompt"), sf("operation", "prompt"), sf("group_by", "assumed")], [],
         )
         assert r.outcome == "ready"
 
-    def test_wealth_dataset_promotion_gates(self):
+    def test_wealth_dataset_default_does_not_gate(self):
         r = gate(
-            True, "run_economy_simulation",
+            True, "run_society_simulation",
             [sf("reform", "prompt"), sf("dataset", "assumed")], [],
             prompt="model a 1% wealth tax on net wealth above 10m",
         )
-        assert r.outcome == "needs_plan" and r.gating_slots == ["dataset"]
+        assert r.outcome == "ready" and r.gating_slots == []
 
     def test_partial(self):
-        r = gate(True, "run_economy_simulation", [sf("reform", "prompt")], ["inflation"])
+        r = gate(True, "run_society_simulation", [sf("reform", "prompt")], ["inflation"])
         assert r.outcome == "partial"
 
     def test_partial_precedes_needs_plan(self):
@@ -142,9 +142,9 @@ class TestGate:
         # ("prompt") slot never gates regardless of ordering.
         slots = [sf("reform", "assumed")]  # assumed + high (override) + not inferable → gates
         # Sanity: that slot really does gate on its own → needs_plan.
-        assert gate(True, "run_economy_simulation", slots, []).outcome == "needs_plan"
+        assert gate(True, "run_society_simulation", slots, []).outcome == "needs_plan"
         # With an unmodellable output also present, partial takes precedence.
-        assert gate(True, "run_economy_simulation", slots, ["inflation"]).outcome == "partial"
+        assert gate(True, "run_society_simulation", slots, ["inflation"]).outcome == "partial"
 
     def test_out_of_scope_no_tool_in_domain(self):
         assert gate(True, None, [], []).outcome == "out_of_scope"
@@ -168,7 +168,7 @@ class TestRunGateway:
     def test_parses_ready(self):
         from gateway import runtime as gateway
         plan = {
-            "in_domain": True, "tool": "run_economy_simulation",
+            "in_domain": True, "tool": "run_society_simulation",
             "slots": [
                 {"name": "reform", "kind": "tool_input", "value": "PA 15k", "source": "prompt"},
                 {"name": "output", "kind": "output", "value": "budgetary_impact", "source": "prompt"},
@@ -178,12 +178,12 @@ class TestRunGateway:
         with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             v = gateway.run_gateway("cost of raising the PA to 15000?")
         assert v.outcome == "ready" and v.route == "compute"
-        assert v.tool == "run_economy_simulation"
+        assert v.tool == "run_society_simulation"
 
     def test_parses_needs_plan(self):
         from gateway import runtime as gateway
         plan = {
-            "in_domain": True, "tool": "run_economy_simulation",
+            "in_domain": True, "tool": "run_society_simulation",
             "slots": [
                 {"name": "reform", "kind": "tool_input", "source": "assumed"},
                 {"name": "output", "kind": "output", "source": "assumed"},
@@ -240,7 +240,7 @@ class TestRunGateway:
     def test_bad_source_coerced_to_assumed(self):
         from gateway import runtime as gateway
         plan = {
-            "in_domain": True, "tool": "run_economy_simulation",
+            "in_domain": True, "tool": "run_society_simulation",
             "slots": [{"name": "reform", "kind": "tool_input", "source": "garbage"}],
             "unmodellable_outputs": [],
         }
@@ -278,8 +278,8 @@ class TestWriterDirective:
     def test_serialise_plan_for_ready(self):
         from gateway import runtime as gateway
         v = gateway.GatewayVerdict(
-            outcome="ready", route="compute", tool="run_economy_simulation",
+            outcome="ready", route="compute", tool="run_society_simulation",
             slots=[gateway.SlotFact("reform", "prompt", value="PA 15k")],
         )
         s = gateway.serialise_plan_for_system(v)
-        assert "run_economy_simulation" in s and "reform=PA 15k" in s
+        assert "run_society_simulation" in s and "reform=PA 15k" in s

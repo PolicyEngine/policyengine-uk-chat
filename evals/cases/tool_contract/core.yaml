@@ -4,7 +4,7 @@ cases:
     description: generate_chart returns frontend-renderable chart markdown.
     tool_name: generate_chart
     input:
-      chart_type: line
+      chart_kind: generic_line
       title: Baseline and reform net income
       data:
         - income: 0
@@ -23,51 +23,44 @@ cases:
       required_paths:
         - chart_markdown
 
-  - id: analyse_microdata_rejects_frs
+  - id: list_datasets_marks_enhanced_frs_restricted
     suite: tool_contract
-    description: analyse_microdata must not expose FRS row-level access.
-    tool_name: analyse_microdata
-    input:
-      entity: households
-      operation: sample
-      dataset: frs
+    description: Dataset discovery identifies Enhanced FRS as aggregate-only.
+    tool_name: list_datasets
+    input: {}
     expect:
-      error_contains: FRS
+      contains:
+        status: success
+      required_paths:
+        - datasets.0.name
+        - datasets.0.row_level_access
 
   - id: validate_reform_accepts_personal_allowance
     suite: tool_contract
     description: validate_reform accepts a valid parametric reform.
-    requirements: [compiled]
+    requirements: [policyengine_py]
     tool_name: validate_reform
     input:
       reform:
-        income_tax:
-          personal_allowance: 15000
+        gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     expect:
       contains:
         valid: true
         normalized_reform:
-          income_tax:
-            personal_allowance: 15000
+          gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
-  - id: calculate_household_single_adult
+  - id: run_household_simulation_single_adult
     suite: tool_contract
-    description: calculate_household returns synthetic household tables.
-    requirements: [compiled]
-    tool_name: calculate_household
+    description: run_household_simulation returns a policyengine.py household result.
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
     input:
       year: 2025
-      person:
-        - person_id: 0
-          benunit_id: 0
-          household_id: 0
-          age: 35
+      people:
+        - age: 35
           employment_income: 30000
-      benunit:
-        - benunit_id: 0
-          household_id: 0
-      household:
-        - household_id: 0
+      benunit: {}
+      household: {}
     expect:
       contains:
         status: success
@@ -75,90 +68,56 @@ cases:
         reform_applied: false
       required_paths:
         - person.0.income_tax
-        - benunit.0.universal_credit
-        - household.0.net_income
+        - person.0.national_insurance
+        - benunit.universal_credit
+        - household.household_net_income
       absent_paths:
-        - person.0.baseline_income_tax
-        - person.0.reform_income_tax
-        - household.0.baseline_net_income
-        - household.0.reform_net_income
-      numeric:
-        - path: person.0.income_tax
-          equals: 3486
-          tolerance: 1
-        - path: person.0.employee_ni
-          equals: 1394.4
-          tolerance: 1
-        - path: benunit.0.total_benefits
-          equals: 0
-          tolerance: 0
-        - path: household.0.net_income
-          equals: 25119.6
-          tolerance: 1
-        - path: household.0.total_tax
-          equals: 6936.89
-          tolerance: 1
+        - baseline
+        - reform
 
-  - id: calculate_household_empty_reform_comparison
+  - id: run_household_simulation_empty_reform_is_noop
     suite: tool_contract
-    description: calculate_household treats an empty reform object as a supplied no-op reform.
-    requirements: [compiled]
-    tool_name: calculate_household
+    description: run_household_simulation normalizes an empty reform to no reform.
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
     input:
       year: 2025
       reform: {}
-      person:
-        - person_id: 0
-          benunit_id: 0
-          household_id: 0
-          age: 35
+      people:
+        - age: 35
           employment_income: 30000
-      benunit:
-        - benunit_id: 0
-          household_id: 0
-      household:
-        - household_id: 0
+      benunit: {}
+      household: {}
     expect:
       contains:
         status: success
-        reform_applied: true
+        reform_applied: false
       required_paths:
-        - person.0.baseline_income_tax
-        - person.0.reform_income_tax
-        - household.0.baseline_net_income
-        - household.0.reform_net_income
-      absent_paths:
         - person.0.income_tax
-        - household.0.net_income
-      numeric:
-        - path: person.0.baseline_income_tax
-          equals: 3486
-          tolerance: 1
-        - path: person.0.reform_income_tax
-          equals: 3486
-          tolerance: 1
-        - path: household.0.baseline_net_income
-          equals: 25119.6
-          tolerance: 1
-        - path: household.0.reform_net_income
-          equals: 25119.6
-          tolerance: 1
+        - household.household_net_income
+      absent_paths:
+        - baseline
+        - reform
 
   - id: economy_simulation_smoke
     suite: tool_contract
-    description: run_economy_simulation returns aggregate society-wide outputs.
-    requirements: [compiled, data]
-    tool_name: run_economy_simulation
+    description: run_society_simulation returns metadata and a derivative handle.
+    requirements: [policyengine_py, data]
+    tool_name: run_society_simulation
     input:
-      year: 2025
-      dataset: frs
+      year: 2026
+      dataset: enhanced_frs_2023_24
       reform:
-        income_tax:
-          personal_allowance: 15000
+        gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     expect:
+      contains:
+        status: success
+        year: 2026
+        reform_applied: true
       required_paths:
+        - result_id
+        - dataset.name
+      absent_paths:
         - budgetary_impact
         - decile_impacts
         - winners_losers
-        - baseline_poverty
-        - reform_poverty

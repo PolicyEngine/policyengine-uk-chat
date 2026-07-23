@@ -34,7 +34,8 @@ def render_markdown(report: EvalReport) -> str:
         "| --- | --- | --- | ---: | --- |",
     ]
     for result in report.results:
-        notes = "; ".join(result.errors) if result.errors else json.dumps(result.details, sort_keys=True)
+        details = result.model_dump(mode="json")["details"]
+        notes = "; ".join(result.errors) if result.errors else json.dumps(details, sort_keys=True)
         notes = notes.replace("\n", " ")[:500]
         lines.append(
             f"| {result.suite} | `{result.id}` | {result.status} | {result.score:.2f} | {notes} |"

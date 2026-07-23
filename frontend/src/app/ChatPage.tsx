@@ -10,7 +10,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Chart, extractChartSpecs } from "@/components/charts";
 import { THEME } from "@/components/theme";
-import { getBackendEndpoint } from "@/utils/backend";
+import { APP_BASE_PATH, getAppBaseUrl, getBackendEndpoint } from "@/utils/backend";
 
 const EXAMPLE_QUERIES = [
   "What's the current personal allowance?",
@@ -139,20 +139,6 @@ interface BalanceSummary {
 const stripChartPlaceholders = (text: string): string =>
   text.replace(/\[CHART_PLACEHOLDER_\d+\]/g, "[Chart]").replace(/\[CHART_LOADING\]/g, "[Chart]");
 
-const formatPythonOutput = (summary?: string): string => {
-  if (!summary) return "";
-  try {
-    const parsed = JSON.parse(summary);
-    const parts: string[] = [];
-    if (parsed.output) parts.push(parsed.output);
-    if (parsed.result !== undefined && parsed.result !== null) parts.push(`result = ${JSON.stringify(parsed.result, null, 2)}`);
-    if (parsed.error) parts.push(`Error: ${parsed.error}`);
-    return parts.join("\n") || summary;
-  } catch {
-    return summary;
-  }
-};
-
 /** Check if a text event is transitional CoT that shouldn't appear in final output. */
 const isTransitionalText = (text: string): boolean => {
   const trimmed = text.trim();
@@ -195,16 +181,9 @@ const messageToMarkdown = (msg: Message): string => {
           parts.push(`\n${stripChartPlaceholders(event.content)}\n`);
         } else if (event.type === "tool") {
           const t = event.data;
-          if (t.tool_name === "run_python") {
-            const code = (t.input as Record<string, string>)?.code || "";
-            const output = formatPythonOutput(t.result_summary);
-            if (code) parts.push(`\n\`\`\`python\n${code}\n\`\`\`\n`);
-            if (output) parts.push(`\n\`\`\`\n${output}\n\`\`\`\n`);
-          } else {
-            const inputStr = t.input ? JSON.stringify(t.input, null, 2) : "";
-            if (inputStr) parts.push(`\n**${t.tool_name} input**\n\`\`\`json\n${inputStr}\n\`\`\`\n`);
-            if (t.result_summary) parts.push(`\n**${t.tool_name} output**\n\`\`\`\n${t.result_summary}\n\`\`\`\n`);
-          }
+          const inputStr = t.input ? JSON.stringify(t.input, null, 2) : "";
+          if (inputStr) parts.push(`\n**${t.tool_name} input**\n\`\`\`json\n${inputStr}\n\`\`\`\n`);
+          if (t.result_summary) parts.push(`\n**${t.tool_name} output**\n\`\`\`\n${t.result_summary}\n\`\`\`\n`);
         }
       }
       parts.push("\n</details>\n");
@@ -371,13 +350,9 @@ export default function ChatPage() {
   };
 
   useEffect(() => {
-    apiRequest<{ engine?: string; engine_version?: string; policyengine_uk_compiled: string }>("GET", "version")
+    apiRequest<{ engine: string; engine_version: string; policyengine_uk: string }>("GET", "version")
       .then((v) =>
-        setModelVersion(
-          v.engine && v.engine_version
-            ? `${v.engine} v${v.engine_version}`
-            : `policyengine-uk v${v.policyengine_uk_compiled}`,
-        ),
+        setModelVersion(`${v.engine} v${v.engine_version}`),
       )
       .catch(() => {});
     // Refresh balance after Stripe redirect
@@ -493,7 +468,7 @@ export default function ChatPage() {
     e.stopPropagation();
     try {
       const { share_token } = await apiRequest<{ share_token: string }>("POST", `conversations/${id}/share`, user?.id ? { user_id: user.id } : undefined);
-      const url = `${window.location.origin}/s/${share_token}`;
+      const url = `${getAppBaseUrl(window.location.origin)}/s/${share_token}`;
       await navigator.clipboard.writeText(url);
       setCopiedShareId(id);
       setTimeout(() => setCopiedShareId(null), 2000);
@@ -593,7 +568,7 @@ export default function ChatPage() {
       const data = await apiRequest<ReportConversationResponse>("POST", `conversations/${conversationId}/report`, undefined, {
         user_id: user?.id,
         note: reportNote.trim() || null,
-        app_url: window.location.origin,
+        app_url: getAppBaseUrl(window.location.origin),
       });
       window.open(data.issue_url, "_blank", "noopener,noreferrer");
       setReportOpen(false);
@@ -1327,53 +1302,8 @@ export default function ChatPage() {
   };
 
   const renderToolDetails = (t: ToolData) => {
-    const isPython = t.tool_name === "run_python";
     const codeStyle = { margin: 0, padding: "8px 10px", background: "#1a1917", color: "#c9c5bc", whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const, maxHeight: "300px", overflow: "auto" as const, fontSize: "11px", lineHeight: 1.7, fontFamily: "'JetBrains Mono', monospace" };
     const copyButtonStyle = { fontSize: "10px", color: THEME.primary, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "'JetBrains Mono', monospace" } as const;
-
-    // For run_python: show code as Python, parse result from summary
-    if (isPython) {
-      const code = (t.input as Record<string, string>)?.code || "";
-      let output = "";
-      if (t.result_summary) {
-        try {
-          const parsed = JSON.parse(t.result_summary);
-          const parts: string[] = [];
-          if (parsed.output) parts.push(parsed.output);
-          if (parsed.result !== undefined && parsed.result !== null) parts.push(`result = ${JSON.stringify(parsed.result, null, 2)}`);
-          if (parsed.error) parts.push(`Error: ${parsed.error}`);
-          output = parts.join("\n") || t.result_summary;
-        } catch { output = t.result_summary; }
-      }
-      return (
-        <div style={{ marginLeft: "18px", marginTop: "4px" }}>
-          {code && (
-            <div style={{ marginBottom: "6px" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                <div style={{ color: THEME.muted, fontSize: "10px", fontFamily: "'JetBrains Mono', monospace" }}>python</div>
-                <button onClick={() => copySnippet(`${t.tool_id}-code`, code)} style={copyButtonStyle}>
-                  {copiedSnippetId === `${t.tool_id}-code` ? "copied" : "copy code"}
-                </button>
-              </div>
-              <pre style={{ ...codeStyle, borderLeft: `2px solid ${THEME.border}` }}>{code}</pre>
-            </div>
-          )}
-          {output && (
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "4px" }}>
-                <div style={{ color: THEME.muted, fontSize: "10px", fontFamily: "'JetBrains Mono', monospace" }}>output</div>
-                <button onClick={() => copySnippet(`${t.tool_id}-output`, output)} style={copyButtonStyle}>
-                  {copiedSnippetId === `${t.tool_id}-output` ? "copied" : "copy output"}
-                </button>
-              </div>
-              <pre style={{ ...codeStyle, borderLeft: `2px solid ${THEME.primary}` }}>{output.length > 2000 ? output.slice(0, 2000) + "…" : output}</pre>
-            </div>
-          )}
-        </div>
-      );
-    }
-
-    // For other tools: show JSON input/output
     const inputStr = t.input ? JSON.stringify(t.input, null, 2) : "";
     const outputStr = t.result_summary || "";
     return (
@@ -1416,11 +1346,17 @@ export default function ChatPage() {
           {t.status === "pending" && <Loader size={10} color="#8e8e8e" />}
           {hasDetails && <IconChevronDown size={10} style={{ opacity: 0.4, transform: isExpanded ? "none" : "rotate(-90deg)", transition: "transform 0.15s" }} />}
           <span style={{ color: THEME.text3 }}>{({
-            run_python: "python",
-            calculate_household: "household sim",
             validate_reform: "reform validation",
-            run_economy_simulation: "economy sim",
-            analyse_microdata: "microdata analysis",
+            validate_household: "household validation",
+            run_household_simulation: "household simulation",
+            run_society_simulation: "society simulation",
+            compute_budgetary_impact: "budgetary impact",
+            compute_program_breakdown: "programme breakdown",
+            compute_decile_impacts: "decile impacts",
+            compute_winners_losers: "winners and losers",
+            compute_poverty_metrics: "poverty metrics",
+            compute_inequality_metrics: "inequality metrics",
+            aggregate_result: "aggregate result",
           } as Record<string, string>)[t.tool_name] ?? t.tool_name}</span>
           {t.status !== "pending" && <span style={{ color: THEME.muted }}>✓</span>}
         </div>
@@ -1488,7 +1424,7 @@ export default function ChatPage() {
           if (segment.type === "loading") return <div key={idx} style={{ margin: "16px 0", padding: "40px", background: "var(--surface-2)", border: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center", gap: "10px", color: "var(--muted)", fontSize: "13px" }}><Loader size={14} color="#8e8e8e" /><span>Generating chart…</span></div>;
           if (segment.type === "chart" && segment.chartIdx !== undefined) {
             const chart = charts[segment.chartIdx];
-            if (chart) return <div key={idx} style={{ margin: "16px 0" }}><Chart spec={chart} width={680} height={400} /></div>;
+            if (chart) return <div key={idx} style={{ margin: "16px 0", maxWidth: "100%", minWidth: 0 }}><Chart spec={chart} height={400} /></div>;
           }
           return null;
         })}
@@ -1595,7 +1531,7 @@ export default function ChatPage() {
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
             >
-              <span role="img" aria-label="PolicyEngine" style={{ display: "inline-block", width: "24px", height: "24px", background: "var(--text)", WebkitMaskImage: "url(/favicon.svg)", maskImage: "url(/favicon.svg)", WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskSize: "contain", maskSize: "contain", WebkitMaskPosition: "center", maskPosition: "center" }} />
+              <span role="img" aria-label="PolicyEngine" style={{ display: "inline-block", width: "24px", height: "24px", background: "var(--text)", WebkitMaskImage: `url(${APP_BASE_PATH}/favicon.svg)`, maskImage: `url(${APP_BASE_PATH}/favicon.svg)`, WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskSize: "contain", maskSize: "contain", WebkitMaskPosition: "center", maskPosition: "center" }} />
             </button>
             <button onClick={startNewChat} data-tip-right="New chat" aria-label="New chat" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginTop: "4px" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}

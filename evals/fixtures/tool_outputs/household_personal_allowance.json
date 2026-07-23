@@ -2,27 +2,14 @@
   "status": "success",
   "year": 2025,
   "reform_applied": true,
-  "person": [
-    {
-      "person_id": 0,
-      "employment_income": 30000,
-      "baseline_net_income": 25000,
-      "reform_net_income": 25200,
-      "net_income_change": 200
-    }
-  ],
-  "benunit": [
-    {
-      "benunit_id": 0,
-      "baseline_net_income": 25000,
-      "reform_net_income": 25200
-    }
-  ],
-  "household": [
-    {
-      "household_id": 0,
-      "baseline_net_income": 25000,
-      "reform_net_income": 25200
-    }
-  ]
+  "baseline": {
+    "person": [{"employment_income": 30000}],
+    "benunit": {},
+    "household": {"household_net_income": 25000}
+  },
+  "reform": {
+    "person": [{"employment_income": 30000}],
+    "benunit": {},
+    "household": {"household_net_income": 25200}
+  }
 }

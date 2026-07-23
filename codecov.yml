@@ -1,0 +1,37 @@
+coverage:
+  status:
+    default_rules:
+      flag_coverage_not_uploaded_behavior: exclude
+    project:
+      backend:
+        target: 80%
+        threshold: 0%
+        flags:
+          - backend
+        informational: false
+      frontend:
+        target: auto
+        threshold: 1%
+        flags:
+          - frontend
+        informational: true
+    patch:
+      default:
+        target: 80%
+        informational: true
+
+flags:
+  backend:
+    paths:
+      - backend/
+      - .github/scripts/
+      - modal_app.py
+    carryforward: false
+  frontend:
+    paths:
+      - frontend/src/
+    carryforward: false
+
+comment:
+  layout: "reach, diff, flags, files"
+  require_changes: true

@@ -2,11 +2,9 @@
 the gateway classifier instructions, and the per-outcome writer directives.
 """
 
-# The scope descriptor is normally generated from the engine by
-# `engine/reference.py` (written to `scope_descriptor.md`). This curated
-# constant is the fallback used in local dev when that file is absent, and the
-# baseline the gateway/lightweight prompts are parameterised by. Keep it compact
-# — it is loaded into a cheap classifier prompt, not the full reference doc.
+# This curated scope descriptor is the fallback used in local dev when an
+# environment-specific descriptor is absent. Keep it compact — it is loaded
+# into a cheap classifier prompt, not the full compute prompt.
 DEFAULT_SCOPE_DESCRIPTOR = """
 This assistant models UK taxes and benefits with a microsimulation engine.
 Modelled: income tax, National Insurance, Universal Credit, child benefit,
@@ -65,10 +63,10 @@ Steps:
    `source`:
    - "prompt": the user stated it or clearly implied it.
    - "default": a documented safe default applies (year {default_year}; dataset
-     FRS/EFRS for general income/benefit work; baseline is current law).
-   - "assumed": you are guessing — OR a default exists but the question makes it
-     unsafe (e.g. a wealth question needs the wealth survey, so the usual
-     dataset default is NOT safe → tag "assumed", not "default").
+     Enhanced FRS for general income/benefit work; baseline is current law).
+   - "assumed": you are guessing, or a documented default does not settle the
+     user's request. Do not invent legacy dataset choices that are absent from
+     the tool schema.
 4. `unmodellable_outputs`: list any requested outputs the engine cannot produce
    — inflation, GDP, employment/behavioural response, market reactions, non-UK
    effects. Leave empty if none.

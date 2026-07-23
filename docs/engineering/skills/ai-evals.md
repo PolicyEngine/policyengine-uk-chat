@@ -32,7 +32,8 @@ validate-then-calculate flows.
 - Put frozen tool outputs in `evals/fixtures/tool_outputs/` when more than one
   case may use them.
 - Mark cases requiring local microdata with `requirements: [data]`.
-- Mark cases requiring the compiled package with `requirements: [compiled]`.
+- Mark cases requiring the policyengine.py UK packages with
+  `requirements: [policyengine_py]`.
 - Mark Anthropic-only baseline cases with `requirements: [live_model]`; these
   must skip in offline mode and run only through `make eval-ai-live`.
 - Use `messages` on trajectory or tool-loop cases when the expected behavior
@@ -44,18 +45,17 @@ validate-then-calculate flows.
   number checks.
 - Source-synced `policyengine-uk` cases are generated from the installed
   `policyengine_uk` package. Update them with `make sync-policyengine-uk-evals`
-  rather than editing the generated YAML by hand. The pure-Python
-  `policyengine_uk` package is not in the runtime `requirements.txt`; install the
-  eval extras first with `pip install -r backend/requirements-eval.txt`.
-- Keep source-synced cases with `skip.code: compiled_coverage_gap` visible in
-  the suite. These mark upstream cases that should become executable as
-  `policyengine-uk-compiled` gains support or parity.
-- When `policyengine-uk-compiled` supports a skipped upstream case through the
-  chat tool contract, remove the skip flag, add or verify the output mapping,
-  and rerun `make sync-policyengine-uk-evals`.
+  rather than editing the generated YAML by hand. Install the eval extras first
+  with `pip install -r backend/requirements-eval.txt`.
+- Keep source-synced cases with `skip.code: policyengine_py_coverage_gap`
+  visible in the suite. These mark upstream cases that should become executable
+  as the policyengine.py chat household contract gains support or parity.
+- When policyengine.py supports a skipped upstream case through the chat tool
+  contract, remove the skip flag, add or verify the output mapping, and rerun
+  `make sync-policyengine-uk-evals`.
 - Do not delete source-synced skipped cases just because they currently fail
-  against compiled. If a case is no longer relevant upstream, update the source
-  manifest with the reason.
+  against the chat tool contract. If a case is no longer relevant upstream,
+  update the source manifest with the reason.
 
 ## Commands
 

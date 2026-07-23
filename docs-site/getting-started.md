@@ -89,9 +89,8 @@ curl http://localhost:8001/health
 # {"status": "ok"}
 
 curl http://localhost:8001/version
-# {"policyengine_uk_compiled": "<version>"}
+# {"engine":"policyengine.py","engine_version":"<version>","policyengine_uk":"<version>"}
 ```
 
-The `/version` value tells you which engine build a given instance is serving —
-it is the same version the agent's generated `reference.md` is stamped against
-(see [Backend overview](backend/overview.md)).
+The `/version` response tells you which policyengine.py and UK country-package
+versions the instance is serving (see [Backend overview](backend/overview.md)).

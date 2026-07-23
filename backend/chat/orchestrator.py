@@ -11,6 +11,7 @@ import json
 import logging
 import uuid
 from contextlib import asynccontextmanager
+from functools import partial
 from typing import Any, Dict, List
 
 import httpx
@@ -27,6 +28,7 @@ from policyengine_observability import segment
 from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_async_client
 from gateway import run_gateway, serialise_plan_for_system
 from observability.segments import SegmentName
+from tools.context import new_tool_context
 from tools.dispatch import execute_tool
 
 from chat.model_selection import is_followup, last_user_text, select_chat_model
@@ -51,6 +53,67 @@ logger = logging.getLogger(__name__)
 # loop with a fresh budget, but the prior tool transcript is already in the
 # conversation so the model resumes mid-thought rather than restarting.
 MAX_ITERATIONS = 30
+MAX_TOOL_RESULT_CHARS = 15000
+
+
+def _serialise_tool_result_for_model(tool_result: Any) -> str:
+    """Return bounded, valid JSON for a tool result sent back to the model."""
+
+    result_json = serialise_tool_result(tool_result)
+    if len(result_json) <= MAX_TOOL_RESULT_CHARS:
+        return result_json
+
+    if isinstance(tool_result, dict):
+        data_key = next(
+            (
+                key
+                for key, value in tool_result.items()
+                if isinstance(value, list) and len(value) > 5
+            ),
+            None,
+        )
+        if data_key:
+            from engine.serialization import explore_tabular_data
+
+            data_array = tool_result[data_key]
+            processed = {
+                **{key: value for key, value in tool_result.items() if key != data_key},
+                "note": (
+                    f"Large '{data_key}' array ({len(data_array)} rows) - "
+                    "showing first 20 with column metadata"
+                ),
+                "exploration": explore_tabular_data(data_array),
+                data_key: data_array[:20],
+            }
+            result_json = serialise_tool_result(processed)
+            if len(result_json) <= MAX_TOOL_RESULT_CHARS:
+                return result_json
+
+        fallback = {
+            "status": (
+                "error"
+                if tool_result.get("error")
+                else tool_result.get("status", "success")
+            ),
+            "result_id": tool_result.get("result_id"),
+            "note": (
+                "Tool result exceeded the model context limit. Use a narrower "
+                "discovery query or request a more specific derivative output."
+            ),
+        }
+        return serialise_tool_result(
+            {key: value for key, value in fallback.items() if value is not None}
+        )
+
+    return serialise_tool_result(
+        {
+            "status": "truncated",
+            "note": (
+                "Tool result exceeded the model context limit. Use a narrower "
+                "query or request a more specific output."
+            ),
+        }
+    )
 
 
 def _user_facing_error_message(session_id: str) -> str:
@@ -156,6 +219,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
         route = "compute"
         model: str | None = None
         charts_mode = chat_request.charts_mode
+        tool_context = new_tool_context(turn_id=session_id)
 
         def annotate_turn(stop_reason: str | None) -> None:
             annotate(
@@ -584,7 +648,13 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                                 tool=tu["name"],
                             ):
                                 result = await loop.run_in_executor(
-                                    None, execute_tool, tu["name"], tu["input"]
+                                    None,
+                                    partial(
+                                        execute_tool,
+                                        tu["name"],
+                                        tu["input"],
+                                        context=tool_context,
+                                    ),
                                 )
                             logger.info(
                                 f"[CHAT] Finished tool: {tu['name']} result_keys={list(result.keys()) if isinstance(result, dict) else type(result)}"
@@ -626,8 +696,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                             )
                             # Tool handlers return an {"error": ...} dict rather than
                             # raising, so surface that as an error status instead of
-                            # reporting every result as a success. (A `stderr` key can
-                            # appear on successful run_python calls, so it doesn't count.)
+                            # reporting every result as a success.
                             tool_status = (
                                 "error"
                                 if isinstance(result, dict) and result.get("error")
@@ -635,47 +704,12 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                             )
                             yield f"data: {json.dumps({'type': 'tool_result', 'tool_name': tu['name'], 'tool_id': tu['id'], 'status': tool_status, 'result_summary': result_summary})}\n\n"
 
-                        # Add tool results (truncate aggressively to avoid context blowup)
-                        MAX_RESULT_CHARS = 15000
+                        # Add bounded tool results without producing malformed JSON.
                         tool_results = []
                         for tu in tool_uses:
-                            result_json = serialise_tool_result(
+                            result_json = _serialise_tool_result_for_model(
                                 completed_tools[tu["id"]]
                             )
-                            if len(result_json) > MAX_RESULT_CHARS:
-                                from tools.dispatch import explore_tabular_data
-
-                                tool_result = completed_tools[tu["id"]]
-                                # Try to find and summarise large arrays
-                                data_key = next(
-                                    (
-                                        k
-                                        for k in tool_result
-                                        if isinstance(tool_result.get(k), list)
-                                        and len(tool_result[k]) > 5
-                                    ),
-                                    None,
-                                )
-                                if data_key:
-                                    data_array = tool_result[data_key]
-                                    exploration = explore_tabular_data(data_array)
-                                    remaining = {
-                                        k: v
-                                        for k, v in tool_result.items()
-                                        if k != data_key
-                                    }
-                                    processed = {
-                                        **remaining,
-                                        "note": f"Large '{data_key}' array ({len(data_array)} rows) - showing first 20 with column metadata",
-                                        "exploration": exploration,
-                                        data_key: data_array[:20],
-                                    }
-                                    result_json = serialise_tool_result(processed)
-                                # Hard cap: if still too large, truncate the JSON string
-                                if len(result_json) > MAX_RESULT_CHARS:
-                                    result_json = (
-                                        result_json[:MAX_RESULT_CHARS] + '..."}'
-                                    )
                             tool_results.append(
                                 {
                                     "type": "tool_result",

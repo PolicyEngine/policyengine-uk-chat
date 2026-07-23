@@ -61,6 +61,13 @@ jobs:
       - name: Install Modal
         run: pip install modal
 
+      - name: Stop stale backend preview
+        env:
+          MODAL_APP_NAME: ${{ steps.names.outputs.modal_app_name }}
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: modal app stop "$MODAL_APP_NAME" || true
+
       - name: Seed Modal secret for preview deploy
         env:
           MODAL_APP_NAME: ${{ steps.names.outputs.modal_app_name }}
@@ -69,74 +76,7 @@ jobs:
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           POLICYENGINE_UK_DATA_TOKEN: ${{ secrets.POLICYENGINE_UK_DATA_TOKEN }}
-          DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-          STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
-          STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
-          OBSERVABILITY_GOOGLE_CLOUD_PROJECT: ${{ vars.OBSERVABILITY_GOOGLE_CLOUD_PROJECT || 'policyengine-api' }}
-          OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER: ${{ vars.OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER || 'projects/389282473430/locations/global/workloadIdentityPools/modal/providers/modal' }}
-          OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL: ${{ vars.OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL || 'observability-writer@policyengine-api.iam.gserviceaccount.com' }}
-          # Previews are the live test bed for Google Cloud Logging routing.
-          OBSERVABILITY_LOG_DESTINATIONS: ${{ vars.OBSERVABILITY_LOG_DESTINATIONS_PREVIEW || 'google_cloud_logging' }}
-        run: |
-          modal secret create "$MODAL_SECRET_NAME" \
-            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-            ANTHROPIC_FAST_MODEL="claude-haiku-4-5" \
-            ANTHROPIC_COMPLEX_MODEL="claude-sonnet-4-6" \
-            ANTHROPIC_TITLE_MODEL="claude-haiku-4-5" \
-            ANTHROPIC_DEFAULT_MODEL="claude-haiku-4-5" \
-            POLICYENGINE_UK_DATA_TOKEN="$POLICYENGINE_UK_DATA_TOKEN" \
-            DATABASE_URL="$DATABASE_URL" \
-            SUPABASE_URL="$SUPABASE_URL" \
-            SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
-            STRIPE_SECRET_KEY="$STRIPE_SECRET_KEY" \
-            STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
-            OBSERVABILITY_ENVIRONMENT="preview" \
-            OBSERVABILITY_GOOGLE_CLOUD_PROJECT="$OBSERVABILITY_GOOGLE_CLOUD_PROJECT" \
-            OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER="$OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER" \
-            OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL="$OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL" \
-            OBSERVABILITY_LOG_DESTINATIONS="$OBSERVABILITY_LOG_DESTINATIONS" \
-            HOSTNAMES="https://policyengine-uk-chat.vercel.app" \
-            PUBLIC_BASE_URL="https://policyengine-uk-chat.vercel.app" \
-            --force
-
-      - name: Deploy backend preview to Modal
-        id: modal_deploy
-        env:
-          MODAL_APP_NAME: ${{ steps.names.outputs.modal_app_name }}
-          MODAL_SECRET_NAME: ${{ steps.names.outputs.modal_secret_name }}
-          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-        run: |
-          POLICYENGINE_UK_CHAT_MODAL_APP_NAME="$MODAL_APP_NAME" \
-          POLICYENGINE_UK_CHAT_MODAL_SECRET_NAME="$MODAL_SECRET_NAME" \
-          modal deploy modal_app.py --name "$MODAL_APP_NAME"
-
-          echo "modal_url=${{ steps.names.outputs.modal_url }}" >> "$GITHUB_OUTPUT"
-
-      - name: Smoke test preview backend
-        run: |
-          url="${{ steps.names.outputs.modal_url }}/version"
-          for attempt in $(seq 1 12); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$url" || true)
-            if [ "$code" = "200" ]; then
-              echo "Preview backend healthy after deploy (attempt $attempt)."
-              exit 0
-            fi
-            echo "Attempt $attempt: got '$code'; retrying in 10s..."
-            sleep 10
-          done
-          echo "Preview backend failed the smoke test: $url" >&2
-          exit 1
-
-      - name: Update Modal secret with preview frontend URL
-        env:
-          MODAL_SECRET_NAME: ${{ steps.names.outputs.modal_secret_name }}
-          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
-          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          POLICYENGINE_UK_DATA_TOKEN: ${{ secrets.POLICYENGINE_UK_DATA_TOKEN }}
+          HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
           DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -156,6 +96,7 @@ jobs:
             ANTHROPIC_TITLE_MODEL="claude-haiku-4-5" \
             ANTHROPIC_DEFAULT_MODEL="claude-haiku-4-5" \
             POLICYENGINE_UK_DATA_TOKEN="$POLICYENGINE_UK_DATA_TOKEN" \
+            HUGGING_FACE_TOKEN="$HUGGING_FACE_TOKEN" \
             DATABASE_URL="$DATABASE_URL" \
             SUPABASE_URL="$SUPABASE_URL" \
             SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
@@ -167,10 +108,11 @@ jobs:
             OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL="$OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL" \
             OBSERVABILITY_LOG_DESTINATIONS="$OBSERVABILITY_LOG_DESTINATIONS" \
             HOSTNAMES="$FRONTEND_URL" \
-            PUBLIC_BASE_URL="$FRONTEND_URL" \
+            PUBLIC_BASE_URL="$FRONTEND_URL/uk/chat" \
             --force
 
-      - name: Refresh backend preview with preview frontend URL
+      - name: Deploy backend preview to Modal
+        id: modal_deploy
         env:
           MODAL_APP_NAME: ${{ steps.names.outputs.modal_app_name }}
           MODAL_SECRET_NAME: ${{ steps.names.outputs.modal_secret_name }}
@@ -181,19 +123,27 @@ jobs:
           POLICYENGINE_UK_CHAT_MODAL_SECRET_NAME="$MODAL_SECRET_NAME" \
           modal deploy modal_app.py --name "$MODAL_APP_NAME"
 
-      - name: Smoke test preview backend after refresh
+          echo "modal_url=${{ steps.names.outputs.modal_url }}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test preview backend
         run: |
-          url="${{ steps.names.outputs.modal_url }}/version"
+          backend_url="${{ steps.names.outputs.modal_url }}"
+          frontend_url="${{ steps.names.outputs.frontend_url }}"
           for attempt in $(seq 1 12); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$url" || true)
-            if [ "$code" = "200" ]; then
-              echo "Preview backend healthy after refresh (attempt $attempt)."
+            health_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$backend_url/version" || true)
+            cors_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 \
+              -X OPTIONS "$backend_url/chat/message" \
+              -H "Origin: $frontend_url" \
+              -H "Access-Control-Request-Method: POST" \
+              -H "Access-Control-Request-Headers: content-type" || true)
+            if [ "$health_code" = "200" ] && [ "$cors_code" = "200" ]; then
+              echo "Preview backend healthy with working CORS after deploy (attempt $attempt)."
               exit 0
             fi
-            echo "Attempt $attempt: got '$code'; retrying in 10s..."
+            echo "Attempt $attempt: health '$health_code', CORS '$cors_code'; retrying in 10s..."
             sleep 10
           done
-          echo "Preview backend failed the smoke test: $url" >&2
+          echo "Preview backend failed health or CORS smoke tests: $backend_url" >&2
           exit 1
 
       - name: Add deploy summary

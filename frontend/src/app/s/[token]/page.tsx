@@ -8,7 +8,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Chart, extractChartSpecs } from "@/components/charts";
 import { THEME } from "@/components/theme";
-import { getBackendEndpoint } from "@/utils/backend";
+import { APP_BASE_PATH, getBackendEndpoint } from "@/utils/backend";
 
 interface SharedConversation {
   title: string;
@@ -87,7 +87,7 @@ function renderMarkdown(content: string) {
         if (segment.type === "loading") return <div key={idx} style={{ margin: "16px 0", padding: "40px", background: "#f9f8f6", border: `1px solid ${THEME.border}`, display: "flex", alignItems: "center", justifyContent: "center", color: THEME.muted, fontSize: "13px" }}>Chart unavailable</div>;
         if (segment.chartIdx !== undefined) {
           const chart = charts[segment.chartIdx];
-          if (chart) return <div key={idx} style={{ margin: "16px 0" }}><Chart spec={chart} width={680} height={400} /></div>;
+          if (chart) return <div key={idx} style={{ margin: "16px 0", maxWidth: "100%", minWidth: 0 }}><Chart spec={chart} height={400} /></div>;
         }
         return null;
       })}
@@ -136,7 +136,7 @@ export default function SharedConversationPage() {
         <div style={{ textAlign: "center", color: THEME.text3 }}>
           <div style={{ fontSize: "48px", marginBottom: "16px" }}>404</div>
           <div style={{ fontSize: "15px" }}>{error}</div>
-          <a href="/" style={{ display: "inline-block", marginTop: "20px", fontSize: "13px", color: THEME.primary }}>Go to PolicyEngine chat</a>
+          <a href={APP_BASE_PATH} style={{ display: "inline-block", marginTop: "20px", fontSize: "13px", color: THEME.primary }}>Go to PolicyEngine chat</a>
         </div>
       </div>
     );
@@ -160,8 +160,8 @@ table .highlight-mark { animation: none; background: none; padding: 0; margin: 0
 
       {/* Header */}
       <div style={{ borderBottom: `1px solid ${THEME.border}`, background: THEME.surface, padding: "0 40px", height: "56px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <a href="/" style={{ display: "flex", alignItems: "center" }}>
-          <img src="/policyengine-logo.svg" alt="PolicyEngine" style={{ height: "24px" }} />
+        <a href={APP_BASE_PATH} style={{ display: "flex", alignItems: "center" }}>
+          <img src={`${APP_BASE_PATH}/policyengine-logo.svg`} alt="PolicyEngine" style={{ height: "24px" }} />
         </a>
         <div style={{ display: "flex", alignItems: "center", gap: "12px", fontSize: "13px", color: THEME.text3 }}>
           <span style={{ color: THEME.muted }}>{formatDate(data.created_at)}</span>
@@ -192,7 +192,7 @@ table .highlight-mark { animation: none; background: none; padding: 0; margin: 0
         ))}
 
         <div style={{ borderTop: `1px solid ${THEME.border}`, paddingTop: "20px", marginTop: "20px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <a href="/" style={{ fontSize: "13px", color: THEME.primary, textDecoration: "none" }}>Try PolicyEngine chat</a>
+          <a href={APP_BASE_PATH} style={{ fontSize: "13px", color: THEME.primary, textDecoration: "none" }}>Try PolicyEngine chat</a>
           <span style={{ fontSize: "12px", color: THEME.muted }}>policyengine.org</span>
         </div>
       </div>

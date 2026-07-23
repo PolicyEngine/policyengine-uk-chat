@@ -15,28 +15,21 @@ app = modal.App(APP_NAME)
 
 
 def _preload_engine():
-    """Bake the compiled engine into the image snapshot for fast cold starts."""
-    from policyengine_uk_compiled import Simulation
-    sim = Simulation(year=2024, dataset="frs")
-    sim.get_baseline_params()
-    print("Engine pre-loaded.")
+    """Import policyengine.py and resolve the default UK dataset at build time."""
+    import policyengine as pe
+    from policyengine.provenance.manifest import resolve_dataset_reference
+
+    pe.uk.model
+    resolve_dataset_reference("uk", "enhanced_frs_2023_24")
+    print("policyengine.py UK engine pre-loaded.")
 
 
 image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("libpq-dev", "gcc")
     .pip_install_from_requirements("backend/requirements.txt")
-    # TEMPORARY: explicit install for the policyengine.py engine override —
-    # also forces an image rebuild that the requirements-file change alone
-    # did not trigger (the 2026-07-20 deploy cache-hit in 2s and shipped
-    # without policyengine-uk). Remove when reverting to the compiled engine.
-    .pip_install("policyengine==4.21.1", "policyengine-uk==2.89.2")
     .run_function(_preload_engine)
     .add_local_dir("backend", remote_path="/app/backend", copy=True)
-    # Regenerate reference.md against the Modal-installed
-    # policyengine-uk-compiled version so the deployed backend always serves a
-    # fresh API reference. This mirrors the equivalent step in backend/Dockerfile.
-    .run_commands("cd /app/backend && python engine/reference.py")
 )
 
 chat_secrets = modal.Secret.from_name(SECRET_NAME)

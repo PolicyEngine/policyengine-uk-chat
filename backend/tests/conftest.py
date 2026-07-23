@@ -33,14 +33,17 @@ if not os.environ.get("DATABASE_URL"):
         pass
     os.environ["DATABASE_URL"] = f"sqlite:///{test_db}"
 
-COMPILED_AVAILABLE = importlib.util.find_spec("policyengine_uk_compiled") is not None
+POLICYENGINE_PY_AVAILABLE = (
+    importlib.util.find_spec("policyengine") is not None
+    and importlib.util.find_spec("policyengine_uk") is not None
+)
 
-# Tests needing the compiled engine skip locally when it is not installed, but
-# always run in CI so a broken engine install fails loudly instead of skipping
-# the suite green.
-requires_compiled = pytest.mark.skipif(
-    os.environ.get("CI") != "true" and not COMPILED_AVAILABLE,
-    reason="policyengine_uk_compiled is not installed",
+# Tests needing the policyengine.py UK model skip locally when it is not
+# installed, but always run in CI so a broken engine install fails loudly
+# instead of skipping the suite green.
+requires_policyengine_py = pytest.mark.skipif(
+    os.environ.get("CI") != "true" and not POLICYENGINE_PY_AVAILABLE,
+    reason="policyengine.py UK packages are not installed",
 )
 
 

@@ -1,316 +1,292 @@
 """Model-facing tool definitions for the UK chat runtime."""
 
-from engine.constants import FRS_DATASET
-from engine.reforms import REFORM_SCHEMA
+from engine.constants import DEFAULT_UK_DATASET
 
 
-# Default simulation/policy year — the single source of truth for the year the
-# engine models when a request doesn't name one. Referenced by YEAR_SCHEMA (so
-# the tool schemas advertise it), the tool implementations' defaults in
-# dispatch.py, and the gateway's non-default-year detection (gateway/policy.py),
-# so they can't drift apart. NB this is the modelled policy year, which
-# deliberately lags the calendar year.
-DEFAULT_SIMULATION_YEAR = 2025
+DEFAULT_SIMULATION_YEAR = 2026
 
 YEAR_SCHEMA = {"type": "integer", "default": DEFAULT_SIMULATION_YEAR}
 
-REFORM_PROPERTY = REFORM_SCHEMA
-
-STRING_ARRAY_SCHEMA = {"type": "array", "items": {"type": "string"}}
-
-ALL_DATASET_SCHEMA = {
-    "type": "string",
-    "enum": [FRS_DATASET, "efrs", "spi", "lcfs", "was"],
-    "default": FRS_DATASET,
-    "description": "Microdata source for aggregate simulation. FRS is the default for aggregate outputs.",
-}
-
-NON_FRS_DATASET_SCHEMA = {
-    "type": "string",
-    "enum": ["efrs", "spi", "lcfs", "was"],
-    "default": "efrs",
-    "description": "FRS is not available for analyse_microdata.",
-}
-
-FILTERS_SCHEMA = {
+REFORM_SCHEMA = {
     "type": "object",
     "description": (
-        "Column to predicate map. Predicate can be a scalar, a list, or a "
-        "dict with min, max, gt, lt, gte, lte, or ne."
+        "Flat policyengine.py UK reform mapping from canonical parameter paths "
+        "to scalar values or date-to-value maps, for example "
+        "`gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000`."
     ),
+    "additionalProperties": True,
+}
+
+STRING_ARRAY_SCHEMA = {"type": "array", "items": {"type": "string"}}
+FILTER_VALUE_SCHEMA = {
+    "type": ["number", "string", "boolean"],
+    "description": "Comparison value interpreted using the filter variable's type.",
+}
+
+DATASET_SCHEMA = {
+    "type": "string",
+    "default": DEFAULT_UK_DATASET,
+    "description": (
+        "Managed policyengine.py UK dataset name. UK Chat defaults to "
+        f"`{DEFAULT_UK_DATASET}`."
+    ),
+}
+
+FILTER_LIMIT_SCHEMA = {
+    "type": "integer",
+    "default": 25,
+    "minimum": 1,
+    "maximum": 100,
 }
 
 CHART_FORMAT_SCHEMA = {
     "type": "string",
     "enum": ["currency", "percent", "percent_decimal", "number", "compact", "year"],
-    "description": (
-        "Number format for axis ticks and tooltips. Use `currency` for GBP "
-        "amounts, `percent` for values already on a 0-100 scale, "
-        "`percent_decimal` for 0-1 shares, `compact` for large counts (1.2k), "
-        "`year` for calendar years."
-    ),
+}
+
+CHART_KIND_SCHEMA = {
+    "type": "string",
+    "enum": [
+        "budget_waterfall",
+        "program_budget_waterfall",
+        "decile_absolute_bar",
+        "decile_relative_bar",
+        "winners_losers_stacked_bar",
+        "poverty_relative_bar",
+        "inequality_relative_bar",
+        "earnings_variation_line",
+        "generic_line",
+        "generic_bar",
+        "generic_area",
+        "generic_scatter",
+    ],
+    "description": "Deterministic chart layout preset.",
 }
 
 CHART_DATA_SCHEMA = {
-    "type": "array",
-    "description": "List of row objects. Each row must contain the `x_field` key and every key listed in `y_fields`.",
-    "items": {"type": "object"},
+    "type": ["array", "object"],
+    "description": "Rows or structured derivative output for chart generation.",
 }
 
 
-VALIDATE_REFORM_INPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "reform": REFORM_PROPERTY,
-    },
-    "required": ["reform"],
-}
+def _object_schema(properties: dict, required: list[str] | None = None) -> dict:
+    return {
+        "type": "object",
+        "properties": properties,
+        "required": required or [],
+        "additionalProperties": False,
+    }
 
-HOUSEHOLD_RECORD_SCHEMA = {"type": "array", "items": {"type": "object"}}
 
-CALCULATE_HOUSEHOLD_INPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "person": {
-            **HOUSEHOLD_RECORD_SCHEMA,
-            "description": (
-                "Person records. Each should include person_id, benunit_id, "
-                "household_id, and age. Common optional fields include "
-                "employment_income, self_employment_income, and pension_income."
-            ),
-        },
-        "benunit": {
-            **HOUSEHOLD_RECORD_SCHEMA,
-            "description": "Benefit-unit records, each with benunit_id and household_id.",
-        },
-        "household": {
-            **HOUSEHOLD_RECORD_SCHEMA,
-            "description": (
-                "Household records, each with household_id. Add location fields "
-                "when relevant, for example region or is_in_scotland."
-            ),
-        },
-        "year": YEAR_SCHEMA,
-        "reform": REFORM_PROPERTY,
-    },
-    "required": ["person", "benunit", "household"],
-}
-
-RUN_ECONOMY_SIMULATION_INPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "year": YEAR_SCHEMA,
-        "reform": REFORM_PROPERTY,
-        "dataset": ALL_DATASET_SCHEMA,
-    },
-    "required": [],
-}
-
-ANALYSE_MICRODATA_INPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "entity": {"type": "string", "enum": ["persons", "benunits", "households"]},
-        "operation": {
+LIST_DATASETS_INPUT_SCHEMA = _object_schema({})
+LIST_ENTITIES_INPUT_SCHEMA = _object_schema({})
+SEARCH_VARIABLES_INPUT_SCHEMA = _object_schema(
+    {
+        "query": {"type": "string", "default": ""},
+        "entity": {"type": "string"},
+        "limit": FILTER_LIMIT_SCHEMA,
+    }
+)
+GET_VARIABLE_INPUT_SCHEMA = _object_schema({"name": {"type": "string"}}, ["name"])
+SEARCH_PARAMETERS_INPUT_SCHEMA = _object_schema(
+    {"query": {"type": "string", "default": ""}, "limit": FILTER_LIMIT_SCHEMA}
+)
+GET_PARAMETER_INPUT_SCHEMA = _object_schema(
+    {"path": {"type": "string"}, "year": YEAR_SCHEMA},
+    ["path"],
+)
+LIST_REFORM_TARGETS_INPUT_SCHEMA = _object_schema(
+    {"query": {"type": "string", "default": ""}, "limit": FILTER_LIMIT_SCHEMA}
+)
+LIST_HOUSEHOLD_INPUT_VARIABLES_INPUT_SCHEMA = _object_schema({"entity": {"type": "string"}})
+LIST_SOCIETY_OUTPUT_VARIABLES_INPUT_SCHEMA = _object_schema(
+    {
+        "entity": {
             "type": "string",
-            "enum": ["sample", "mean", "sum", "count", "group_by", "describe"],
-            "description": (
-                "`sample` is not available for the FRS-derived `efrs` dataset; "
-                "use aggregate operations for `efrs`."
-            ),
-        },
+            "enum": ["person", "benunit", "household"],
+            "description": "Optional output entity to inspect.",
+        }
+    }
+)
+LIST_SUPPORTED_OUTPUTS_INPUT_SCHEMA = _object_schema(
+    {
+        "scope": {
+            "type": "string",
+            "enum": ["household", "society", "derivative", "artifact"],
+        }
+    }
+)
+
+VALIDATE_REFORM_INPUT_SCHEMA = _object_schema(
+    {"reform": REFORM_SCHEMA, "year": YEAR_SCHEMA},
+    ["reform"],
+)
+
+VALIDATE_HOUSEHOLD_INPUT_SCHEMA = _object_schema(
+    {
+        "people": {"type": "array", "items": {"type": "object"}},
+        "benunit": {"type": "object"},
+        "household": {"type": "object"},
         "year": YEAR_SCHEMA,
-        "reform": REFORM_PROPERTY,
-        "filters": FILTERS_SCHEMA,
-        "columns": STRING_ARRAY_SCHEMA,
-        "group_by": STRING_ARRAY_SCHEMA,
-        "n": {"type": "integer", "default": 5, "description": "Sample size when operation is sample."},
-        "dataset": NON_FRS_DATASET_SCHEMA,
+        "reform": REFORM_SCHEMA,
+        "extra_variables": STRING_ARRAY_SCHEMA,
     },
-    "required": ["entity", "operation"],
-}
+    ["people"],
+)
 
-LOOKUP_LIMIT_SCHEMA = {
-    "type": "integer",
-    "default": 5,
-    "minimum": 1,
-    "maximum": 10,
-    "description": (
-        "Maximum number of success matches or error suggestions to return. "
-        "Confirmation responses return the full bounded option set even when "
-        "this limit is lower."
-    ),
-}
+RUN_HOUSEHOLD_SIMULATION_INPUT_SCHEMA = VALIDATE_HOUSEHOLD_INPUT_SCHEMA
 
-LOOKUP_PARAMETER_INPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "query": {
-            "type": "string",
-            "description": (
-                "Parameter path or natural-language query, for example "
-                "`income_tax.personal_allowance` or `basic rate threshold`."
-            ),
-        },
+RUN_SOCIETY_SIMULATION_INPUT_SCHEMA = _object_schema(
+    {
         "year": YEAR_SCHEMA,
-        "limit": LOOKUP_LIMIT_SCHEMA,
-    },
-    "required": ["query"],
-}
+        "reform": REFORM_SCHEMA,
+        "dataset": DATASET_SCHEMA,
+        "extra_variables": {
+            "type": "object",
+            "description": (
+                "Existing policyengine-uk variables to materialize in addition to "
+                "the defaults reported by list_society_output_variables. Before "
+                "using this field, verify every exact variable name with "
+                "search_variables or get_variable and place it under the entity "
+                "reported by discovery. Do not put default variables, invented "
+                "names, expressions, aliases, or derived concepts here."
+            ),
+            "properties": {
+                "person": STRING_ARRAY_SCHEMA,
+                "benunit": STRING_ARRAY_SCHEMA,
+                "household": STRING_ARRAY_SCHEMA,
+            },
+            "additionalProperties": False,
+        },
+    }
+)
 
-RUN_PYTHON_INPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "code": {
+RESULT_ID_INPUT_SCHEMA = {"type": "string", "description": "Result handle returned by a prior tool in this turn."}
+
+COMPUTE_BUDGETARY_IMPACT_INPUT_SCHEMA = _object_schema({"simulation_id": RESULT_ID_INPUT_SCHEMA}, ["simulation_id"])
+COMPUTE_PROGRAM_BREAKDOWN_INPUT_SCHEMA = _object_schema(
+    {"simulation_id": RESULT_ID_INPUT_SCHEMA, "programs": STRING_ARRAY_SCHEMA},
+    ["simulation_id"],
+)
+COMPUTE_DECILE_IMPACTS_INPUT_SCHEMA = _object_schema(
+    {
+        "simulation_id": RESULT_ID_INPUT_SCHEMA,
+        "basis": {"type": "string", "enum": ["income", "wealth"], "default": "income"},
+    },
+    ["simulation_id"],
+)
+COMPUTE_WINNERS_LOSERS_INPUT_SCHEMA = _object_schema(
+    {
+        "simulation_id": RESULT_ID_INPUT_SCHEMA,
+        "basis": {"type": "string", "enum": ["income", "wealth"], "default": "income"},
+    },
+    ["simulation_id"],
+)
+COMPUTE_POVERTY_METRICS_INPUT_SCHEMA = _object_schema(
+    {"simulation_id": RESULT_ID_INPUT_SCHEMA},
+    ["simulation_id"],
+)
+COMPUTE_INEQUALITY_METRICS_INPUT_SCHEMA = _object_schema(
+    {"simulation_id": RESULT_ID_INPUT_SCHEMA},
+    ["simulation_id"],
+)
+AGGREGATE_RESULT_INPUT_SCHEMA = _object_schema(
+    {
+        "simulation_id": RESULT_ID_INPUT_SCHEMA,
+        "target": {
+            "type": "string",
+            "enum": ["baseline", "reform", "change"],
+            "default": "reform",
+        },
+        "entity": {"type": "string", "enum": ["person", "benunit", "household"]},
+        "variable": {"type": "string"},
+        "operation": {"type": "string", "enum": ["sum", "mean", "count"]},
+        "filter_variable": {
             "type": "string",
             "description": (
-                "Python code to execute. Must assign the final answer to `result`. "
-                "Use the preloaded PolicyEngine interface directly, for example: "
-                "`sim = Simulation(year=2025, dataset='efrs')` or "
-                "`policy = Parameters.model_validate({...})`. Simulation requires an "
-                "explicit data source (dataset= or synthetic household frames)."
+                "Optional verified model variable used to filter the weighted "
+                "aggregate. It must be materialized by the simulation."
             ),
         },
+        "filter_variable_eq": FILTER_VALUE_SCHEMA,
+        "filter_variable_leq": FILTER_VALUE_SCHEMA,
+        "filter_variable_geq": FILTER_VALUE_SCHEMA,
     },
-    "required": ["code"],
-}
+    ["simulation_id", "entity", "variable", "operation"],
+)
 
-GENERATE_CHART_INPUT_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "chart_type": {
-            "type": "string",
-            "enum": ["line", "bar", "area", "scatter"],
-            "description": (
-                "Chart type. Use `line` for schedules/curves over a continuous x, "
-                "`bar` for category comparisons (e.g. deciles), `area` for "
-                "stacked compositions, `scatter` for point clouds."
-            ),
-        },
-        "title": {"type": "string", "description": "Factually neutral chart title shown above the plot."},
+GENERATE_CHART_INPUT_SCHEMA = _object_schema(
+    {
+        "chart_kind": CHART_KIND_SCHEMA,
+        "result_id": RESULT_ID_INPUT_SCHEMA,
         "data": CHART_DATA_SCHEMA,
-        "x_field": {"type": "string", "description": "Key in each data row to use as the x value."},
-        "y_fields": {
-            **STRING_ARRAY_SCHEMA,
-            "description": (
-                "Keys in each data row to plot as y series. Provide multiple for "
-                "multi-series charts (e.g. baseline vs reform)."
-            ),
-        },
-        "x_label": {"type": "string", "description": "Axis label for x (defaults to `x_field`)."},
-        "y_label": {"type": "string", "description": "Axis label for y (defaults to first y field or 'Value')."},
-        "x_format": {**CHART_FORMAT_SCHEMA, "description": f"X-axis {CHART_FORMAT_SCHEMA['description']}"},
-        "y_format": {**CHART_FORMAT_SCHEMA, "description": f"Y-axis {CHART_FORMAT_SCHEMA['description']}"},
-        "x_min": {"type": "number", "description": "Optional fixed minimum for the x axis."},
-        "x_max": {"type": "number", "description": "Optional fixed maximum for the x axis."},
-        "y_min": {"type": "number", "description": "Optional fixed minimum for the y axis."},
-        "y_max": {"type": "number", "description": "Optional fixed maximum for the y axis."},
-        "series_labels": {
-            **STRING_ARRAY_SCHEMA,
-            "description": "Display labels for each y series, in the same order as `y_fields`.",
-        },
+        "title": {"type": "string", "description": "Optional neutral chart title."},
+        "subtitle": {"type": "string"},
+        "source": {"type": "string"},
+        "x_field": {"type": "string"},
+        "y_fields": STRING_ARRAY_SCHEMA,
+        "x_label": {"type": "string"},
+        "y_label": {"type": "string"},
+        "x_format": CHART_FORMAT_SCHEMA,
+        "y_format": CHART_FORMAT_SCHEMA,
+        "x_min": {"type": "number"},
+        "x_max": {"type": "number"},
+        "y_min": {"type": "number"},
+        "y_max": {"type": "number"},
+        "series_labels": STRING_ARRAY_SCHEMA,
         "series_styles": {
             "type": "array",
-            "description": "Line style per series (line/area charts).",
             "items": {"type": "string", "enum": ["solid", "dashed", "dotted"]},
         },
         "series_curves": {
             "type": "array",
-            "description": "Curve interpolation per series (line/area charts).",
             "items": {"type": "string", "enum": ["smooth", "step", "linear"]},
         },
-        "subtitle": {"type": "string", "description": "Optional subtitle shown under the title."},
-        "source": {"type": "string", "description": "Optional source/caption shown beneath the chart."},
-        "arrangement": {
-            "type": "string",
-            "enum": ["grouped", "stacked"],
-            "description": "For bar charts only: `grouped` side-by-side or `stacked`.",
-        },
-        "area_fill": {"type": "boolean", "description": "For line charts only: fill the area under the line."},
+        "arrangement": {"type": "string", "enum": ["grouped", "stacked"]},
     },
-    "required": ["chart_type", "title", "data", "x_field", "y_fields"],
-}
+    ["chart_kind"],
+)
 
+DISCOVERY_DESCRIPTION = "Discover model metadata from policyengine.py without running a simulation."
+SEARCH_VARIABLES_DESCRIPTION = (
+    "Search the policyengine.py UK variable registry. Use this before passing a "
+    "variable to run_society_simulation.extra_variables or aggregate_result; "
+    "never invent variable names. Results identify default society outputs."
+)
+GET_VARIABLE_DESCRIPTION = (
+    "Verify one exact policyengine.py UK variable and inspect its entity and "
+    "whether it is a default society output."
+)
+LIST_SOCIETY_OUTPUT_VARIABLES_DESCRIPTION = (
+    "List the policyengine.py UK variables automatically materialized by a "
+    "society simulation, grouped by output entity. Call this before choosing "
+    "run_society_simulation.extra_variables."
+)
 VALIDATE_REFORM_DESCRIPTION = (
-    "Validate parametric reform JSON without running a simulation. "
-    "Use this when the user is drafting, debugging, or asking whether "
-    "a reform object is valid. Do not call it as a routine preflight "
-    "before every simulation; calculation tools validate reforms internally."
+    "Validate flat policyengine.py reform JSON without running a simulation. "
+    "Use for drafting or debugging reform parameter paths, not as routine preflight."
 )
-
-CALCULATE_HOUSEHOLD_DESCRIPTION = (
-    "Compute taxes, benefits, and net income for an illustrative "
-    "specific household described with person, benefit-unit, and "
-    "household records. Prefer this over run_python for household-level "
-    "questions with a defined household composition. These inputs are "
-    "synthetic examples, not real households. When reform is omitted, "
-    "output calculated columns use plain names such as income_tax and "
-    "net_income. When reform is supplied, including an empty no-op "
-    "object, output includes baseline_* and reform_* comparison columns."
+VALIDATE_HOUSEHOLD_DESCRIPTION = (
+    "Validate an illustrative synthetic UK household against policyengine.py variable metadata."
 )
-
-RUN_ECONOMY_SIMULATION_DESCRIPTION = (
-    "Run a UK economy-wide microsimulation comparing baseline current "
-    "law to a parametric reform. Returns aggregate outputs including "
-    "budgetary impact, programme breakdown, decile impacts, "
-    "winners/losers, caseloads, HBAI incomes, and poverty metrics. "
-    "Prefer this over run_python for society-wide reform analysis. "
-    "Use run_python for structural reforms."
+RUN_HOUSEHOLD_SIMULATION_DESCRIPTION = (
+    "Run an illustrative synthetic UK household simulation through policyengine.py."
 )
-
-ANALYSE_MICRODATA_DESCRIPTION = (
-    "Slice, filter, sample, or aggregate non-FRS model microdata for a "
-    "given year and optional parametric reform. Use this for allowed "
-    "non-FRS microdata follow-ups such as subset means, counts, group "
-    "breakdowns, descriptions, or small model-record samples. This tool "
-    "explicitly does not support FRS; use run_economy_simulation for "
-    "aggregate FRS outputs. Row-level `sample` is also not supported "
-    "for the FRS-derived `efrs` dataset; use aggregate operations there. "
-    "When reform is omitted, calculated columns use plain names; when "
-    "reform is supplied, including an empty no-op object, use "
-    "baseline_* and reform_* comparison columns."
+RUN_SOCIETY_SIMULATION_DESCRIPTION = (
+    "Run baseline and reform policyengine.py UK simulations and return metadata plus a turn-local result handle. "
+    "Use derivative tools to calculate outputs from that handle. Before adding "
+    "extra_variables, inspect the default set with list_society_output_variables "
+    "and verify every non-default name with search_variables or get_variable."
 )
-
-LOOKUP_PARAMETER_DESCRIPTION = (
-    "Look up baseline UK model parameter values for a year by exact path "
-    "or natural-language query. Use this for static parameter questions "
-    "such as the personal allowance, tax rates, thresholds, limits, and "
-    "amounts. Prefer this over run_python for parameter introspection, "
-    "and do not run household or economy simulations just to infer a "
-    "parameter value. Returns canonical model paths and values, plus "
-    "context for common threshold interpretations when deterministic. "
-    "`match_certainty` is deterministic string parsing certainty, not "
-    "factual confidence in the parameter value. "
-    "If several matches are plausible, returns status `needs_confirmation`; "
-    "ask the user to choose before answering, using `confirmation_reason` "
-    "to explain whether the string match is low-certainty or closely tied."
+DERIVATIVE_DESCRIPTION = (
+    "Compute an official policyengine.py aggregate or derivative output from a prior simulation result handle. "
+    "This never returns row-level survey records."
 )
-
-RUN_PYTHON_DESCRIPTION = (
-    "Execute reproducible Python code using the official PolicyEngine UK compiled interface. "
-    "Prefer the typed tools (`calculate_household`, `run_economy_simulation`, `analyse_microdata`, "
-    "`lookup_parameter`) "
-    "when the question fits their shape; use `run_python` as a fallback for structural reforms, "
-    "novel aggregations, historical lookups, or unsupported cases. "
-    "The environment preloads `policyengine_uk_compiled` as `pe`, plus `Simulation`, `Parameters`, "
-    "`StructuralReform`, `aggregate_microdata`, `combine_microdata`, `capabilities`, "
-    "`ensure_dataset`, `pd`, `np`, `json`, and `math`. Assign the final answer to `result` and "
-    "use `print()` for intermediate output. Do not inspect or return row-level survey microdata, "
-    "including FRS data. For household examples, create illustrative synthetic households, prefer "
-    "`Simulation.single_person()` for single-person examples, and label them as illustrative rather "
-    "than real households."
-)
-
 GENERATE_CHART_DESCRIPTION = (
-    "Generate a chart JSON block for the frontend to render. "
-    "Use this for visualisations such as income distributions, marginal-rate or tax-schedule curves, "
-    "decile impact comparisons, and trends over time or income. "
-    "Use factually neutral titles, subtitles, labels, and captions; do not call policies good, bad, fair, unfair, "
-    "regressive, progressive, generous, or punitive. "
-    "The tool returns a `chart_markdown` field containing a ```chart fenced JSON block - you MUST paste that "
-    "string verbatim into your next text response, otherwise the chart will not appear to the user. "
-    "Do not attempt to render charts with matplotlib inside `run_python`; the UI cannot display matplotlib output. "
-    "Compute the data first with a typed calculation tool or `run_python` "
-    "(returning a list of row dicts), then pass it to this tool."
+    "Generate frontend-renderable chart markdown. For preset chart kinds, the layout, "
+    "colours, axes, labels, and legend are deterministic app-v2-style choices and "
+    "result_id must identify the matching derivative output. Explicit data is accepted "
+    "for generic chart kinds and the earnings-variation preset."
 )
 
 

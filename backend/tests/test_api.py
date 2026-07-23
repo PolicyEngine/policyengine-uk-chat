@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 from policyengine_observability.runtime import EVENT_LOGGER
 from policyengine_observability.runtime import OPERATION_LOGGER
 from api.main import app
+from chat.orchestrator import MAX_TOOL_RESULT_CHARS, _serialise_tool_result_for_model
 
 client = TestClient(app)
 
@@ -22,6 +23,27 @@ requires_live_anthropic = pytest.mark.skipif(
     or not os.environ.get("ANTHROPIC_API_KEY"),
     reason="set RUN_LIVE_ANTHROPIC_TESTS=1 and ANTHROPIC_API_KEY to run live Anthropic tests",
 )
+
+
+def test_oversized_tool_results_remain_valid_json():
+    result_json = _serialise_tool_result_for_model(
+        {
+            "status": "success",
+            "result_id": "result-1",
+            "payload": "x" * (MAX_TOOL_RESULT_CHARS + 1),
+        }
+    )
+
+    result = json.loads(result_json)
+    assert len(result_json) <= MAX_TOOL_RESULT_CHARS
+    assert result == {
+        "status": "success",
+        "result_id": "result-1",
+        "note": (
+            "Tool result exceeded the model context limit. Use a narrower "
+            "discovery query or request a more specific derivative output."
+        ),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -175,11 +197,11 @@ class TestConversations:
                     {
                         "type": "tool",
                         "data": {
-                            "tool_name": "run_python",
+                            "tool_name": "generate_chart",
                             "tool_id": "tool-1",
                             "status": "success",
-                            "input": {"code": "result = 1 + 1"},
-                            "result_summary": '{"result": 2, "output": "done"}',
+                            "input": {"chart_kind": "budget_waterfall"},
+                            "result_summary": '{"status": "success"}',
                         },
                     }
                 ],
@@ -195,8 +217,8 @@ class TestConversations:
         )
         assert report_r.status_code == 200
         issue_body = report_r.json()["issue_body"]
-        assert "result = 1 + 1" in issue_body
-        assert '"result": 2' in issue_body
+        assert "budget_waterfall" in issue_body
+        assert '"status": "success"' in issue_body
 
     def test_shared_conversation_does_not_expose_author_email(self):
         email = "private-author@example.com"
@@ -475,24 +497,21 @@ class TestChatRouteWithMockedAnthropic:
             return []
 
         tool_input = {
-            "year": 2025,
-            "person": [
+            "year": 2026,
+            "people": [
                 {
-                    "person_id": 0,
-                    "benunit_id": 0,
-                    "household_id": 0,
                     "age": 35,
                     "employment_income": 30000,
                 }
             ],
-            "benunit": [{"benunit_id": 0, "household_id": 0}],
-            "household": [{"household_id": 0}],
+            "benunit": {},
+            "household": {},
         }
         fake_client = _FakeAnthropicClient(
             [
                 _FakeAnthropicStream(
                     final_content=[
-                        _tool_use_block("calculate_household", tool_input),
+                        _tool_use_block("run_household_simulation", tool_input),
                     ],
                 ),
                 _FakeAnthropicStream(
@@ -505,11 +524,12 @@ class TestChatRouteWithMockedAnthropic:
         )
         executed = []
 
-        def fake_execute_tool(tool_name, received_input):
+        def fake_execute_tool(tool_name, received_input, context=None):
             executed.append((tool_name, received_input))
             return {
                 "status": "success",
                 "household": [{"net_income": 25119.60}],
+                "result_id": "household_simulation_1",
             }
 
         monkeypatch.setattr(chatbot, "get_async_client", lambda: fake_client)
@@ -551,7 +571,7 @@ class TestChatRouteWithMockedAnthropic:
         assert "timings" not in usage_calls[0]
         assert "timings_ms" not in usage_calls[0]
         assert "timing_counts" not in usage_calls[0]
-        assert executed == [("calculate_household", tool_input)]
+        assert executed == [("run_household_simulation", tool_input)]
         assert "tools" in fake_client.messages.calls[0]
         second_messages = fake_client.messages.calls[1]["messages"]
         assert second_messages[-1]["content"][0]["type"] == "tool_result"
@@ -656,8 +676,11 @@ class TestChatRouteWithMockedAnthropic:
         monkeypatch.setattr(chatbot, "get_async_client", lambda: object())
         monkeypatch.setattr(chatbot, "is_followup", lambda _conversation: True)
         monkeypatch.setattr(chatbot, "select_chat_model", raise_model_selection)
-        # Handled-error operation logs emit at WARNING since observability 1.1.
+        # The installed observability version decides which level receives
+        # handled-error operation logs; capture all common levels.
+        monkeypatch.setattr(OPERATION_LOGGER, "info", operation_records.append)
         monkeypatch.setattr(OPERATION_LOGGER, "warning", operation_records.append)
+        monkeypatch.setattr(OPERATION_LOGGER, "error", operation_records.append)
 
         async def consume_stream():
             response = chatbot.stream_chat(

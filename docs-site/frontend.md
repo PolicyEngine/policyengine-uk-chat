@@ -66,24 +66,24 @@ In production the browser does **not** call the backend directly. The Next.js
 route handler at `app/api/proxy/[...slug]/route.ts` forwards all methods
 (GET / POST / PUT / PATCH / DELETE) to the backend.
 
-It resolves the backend URL from the `BACKEND_URL` env var, falling back to a
-per-branch Modal preview URL when `VERCEL_ENV=preview` (derived from
-`VERCEL_GIT_COMMIT_REF`), else `http://localhost:8080`. When a response carries
+Preview deployments derive a per-branch Modal URL from
+`VERCEL_GIT_COMMIT_REF`. Production resolves the backend from the server-only
+`POLICYENGINE_UK_CHAT_BACKEND_URL` variable; local development defaults to
+`http://localhost:8080`. When a response carries
 `content-type: text/event-stream`, the handler pipes the SSE stream through a
 `TransformStream` so streaming is not buffered.
 
-Client code (`utils/backend.ts`) uses `NEXT_PUBLIC_BACKEND_URL` or defaults to
-`/api/proxy`, so the [chat agent](backend/chat.md) and [tools](backend/tools.md)
-are reached through the same proxy path in every environment.
+Client code (`utils/backend.ts`) always uses the same-origin
+`/uk/chat/api/proxy` path, so backend origins are never exposed to the browser.
 
-## Multizone / asset prefix
+## Base path and multizone routing
 
 ```{note}
-`frontend/next.config.js` sets `output: "standalone"` and, in production only,
-`assetPrefix: "/_zones/uk-chat"` so the app can be embedded under
-policyengine.org. `frontend/vercel.json` rewrites
-`/_zones/uk-chat/_next/:path*` → `/_next/:path*` on the chat host so the
-prefixed asset URLs resolve.
+`frontend/next.config.js` sets `basePath: "/uk/chat"` in every environment.
+Standalone deployments therefore serve the application at `/uk/chat`, and
+policyengine.org can preserve that exact path through one multizone rewrite.
+Pages, Next.js assets, shared links, and API requests all remain under the same
+namespace. The standalone Vercel root redirects to `/uk/chat`.
 ```
 
 ## Charts
@@ -117,7 +117,7 @@ renderer is used in the main chat and the shared view.
 
 `AuthContext` wraps the app in Supabase auth state; signed-in users get saved
 history and credit tracking. Any conversation can be shared via a public token;
-the read-only view lives at `/s/[token]`, backed by the backend
+the read-only view lives at `/uk/chat/s/[token]`, backed by the backend
 `GET /conversations/shared/{share_token}` endpoint. See [the API](backend/api.md).
 
 ## Configuration
@@ -131,9 +131,7 @@ the read-only view lives at `/s/[token]`, backed by the backend
   - Supabase project URL (client auth)
 * - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
   - Supabase anon key (client auth)
-* - `NEXT_PUBLIC_BACKEND_URL`
-  - Optional client-side backend override
-* - `BACKEND_URL`
+* - `POLICYENGINE_UK_CHAT_BACKEND_URL`
   - Server-side backend URL used by the proxy route
 * - `VERCEL_ENV` / `VERCEL_GIT_COMMIT_REF`
   - Set automatically; drive preview backend routing

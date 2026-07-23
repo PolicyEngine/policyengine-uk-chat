@@ -1,67 +1,59 @@
 cases:
   - id: economy_simulation_invalid_reform_errors_before_data
     suite: tool_contract
-    description: run_economy_simulation returns a structured error for invalid reform JSON before loading data.
-    requirements: [compiled]
-    tool_name: run_economy_simulation
+    description: run_society_simulation returns a structured error for invalid reform JSON before loading data.
+    requirements: [policyengine_py]
+    tool_name: run_society_simulation
     input:
-      year: 2025
-      dataset: frs
+      year: 2026
+      dataset: enhanced_frs_2023_24
       reform:
-        made_up_program:
-          threshold: 1
+        gov.made_up.parameter: 1
     expect:
-      error_contains: Unknown reform program
-
-  - id: economy_simulation_rejects_structural_reform_input
-    suite: tool_contract
-    description: run_economy_simulation rejects structural_reform input before loading data; structural reforms are run_python-only.
-    tool_name: run_economy_simulation
-    input:
-      year: 2025
-      dataset: frs
-      structural_reform:
-        pre: "def hook(year, persons, benunits, households): return persons, benunits, households"
-    expect:
-      error_contains: structural_reform
+      error_contains: gov.made_up.parameter
 
   - id: economy_simulation_baseline_aggregate_shape
     suite: tool_contract
-    description: run_economy_simulation baseline aggregate run returns aggregate sections.
-    requirements: [compiled, data]
-    tool_name: run_economy_simulation
+    description: run_society_simulation baseline run returns metadata and a simulation handle only.
+    requirements: [policyengine_py, data]
+    tool_name: run_society_simulation
     input:
-      year: 2025
-      dataset: frs
+      year: 2026
+      dataset: enhanced_frs_2023_24
     expect:
       contains:
-        dataset: Family Resources Survey
+        status: success
+        year: 2026
+        reform_applied: false
       required_paths:
+        - result_id
+        - dataset.name
+      absent_paths:
         - budgetary_impact
         - program_breakdown_changes
         - decile_impacts
         - winners_losers
-        - baseline_poverty
-        - reform_poverty
 
   - id: economy_simulation_personal_allowance_aggregate_shape
     suite: tool_contract
-    description: run_economy_simulation reform run returns aggregate reform sections.
-    requirements: [compiled, data]
-    tool_name: run_economy_simulation
+    description: run_society_simulation reform run defers all derivative outputs.
+    requirements: [policyengine_py, data]
+    tool_name: run_society_simulation
     input:
-      year: 2025
-      dataset: frs
+      year: 2026
+      dataset: enhanced_frs_2023_24
       reform:
-        income_tax:
-          personal_allowance: 15000
+        gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     expect:
       contains:
-        dataset: Family Resources Survey
+        status: success
+        year: 2026
+        reform_applied: true
       required_paths:
+        - result_id
+        - dataset.name
+      absent_paths:
         - budgetary_impact
-        - program_breakdown_changes.income_tax.change
+        - program_breakdown_changes
         - decile_impacts
         - winners_losers
-        - baseline_hbai_incomes
-        - reform_hbai_incomes

@@ -49,7 +49,7 @@ through `make eval-ai-live`.
 Trajectory and tool-loop cases can set `messages` for multi-turn transcripts
 and `charts_mode: true` to test the chart-mode directive.
 
-Source-synced `policyengine-uk` cases with `compiled_coverage_gap` skips are
-kept in the suite as visible compiled-backlog markers. Remove the skip only
-after `policyengine-uk-compiled` supports the upstream case through the chat
+Source-synced `policyengine-uk` cases with `policyengine_py_coverage_gap` skips are
+kept in the suite as visible policyengine_py-backlog markers. Remove the skip only
+after `policyengine` supports the upstream case through the chat
 tool contract.

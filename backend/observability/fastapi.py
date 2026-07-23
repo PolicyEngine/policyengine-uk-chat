@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+import inspect
 import logging
 import os
 
@@ -126,16 +127,22 @@ def init_observability(
 
     service_role = _service_role(service_role)
     platform = _platform()
+    supports_default_log_destinations = (
+        "default_log_destinations"
+        in inspect.signature(ObservabilityConfig.from_env).parameters
+    )
+    config_kwargs = {
+        "service_name": SERVICE_NAME,
+        "service_role": service_role,
+        "span_prefix": SPAN_PREFIX,
+        "instrument_fastapi": supports_default_log_destinations,
+        "instrument_httpx": True,
+        "extra_metric_attribute_keys": UK_CHAT_METRIC_ATTRIBUTE_KEYS,
+    }
+    if supports_default_log_destinations:
+        config_kwargs["default_log_destinations"] = _default_log_destinations(platform)
     config = replace(
-        ObservabilityConfig.from_env(
-            service_name=SERVICE_NAME,
-            service_role=service_role,
-            span_prefix=SPAN_PREFIX,
-            instrument_fastapi=True,
-            instrument_httpx=True,
-            extra_metric_attribute_keys=UK_CHAT_METRIC_ATTRIBUTE_KEYS,
-            default_log_destinations=_default_log_destinations(platform),
-        ),
+        ObservabilityConfig.from_env(**config_kwargs),
         environment=_environment(),
     )
     # One startup line so a misrouted destination or missing workload
@@ -144,7 +151,7 @@ def init_observability(
         "Observability initialized: platform=%s log_destinations=%s "
         "modal_identity_token=%s",
         platform,
-        ",".join(config.log_destinations),
+        ",".join(getattr(config, "log_destinations", ())),
         "present" if os.getenv("MODAL_IDENTITY_TOKEN") else "absent",
     )
     return init_fastapi_observability(

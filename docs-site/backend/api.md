@@ -19,7 +19,7 @@ Request and response shapes below are summarised from the route handlers under
 * - `GET /health`
   - Liveness probe. Returns `{"status": "ok"}`.
 * - `GET /version`
-  - Returns `{"policyengine_uk_compiled": "<version>"}`.
+  - Returns the `policyengine.py` engine version and installed `policyengine-uk` version.
 ```
 
 ## Chat — `/chat`
@@ -77,7 +77,7 @@ Defined in `backend/conversations/` (a router that aggregates the `store`,
     returns its `issue_url` plus a `share_url`.
 ```
 
-Shared conversations are surfaced in the frontend at `/s/[token]`.
+Shared conversations are surfaced in the frontend at `/uk/chat/s/[token]`.
 
 ## Billing — `/billing`
 

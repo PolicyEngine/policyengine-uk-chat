@@ -1,7 +1,7 @@
 """Unit tests for .github/scripts/dependency_bump.py.
 
 The script drives the dependency-update-pr workflow: it plans exact-pin
-bumps for policyengine-* packages in backend/requirements.txt and opens PRs
+bumps for PolicyEngine packages in backend/requirements.txt and opens PRs
 for them. These tests cover the planning and rewriting logic with the PyPI
 and git/gh seams mocked; nothing here touches the network or runs
 subprocesses.
@@ -24,7 +24,7 @@ _spec.loader.exec_module(bump)
 
 REQUIREMENTS = (
     "fastapi\n"
-    "policyengine-uk-compiled==0.44.0\n"
+    "policyengine[uk]==0.44.0\n"
     "pandas\n"
     "policyengine-observability[fastapi,httpx]==1.0.0\n"
 )
@@ -50,17 +50,17 @@ def test_parse_pin_reads_version_and_extras():
 
 def test_parse_pin_ignores_comments_ranges_and_other_packages():
     content = (
-        "# policyengine-uk-compiled==0.1.0\n"
-        "policyengine-uk-compiled\n"
-        "policyengine-uk-compiled>=0.44.0,<0.45\n"
-        "policyengine-uk-compiled-extras==1.0.0\n"
+        "# policyengine==0.1.0\n"
+        "policyengine\n"
+        "policyengine>=0.44.0,<0.45\n"
+        "policyengine-uk==1.0.0\n"
     )
-    assert bump.parse_pin(content, "policyengine-uk-compiled") is None
+    assert bump.parse_pin(content, "policyengine") is None
 
 
 def test_pinned_packages_finds_all_policyengine_pins():
     assert bump.pinned_packages(REQUIREMENTS) == [
-        "policyengine-uk-compiled",
+        "policyengine",
         "policyengine-observability",
     ]
 
@@ -69,9 +69,9 @@ def test_pinned_packages_finds_all_policyengine_pins():
 
 
 def test_bumped_line_rewrites_exact_pin():
-    match = bump.parse_pin(REQUIREMENTS, "policyengine-uk-compiled")
+    match = bump.parse_pin(REQUIREMENTS, "policyengine")
     assert bump.bumped_line(match, Version("0.44.2")) == (
-        "policyengine-uk-compiled==0.44.2"
+        "policyengine[uk]==0.44.2"
     )
 
 
@@ -87,12 +87,12 @@ def test_bumped_line_keeps_extras():
 
 def test_plan_explicit_version_not_newer_than_pin_is_noop(monkeypatch):
     monkeypatch.setattr(bump, "pypi_releases", lambda package: [Version("0.44.0")])
-    assert bump.plan_bumps(REQUIREMENTS, "policyengine-uk-compiled", "0.44.0") == []
+    assert bump.plan_bumps(REQUIREMENTS, "policyengine", "0.44.0") == []
 
 
 def test_plan_explicit_patch_version_within_minor(monkeypatch):
     monkeypatch.setattr(bump, "pypi_releases", lambda package: [Version("0.44.2")])
-    plans = bump.plan_bumps(REQUIREMENTS, "policyengine-uk-compiled", "0.44.2")
+    plans = bump.plan_bumps(REQUIREMENTS, "policyengine", "0.44.2")
     assert [(p["target"], p["crosses_minor"]) for p in plans] == [
         (Version("0.44.2"), False)
     ]
@@ -100,7 +100,7 @@ def test_plan_explicit_patch_version_within_minor(monkeypatch):
 
 def test_plan_explicit_version_crossing_minor_needs_review(monkeypatch):
     monkeypatch.setattr(bump, "pypi_releases", lambda package: [Version("0.46.0")])
-    plans = bump.plan_bumps(REQUIREMENTS, "policyengine-uk-compiled", "0.46.0")
+    plans = bump.plan_bumps(REQUIREMENTS, "policyengine", "0.46.0")
     assert [(p["target"], p["crosses_minor"]) for p in plans] == [
         (Version("0.46.0"), True)
     ]
@@ -115,7 +115,7 @@ def test_plan_waits_for_pypi_propagation(monkeypatch):
 
     monkeypatch.setattr(bump, "pypi_releases", releases)
     monkeypatch.setattr(bump.time, "sleep", lambda seconds: None)
-    plans = bump.plan_bumps(REQUIREMENTS, "policyengine-uk-compiled", "0.44.2")
+    plans = bump.plan_bumps(REQUIREMENTS, "policyengine", "0.44.2")
     assert len(calls) == 3
     assert plans[0]["target"] == Version("0.44.2")
 
@@ -125,7 +125,7 @@ def test_plan_exits_when_version_never_reaches_pypi(monkeypatch):
     monkeypatch.setattr(bump, "PYPI_WAIT_ATTEMPTS", 2)
     monkeypatch.setattr(bump.time, "sleep", lambda seconds: None)
     with pytest.raises(SystemExit):
-        bump.plan_bumps(REQUIREMENTS, "policyengine-uk-compiled", "0.44.2")
+        bump.plan_bumps(REQUIREMENTS, "policyengine", "0.44.2")
 
 
 def test_plan_discovery_proposes_patch_and_cross_minor_separately(monkeypatch):
@@ -141,7 +141,7 @@ def test_plan_discovery_proposes_patch_and_cross_minor_separately(monkeypatch):
             Version("0.47.0"),
         ],
     )
-    plans = bump.plan_bumps(REQUIREMENTS, "policyengine-uk-compiled", "")
+    plans = bump.plan_bumps(REQUIREMENTS, "policyengine", "")
     assert [(p["target"], p["crosses_minor"]) for p in plans] == [
         (Version("0.44.2"), False),
         (Version("0.47.0"), True),
@@ -160,14 +160,14 @@ def test_plan_discovery_only_cross_minor_releases(monkeypatch):
 
 def test_plan_discovery_current_pin_is_noop(monkeypatch):
     monkeypatch.setattr(bump, "pypi_releases", lambda package: [Version("0.44.0")])
-    assert bump.plan_bumps(REQUIREMENTS, "policyengine-uk-compiled", "") == []
+    assert bump.plan_bumps(REQUIREMENTS, "policyengine", "") == []
 
 
 def test_plan_missing_pin_is_noop(monkeypatch):
     monkeypatch.setattr(
         bump, "pypi_releases", lambda package: pytest.fail("should not hit PyPI")
     )
-    assert bump.plan_bumps("fastapi\n", "policyengine-uk-compiled", "") == []
+    assert bump.plan_bumps("fastapi\n", "policyengine", "") == []
 
 
 # ── PyPI release listing ─────────────────────────────────────────────────
@@ -233,22 +233,22 @@ def pr_sandbox(tmp_path, monkeypatch):
 
 
 def test_open_pr_rewrites_pin_and_requests_automerge(pr_sandbox):
-    plan = _plan(REQUIREMENTS, "policyengine-uk-compiled", "0.44.2", crosses_minor=False)
+    plan = _plan(REQUIREMENTS, "policyengine", "0.44.2", crosses_minor=False)
     bump.open_pr(REQUIREMENTS, plan)
 
     written = (pr_sandbox.root / "backend" / "requirements.txt").read_text()
-    assert "policyengine-uk-compiled==0.44.2" in written
+    assert "policyengine[uk]==0.44.2" in written
     # Other pins are untouched.
     assert "policyengine-observability[fastapi,httpx]==1.0.0" in written
 
-    branch = "auto/bump-policyengine-uk-compiled-0.44.2"
+    branch = "auto/bump-policyengine-0.44.2"
     assert ("git", "switch", "-c", branch, "main") in pr_sandbox.commands
     assert ("git", "push", "-u", "origin", branch) in pr_sandbox.commands
     assert ("git", "switch", "main") in pr_sandbox.commands
 
     pr_create = next(c for c in pr_sandbox.commands if c[:3] == ("gh", "pr", "create"))
     assert pr_create[pr_create.index("--title") + 1] == (
-        "chore: bump policyengine-uk-compiled to 0.44.2"
+        "chore: bump policyengine to 0.44.2"
     )
     assert pr_sandbox.merge_calls[0][:5] == ["gh", "pr", "merge", "--auto", "--squash"]
 
@@ -270,7 +270,7 @@ def test_open_pr_cross_minor_skips_automerge(pr_sandbox):
 
 def test_open_pr_skips_existing_branch(pr_sandbox, monkeypatch):
     monkeypatch.setattr(bump, "branch_exists", lambda branch: True)
-    plan = _plan(REQUIREMENTS, "policyengine-uk-compiled", "0.44.2", crosses_minor=False)
+    plan = _plan(REQUIREMENTS, "policyengine", "0.44.2", crosses_minor=False)
     bump.open_pr(REQUIREMENTS, plan)
 
     assert pr_sandbox.commands == []
@@ -307,4 +307,4 @@ def test_main_dry_run_sweeps_all_pins_without_opening_prs(tmp_path, monkeypatch)
         bump, "open_pr", lambda content, plan: pytest.fail("dry run must not open PRs")
     )
     bump.main()
-    assert swept == ["policyengine-uk-compiled", "policyengine-observability"]
+    assert swept == ["policyengine", "policyengine-observability"]

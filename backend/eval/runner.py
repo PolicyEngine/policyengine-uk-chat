@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from prompts import CHARTS_MODE_DIRECTIVE, SYSTEM_PROMPT
+from tools.context import new_tool_context
 from tools.definitions import TOOL_DEFINITIONS
 from tools.dispatch import execute_tool
 
@@ -67,8 +68,11 @@ def _case_paths(suites: Iterable[str]) -> List[Path]:
 
 
 def _requirements_skip_reason(requirements: List[str], mode: str) -> str | None:
-    if "compiled" in requirements and importlib.util.find_spec("policyengine_uk_compiled") is None:
-        return "policyengine_uk_compiled is not installed"
+    if "policyengine_py" in requirements and (
+        importlib.util.find_spec("policyengine") is None
+        or importlib.util.find_spec("policyengine_uk") is None
+    ):
+        return "policyengine.py UK packages are not installed"
     if "data" in requirements and os.environ.get("RUN_DATA_EVALS") != "1":
         return "set RUN_DATA_EVALS=1 to run data-backed evals"
     if "live_model" in requirements and mode != "live":
@@ -146,7 +150,11 @@ def _system_for_case(case: TrajectoryCase | ToolLoopCase) -> str:
 
 def _run_tool_contract(case: ToolContractCase) -> CaseResult:
     try:
-        output = execute_tool(case.tool_name, case.input)
+        output = execute_tool(
+            case.tool_name,
+            case.input,
+            context=new_tool_context(turn_id=case.id),
+        )
     except Exception as exc:
         return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
     errors = grade_output(output, case.expect)
@@ -227,6 +235,7 @@ def _tool_use_id(case: ToolLoopCase, iteration: int, index: int, call_id: str) -
 
 def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
     messages: List[Dict[str, Any]] = _messages_for_case(case)
+    tool_context = new_tool_context(turn_id=case.id)
     tool_calls = []
     final_text = ""
     errors: List[str] = []
@@ -263,7 +272,7 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
                     "input": call.input,
                 }
             )
-            output = execute_tool(call.name, call.input)
+            output = execute_tool(call.name, call.input, context=tool_context)
             tool_results.append(
                 {
                     "type": "tool_result",

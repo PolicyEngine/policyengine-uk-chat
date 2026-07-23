@@ -1,10 +1,12 @@
 import json
 import os
+import inspect
 from types import SimpleNamespace
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from policyengine_observability import ObservabilityConfig
 from policyengine_observability import REQUEST_ID_HEADER, segment
 from policyengine_observability.runtime import OPERATION_LOGGER, REQUEST_LOGGER
 
@@ -13,6 +15,13 @@ from observability.fastapi import configure_process_observability
 from observability.fastapi import init_observability
 from observability.segments import SegmentName
 from observability.segments import coerce_segment_name
+
+
+def _supports_log_destinations() -> bool:
+    return (
+        "default_log_destinations"
+        in inspect.signature(ObservabilityConfig.from_env).parameters
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -101,8 +110,12 @@ def test_fastapi_otel_instrumentation_is_enabled(monkeypatch):
 
     runtime = init_observability(app, service_role="test_api")
 
-    assert runtime.config.instrument_fastapi is True
-    assert getattr(app, "_is_instrumented_by_opentelemetry", False) is True
+    if _supports_log_destinations():
+        assert runtime.config.instrument_fastapi is True
+        assert getattr(app, "_is_instrumented_by_opentelemetry", False) is True
+    else:
+        assert runtime.config.instrument_fastapi is False
+        assert getattr(app, "_is_instrumented_by_opentelemetry", False) is False
 
 
 def test_request_log_contains_cloud_run_metadata(monkeypatch):
@@ -133,6 +146,8 @@ def test_request_log_contains_cloud_run_metadata(monkeypatch):
 
 
 def test_local_observability_defaults_to_stdout_logs(monkeypatch):
+    if not _supports_log_destinations():
+        pytest.skip("installed policyengine-observability has no log_destinations support")
     monkeypatch.delenv("OBSERVABILITY_LOG_DESTINATIONS", raising=False)
     monkeypatch.delenv("OBSERVABILITY_PLATFORM", raising=False)
     monkeypatch.delenv("K_SERVICE", raising=False)
@@ -147,6 +162,8 @@ def test_local_observability_defaults_to_stdout_logs(monkeypatch):
 
 
 def test_cloud_run_observability_defaults_to_google_logs(monkeypatch):
+    if not _supports_log_destinations():
+        pytest.skip("installed policyengine-observability has no log_destinations support")
     monkeypatch.delenv("OBSERVABILITY_LOG_DESTINATIONS", raising=False)
     monkeypatch.delenv("OBSERVABILITY_PLATFORM", raising=False)
     monkeypatch.setenv("K_SERVICE", "policyengine-uk-chat")
@@ -158,6 +175,8 @@ def test_cloud_run_observability_defaults_to_google_logs(monkeypatch):
 
 
 def test_modal_observability_defaults_to_google_logs(monkeypatch):
+    if not _supports_log_destinations():
+        pytest.skip("installed policyengine-observability has no log_destinations support")
     monkeypatch.delenv("OBSERVABILITY_LOG_DESTINATIONS", raising=False)
     monkeypatch.delenv("OBSERVABILITY_PLATFORM", raising=False)
     configure_process_observability(
@@ -177,6 +196,8 @@ def test_modal_observability_defaults_to_google_logs(monkeypatch):
 def test_observability_log_destination_env_overrides_deployed_default(
     monkeypatch,
 ):
+    if not _supports_log_destinations():
+        pytest.skip("installed policyengine-observability has no log_destinations support")
     monkeypatch.setenv("OBSERVABILITY_LOG_DESTINATIONS", "stdout")
     configure_process_observability(
         platform="modal",

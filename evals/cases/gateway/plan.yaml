@@ -36,7 +36,7 @@ cases:
     requirements: [live_model]
     prompt: How would raising the income tax personal allowance to £15,000 affect inflation?
     expected_outcome: partial
-    expected_tool: run_economy_simulation
+    expected_tool: run_society_simulation
 
   - id: gw_partial_rate_growth
     suite: gateway
@@ -44,7 +44,7 @@ cases:
     requirements: [live_model]
     prompt: Cut the basic rate of income tax to 19% — what's the cost, and will it boost GDP?
     expected_outcome: partial
-    expected_tool: run_economy_simulation
+    expected_tool: run_society_simulation
 
   # ---- needs_plan: in scope but under-specified on a load-bearing slot ----
   - id: gw_needsplan_compare_two_reforms
@@ -56,12 +56,11 @@ cases:
 
   - id: gw_needsplan_uc_no_household
     suite: gateway
-    description: A household benefit question with no household — person is ungrounded, but
-      benunit/household are model-inferable and must NOT trigger a question.
+    description: A household benefit question with no household — person is ungrounded, but benunit/household are model-inferable and must NOT trigger a question.
     requirements: [live_model]
     prompt: How much Universal Credit would I get?
     expected_outcome: needs_plan
-    expected_tool: calculate_household
+    expected_tool: run_household_simulation
     expected_slots:
       - slot: benunit
         gates: false
@@ -77,15 +76,14 @@ cases:
 
   - id: gw_needsplan_wealth_tax_underspecified
     suite: gateway
-    description: Wealth tax with no rate/threshold; dataset is promoted to high (needs WAS)
-      so an assumed dataset gates. Minimal pair with gw_ready_wealth_tax_specified.
+    description: Wealth tax with no rate/threshold needs reform details, while Enhanced FRS remains the settled dataset default. Minimal pair with gw_ready_wealth_tax_specified.
     requirements: [live_model]
     prompt: Model a wealth tax.
     expected_outcome: needs_plan
-    expected_tool: run_economy_simulation
+    expected_tool: run_society_simulation
     expected_slots:
       - slot: dataset
-        gates: true
+        gates: false
 
   # ---- ready: fully specified, admissible ----
   - id: gw_ready_basic_rate_cost
@@ -94,7 +92,7 @@ cases:
     requirements: [live_model]
     prompt: What is the budgetary cost of raising the basic rate of income tax to 21%?
     expected_outcome: ready
-    expected_tool: run_economy_simulation
+    expected_tool: run_society_simulation
 
   - id: gw_ready_household_full
     suite: gateway
@@ -102,7 +100,7 @@ cases:
     requirements: [live_model]
     prompt: What Universal Credit would a single parent with two children aged 4 and 9 earning £20,000 receive in 2025?
     expected_outcome: ready
-    expected_tool: calculate_household
+    expected_tool: run_household_simulation
 
   - id: gw_ready_schedule_lookup
     suite: gateway
@@ -113,25 +111,24 @@ cases:
 
   - id: gw_ready_parameter_lookup
     suite: gateway
-    description: A static parameter lookup is fully determined and should route to lookup_parameter.
+    description: A static parameter lookup is fully determined and should route to get_parameter.
     requirements: [live_model]
     prompt: What is the basic rate threshold in 2025?
     expected_outcome: ready
-    expected_tool: lookup_parameter
+    expected_tool: get_parameter
     expected_slots:
-      - slot: query
+      - slot: path
         gates: false
       - slot: year
         gates: false
 
   - id: gw_ready_decile_distribution
     suite: gateway
-    description: A fully-specified distributional ask; FRS/EFRS is the correct default
-      (dataset stays settled — confirms dataset is NOT over-promoted for income reforms).
+    description: A fully-specified distributional ask; FRS/EFRS is the correct default (dataset stays settled — confirms dataset is NOT over-promoted for income reforms).
     requirements: [live_model]
     prompt: Show the distributional impact by decile of raising the personal allowance to £15,000.
     expected_outcome: ready
-    expected_tool: run_economy_simulation
+    expected_tool: run_society_simulation
     expected_slots:
       - slot: dataset
         gates: false

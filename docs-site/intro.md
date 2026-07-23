@@ -23,16 +23,16 @@ straight from the run — often with a chart you can read inline.
 | Frontend | Next.js 15 + React 19, Mantine UI, deployed on Vercel |
 | Backend | FastAPI (Python 3.13), served as a Modal ASGI app |
 | Agent | Anthropic Claude models driven through a streaming tool-use loop |
-| Engine | `policyengine-uk-compiled` (the Rust-backed UK tax-benefit model) |
+| Engine | `policyengine.py` with the `policyengine-uk` country package |
 | Gateway | A cheap per-turn pre-pass that classifies and routes each message |
 | Auth & storage | Supabase (auth) + Postgres (conversation history) |
 | Billing | Stripe checkout with per-token cost tracking |
 | Observability | `policyengine-observability` tracing/metrics across the turn |
 
 ```{note}
-The calculation engine is the **compiled** `policyengine-uk-compiled` package
-(Rust-backed), not the pure-Python `policyengine-uk`. Code and reviews that
-assume the pure-Python engine are usually wrong for this repo.
+All household and society calculations use the typed policyengine.py lifecycle.
+Society-wide derivatives delegate to official weighted output classes; the app
+does not aggregate raw microsimulation arrays itself.
 ```
 
 ## Repository layout

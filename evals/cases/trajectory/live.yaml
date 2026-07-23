@@ -8,16 +8,13 @@ cases:
       Calculate an illustrative 2025 household result for a single adult
       earning GBP 30k.
     expected_tools:
-      - name: calculate_household
+      - name: run_household_simulation
         input_contains:
           year: 2025
-          person:
+          people:
             - employment_income: 30000
-          benunit:
-            - benunit_id: 0
-              household_id: 0
-          household:
-            - household_id: 0
+          benunit: {}
+          household: {}
     forbidden_tools:
-      - run_economy_simulation
-      - analyse_microdata
+      - run_society_simulation
+      - aggregate_result

@@ -39,9 +39,8 @@ The conversion is performed by `calculate_cost_gbp(...)`. An unknown model name
 falls back to the default billing model's pricing.
 
 ```{note}
-The large `reference.md` is prompt-cached, which is why the cache-write and
-cache-read rates matter: most of a turn's input tokens are served from cache
-at the much cheaper cache-read rate rather than the full input rate.
+The compute system prompt and tool definitions are prompt-cached. Cache-write
+and cache-read rates therefore remain part of per-turn billing.
 ```
 
 ### Pricing table

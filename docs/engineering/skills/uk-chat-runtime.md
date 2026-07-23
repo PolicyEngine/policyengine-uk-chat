@@ -8,8 +8,8 @@ tools, calculation behavior, or AI-facing runtime boundaries.
 The backend is organized by topic — one package per concern:
 
 - `backend/chat/` owns the chat turn: `orchestrator.py` (request parsing, SSE
-  streaming, the tool loop), `system_blocks.py` (system-block assembly + the
-  reference doc), `model_selection.py`, `schemas.py`, `titles.py`,
+  streaming, the tool loop), `system_blocks.py` (system-block assembly),
+  `model_selection.py`, `schemas.py`, `titles.py`,
   `suggestions.py`, and `routes.py` (the `/chat` router).
 - `backend/gateway/` owns the opening-turn pre-pass: `runtime.py` (the
   forced-tool classifier) and `policy.py` (the deterministic criticality + gate).
@@ -23,11 +23,10 @@ The backend is organized by topic — one package per concern:
   that registry. Reuse shared schema fragments in `definitions.py` rather than
   duplicating object/array/dataset/format shapes.
 - `backend/engine/` owns the deterministic PolicyEngine compute helpers
-  (households, microdata, reforms, simulations, sandbox, serialization);
-  `backend/engine/reference.py` builds the API reference attached to the chat
-  system prompt.
+  (policyengine.py runtime loading, catalog discovery, households, official
+  derivative adapters, reforms, simulations, and serialization).
 - `backend/config/` owns model-call configuration (model ids, temperatures, the
-  Anthropic client factories, the scope-descriptor loader).
+  Anthropic client factories, and environment settings).
 - `backend/api/` owns the HTTP surface (`main.py` app + router mounting,
   `errors.py`, `rate_limit.py`).
 
@@ -50,18 +49,22 @@ belong in `backend/prompts/`.
 Only tools registered with `@register_tool` are exposed to the model and
 dispatched by `execute_tool()`. At present, the exposed tools are:
 
-- `validate_reform`: validate parametric reform JSON without running a
-  simulation.
-- `calculate_household`: calculate illustrative synthetic household outcomes.
-- `run_economy_simulation`: calculate aggregate society-wide impacts for
-  parametric reforms.
-- `analyse_microdata`: analyse allowed non-FRS model microdata through bounded
-  filtering, sampling, grouping, and aggregation operations.
-- `lookup_parameter`: look up baseline model parameter values by exact path or
-  natural-language query.
-- `run_python`: execute reproducible PolicyEngine UK Python code for fallback
-  cases that do not fit the typed tools.
-- `generate_chart`: return frontend-renderable chart JSON markdown.
+- Discovery: `list_datasets`, `list_entities`, `search_variables`,
+  `get_variable`, `search_parameters`, `get_parameter`,
+  `list_reform_targets`, `list_household_input_variables`,
+  `list_society_output_variables`, and `list_supported_outputs`.
+- Validation: `validate_reform` and `validate_household`.
+- Simulation: `run_household_simulation` for illustrative synthetic households
+  and `run_society_simulation` for aggregate society-wide simulations.
+- Derivatives: `compute_budgetary_impact`, `compute_program_breakdown`,
+  `compute_decile_impacts`, `compute_winners_losers`,
+  `compute_poverty_metrics`, `compute_inequality_metrics`, and
+  `aggregate_result`. These tools must delegate aggregation and derivation to
+  policyengine.py output classes; runtime code must not aggregate MicroSeries,
+  NumPy arrays, or survey weights itself.
+- Artifacts: `generate_chart`, including deterministic app-v2-style presets for
+  budget waterfalls, programme waterfalls, decile bars, winners/losers stacks,
+  poverty/inequality relative bars, and earnings lines.
 
 Helper functions in `backend/engine/` are implementation details unless they
 are exposed through `@register_tool`.
@@ -71,23 +74,25 @@ model/eval requests. Mutating those snapshots is only a local per-call edit and
 does not register, remove, or mutate canonical tools. Use `@register_tool` for
 tool registration.
 
-`lookup_parameter` reads year-scoped values from
-`policyengine_uk_compiled.Simulation.get_baseline_params()`.
+The runtime uses policyengine.py with the UK country package. The default year
+is `2026`. Society-wide tools default to `enhanced_frs_2023_24`, resolved
+through policyengine.py's dataset manifest. The standard certified UK dataset
+exposed by policyengine.py is `populace_uk_2023`; keep the mapping in
+`backend/engine/constants.py` documented so the default can be switched if
+needed.
 
-`policyengine-uk-compiled` 0.65.0 is the minimum supported output contract for
-microdata-backed tools. Since 0.45, `Simulation` has no default dataset — every
-construction must pass `dataset=`, `data_dir=`, or synthetic household frames. When reform is omitted, `run_microdata()`,
-`calculate_household`, and `analyse_microdata` outputs use plain calculated
-column names such as `income_tax`, `universal_credit`, and `net_income`. When a
-reform is supplied, including an empty no-op object (`{}`), calculations use
-side-by-side `baseline_*` and `reform_*` comparison columns. Do not normalize
-omitted-reform outputs back to the older prefixed shape.
+The public runtime does not expose row-level survey records or a broad
+model-facing Python execution tool. Use discovery and derivative tools rather
+than asking the model to write arbitrary code.
 
-The default columns for `analyse_microdata` are manually enumerated in
-`backend/engine/microdata.py` because `policyengine-uk-compiled` does not yet
-expose a programmatic way to query output columns or recommended defaults for
-plain versus reform-comparison mode. Replace those lists with upstream metadata
-when it becomes available.
+Before a society simulation uses variable-level outputs, inspect the model
+version's authoritative `entity_variables` defaults through
+`list_society_output_variables`. Verify every required non-default variable
+with `search_variables` or `get_variable`, then pass only those non-default
+names through `extra_variables` under the entity reported by discovery.
+`extra_variables` materializes existing model variables; it does not create
+expressions, aliases, filters, or derived variables. Use `aggregate_result`'s
+official policyengine.py filter arguments for conditional weighted aggregates.
 
 ## Deterministic And Non-Deterministic Segments
 
@@ -95,7 +100,7 @@ when it becomes available.
   prose generation, follow-up suggestions, and title generation.
 - Deterministic: request validation, the gateway gate (criticality + outcome),
   lightweight-route tool omission, tool dispatch, typed tool execution after
-  selection, Python execution, chart JSON construction,
+  selection, derivative calculation, chart JSON construction,
   result truncation/summarisation, billing calculation, and database writes.
 
 The gateway's non-`ready` (lightweight) outcomes must remain structurally
@@ -113,30 +118,21 @@ for follow-up suggestion chips, which deliberately sample with variety.
 
 - Be factually neutral. Do not call UK tax or benefit choices good, bad, fair,
   unfair, regressive, progressive, generous, punitive, or similar.
-- Quantitative policy answers should be computed with the typed calculation
-  tools when they fit the request, or with `run_python` as a fallback; do not
-  answer tax, benefit, reform, poverty, decile, or distributional questions from
-  memory.
-- Static parameter questions should use `lookup_parameter`. Do not run household
-  or economy simulations just to infer a parameter value.
-- If `lookup_parameter` returns `status: "needs_confirmation"`, ask the user to
-  pick one of the returned options before presenting a value. Treat
-  `match_certainty` as deterministic string parsing certainty only, not factual
-  confidence in the policy value. Use
-  `confirmation_reason` to explain whether the parsed query is low-certainty or
-  closely tied between options.
+- Quantitative policy answers should be computed with the lifecycle tools; do
+  not answer tax, benefit, reform, poverty, decile, or distributional questions
+  from memory.
+- Static parameter questions should use `search_parameters` to discover the
+  canonical path, then `get_parameter` to retrieve its value. Do not run
+  household or society simulations just to infer a parameter value.
 - Use `validate_reform` only when the user is drafting, debugging, or asking
   whether reform JSON is valid. Do not use it as a routine preflight before
   every simulation.
 - Do not access, display, quote, or imply access to row-level survey microdata
   or real households.
-- Use aggregate microdata interfaces only for aggregate outputs.
-- Do not use `analyse_microdata` with FRS. For FRS-backed questions, use
-  aggregate outputs such as `run_economy_simulation`.
-- Do not row-sample the Enhanced FRS: the `sample` operation of
-  `analyse_microdata` is unavailable for `efrs` because its rows derive from
-  FRS respondents. Use aggregate operations for `efrs`.
+- Use aggregate simulation and derivative tools only for aggregate outputs.
+- Do not row-sample FRS-derived datasets, including Enhanced FRS.
 - If a user asks for household examples, construct illustrative synthetic
-  households with the public `Simulation` API. Prefer
-  `Simulation.single_person()` for single-person examples, and label examples as
+  households through `run_household_simulation`, and label examples as
   illustrative, synthetic, or hypothetical.
+- The household tool supports one household containing one benefit unit. Do not
+  combine unrelated adults or multiple benefit units into one tool call.

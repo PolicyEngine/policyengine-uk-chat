@@ -81,7 +81,26 @@ export interface ScatterChartSpec {
   showGrid?: boolean;
 }
 
-export type ChartSpec = LineChartSpec | BarChartSpec | AreaChartSpec | ScatterChartSpec;
+export type PresetChartKind =
+  | "budget_waterfall"
+  | "program_budget_waterfall"
+  | "decile_absolute_bar"
+  | "decile_relative_bar"
+  | "winners_losers_stacked_bar"
+  | "poverty_relative_bar"
+  | "inequality_relative_bar"
+  | "earnings_variation_line";
+
+export interface PresetChartSpec {
+  type: "preset";
+  preset: PresetChartKind;
+  title?: string;
+  subtitle?: string;
+  source?: string;
+  data: unknown;
+}
+
+export type ChartSpec = LineChartSpec | BarChartSpec | AreaChartSpec | ScatterChartSpec | PresetChartSpec;
 
 export interface TooltipData {
   x: number;
@@ -92,9 +111,12 @@ export interface TooltipData {
 
 export const CHART_COLORS = {
   series: ["#2C7A7B", "#16a34a", "#d97706", "#9333ea", "#ef4444", "#0891b2", "#f97316", "#6366f1"],
-  positive: "#16a34a",
-  negative: "#dc2626",
+  positive: "#2C7A7B",
+  positiveMuted: "#7fb6b3",
+  negative: "#6b6860",
+  negativeMuted: "#b9b5ad",
   neutral: "#9e9a90",
+  neutralLight: "#e6e4df",
   grid: "#e5e7eb",
   axis: "#9e9a90",
   label: "#6b6860",

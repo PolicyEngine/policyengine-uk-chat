@@ -12,19 +12,23 @@ from config import (
 )
 from prompts import SYSTEM_PROMPT
 
-from chat.system_blocks import REFERENCE_DOC
-
 logger = logging.getLogger(__name__)
 
 
 _REFORM_CAPABLE_TOOLS = {
-    "analyse_microdata",
-    "calculate_household",
-    "run_economy_simulation",
+    "validate_reform",
+    "run_household_simulation",
+    "run_society_simulation",
+    "compute_budgetary_impact",
+    "compute_decile_impacts",
+    "compute_inequality_metrics",
+    "compute_poverty_metrics",
+    "compute_winners_losers",
 }
 
 _DISTRIBUTIONAL_OUTPUTS = {
     "decile_impact",
+    "inequality_impact",
     "marginal_rate",
     "poverty_impact",
     "winners_losers",
@@ -164,7 +168,6 @@ def select_chat_model(
     estimated_input_tokens = (
         _estimate_message_tokens(messages)
         + len(SYSTEM_PROMPT) // 4
-        + len(REFERENCE_DOC) // 4
     )
     if estimated_input_tokens > FAST_MODEL_MAX_INPUT_TOKENS:
         return DEFAULT_COMPLEX_MODEL
