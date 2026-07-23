@@ -10,10 +10,7 @@ from engine.decile_concepts import (
     DecileConcept,
     resolve_decile_concept,
 )
-from engine.decile_grouping import (
-    decile_grouping_metadata,
-    income_decile_grouping,
-)
+from engine.decile_grouping import person_weighted_income_decile
 from engine.simulations import SocietySimulationRun
 
 
@@ -189,7 +186,7 @@ def decile_impacts(
     grouping_context = (
         nullcontext(config.decile_variable)
         if config.decile_variable is not None
-        else income_decile_grouping(
+        else person_weighted_income_decile(
             run.baseline,
             income_variable=config.income_variable,
             entity=config.entity,
@@ -231,9 +228,19 @@ def decile_impacts(
         "decile_concept": concept.value,
         "basis": config.basis,
         "income_variable": config.income_variable,
-        **decile_grouping_metadata(
-            income_variable=config.income_variable,
-            decile_variable=config.decile_variable,
+        "decile_variable": config.decile_variable,
+        "grouping_variable": (
+            config.decile_variable or config.income_variable
+        ),
+        "grouping_method": (
+            "precomputed_variable"
+            if config.decile_variable is not None
+            else "person_weighted_rank"
+        ),
+        "grouping_weight_variables": (
+            []
+            if config.decile_variable is not None
+            else ["household_weight", "household_count_people"]
         ),
         "entity": config.entity,
         "deciles": rows,

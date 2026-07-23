@@ -15,7 +15,7 @@ TEMPORARY_DECILE_VARIABLE = "__uk_chat_person_weighted_income_decile"
 
 
 @contextmanager
-def income_decile_grouping(
+def person_weighted_income_decile(
     baseline_simulation: Any,
     *,
     income_variable: str,
@@ -63,28 +63,3 @@ def income_decile_grouping(
             baseline_data[TEMPORARY_DECILE_VARIABLE] = previous_value
         else:
             del baseline_data[TEMPORARY_DECILE_VARIABLE]
-
-
-def decile_grouping_metadata(
-    *,
-    income_variable: str,
-    decile_variable: str | None,
-) -> dict[str, Any]:
-    """Describe the durable grouping semantics without exposing a temp column."""
-
-    if decile_variable is not None:
-        return {
-            "decile_variable": decile_variable,
-            "grouping_variable": decile_variable,
-            "grouping_method": "precomputed_variable",
-            "grouping_weight_variables": [],
-        }
-    return {
-        "decile_variable": None,
-        "grouping_variable": income_variable,
-        "grouping_method": "person_weighted_rank",
-        "grouping_weight_variables": [
-            "household_weight",
-            "household_count_people",
-        ],
-    }
