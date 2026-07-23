@@ -76,6 +76,13 @@ def test_main_prompt_describes_py_lifecycle_tools():
     assert "wait for the\n  result before running the simulation" in SYSTEM_PROMPT
 
 
+def test_main_prompt_distinguishes_decile_income_concepts():
+    assert "measure household net income and rank households" in SYSTEM_PROMPT
+    assert "pass `equiv_hbai_household_net_income` to measure and rank" in SYSTEM_PROMPT
+    assert "group households by wealth" in SYSTEM_PROMPT
+    assert "do not describe them as income deciles" in SYSTEM_PROMPT
+
+
 def test_public_tools_exclude_removed_public_tools():
     names = {tool["name"] for tool in TOOL_DEFINITIONS}
     assert "run_python" not in names

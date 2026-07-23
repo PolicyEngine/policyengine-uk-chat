@@ -211,13 +211,96 @@ def test_decile_and_winners_losers_use_official_output_rows(monkeypatch):
     )
 
     deciles = derivatives.decile_impacts(_run(), basis="income")
+    default_income_call = decile_calls[0]
+    decile_calls.clear()
+    hbai_deciles = derivatives.decile_impacts(
+        _run(),
+        basis="income",
+        income_concept="equiv_hbai_household_net_income",
+    )
+    hbai_income_call = decile_calls[0]
+    decile_calls.clear()
+    wealth_deciles = derivatives.decile_impacts(_run(), basis="wealth")
+    wealth_call = decile_calls[0]
     winners = derivatives.winners_losers(_run(), basis="wealth")
 
     assert deciles["deciles"][0]["relative_change"] == 10
     assert len(decile_calls) == 10
-    assert decile_calls[0]["baseline_simulation"] == "baseline"
+    assert default_income_call == {
+        "baseline_simulation": "baseline",
+        "reform_simulation": "reform",
+        "decile": 1,
+        "income_variable": "household_net_income",
+        "decile_variable": None,
+        "entity": "household",
+    }
+    assert hbai_income_call == {
+        "baseline_simulation": "baseline",
+        "reform_simulation": "reform",
+        "decile": 1,
+        "income_variable": "equiv_hbai_household_net_income",
+        "decile_variable": None,
+        "entity": "household",
+    }
+    assert wealth_call == {
+        "baseline_simulation": "baseline",
+        "reform_simulation": "reform",
+        "decile": 1,
+        "income_variable": "household_net_income",
+        "decile_variable": "household_wealth_decile",
+        "entity": "household",
+    }
+    assert deciles["income_variable"] == "household_net_income"
+    assert hbai_deciles["income_variable"] == "equiv_hbai_household_net_income"
+    assert wealth_deciles["decile_variable"] == "household_wealth_decile"
+    assert deciles["grouping_variable"] == "household_net_income"
+    assert (
+        hbai_deciles["grouping_variable"]
+        == "equiv_hbai_household_net_income"
+    )
+    assert wealth_deciles["grouping_variable"] == "household_wealth_decile"
     assert winners["deciles"][0]["gain_more_than_5pct"] == 0.2
     assert winners_calls[0]["decile_variable"] == "household_wealth_decile"
+
+    with pytest.raises(ValueError, match="only configurable for income deciles"):
+        derivatives.decile_impacts(
+            _run(),
+            basis="wealth",
+            income_concept="equiv_hbai_household_net_income",
+        )
+
+
+def test_default_deciles_capture_impacts_missing_from_hbai_income(monkeypatch):
+    """Regress the capital-gains-style mismatch between the two concepts."""
+
+    class FakeDecileImpact:
+        def __init__(self, **kwargs):
+            self.decile = kwargs["decile"]
+            self.income_variable = kwargs["income_variable"]
+
+        def run(self):
+            changed = self.income_variable == "household_net_income"
+            self.baseline_mean = 100
+            self.reform_mean = 101 if changed else 100
+            self.absolute_change = 1 if changed else 0
+            self.relative_change = 1 if changed else 0
+            self.count_better_off = 1 if changed else 0
+            self.count_worse_off = 0
+            self.count_no_change = 0 if changed else 1
+
+    _install_policyengine_outputs(
+        monkeypatch,
+        DecileImpact=FakeDecileImpact,
+    )
+
+    default = derivatives.decile_impacts(_run())
+    explicit_hbai = derivatives.decile_impacts(
+        _run(),
+        income_concept="equiv_hbai_household_net_income",
+    )
+
+    assert any(row["absolute_change"] != 0 for row in default["deciles"])
+    assert all(row["absolute_change"] == 0 for row in explicit_hbai["deciles"])
 
 
 def test_poverty_and_inequality_compare_official_outputs(monkeypatch):

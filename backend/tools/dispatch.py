@@ -24,6 +24,7 @@ from tools.definitions import (
     COMPUTE_POVERTY_METRICS_INPUT_SCHEMA,
     COMPUTE_PROGRAM_BREAKDOWN_INPUT_SCHEMA,
     COMPUTE_WINNERS_LOSERS_INPUT_SCHEMA,
+    DECILE_IMPACTS_DESCRIPTION,
     DEFAULT_SIMULATION_YEAR,
     DERIVATIVE_DESCRIPTION,
     DISCOVERY_DESCRIPTION,
@@ -271,13 +272,26 @@ def compute_program_breakdown(
     return _derivative_result(_context, "program_breakdown", summary)
 
 
-@register_tool(name="compute_decile_impacts", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_DECILE_IMPACTS_INPUT_SCHEMA)
-def compute_decile_impacts(simulation_id: str, basis: str = "income", _context: ToolExecutionContext | None = None) -> Dict[str, Any]:
+@register_tool(
+    name="compute_decile_impacts",
+    description=DECILE_IMPACTS_DESCRIPTION,
+    input_schema=COMPUTE_DECILE_IMPACTS_INPUT_SCHEMA,
+)
+def compute_decile_impacts(
+    simulation_id: str,
+    basis: str = "income",
+    income_concept: str = "household_net_income",
+    _context: ToolExecutionContext | None = None,
+) -> Dict[str, Any]:
     payload = _society_payload(_context, simulation_id)
     summary = {
         "status": "success",
         "simulation_id": simulation_id,
-        **derivatives.decile_impacts(payload, basis=basis),
+        **derivatives.decile_impacts(
+            payload,
+            basis=basis,
+            income_concept=income_concept,
+        ),
     }
     return _derivative_result(_context, "decile_impacts", summary)
 

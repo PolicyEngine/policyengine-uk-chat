@@ -71,6 +71,67 @@ def test_simulation_schema_uses_fixed_dataset():
     ).parameters
 
 
+def test_decile_tool_exposes_controlled_income_concepts():
+    tool = _tool("compute_decile_impacts")
+    properties = tool["input_schema"]["properties"]
+
+    assert properties["basis"]["enum"] == ["income", "wealth"]
+    assert properties["income_concept"] == {
+        "type": "string",
+        "enum": [
+            "household_net_income",
+            "equiv_hbai_household_net_income",
+        ],
+        "default": "household_net_income",
+        "description": properties["income_concept"]["description"],
+    }
+    assert "explicitly requests" in properties["income_concept"]["description"]
+    assert "equivalised HBAI net income" in tool["description"]
+    assert "Wealth deciles" in tool["description"]
+
+
+def test_decile_tool_passes_explicit_income_concept_to_derivative(monkeypatch):
+    captured = {}
+
+    def fake_decile_impacts(payload, **kwargs):
+        captured["payload"] = payload
+        captured.update(kwargs)
+        return {
+            "basis": kwargs["basis"],
+            "income_variable": kwargs["income_concept"],
+            "decile_variable": None,
+            "entity": "household",
+            "deciles": [],
+        }
+
+    monkeypatch.setattr(
+        agent_tools.derivatives,
+        "decile_impacts",
+        fake_decile_impacts,
+    )
+    context = new_tool_context("decile-income-concept")
+    payload = object()
+    simulation_id = context.result_store.put(
+        "society_simulation",
+        payload,
+        {},
+    )
+
+    result = agent_tools.compute_decile_impacts(
+        simulation_id,
+        basis="income",
+        income_concept="equiv_hbai_household_net_income",
+        _context=context,
+    )
+
+    assert captured == {
+        "payload": payload,
+        "basis": "income",
+        "income_concept": "equiv_hbai_household_net_income",
+    }
+    assert result["income_variable"] == "equiv_hbai_household_net_income"
+
+
 def test_discovery_tools_are_split_by_catalog_area():
     assert agent_tools.list_supported_outputs()["status"] == "success"
     society_outputs = agent_tools.list_society_output_variables(entity="household")

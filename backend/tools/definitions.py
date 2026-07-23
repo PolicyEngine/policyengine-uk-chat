@@ -171,7 +171,29 @@ COMPUTE_PROGRAM_BREAKDOWN_INPUT_SCHEMA = _object_schema(
 COMPUTE_DECILE_IMPACTS_INPUT_SCHEMA = _object_schema(
     {
         "simulation_id": RESULT_ID_INPUT_SCHEMA,
-        "basis": {"type": "string", "enum": ["income", "wealth"], "default": "income"},
+        "basis": {
+            "type": "string",
+            "enum": ["income", "wealth"],
+            "default": "income",
+            "description": (
+                "Use income deciles unless the user explicitly requests wealth "
+                "deciles."
+            ),
+        },
+        "income_concept": {
+            "type": "string",
+            "enum": [
+                "household_net_income",
+                "equiv_hbai_household_net_income",
+            ],
+            "default": "household_net_income",
+            "description": (
+                "Income measure and ranking variable for income-decile impacts. "
+                "Keep the default `household_net_income` unless the user "
+                "explicitly requests equivalised HBAI net income. Wealth-decile "
+                "impacts always measure `household_net_income` and rank by wealth."
+            ),
+        },
     },
     ["simulation_id"],
 )
@@ -281,6 +303,13 @@ RUN_SOCIETY_SIMULATION_DESCRIPTION = (
 DERIVATIVE_DESCRIPTION = (
     "Compute an official policyengine.py aggregate or derivative output from a prior simulation result handle. "
     "This never returns row-level survey records."
+)
+DECILE_IMPACTS_DESCRIPTION = (
+    "Compute policyengine.py changes in mean income by decile. By default, "
+    "measure household net income and rank households by that income. Only when "
+    "explicitly requested, measure equivalised HBAI net income and rank "
+    "households by that income. Wealth deciles rank households by wealth and "
+    "measure household net income."
 )
 GENERATE_CHART_DESCRIPTION = (
     "Generate frontend-renderable chart markdown. For preset chart kinds, the layout, "

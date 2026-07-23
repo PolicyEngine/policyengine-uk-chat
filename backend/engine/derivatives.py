@@ -9,6 +9,11 @@ from engine.simulations import SocietySimulationRun
 
 AggregateOperation = Literal["sum", "mean", "count"]
 SimulationTarget = Literal["baseline", "reform", "change"]
+DecileBasis = Literal["income", "wealth"]
+DecileIncomeConcept = Literal[
+    "household_net_income",
+    "equiv_hbai_household_net_income",
+]
 
 _TAX_CREDIT_AGGREGATE = "tax_credits"
 _TAX_CREDIT_COMPONENTS = frozenset({"working_tax_credit", "child_tax_credit"})
@@ -169,17 +174,32 @@ def program_breakdown(
 def decile_impacts(
     run: SocietySimulationRun,
     *,
-    basis: Literal["income", "wealth"] = "income",
+    basis: DecileBasis = "income",
+    income_concept: DecileIncomeConcept = "household_net_income",
 ) -> dict[str, Any]:
     """Return official policyengine.py decile-impact rows."""
 
     from policyengine.outputs import DecileImpact
 
-    kwargs: dict[str, Any] = {}
     if basis == "wealth":
+        if income_concept != "household_net_income":
+            raise ValueError(
+                "income_concept is only configurable for income deciles; "
+                "wealth deciles measure household_net_income."
+            )
+        # Keep the wealth grouping and measured income explicit. Changes to
+        # policyengine.py defaults must not silently change UK Chat results.
         kwargs = {
             "income_variable": "household_net_income",
             "decile_variable": "household_wealth_decile",
+            "entity": "household",
+        }
+    else:
+        # Keep the income concept, grouping, and entity explicit. Changes to
+        # policyengine.py defaults must not silently change UK Chat results.
+        kwargs = {
+            "income_variable": income_concept,
+            "decile_variable": None,
             "entity": "household",
         }
     outputs = []
@@ -205,7 +225,16 @@ def decile_impacts(
         }
         for output in outputs
     ]
-    return {"basis": basis, "deciles": rows}
+    return {
+        "basis": basis,
+        "income_variable": kwargs["income_variable"],
+        "decile_variable": kwargs["decile_variable"],
+        "grouping_variable": (
+            kwargs["decile_variable"] or kwargs["income_variable"]
+        ),
+        "entity": kwargs["entity"],
+        "deciles": rows,
+    }
 
 
 def winners_losers(
