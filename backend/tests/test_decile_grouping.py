@@ -8,7 +8,8 @@ from microdf import MicroDataFrame
 
 from engine.decile_grouping import (
     TEMPORARY_DECILE_VARIABLE,
-    person_weighted_income_decile,
+    decile_grouping_metadata,
+    income_decile_grouping,
 )
 
 
@@ -48,7 +49,7 @@ def test_income_deciles_multiply_survey_weights_by_household_size():
         index=[100, 200, 300, 400],
     )
 
-    with person_weighted_income_decile(
+    with income_decile_grouping(
         _simulation(household),
         income_variable="household_net_income",
         entity="household",
@@ -66,7 +67,7 @@ def test_income_deciles_keep_tied_incomes_in_the_same_group():
         [1, 2, 1],
     )
 
-    with person_weighted_income_decile(
+    with income_decile_grouping(
         _simulation(household),
         income_variable="household_net_income",
         entity="household",
@@ -83,7 +84,7 @@ def test_income_decile_grouping_restores_existing_column_after_failure():
     household[TEMPORARY_DECILE_VARIABLE] = [91, 92]
 
     with pytest.raises(RuntimeError, match="output failed"):
-        with person_weighted_income_decile(
+        with income_decile_grouping(
             _simulation(household),
             income_variable="household_net_income",
             entity="household",
@@ -95,9 +96,30 @@ def test_income_decile_grouping_restores_existing_column_after_failure():
 
 def test_person_weighted_deciles_reject_non_household_entities():
     with pytest.raises(ValueError, match="require the household entity"):
-        with person_weighted_income_decile(
+        with income_decile_grouping(
             SimpleNamespace(),
             income_variable="person_net_income",
             entity="person",
         ):
             pass
+
+
+def test_grouping_metadata_hides_temporary_column_name():
+    income_metadata = decile_grouping_metadata(
+        income_variable="household_net_income",
+        decile_variable=None,
+    )
+    wealth_metadata = decile_grouping_metadata(
+        income_variable="household_net_income",
+        decile_variable="household_wealth_decile",
+    )
+
+    assert income_metadata["decile_variable"] is None
+    assert income_metadata["grouping_variable"] == "household_net_income"
+    assert TEMPORARY_DECILE_VARIABLE not in income_metadata.values()
+    assert wealth_metadata == {
+        "decile_variable": "household_wealth_decile",
+        "grouping_variable": "household_wealth_decile",
+        "grouping_method": "precomputed_variable",
+        "grouping_weight_variables": [],
+    }

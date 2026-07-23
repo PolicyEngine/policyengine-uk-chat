@@ -177,7 +177,7 @@ def test_decile_and_winners_losers_use_official_output_rows(monkeypatch):
     winners_calls = []
 
     @contextmanager
-    def fake_person_weighted_income_decile(
+    def fake_income_decile_grouping(
         baseline_simulation,
         *,
         income_variable,
@@ -229,8 +229,8 @@ def test_decile_and_winners_losers_use_official_output_rows(monkeypatch):
     )
     monkeypatch.setattr(
         derivatives,
-        "person_weighted_income_decile",
-        fake_person_weighted_income_decile,
+        "income_decile_grouping",
+        fake_income_decile_grouping,
     )
 
     deciles = derivatives.decile_impacts(_run())
