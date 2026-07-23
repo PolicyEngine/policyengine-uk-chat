@@ -41,6 +41,12 @@ def test_main_prompt_contains_microdata_privacy_rules():
     assert "Do not combine unrelated adults" in SYSTEM_PROMPT
 
 
+def test_main_prompt_describes_household_country_ids():
+    for country_id in ("ENGLAND", "NORTHERN_IRELAND", "SCOTLAND", "WALES"):
+        assert f"`{country_id}`" in SYSTEM_PROMPT
+    assert "do not use ONS codes such as `E92000001`" in SYSTEM_PROMPT
+
+
 def test_main_prompt_describes_py_lifecycle_tools():
     assert f"default simulation year is {DEFAULT_SIMULATION_YEAR}" in SYSTEM_PROMPT
     assert DEFAULT_UK_DATASET in SYSTEM_PROMPT
