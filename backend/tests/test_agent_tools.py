@@ -89,7 +89,6 @@ def test_decile_tool_exposes_three_state_concept():
     assert "Select exactly one" in properties["decile_concept"]["description"]
     assert "explicitly requests" in properties["decile_concept"]["description"]
     assert "equivalised HBAI net income" in tool["description"]
-    assert "Income-decile groups are person-weighted" in tool["description"]
     assert "Wealth deciles" in tool["description"]
 
 

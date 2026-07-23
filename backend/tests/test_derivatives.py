@@ -1,7 +1,6 @@
 """Tests that society derivatives delegate to policyengine.py outputs."""
 
 import sys
-from contextlib import contextmanager
 from types import ModuleType, SimpleNamespace
 
 import pytest
@@ -173,24 +172,7 @@ def test_program_breakdown_uses_non_overlapping_default_rows(monkeypatch):
 
 def test_decile_and_winners_losers_use_official_output_rows(monkeypatch):
     decile_calls = []
-    grouping_calls = []
     winners_calls = []
-
-    @contextmanager
-    def fake_person_weighted_income_decile(
-        baseline_simulation,
-        *,
-        income_variable,
-        entity,
-    ):
-        grouping_calls.append(
-            {
-                "baseline_simulation": baseline_simulation,
-                "income_variable": income_variable,
-                "entity": entity,
-            }
-        )
-        yield "__test_person_weighted_decile"
 
     class FakeDecileImpact:
         def __init__(self, **kwargs):
@@ -227,11 +209,6 @@ def test_decile_and_winners_losers_use_official_output_rows(monkeypatch):
         DecileImpact=FakeDecileImpact,
         compute_intra_decile_impacts=compute_intra_decile_impacts,
     )
-    monkeypatch.setattr(
-        derivatives,
-        "person_weighted_income_decile",
-        fake_person_weighted_income_decile,
-    )
 
     deciles = derivatives.decile_impacts(_run())
     default_income_call = decile_calls[0]
@@ -256,7 +233,7 @@ def test_decile_and_winners_losers_use_official_output_rows(monkeypatch):
         "reform_simulation": "reform",
         "decile": 1,
         "income_variable": "household_net_income",
-        "decile_variable": "__test_person_weighted_decile",
+        "decile_variable": None,
         "entity": "household",
     }
     assert hbai_income_call == {
@@ -264,7 +241,7 @@ def test_decile_and_winners_losers_use_official_output_rows(monkeypatch):
         "reform_simulation": "reform",
         "decile": 1,
         "income_variable": "equiv_hbai_household_net_income",
-        "decile_variable": "__test_person_weighted_decile",
+        "decile_variable": None,
         "entity": "household",
     }
     assert wealth_call == {
@@ -281,18 +258,6 @@ def test_decile_and_winners_losers_use_official_output_rows(monkeypatch):
     assert deciles["basis"] == "income"
     assert hbai_deciles["basis"] == "income"
     assert wealth_deciles["basis"] == "wealth"
-    assert deciles["grouping_method"] == "person_weighted_rank"
-    assert hbai_deciles["grouping_method"] == "person_weighted_rank"
-    assert wealth_deciles["grouping_method"] == "precomputed_variable"
-    assert deciles["grouping_weight_variables"] == [
-        "household_weight",
-        "household_count_people",
-    ]
-    assert hbai_deciles["grouping_weight_variables"] == [
-        "household_weight",
-        "household_count_people",
-    ]
-    assert wealth_deciles["grouping_weight_variables"] == []
     assert deciles["income_variable"] == "household_net_income"
     assert hbai_deciles["income_variable"] == "equiv_hbai_household_net_income"
     assert wealth_deciles["decile_variable"] == "household_wealth_decile"
@@ -304,18 +269,6 @@ def test_decile_and_winners_losers_use_official_output_rows(monkeypatch):
     assert wealth_deciles["grouping_variable"] == "household_wealth_decile"
     assert winners["deciles"][0]["gain_more_than_5pct"] == 0.2
     assert winners_calls[0]["decile_variable"] == "household_wealth_decile"
-    assert grouping_calls == [
-        {
-            "baseline_simulation": "baseline",
-            "income_variable": "household_net_income",
-            "entity": "household",
-        },
-        {
-            "baseline_simulation": "baseline",
-            "income_variable": "equiv_hbai_household_net_income",
-            "entity": "household",
-        },
-    ]
 
     with pytest.raises(
         ValueError,

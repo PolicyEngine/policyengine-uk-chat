@@ -4,7 +4,6 @@ sqlmodel
 psycopg2-binary
 anthropic
 policyengine[uk]==4.21.1
-microdf-python>=1.3.0
 pandas
 pyyaml
 httpx
