@@ -20,10 +20,10 @@ are run in memory rather than persisted into policyengine.py's process cache.
 
 ## Datasets
 
-UK Chat defaults to `enhanced_frs_2023_24`. The logical name is resolved to the
-URI certified by the installed policyengine.py release manifest. This preserves
-the app's Enhanced FRS workflow while using policyengine.py provenance and
-materialization.
+UK Chat defaults to `enhanced_frs_2024_25`. The logical name maps to the pinned
+PolicyEngine UK data release in `backend/engine/constants.py`, with
+`POLICYENGINE_UK_DEFAULT_DATASET` available as a deployment override. The
+resolved URI is then materialized through policyengine.py.
 
 The standard policyengine.py UK default is `populace_uk_2023`; the constant and
 discovery metadata retain that option so the chat default can be switched to the

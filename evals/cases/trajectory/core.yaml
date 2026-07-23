@@ -48,7 +48,7 @@ cases:
         - name: run_society_simulation
           input:
             year: 2025
-            dataset: enhanced_frs_2023_24
+            dataset: enhanced_frs_2024_25
             reform:
               gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
@@ -575,7 +575,7 @@ cases:
       - name: run_society_simulation
         input_contains:
           year: 2026
-          dataset: enhanced_frs_2023_24
+          dataset: enhanced_frs_2024_25
     forbidden_tools:
       - generate_chart
       - aggregate_result
@@ -584,7 +584,7 @@ cases:
         - name: run_society_simulation
           input:
             year: 2026
-            dataset: enhanced_frs_2023_24
+            dataset: enhanced_frs_2024_25
 
   - id: trajectory_society_custom_output_discovers_variable_first
     suite: trajectory
@@ -625,7 +625,7 @@ cases:
       - name: run_society_simulation
         input_contains:
           year: 2026
-          dataset: enhanced_frs_2023_24
+          dataset: enhanced_frs_2024_25
           extra_variables:
             benunit: [benunit_count_children]
     forbidden_tools:
@@ -637,7 +637,7 @@ cases:
         - name: run_society_simulation
           input:
             year: 2026
-            dataset: enhanced_frs_2023_24
+            dataset: enhanced_frs_2024_25
             extra_variables:
               benunit: [benunit_count_children]
 
@@ -707,7 +707,7 @@ cases:
       - name: run_society_simulation
         input_contains:
           year: 2025
-          dataset: enhanced_frs_2023_24
+          dataset: enhanced_frs_2024_25
           reform:
             gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     forbidden_tools:
@@ -719,7 +719,7 @@ cases:
         - name: run_society_simulation
           input:
             year: 2025
-            dataset: enhanced_frs_2023_24
+            dataset: enhanced_frs_2024_25
             reform:
               gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
@@ -734,7 +734,7 @@ cases:
       - name: run_society_simulation
         input_contains:
           year: 2025
-          dataset: enhanced_frs_2023_24
+          dataset: enhanced_frs_2024_25
           reform:
             gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     forbidden_tools:
@@ -746,7 +746,7 @@ cases:
         - name: run_society_simulation
           input:
             year: 2025
-            dataset: enhanced_frs_2023_24
+            dataset: enhanced_frs_2024_25
             reform:
               gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
@@ -761,7 +761,7 @@ cases:
       - name: run_society_simulation
         input_contains:
           year: 2025
-          dataset: enhanced_frs_2023_24
+          dataset: enhanced_frs_2024_25
           reform:
             gov.hmrc.child_benefit.amount.eldest: 30
     forbidden_tools:
@@ -773,7 +773,7 @@ cases:
         - name: run_society_simulation
           input:
             year: 2025
-            dataset: enhanced_frs_2023_24
+            dataset: enhanced_frs_2024_25
             reform:
               gov.hmrc.child_benefit.amount.eldest: 30
 
@@ -812,7 +812,7 @@ cases:
       - name: run_society_simulation
         input_contains:
           year: 2025
-          dataset: enhanced_frs_2023_24
+          dataset: enhanced_frs_2024_25
           reform:
             gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     forbidden_tools:
@@ -825,7 +825,7 @@ cases:
         - name: run_society_simulation
           input:
             year: 2025
-            dataset: enhanced_frs_2023_24
+            dataset: enhanced_frs_2024_25
             reform:
               gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 
@@ -840,7 +840,7 @@ cases:
       - name: run_society_simulation
         input_contains:
           year: 2025
-          dataset: enhanced_frs_2023_24
+          dataset: enhanced_frs_2024_25
           reform:
             gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     forbidden_tools:
@@ -852,7 +852,7 @@ cases:
         - name: run_society_simulation
           input:
             year: 2025
-            dataset: enhanced_frs_2023_24
+            dataset: enhanced_frs_2024_25
             reform:
               gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
 

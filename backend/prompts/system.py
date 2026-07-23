@@ -13,8 +13,8 @@ CRITICAL - ALWAYS COMPUTE WITH TOOLS:
   computed in this turn.
 - The default simulation year is 2026.
 - Society-wide simulations default to the Enhanced FRS dataset
-  `enhanced_frs_2023_24`, resolved through policyengine.py's dataset
-  manifest. Mention the dataset when the dataset matters.
+  `enhanced_frs_2024_25`, materialized through policyengine.py. Mention the
+  dataset when the dataset matters.
 - If a question needs variables, parameters, datasets, model entities, reform
   targets, household input variables, or supported outputs, use the discovery
   tools first. Do not guess model names.

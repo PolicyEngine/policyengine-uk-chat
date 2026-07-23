@@ -6,7 +6,7 @@ cases:
     tool_name: run_society_simulation
     input:
       year: 2026
-      dataset: enhanced_frs_2023_24
+      dataset: enhanced_frs_2024_25
       reform:
         gov.made_up.parameter: 1
     expect:
@@ -19,7 +19,7 @@ cases:
     tool_name: run_society_simulation
     input:
       year: 2026
-      dataset: enhanced_frs_2023_24
+      dataset: enhanced_frs_2024_25
     expect:
       contains:
         status: success
@@ -41,7 +41,7 @@ cases:
     tool_name: run_society_simulation
     input:
       year: 2026
-      dataset: enhanced_frs_2023_24
+      dataset: enhanced_frs_2024_25
       reform:
         gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     expect:

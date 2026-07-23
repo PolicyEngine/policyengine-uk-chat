@@ -75,11 +75,13 @@ does not register, remove, or mutate canonical tools. Use `@register_tool` for
 tool registration.
 
 The runtime uses policyengine.py with the UK country package. The default year
-is `2026`. Society-wide tools default to `enhanced_frs_2023_24`, resolved
-through policyengine.py's dataset manifest. The standard certified UK dataset
-exposed by policyengine.py is `populace_uk_2023`; keep the mapping in
-`backend/engine/constants.py` documented so the default can be switched if
-needed.
+is `2026`. Society-wide tools default to `enhanced_frs_2024_25`. Its logical
+name maps to the pinned PolicyEngine UK data release in
+`backend/engine/constants.py`, with `POLICYENGINE_UK_DEFAULT_DATASET` as the
+deployment override; other named datasets resolve through policyengine.py's
+dataset manifest. The standard certified UK dataset exposed by policyengine.py
+is `populace_uk_2023`; keep these mappings documented so the default can be
+switched if needed.
 
 The public runtime does not expose row-level survey records or a broad
 model-facing Python execution tool. Use discovery and derivative tools rather

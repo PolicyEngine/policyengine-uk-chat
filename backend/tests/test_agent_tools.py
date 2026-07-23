@@ -6,7 +6,11 @@ import tools.dispatch as agent_tools
 from conftest import requires_policyengine_py
 from engine import households as household_engine
 from engine import simulations as simulation_engine
-from engine.constants import DEFAULT_UK_DATASET, STANDARD_POLICYENGINE_UK_DATASET
+from engine.constants import (
+    DEFAULT_UK_DATASET,
+    DEFAULT_UK_DATASET_URI,
+    STANDARD_POLICYENGINE_UK_DATASET,
+)
 from engine.py_runtime import DatasetSpec
 from engine.simulations import SocietySimulationRun
 from tools.context import new_tool_context
@@ -52,7 +56,10 @@ def test_tool_inventory_matches_py_lifecycle():
 
 def test_default_year_and_dataset_are_py_migration_defaults():
     assert DEFAULT_SIMULATION_YEAR == 2026
-    assert DEFAULT_UK_DATASET == "enhanced_frs_2023_24"
+    assert DEFAULT_UK_DATASET == "enhanced_frs_2024_25"
+    assert DEFAULT_UK_DATASET_URI.endswith(
+        "/enhanced_frs_2024_25.h5@1.56.13"
+    )
     assert STANDARD_POLICYENGINE_UK_DATASET == "populace_uk_2023"
     society_schema = _tool("run_society_simulation")["input_schema"]
     assert society_schema["properties"]["year"]["default"] == 2026
@@ -113,8 +120,8 @@ def test_run_household_simulation_passes_policyengine_py_shape_unchanged(monkeyp
 def test_society_simulation_result_handle_feeds_derivative_and_chart_tools(monkeypatch):
     dataset = DatasetSpec(
         name=DEFAULT_UK_DATASET,
-        label="Enhanced FRS",
-        uri="hf://policyengine/uk/enhanced_frs_2023_24",
+        label="Enhanced FRS 2024-25",
+        uri="hf://policyengine/uk/enhanced_frs_2024_25",
         is_default=True,
         is_policyengine_standard_default=False,
         row_level_access=False,
@@ -166,7 +173,7 @@ def test_society_simulation_passes_extra_variables(monkeypatch):
             year=kwargs["year"],
             dataset=DatasetSpec(
                 name=DEFAULT_UK_DATASET,
-                label="Enhanced FRS",
+                label="Enhanced FRS 2024-25",
                 uri="hf://example",
                 is_default=True,
                 is_policyengine_standard_default=False,
@@ -192,7 +199,7 @@ def test_society_simulation_normalizes_unset_reform_values(monkeypatch):
     captured = {}
     dataset = DatasetSpec(
         name=DEFAULT_UK_DATASET,
-        label="Enhanced FRS",
+        label="Enhanced FRS 2024-25",
         uri="hf://example",
         is_default=True,
         is_policyengine_standard_default=False,

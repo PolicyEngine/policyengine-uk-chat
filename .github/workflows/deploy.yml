@@ -132,7 +132,7 @@ jobs:
             ANTHROPIC_DEFAULT_MODEL="claude-haiku-4-5" \
             POLICYENGINE_UK_DATA_TOKEN="$POLICYENGINE_UK_DATA_TOKEN" \
             HUGGING_FACE_TOKEN="$HUGGING_FACE_TOKEN" \
-            POLICYENGINE_UK_DEFAULT_DATASET="hf://policyengine/policyengine-uk-data-private/enhanced_frs_2023_24.h5" \
+            POLICYENGINE_UK_DEFAULT_DATASET="hf://policyengine/policyengine-uk-data-private/enhanced_frs_2024_25.h5@1.56.13" \
             DATABASE_URL="$DATABASE_URL" \
             SUPABASE_URL="$SUPABASE_URL" \
             SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \

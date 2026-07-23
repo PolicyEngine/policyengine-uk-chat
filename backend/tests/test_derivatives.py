@@ -12,7 +12,7 @@ from engine.simulations import SocietySimulationRun
 def _run() -> SocietySimulationRun:
     return SocietySimulationRun(
         year=2026,
-        dataset=SimpleNamespace(name="enhanced_frs_2023_24"),
+        dataset=SimpleNamespace(name="enhanced_frs_2024_25"),
         reform_applied=True,
         reform={"gov.example": 1},
         baseline="baseline",

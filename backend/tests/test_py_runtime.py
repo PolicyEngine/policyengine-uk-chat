@@ -4,6 +4,83 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 from engine import py_runtime
+from engine.constants import (
+    DEFAULT_UK_DATASET,
+    DEFAULT_UK_DATASET_URI,
+    is_row_level_restricted_dataset,
+)
+
+
+def test_default_dataset_resolves_pinned_release_reference(monkeypatch):
+    calls = []
+
+    def fake_resolve(country, reference):
+        calls.append((country, reference))
+        return reference
+
+    monkeypatch.delenv("POLICYENGINE_UK_DEFAULT_DATASET", raising=False)
+    monkeypatch.setattr(py_runtime, "_manifest_module", lambda: fake_resolve)
+    py_runtime.resolve_dataset.cache_clear()
+    try:
+        spec = py_runtime.resolve_dataset()
+    finally:
+        py_runtime.resolve_dataset.cache_clear()
+
+    assert calls == [("uk", DEFAULT_UK_DATASET_URI)]
+    assert spec.name == DEFAULT_UK_DATASET
+    assert spec.uri == DEFAULT_UK_DATASET_URI
+    assert spec.row_level_access is False
+
+
+def test_default_dataset_honours_deployment_override(monkeypatch):
+    override = "hf://policyengine/example/default.h5@release"
+    calls = []
+
+    monkeypatch.setenv("POLICYENGINE_UK_DEFAULT_DATASET", override)
+    monkeypatch.setattr(
+        py_runtime,
+        "_manifest_module",
+        lambda: lambda country, reference: calls.append((country, reference))
+        or reference,
+    )
+    py_runtime.resolve_dataset.cache_clear()
+    try:
+        spec = py_runtime.resolve_dataset()
+    finally:
+        py_runtime.resolve_dataset.cache_clear()
+
+    assert calls == [("uk", override)]
+    assert spec.uri == override
+
+
+def test_managed_dataset_materializes_resolved_reference(monkeypatch):
+    calls = []
+    spec = py_runtime.DatasetSpec(
+        name=DEFAULT_UK_DATASET,
+        label="Enhanced FRS 2024-25",
+        uri=DEFAULT_UK_DATASET_URI,
+        is_default=True,
+        is_policyengine_standard_default=False,
+        row_level_access=False,
+    )
+
+    monkeypatch.setattr(py_runtime, "resolve_dataset", lambda _name: spec)
+    monkeypatch.setattr(
+        py_runtime,
+        "_managed_dataset",
+        lambda reference, year, folder: calls.append((reference, year, folder))
+        or "dataset",
+    )
+
+    assert py_runtime.managed_dataset(year=2026) == "dataset"
+    assert calls == [
+        (DEFAULT_UK_DATASET_URI, 2026, "/tmp/policyengine-uk-chat-data")
+    ]
+
+
+def test_all_enhanced_frs_vintages_are_row_level_restricted():
+    assert is_row_level_restricted_dataset("enhanced_frs_2023_24")
+    assert is_row_level_restricted_dataset(DEFAULT_UK_DATASET)
 
 
 def test_managed_simulation_pair_uses_high_level_simulation(monkeypatch):
@@ -52,7 +129,7 @@ def test_managed_simulation_pair_uses_high_level_simulation(monkeypatch):
 
     baseline, reform = py_runtime.managed_simulation_pair(
         year=2026,
-        dataset="enhanced_frs_2023_24",
+        dataset="enhanced_frs_2024_25",
         reform={"gov.example": 1},
         extra_variables={"household": ["rent"]},
     )
@@ -70,7 +147,7 @@ def test_managed_simulation_pair_uses_high_level_simulation(monkeypatch):
 
     baseline_only, empty_reform = py_runtime.managed_simulation_pair(
         year=2026,
-        dataset="enhanced_frs_2023_24",
+        dataset="enhanced_frs_2024_25",
         reform={"gov.example": None},
     )
 
