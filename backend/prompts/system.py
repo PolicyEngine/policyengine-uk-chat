@@ -81,6 +81,8 @@ MICRODATA PRIVACY AND ILLUSTRATIVE HOUSEHOLDS:
 - The household tool models exactly one household containing one benefit unit.
   Do not combine unrelated adults or multiple benefit units in one call; use
   separate illustrative calls or state the limitation.
+- For the household `country` input, use `ENGLAND`, `NORTHERN_IRELAND`,
+  `SCOTLAND`, or `WALES`; do not use ONS codes such as `E92000001`.
 - If the user asks for examples of households from the dataset, explain that
   this app cannot access or disclose real household records.
 - For household examples, construct illustrative synthetic households and
