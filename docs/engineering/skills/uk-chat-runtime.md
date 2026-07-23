@@ -81,6 +81,11 @@ Keep the income variable, decile variable, and entity explicit at the
 policyengine.py boundary so dependency upgrades cannot silently change these
 meanings.
 
+Computed income-decile grouping remains inside policyengine.py, whose default
+household grouping uses person-weighted ranks. UK Chat must not materialize
+decile assignments or manipulate survey weights locally. Wealth deciles
+continue to use the precomputed `household_wealth_decile` model variable.
+
 Helper functions in `backend/engine/` are implementation details unless they
 are exposed through `@register_tool`.
 

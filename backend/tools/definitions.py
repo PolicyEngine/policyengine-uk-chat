@@ -300,7 +300,8 @@ DERIVATIVE_DESCRIPTION = (
 DECILE_IMPACTS_DESCRIPTION = (
     "Compute policyengine.py changes in mean income for exactly one of three "
     "decile concepts. Household net income is the default; equivalised HBAI net "
-    "income is used only when explicitly requested. Wealth deciles rank "
+    "income is used only when explicitly requested. Computed household income "
+    "groups use policyengine.py's person-weighted ranks. Wealth deciles rank "
     "households by wealth and measure household net income."
 )
 GENERATE_CHART_DESCRIPTION = (
