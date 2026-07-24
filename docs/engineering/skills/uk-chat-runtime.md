@@ -55,7 +55,14 @@ dispatched by `execute_tool()`. At present, the exposed tools are:
   `list_society_output_variables`, and `list_supported_outputs`.
 - Validation: `validate_reform` and `validate_household`.
 - Simulation: `run_household_simulation` for illustrative synthetic households
-  and `run_society_simulation` for aggregate society-wide simulations.
+  at one input point, `run_axes_simulation` for one numeric household input
+  sweep, and `run_society_simulation` for aggregate society-wide simulations.
+- Axes retrieval: `get_axes_series` consumes a turn-local axes `simulation_id`
+  and returns one complete selected output as parallel `x` and `y` arrays. A
+  run accepts one axis with 2–401 points and 1–5 numeric outputs. Retrieval has
+  no pagination; request baseline and reform series separately. The stored
+  multi-output run stays outside model context, while the retrieved series
+  enters it. Axes handles are not chart inputs.
 - Derivatives: `compute_budgetary_impact`, `compute_program_breakdown`,
   `compute_decile_impacts`, `compute_winners_losers`,
   `compute_poverty_metrics`, `compute_inequality_metrics`, and
@@ -132,7 +139,7 @@ for follow-up suggestion chips, which deliberately sample with variety.
 - Use aggregate simulation and derivative tools only for aggregate outputs.
 - Do not row-sample FRS-derived datasets, including Enhanced FRS.
 - If a user asks for household examples, construct illustrative synthetic
-  households through `run_household_simulation`, and label examples as
-  illustrative, synthetic, or hypothetical.
+  households through `run_household_simulation` or `run_axes_simulation`, and
+  label examples as illustrative, synthetic, or hypothetical.
 - The household tool supports one household containing one benefit unit. Do not
   combine unrelated adults or multiple benefit units into one tool call.

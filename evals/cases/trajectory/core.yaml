@@ -564,6 +564,47 @@ cases:
               - age: 30
                 employment_income: 60000
 
+  - id: trajectory_household_earnings_axis
+    suite: trajectory
+    description: A verified numeric household range should start a standalone axes simulation.
+    prompt: >
+      The household variables employment_income and household_net_income have
+      already been verified. For an illustrative single 30-year-old in 2026,
+      calculate household net income at five evenly spaced employment income
+      levels from GBP 0 to GBP 100,000.
+    expected_tools:
+      - name: run_axes_simulation
+        input_contains:
+          year: 2026
+          axis:
+            name: employment_income
+            min: 0
+            max: 100000
+            count: 5
+          outputs: [household_net_income]
+        required_input_paths:
+          - people
+    forbidden_tools:
+      - run_household_simulation
+      - run_society_simulation
+      - generate_chart
+      - get_axes_series
+    offline_response:
+      tool_calls:
+        - name: run_axes_simulation
+          input:
+            year: 2026
+            people:
+              - age: 30
+            benunit: {}
+            household: {}
+            axis:
+              name: employment_income
+              min: 0
+              max: 100000
+              count: 5
+            outputs: [household_net_income]
+
   - id: trajectory_weighted_aggregate_starts_society_simulation
     suite: trajectory
     description: A weighted aggregate request must first create a society simulation handle.

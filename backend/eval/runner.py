@@ -233,10 +233,52 @@ def _tool_use_id(case: ToolLoopCase, iteration: int, index: int, call_id: str) -
     return call_id or f"{case.id}-{iteration}-{index}"
 
 
+def _resolve_offline_tool_input(
+    value: Any,
+    tool_outputs: Dict[str, Dict[str, Any]],
+) -> Any:
+    """Resolve deterministic references to prior tool-loop outputs."""
+
+    if isinstance(value, dict):
+        return {
+            key: _resolve_offline_tool_input(item, tool_outputs)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _resolve_offline_tool_input(item, tool_outputs)
+            for item in value
+        ]
+    if not isinstance(value, str) or not value.startswith("$tool_result."):
+        return value
+
+    reference = value.removeprefix("$tool_result.")
+    tool_name, separator, path = reference.partition(".")
+    if not separator or not tool_name or not path:
+        raise ValueError(
+            "Offline tool-result references must use "
+            "'$tool_result.<tool_name>.<field>'."
+        )
+    if tool_name not in tool_outputs:
+        raise ValueError(
+            f"Offline tool-result reference has no prior output for {tool_name!r}."
+        )
+
+    resolved: Any = tool_outputs[tool_name]
+    for field in path.split("."):
+        if not isinstance(resolved, dict) or field not in resolved:
+            raise ValueError(
+                f"Offline tool-result reference {value!r} was not found."
+            )
+        resolved = resolved[field]
+    return resolved
+
+
 def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
     messages: List[Dict[str, Any]] = _messages_for_case(case)
     tool_context = new_tool_context(turn_id=case.id)
     tool_calls = []
+    tool_outputs: Dict[str, Dict[str, Any]] = {}
     final_text = ""
     errors: List[str] = []
 
@@ -261,18 +303,29 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
             assistant_content.append({"type": "text", "text": turn.text})
 
         tool_results: List[Dict[str, Any]] = []
+        prior_tool_outputs = dict(tool_outputs)
         for index, call in enumerate(turn.tool_calls, start=1):
-            tool_calls.append(call)
+            try:
+                tool_input = (
+                    _resolve_offline_tool_input(call.input, prior_tool_outputs)
+                    if isinstance(client, FakeModelClient)
+                    else call.input
+                )
+            except ValueError as exc:
+                return _result(case, "failed", 0.0, [str(exc)])
+            resolved_call = call.model_copy(update={"input": tool_input})
+            tool_calls.append(resolved_call)
             tool_use_id = _tool_use_id(case, iteration, index, call.id)
             assistant_content.append(
                 {
                     "type": "tool_use",
                     "id": tool_use_id,
                     "name": call.name,
-                    "input": call.input,
+                    "input": tool_input,
                 }
             )
-            output = execute_tool(call.name, call.input, context=tool_context)
+            output = execute_tool(call.name, tool_input, context=tool_context)
+            tool_outputs[call.name] = output
             tool_results.append(
                 {
                     "type": "tool_result",

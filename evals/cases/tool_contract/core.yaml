@@ -99,6 +99,41 @@ cases:
         - baseline
         - reform
 
+  - id: run_axes_simulation_returns_handle_not_series
+    suite: tool_contract
+    description: run_axes_simulation retains selected series behind a turn-local handle.
+    requirements: [policyengine_py]
+    tool_name: run_axes_simulation
+    input:
+      year: 2026
+      people:
+        - age: 30
+      benunit: {}
+      household: {}
+      axis:
+        name: employment_income
+        min: 0
+        max: 100000
+        count: 3
+      outputs: [household_net_income]
+    expect:
+      contains:
+        status: success
+        year: 2026
+        point_count: 3
+        targets: [baseline]
+        axis:
+          name: employment_income
+          index: 0
+          count: 3
+      required_paths:
+        - simulation_id
+        - outputs.0.name
+      absent_paths:
+        - household_input
+        - x
+        - y
+
   - id: economy_simulation_smoke
     suite: tool_contract
     description: run_society_simulation returns metadata and a derivative handle.

@@ -154,6 +154,67 @@ cases:
           The illustrative 2025 calculation completed and reports household
           net income, income tax, and National Insurance from PolicyEngine.
 
+  - id: tool_loop_axes_simulation_to_complete_series
+    suite: tool_loop
+    description: An axes handle should feed complete-series retrieval and a grounded answer.
+    requirements: [policyengine_py]
+    prompt: >
+      The variables employment_income and household_net_income are verified.
+      For an illustrative single 30-year-old in 2026, calculate household net
+      income at five evenly spaced employment income levels from GBP 0 to
+      GBP 100,000.
+    expected_tools:
+      - name: run_axes_simulation
+        input_contains:
+          year: 2026
+          axis:
+            name: employment_income
+            min: 0
+            max: 100000
+            count: 5
+          outputs: [household_net_income]
+      - name: get_axes_series
+        input_contains:
+          variable: household_net_income
+          target: baseline
+    forbidden_tools:
+      - run_household_simulation
+      - run_society_simulation
+      - generate_chart
+    expect:
+      required:
+        - illustrative
+        - complete
+        - household net income
+      forbidden:
+        - actual household
+        - chart
+      grounded_numbers: false
+    offline_responses:
+      - tool_calls:
+          - name: run_axes_simulation
+            input:
+              year: 2026
+              people:
+                - age: 30
+              benunit: {}
+              household: {}
+              axis:
+                name: employment_income
+                min: 0
+                max: 100000
+                count: 5
+              outputs: [household_net_income]
+      - tool_calls:
+          - name: get_axes_series
+            input:
+              simulation_id: $tool_result.run_axes_simulation.simulation_id
+              variable: household_net_income
+              target: baseline
+      - text: >
+          The complete illustrative household net income series was retrieved
+          from PolicyEngine.
+
   - id: tool_loop_validate_reform_then_household
     suite: tool_loop
     description: Explicit reform validation can precede household calculation and final answer.

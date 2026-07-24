@@ -45,6 +45,9 @@ Reforms use flat policyengine.py parameter paths, for example:
 `backend/engine/reforms.py` validates and compiles these reforms through the
 policyengine.py reform API. `backend/engine/households.py` validates synthetic
 household inputs and calls the managed UK household calculator.
+`backend/engine/axes.py` runs one numeric household sweep and retains only the
+requested numeric outputs. It reads the actual axis coordinates from the
+calculator result rather than rebuilding the grid independently.
 
 ## Society outputs
 

@@ -11,8 +11,10 @@ Society-wide analysis is a multi-step lifecycle:
 1. Discover datasets, entities, variables, parameters, reform targets, household
    inputs, or supported outputs.
 2. Validate the reform or synthetic household.
-3. Run a household simulation or create a society simulation handle.
-4. Pass the society handle to a derivative tool.
+3. Run a household simulation, create an axes handle, or create a society
+   simulation handle.
+4. Retrieve one complete axes series, or pass the society handle to a
+   derivative tool.
 5. Pass a derivative result handle to a deterministic preset chart.
 
 `ToolExecutionContext` owns the result store for one chat turn. Handles are
@@ -43,12 +45,44 @@ for only the metadata it needs.
 | `validate_reform` | Validate a flat policyengine.py parameter-path reform. |
 | `validate_household` | Validate synthetic household structure, variables, and reform. |
 | `run_household_simulation` | Run baseline and reform values for one synthetic household. |
+| `run_axes_simulation` | Run one numeric synthetic-household sweep and return a turn-local handle. |
+| `get_axes_series` | Retrieve every point for one selected axes output and target. |
 | `run_society_simulation` | Materialize baseline and reform simulations and return metadata plus a handle. |
 
 `run_society_simulation` does not eagerly calculate fiscal, poverty, decile, or
 inequality results. Its `result_id` is consumed by the derivative tools below.
 `run_household_simulation` models one household containing one benefit unit;
 multiple benefit units or unrelated households require separate calls.
+
+`run_axes_simulation` accepts one verified numeric axis with 2–401 points and
+1–5 verified numeric outputs. It returns metadata and a turn-local
+`simulation_id`, not the full calculation. `get_axes_series` then retrieves one
+baseline or reform output with no pagination. An abbreviated response is:
+
+```json
+{
+  "household_input": {
+    "people": [{"age": 30}],
+    "benunit": {},
+    "household": {},
+    "year": 2026
+  },
+  "axis": {"name": "employment_income", "index": 0},
+  "series": {
+    "name": "household_net_income",
+    "index": 0,
+    "target": "baseline"
+  },
+  "x": [0, 100000],
+  "y": [4939.75, 68398.35]
+}
+```
+
+Parallel arrays keep a complete 401-point series within the model tool-result
+limit. The stored multi-output run stays outside model context, but each
+retrieved series enters it. Handles expire after the current chat turn.
+Request baseline and reform separately. Axes handles are deliberately not
+accepted by chart tools.
 
 ## Derivative tools
 

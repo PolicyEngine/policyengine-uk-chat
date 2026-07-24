@@ -217,6 +217,89 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
     assert calls == [("run_household_simulation", {"year": 2025})]
 
 
+def test_offline_tool_loop_resolves_prior_tool_result_fields(
+    tmp_path,
+    monkeypatch,
+):
+    case_file = tmp_path / "tool_loop.yaml"
+    case_file.write_text(
+        yaml.safe_dump(
+            {
+                "cases": [
+                    {
+                        "id": "axes_loop_case",
+                        "suite": "tool_loop",
+                        "description": "A stored simulation handle feeds retrieval.",
+                        "prompt": "Run an axis, then retrieve it.",
+                        "expected_tools": [
+                            {"name": "run_axes_simulation"},
+                            {
+                                "name": "get_axes_series",
+                                "input_contains": {
+                                    "simulation_id": "axes_simulation_test"
+                                },
+                            },
+                        ],
+                        "expect": {"required": ["done"]},
+                        "offline_responses": [
+                            {
+                                "tool_calls": [
+                                    {
+                                        "name": "run_axes_simulation",
+                                        "input": {},
+                                    }
+                                ]
+                            },
+                            {
+                                "tool_calls": [
+                                    {
+                                        "name": "get_axes_series",
+                                        "input": {
+                                            "simulation_id": (
+                                                "$tool_result."
+                                                "run_axes_simulation.simulation_id"
+                                            )
+                                        },
+                                    }
+                                ]
+                            },
+                            {"text": "done"},
+                        ],
+                    }
+                ]
+            },
+            sort_keys=False,
+        )
+    )
+    calls = []
+
+    def record_tool_call(tool_name, tool_input, context=None):
+        assert context is not None
+        calls.append((tool_name, tool_input))
+        if tool_name == "run_axes_simulation":
+            return {"simulation_id": "axes_simulation_test"}
+        return {"x": [0, 1], "y": [2, 3]}
+
+    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+    monkeypatch.setattr(runner, "execute_tool", record_tool_call)
+
+    report = runner.run_eval(
+        suites=["tool_loop"],
+        mode="offline",
+        write_reports=False,
+    )
+
+    assert report.failed == 0
+    assert report.passed == 1
+    assert calls == [
+        ("run_axes_simulation", {}),
+        (
+            "get_axes_series",
+            {"simulation_id": "axes_simulation_test"},
+        ),
+    ]
+
+
 def test_charts_mode_trajectory_adds_directive_and_keeps_tools():
     class RecordingClient:
         def __init__(self):

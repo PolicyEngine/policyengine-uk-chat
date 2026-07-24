@@ -27,6 +27,8 @@ The compute prompt in `backend/prompts/system.py` requires the agent to:
 
 - use discovery tools instead of guessing variable or parameter names;
 - validate reforms and synthetic households before relying on them;
+- use `run_axes_simulation` followed by `get_axes_series` for numeric household
+  ranges;
 - run `run_society_simulation` before requesting society derivatives;
 - use the official budget, programme, decile, winners/losers, poverty,
   inequality, and aggregate tools;
