@@ -6,6 +6,38 @@ on:
       - main
 
 jobs:
+  changes:
+    name: Classify changed paths
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      model_facing: ${{ steps.filter.outputs.model_facing }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Detect model-facing changes
+        id: filter
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            model_facing:
+              - "backend/chat/**"
+              - "backend/config/**"
+              - "backend/engine/**"
+              - "backend/eval/**"
+              - "backend/gateway/**"
+              - "backend/prompts/**"
+              - "backend/requirements*.txt"
+              - "backend/tools/**"
+              - "evals/**"
+              - "Makefile"
+              - "modal_app.py"
+              - ".github/workflows/tests.yml"
+
   backend:
     name: Backend pytest
     runs-on: ubuntu-latest
@@ -29,6 +61,9 @@ jobs:
 
       - name: Run backend tests with coverage
         run: make test-backend
+
+      - name: Run deterministic AI and tool-contract evals
+        run: make eval-ai-offline
 
       - name: Upload backend coverage to Codecov
         uses: codecov/codecov-action@v6
@@ -81,3 +116,83 @@ jobs:
           name: frontend
           use_oidc: true
           verbose: true
+
+  enhanced-frs:
+    name: Configured Enhanced FRS integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
+      HF_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
+      RUN_DATA_EVALS: "1"
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Require the Enhanced FRS credential
+        run: |
+          if [ -z "$HUGGING_FACE_TOKEN" ]; then
+            echo "::error::HUGGING_FACE_TOKEN is required for Enhanced FRS integration."
+            exit 1
+          fi
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
+
+      - name: Run the 2026 Enhanced FRS lifecycle
+        run: |
+          PYTHONPATH=backend python -m pytest \
+            backend/tests/test_data_integration.py -v
+
+  live-model-evals:
+    name: Live model evals (3 trials)
+    needs: changes
+    if: needs.changes.outputs.model_facing == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Require the live-model credential
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "::error::ANTHROPIC_API_KEY is required for model-facing pull requests."
+            exit 1
+          fi
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
+
+      - name: Run every live model case three times
+        run: make eval-ai-live
+
+      - name: Upload live eval reports
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: live-model-eval-report
+          path: evals/reports/
+          if-no-files-found: warn

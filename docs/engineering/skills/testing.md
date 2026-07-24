@@ -23,6 +23,10 @@ Use this skill whenever adding, moving, or reviewing tests.
   dependencies before running the full backend suite.
 - Conversation-table tests should use the named isolated table fixture rather
   than a shared developer database.
+- The deterministic `/chat` integration smoke test must keep the model boundary
+  controlled while exercising the real HTTP/SSE route, tool dispatcher, and
+  policyengine.py calculation. Browser automation is not required for the
+  current simple UX.
 
 ## Commands
 
@@ -52,6 +56,27 @@ For changes spanning both sides, run:
 make test
 ```
 
+Every pull request also runs:
+
+```bash
+make eval-ai-offline
+```
+
+This validates eval schemas and errors and executes the public PolicyEngine tool
+contract, including exact and tolerance-based 2026 household and reform
+goldens. It complements pytest rather than replacing backend or frontend
+coverage.
+
+Model-facing pull requests additionally run the complete live suite:
+
+```bash
+ANTHROPIC_API_KEY=... make eval-ai-live
+```
+
+Every live model case runs three independent trials with production model
+routing. The report exposes pass@1 and pass^3, and any failed trial fails the
+job. There is no nightly-only coverage tier.
+
 `make test-backend` writes branch-aware Python coverage to `coverage.xml` and
 prints missing lines. Its coverage boundary includes all repository Python:
 `backend/`, `.github/scripts/`, and `modal_app.py`, excluding
@@ -79,8 +104,10 @@ HUGGING_FACE_TOKEN=... RUN_DATA_EVALS=1 PYTHONPATH=backend \
   python -m pytest backend/tests/test_data_integration.py
 ```
 
-This test is deliberately excluded from the default suite because it downloads
-managed data and runs a full baseline/reform society simulation.
+The default local pytest suite skips this credentialed test. PR CI runs it in a
+dedicated `Configured Enhanced FRS integration` job using the repository
+secret. It checks the configured default dataset identity, the full derivative
+lifecycle, and broad 2026 fiscal and distributional ranges.
 
 If a command cannot run locally because dependencies or credentials are missing,
 state that explicitly in the handoff.
