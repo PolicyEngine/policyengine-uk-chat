@@ -168,7 +168,7 @@ def is_inferable(tool: Optional[str], slot_name: str) -> bool:
     return (tool, slot_name) in INFERABLE
 
 
-def complete_required_slots(
+def add_missing_required_slots(
     tool: Optional[str],
     slots: List[SlotFact],
 ) -> List[SlotFact]:
