@@ -86,6 +86,8 @@ _CRITICALITY_OVERRIDES: dict = {
 INFERABLE: set = {
     ("run_household_simulation", "benunit"),
     ("run_household_simulation", "household"),
+    ("run_axes_simulation", "benunit"),
+    ("run_axes_simulation", "household"),
     ("generate_chart", "chart_kind"),
     ("generate_chart", "title"),
     ("generate_chart", "x_field"),

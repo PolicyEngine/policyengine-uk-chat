@@ -54,6 +54,8 @@ def test_main_prompt_describes_py_lifecycle_tools():
         "validate_reform",
         "validate_household",
         "run_household_simulation",
+        "run_axes_simulation",
+        "get_axes_series",
         "run_society_simulation",
         "compute_budgetary_impact",
         "compute_decile_impacts",
@@ -63,6 +65,7 @@ def test_main_prompt_describes_py_lifecycle_tools():
     assert "Do not run broad Python code for normal analysis" in SYSTEM_PROMPT
     assert "It does not define new" in SYSTEM_PROMPT
     assert "wait for the\n  result before running the simulation" in SYSTEM_PROMPT
+    assert "Do not send axes through" in SYSTEM_PROMPT
 
 
 def test_public_tools_exclude_removed_public_tools():

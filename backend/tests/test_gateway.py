@@ -27,6 +27,8 @@ class TestSlotInventory:
 
     def test_required_slots_detected(self):
         assert TOOL_SLOT_REQUIREMENT[("run_household_simulation", "people")] == "required"
+        assert TOOL_SLOT_REQUIREMENT[("run_axes_simulation", "axis")] == "required"
+        assert TOOL_SLOT_REQUIREMENT[("run_axes_simulation", "outputs")] == "required"
         assert TOOL_SLOT_REQUIREMENT[("validate_reform", "reform")] == "required"
         assert TOOL_SLOT_REQUIREMENT[("aggregate_result", "simulation_id")] == "required"
         assert TOOL_SLOT_REQUIREMENT[("aggregate_result", "operation")] == "required"
@@ -76,6 +78,8 @@ class TestInferable:
     def test_benunit_household_inferable(self):
         assert is_inferable("run_household_simulation", "benunit")
         assert is_inferable("run_household_simulation", "household")
+        assert is_inferable("run_axes_simulation", "benunit")
+        assert is_inferable("run_axes_simulation", "household")
 
     def test_people_not_inferable(self):
         assert not is_inferable("run_household_simulation", "people")

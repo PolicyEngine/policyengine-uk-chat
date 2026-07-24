@@ -1,5 +1,6 @@
 """Tests for the synthetic-household axes engine boundary."""
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -296,6 +297,11 @@ def test_axes_calculator_length_must_match_requested_count(monkeypatch):
 
 @requires_policyengine_py
 def test_policyengine_py_runs_a_401_point_axis():
+    from chat.orchestrator import (
+        MAX_TOOL_RESULT_CHARS,
+        _serialise_tool_result_for_model,
+    )
+
     run = axes.build_axes_simulation(
         people=[{"age": 30}],
         benunit={},
@@ -316,3 +322,6 @@ def test_policyengine_py_runs_a_401_point_axis():
     assert len(series["y"]) == 401
     assert series["x"][0] == 0
     assert series["x"][-1] == 100_000
+    result_json = _serialise_tool_result_for_model(series)
+    assert len(result_json) < MAX_TOOL_RESULT_CHARS
+    assert json.loads(result_json) == series

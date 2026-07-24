@@ -1,5 +1,6 @@
 """Model-facing tool definitions for the UK chat runtime."""
 
+from engine.axes import MAX_AXIS_OUTPUTS, MAX_AXIS_POINTS, MIN_AXIS_POINTS
 from engine.constants import DEFAULT_UK_DATASET
 
 
@@ -136,6 +137,67 @@ VALIDATE_HOUSEHOLD_INPUT_SCHEMA = _object_schema(
 
 RUN_HOUSEHOLD_SIMULATION_INPUT_SCHEMA = VALIDATE_HOUSEHOLD_INPUT_SCHEMA
 
+AXIS_SCHEMA = _object_schema(
+    {
+        "name": {
+            "type": "string",
+            "description": (
+                "Exact numeric household input variable verified with "
+                "list_household_input_variables."
+            ),
+        },
+        "index": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "description": (
+                "Zero-based member index for a person variable; group variables "
+                "only support index 0."
+            ),
+        },
+        "min": {
+            "type": "number",
+            "description": "First value in the numeric sweep.",
+        },
+        "max": {
+            "type": "number",
+            "description": "Last value in the numeric sweep.",
+        },
+        "count": {
+            "type": "integer",
+            "minimum": MIN_AXIS_POINTS,
+            "maximum": MAX_AXIS_POINTS,
+            "description": (
+                "Number of evenly spaced values, including both endpoints."
+            ),
+        },
+    },
+    ["name", "min", "max", "count"],
+)
+
+RUN_AXES_SIMULATION_INPUT_SCHEMA = _object_schema(
+    {
+        "people": {"type": "array", "items": {"type": "object"}},
+        "benunit": {"type": "object"},
+        "household": {"type": "object"},
+        "year": YEAR_SCHEMA,
+        "reform": REFORM_SCHEMA,
+        "axis": AXIS_SCHEMA,
+        "outputs": {
+            "type": "array",
+            "items": {"type": "string"},
+            "minItems": 1,
+            "maxItems": MAX_AXIS_OUTPUTS,
+            "uniqueItems": True,
+            "description": (
+                "Numeric household output variables verified with "
+                "list_household_input_variables."
+            ),
+        },
+    },
+    ["people", "axis", "outputs"],
+)
+
 RUN_SOCIETY_SIMULATION_INPUT_SCHEMA = _object_schema(
     {
         "year": YEAR_SCHEMA,
@@ -162,6 +224,31 @@ RUN_SOCIETY_SIMULATION_INPUT_SCHEMA = _object_schema(
 )
 
 RESULT_ID_INPUT_SCHEMA = {"type": "string", "description": "Result handle returned by a prior tool in this turn."}
+
+GET_AXES_SERIES_INPUT_SCHEMA = _object_schema(
+    {
+        "simulation_id": RESULT_ID_INPUT_SCHEMA,
+        "variable": {
+            "type": "string",
+            "description": (
+                "One output variable selected in the preceding "
+                "run_axes_simulation call."
+            ),
+        },
+        "index": {
+            "type": "integer",
+            "default": 0,
+            "minimum": 0,
+            "description": "Zero-based entity member index for the output series.",
+        },
+        "target": {
+            "type": "string",
+            "enum": ["baseline", "reform"],
+            "default": "baseline",
+        },
+    },
+    ["simulation_id", "variable"],
+)
 
 COMPUTE_BUDGETARY_IMPACT_INPUT_SCHEMA = _object_schema({"simulation_id": RESULT_ID_INPUT_SCHEMA}, ["simulation_id"])
 COMPUTE_PROGRAM_BREAKDOWN_INPUT_SCHEMA = _object_schema(
@@ -271,6 +358,15 @@ VALIDATE_HOUSEHOLD_DESCRIPTION = (
 )
 RUN_HOUSEHOLD_SIMULATION_DESCRIPTION = (
     "Run an illustrative synthetic UK household simulation through policyengine.py."
+)
+RUN_AXES_SIMULATION_DESCRIPTION = (
+    "Run one numeric sweep for an illustrative synthetic UK household. The full "
+    "selected result is retained behind a turn-local simulation_id; call "
+    "get_axes_series to retrieve each output series."
+)
+GET_AXES_SERIES_DESCRIPTION = (
+    "Retrieve every x/y point for one output selected by a prior "
+    "run_axes_simulation call. Returns one compact series with no pagination."
 )
 RUN_SOCIETY_SIMULATION_DESCRIPTION = (
     "Run baseline and reform policyengine.py UK simulations and return metadata plus a turn-local result handle. "

@@ -204,6 +204,7 @@ def supported_outputs(scope: str | None = None) -> list[dict[str, str]]:
     rows = [
         {"scope": "household", "name": "household_net_income", "description": "Synthetic household net income."},
         {"scope": "household", "name": "income_tax", "description": "Synthetic household/person income tax."},
+        {"scope": "household", "name": "axes_series", "description": "One complete numeric synthetic-household input sweep."},
         {"scope": "society", "name": "simulation_handle", "description": "A policyengine.py baseline/reform Simulation pair."},
         {"scope": "derivative", "name": "budgetary_impact", "description": "Weighted tax, benefit-spending, and net fiscal impacts."},
         {"scope": "derivative", "name": "program_statistics", "description": "Official programme totals, caseloads, winners, and losers."},

@@ -46,6 +46,30 @@ def test_oversized_tool_results_remain_valid_json():
     }
 
 
+def test_complete_401_point_axes_series_fits_model_tool_result_limit():
+    result = {
+        "household_input": {
+            "people": [{"age": 30}],
+            "benunit": {},
+            "household": {},
+            "year": 2026,
+        },
+        "axis": {"name": "employment_income", "index": 0},
+        "series": {
+            "name": "household_net_income",
+            "index": 0,
+            "target": "baseline",
+        },
+        "x": [index * 250 for index in range(401)],
+        "y": [4_939.7548828125 + index * 158.646484375 for index in range(401)],
+    }
+
+    result_json = _serialise_tool_result_for_model(result)
+
+    assert len(result_json) < MAX_TOOL_RESULT_CHARS
+    assert json.loads(result_json) == result
+
+
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------

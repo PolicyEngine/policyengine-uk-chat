@@ -4,6 +4,7 @@ from pathlib import Path
 
 import tools.dispatch as agent_tools
 from conftest import requires_policyengine_py
+from engine import axes as axes_engine
 from engine import households as household_engine
 from engine import simulations as simulation_engine
 from engine.constants import DEFAULT_UK_DATASET, STANDARD_POLICYENGINE_UK_DATASET
@@ -33,6 +34,8 @@ def test_tool_inventory_matches_py_lifecycle():
         "validate_reform",
         "validate_household",
         "run_household_simulation",
+        "run_axes_simulation",
+        "get_axes_series",
         "run_society_simulation",
         "compute_budgetary_impact",
         "compute_program_breakdown",
@@ -57,6 +60,40 @@ def test_default_year_and_dataset_are_py_migration_defaults():
     society_schema = _tool("run_society_simulation")["input_schema"]
     assert society_schema["properties"]["year"]["default"] == 2026
     assert society_schema["properties"]["dataset"]["default"] == DEFAULT_UK_DATASET
+
+
+def test_axes_tools_have_standalone_bounded_schemas():
+    household_properties = _tool("run_household_simulation")["input_schema"][
+        "properties"
+    ]
+    validation_properties = _tool("validate_household")["input_schema"][
+        "properties"
+    ]
+    run_schema = _tool("run_axes_simulation")["input_schema"]
+    get_schema = _tool("get_axes_series")["input_schema"]
+
+    assert "axes" not in household_properties
+    assert "axes" not in validation_properties
+    assert run_schema["required"] == ["people", "axis", "outputs"]
+    assert run_schema["properties"]["axis"]["properties"]["count"] == {
+        "type": "integer",
+        "minimum": 2,
+        "maximum": 401,
+        "description": (
+            "Number of evenly spaced values, including both endpoints."
+        ),
+    }
+    assert run_schema["properties"]["outputs"]["maxItems"] == 5
+    assert run_schema["properties"]["outputs"]["uniqueItems"] is True
+    assert get_schema["required"] == ["simulation_id", "variable"]
+    assert set(get_schema["properties"]) == {
+        "simulation_id",
+        "variable",
+        "index",
+        "target",
+    }
+    assert "limit" not in get_schema["properties"]
+    assert "offset" not in get_schema["properties"]
 
 
 def test_list_datasets_exposes_enhanced_frs_and_certified_standard():
@@ -108,6 +145,122 @@ def test_run_household_simulation_passes_policyengine_py_shape_unchanged(monkeyp
     assert captured["benunit"] == {"is_married": False}
     assert captured["household"] == {"region": "LONDON"}
     assert captured["year"] == 2026
+
+
+def test_axes_simulation_handle_retrieves_one_complete_series(monkeypatch):
+    run = axes_engine.AxesSimulationRun(
+        household_input={
+            "people": [{"age": 30}],
+            "benunit": {},
+            "household": {},
+            "year": 2026,
+        },
+        axis={
+            "name": "employment_income",
+            "index": 0,
+            "min": 0,
+            "max": 100_000,
+            "count": 3,
+        },
+        output_entities={"household_net_income": "household"},
+        series_by_target={
+            "baseline": {
+                "household_net_income": [[20_000, 50_000, 80_000]],
+            }
+        },
+        x=[0, 50_000, 100_000],
+    )
+    captured = {}
+
+    def fake_build(**kwargs):
+        captured.update(kwargs)
+        return run
+
+    monkeypatch.setattr(agent_tools, "build_axes_simulation", fake_build)
+    context = new_tool_context("axes-test")
+    result = agent_tools.execute_tool(
+        "run_axes_simulation",
+        {
+            "people": [{"age": 30}],
+            "year": 2026,
+            "axis": {
+                "name": "employment_income",
+                "min": 0,
+                "max": 100_000,
+                "count": 3,
+            },
+            "outputs": ["household_net_income"],
+        },
+        context=context,
+    )
+
+    assert result["simulation_id"].startswith("axes_simulation_")
+    assert result["point_count"] == 3
+    assert result["outputs"] == [
+        {
+            "name": "household_net_income",
+            "entity": "household",
+            "entity_count": 1,
+        }
+    ]
+    assert captured["axis"]["count"] == 3
+
+    series = agent_tools.execute_tool(
+        "get_axes_series",
+        {
+            "simulation_id": result["simulation_id"],
+            "variable": "household_net_income",
+        },
+        context=context,
+    )
+    assert series == {
+        "household_input": {
+            "people": [{"age": 30}],
+            "benunit": {},
+            "household": {},
+            "year": 2026,
+        },
+        "axis": {"name": "employment_income", "index": 0},
+        "series": {
+            "name": "household_net_income",
+            "index": 0,
+            "target": "baseline",
+        },
+        "x": [0, 50_000, 100_000],
+        "y": [20_000, 50_000, 80_000],
+    }
+
+
+def test_axes_handles_are_turn_local_and_not_chart_inputs():
+    run_context = new_tool_context("axes-run")
+    simulation_id = run_context.result_store.put(
+        "axes_simulation",
+        object(),
+        {"status": "success"},
+    )
+
+    expired = agent_tools.execute_tool(
+        "get_axes_series",
+        {
+            "simulation_id": simulation_id,
+            "variable": "household_net_income",
+        },
+        context=new_tool_context("later-turn"),
+    )
+    chart = agent_tools.execute_tool(
+        "generate_chart",
+        {
+            "chart_kind": "generic_line",
+            "result_id": simulation_id,
+            "x_field": "x",
+            "y_fields": ["y"],
+        },
+        context=run_context,
+    )
+
+    assert expired["error"] == f"'Unknown result_id: {simulation_id}'"
+    assert "expected one of" in chart["error"]
+    assert "axes_simulation" in chart["error"]
 
 
 def test_society_simulation_result_handle_feeds_derivative_and_chart_tools(monkeypatch):

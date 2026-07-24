@@ -32,6 +32,9 @@ CRITICAL - ALWAYS COMPUTE WITH TOOLS:
 - Use `validate_household` when checking whether a synthetic household is
   shaped correctly.
 - Use `run_household_simulation` for illustrative synthetic households.
+- For one numeric household range, call `run_axes_simulation`, then
+  `get_axes_series` for each complete output series. Do not send axes through
+  the ordinary household tools or chart tools.
 - Use `run_society_simulation` for aggregate, society-wide reform analysis.
 - After a society simulation, use derivative tools such as
   `compute_budgetary_impact`, `compute_program_breakdown`,

@@ -8,6 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from engine import derivatives, discovery
+from engine.axes import AxesSimulationRun, build_axes_simulation
 from engine.households import calculate_household, validate_household_dict
 from engine.reforms import validate_reform_dict
 from engine.serialization import explore_tabular_data, json_safe
@@ -29,6 +30,8 @@ from tools.definitions import (
     DISCOVERY_DESCRIPTION,
     GENERATE_CHART_DESCRIPTION,
     GENERATE_CHART_INPUT_SCHEMA,
+    GET_AXES_SERIES_DESCRIPTION,
+    GET_AXES_SERIES_INPUT_SCHEMA,
     GET_PARAMETER_INPUT_SCHEMA,
     GET_VARIABLE_DESCRIPTION,
     GET_VARIABLE_INPUT_SCHEMA,
@@ -41,6 +44,8 @@ from tools.definitions import (
     LIST_SUPPORTED_OUTPUTS_INPUT_SCHEMA,
     RUN_HOUSEHOLD_SIMULATION_DESCRIPTION,
     RUN_HOUSEHOLD_SIMULATION_INPUT_SCHEMA,
+    RUN_AXES_SIMULATION_DESCRIPTION,
+    RUN_AXES_SIMULATION_INPUT_SCHEMA,
     RUN_SOCIETY_SIMULATION_DESCRIPTION,
     RUN_SOCIETY_SIMULATION_INPUT_SCHEMA,
     SEARCH_PARAMETERS_INPUT_SCHEMA,
@@ -70,6 +75,7 @@ __all__ = [
     "execute_tool",
     "explore_tabular_data",
     "generate_chart",
+    "get_axes_series",
     "get_parameter",
     "get_variable",
     "list_datasets",
@@ -79,6 +85,7 @@ __all__ = [
     "list_society_output_variables",
     "list_supported_outputs",
     "run_household_simulation",
+    "run_axes_simulation",
     "run_society_simulation",
     "search_parameters",
     "search_variables",
@@ -212,6 +219,71 @@ def run_household_simulation(
         result_id = _store(_context, "household_simulation", result, result)
         result["result_id"] = result_id
     return result
+
+
+@register_tool(
+    name="run_axes_simulation",
+    description=RUN_AXES_SIMULATION_DESCRIPTION,
+    input_schema=RUN_AXES_SIMULATION_INPUT_SCHEMA,
+)
+def run_axes_simulation(
+    people: list[dict[str, Any]],
+    axis: dict[str, Any],
+    outputs: list[str],
+    benunit: Optional[Dict[str, Any]] = None,
+    household: Optional[Dict[str, Any]] = None,
+    year: int = DEFAULT_SIMULATION_YEAR,
+    reform: Optional[Dict[str, Any]] = None,
+    _context: ToolExecutionContext | None = None,
+) -> Dict[str, Any]:
+    try:
+        payload = build_axes_simulation(
+            people=people,
+            benunit=benunit,
+            household=household,
+            year=year,
+            reform=reform,
+            axis=axis,
+            outputs=outputs,
+        )
+    except Exception as exc:
+        logger.exception("Error in run_axes_simulation")
+        return {"error": f"{type(exc).__name__}: {exc}"}
+
+    result = payload.metadata()
+    result["simulation_id"] = _store(
+        _context,
+        "axes_simulation",
+        payload,
+        result,
+    )
+    return result
+
+
+def _axes_payload(
+    context: ToolExecutionContext | None,
+    simulation_id: str,
+) -> AxesSimulationRun:
+    return _get_stored(context, simulation_id, "axes_simulation").payload
+
+
+@register_tool(
+    name="get_axes_series",
+    description=GET_AXES_SERIES_DESCRIPTION,
+    input_schema=GET_AXES_SERIES_INPUT_SCHEMA,
+)
+def get_axes_series(
+    simulation_id: str,
+    variable: str,
+    index: int = 0,
+    target: str = "baseline",
+    _context: ToolExecutionContext | None = None,
+) -> Dict[str, Any]:
+    return _axes_payload(_context, simulation_id).get_series(
+        variable=variable,
+        target=target,
+        index=index,
+    )
 
 
 @register_tool(name="run_society_simulation", description=RUN_SOCIETY_SIMULATION_DESCRIPTION, input_schema=RUN_SOCIETY_SIMULATION_INPUT_SCHEMA)

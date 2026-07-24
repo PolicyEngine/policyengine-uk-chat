@@ -1349,6 +1349,8 @@ export default function ChatPage() {
             validate_reform: "reform validation",
             validate_household: "household validation",
             run_household_simulation: "household simulation",
+            run_axes_simulation: "axes simulation",
+            get_axes_series: "axes series",
             run_society_simulation: "society simulation",
             compute_budgetary_impact: "budgetary impact",
             compute_program_breakdown: "programme breakdown",
