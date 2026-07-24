@@ -527,6 +527,61 @@ _GENERIC_CHART_KINDS = {
 }
 
 
+def _normalise_compact_axes_chart_data(
+    chart_kind: str,
+    data: Any,
+) -> tuple[Any, dict[str, Any]]:
+    """Convert one compact axes x/y result into chart rows and field defaults."""
+
+    if not isinstance(data, dict) or not ({"x", "y"} & set(data)):
+        return data, {}
+
+    x = data.get("x")
+    y = data.get("y")
+    axis = data.get("axis")
+    series = data.get("series")
+    if not isinstance(x, list) or not isinstance(y, list):
+        raise ValueError("Compact axes chart data requires x and y arrays.")
+    if not x or len(x) != len(y):
+        raise ValueError(
+            "Compact axes chart data requires non-empty x and y arrays "
+            "with the same length."
+        )
+    if (
+        not isinstance(axis, dict)
+        or not isinstance(axis.get("name"), str)
+        or not axis["name"].strip()
+    ):
+        raise ValueError("Compact axes chart data requires axis.name.")
+    if (
+        not isinstance(series, dict)
+        or not isinstance(series.get("name"), str)
+        or not series["name"].strip()
+    ):
+        raise ValueError("Compact axes chart data requires series.name.")
+
+    axis_name = axis["name"]
+    series_name = series["name"]
+    if chart_kind == "earnings_variation_line":
+        rows = [
+            {"earnings": x_value, "value": y_value}
+            for x_value, y_value in zip(x, y, strict=True)
+        ]
+        return rows, {}
+
+    y_field = series_name if series_name != axis_name else f"{series_name}_output"
+    rows = [
+        {axis_name: x_value, y_field: y_value}
+        for x_value, y_value in zip(x, y, strict=True)
+    ]
+    return rows, {
+        "x_field": axis_name,
+        "y_fields": [y_field],
+        "x_label": axis_name.replace("_", " ").title(),
+        "y_label": series_name.replace("_", " ").title(),
+    }
+
+
 def _preset_chart_data(chart_kind: str, result: dict[str, Any]) -> list[dict[str, Any]]:
     if chart_kind == "budget_waterfall":
         return [
@@ -612,6 +667,19 @@ def generate_chart(
         _GENERIC_CHART_KINDS | set(_PRESET_RESULT_KINDS) | _EXPLICIT_DATA_PRESETS
     ):
         return {"error": f"Unknown chart kind: {chart_kind}"}
+    try:
+        data, axes_defaults = _normalise_compact_axes_chart_data(
+            chart_kind,
+            data,
+        )
+    except ValueError as exc:
+        return {"error": str(exc)}
+    if axes_defaults:
+        # Compact axes metadata is authoritative for the generated row keys.
+        x_field = axes_defaults["x_field"]
+        y_fields = axes_defaults["y_fields"]
+        x_label = x_label or axes_defaults["x_label"]
+        y_label = y_label or axes_defaults["y_label"]
     if chart_kind in _GENERIC_CHART_KINDS:
         if result_id:
             stored = _get_stored(

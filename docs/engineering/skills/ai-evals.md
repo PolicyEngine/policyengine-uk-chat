@@ -43,9 +43,11 @@ validate-then-calculate flows.
 - Use deterministic graders first: JSON partial match, path checks, numeric
   tolerance, forbidden terms, required caveats, privacy statements, and grounded
   number checks.
-- In an offline tool-loop fixture, reference a field from a prior tool result as
-  `$tool_result.<tool_name>.<field>`. The harness resolves the reference before
-  executing the later tool, allowing opaque result handles to cross iterations.
+- In an offline tool-loop fixture, reference one field from a prior tool result
+  as `$tool_result.<tool_name>.<field>`. To pass the complete result into an
+  object-valued tool input, use `{$tool_result: <tool_name>}`. The harness
+  resolves these references before executing the later tool, allowing opaque
+  result handles and compact results to cross iterations.
 - Source-synced `policyengine-uk` cases are generated from the installed
   `policyengine_uk` package. Update them with `make sync-policyengine-uk-evals`
   rather than editing the generated YAML by hand. Install the eval extras first

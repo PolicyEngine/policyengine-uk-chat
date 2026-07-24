@@ -71,7 +71,10 @@ CHART_KIND_SCHEMA = {
 
 CHART_DATA_SCHEMA = {
     "type": ["array", "object"],
-    "description": "Rows or structured derivative output for chart generation.",
+    "description": (
+        "Rows, structured derivative output, or the compact x/y object returned "
+        "by get_axes_series."
+    ),
 }
 
 
@@ -128,13 +131,17 @@ VALIDATE_REFORM_INPUT_SCHEMA = _object_schema(
     ["reform"],
 )
 
+HOUSEHOLD_INPUT_PROPERTIES = {
+    "people": {"type": "array", "items": {"type": "object"}},
+    "benunit": {"type": "object"},
+    "household": {"type": "object"},
+    "year": YEAR_SCHEMA,
+    "reform": REFORM_SCHEMA,
+}
+
 VALIDATE_HOUSEHOLD_INPUT_SCHEMA = _object_schema(
     {
-        "people": {"type": "array", "items": {"type": "object"}},
-        "benunit": {"type": "object"},
-        "household": {"type": "object"},
-        "year": YEAR_SCHEMA,
-        "reform": REFORM_SCHEMA,
+        **HOUSEHOLD_INPUT_PROPERTIES,
         "extra_variables": STRING_ARRAY_SCHEMA,
     },
     ["people"],
@@ -182,11 +189,7 @@ AXIS_SCHEMA = _object_schema(
 
 RUN_AXES_SIMULATION_INPUT_SCHEMA = _object_schema(
     {
-        "people": {"type": "array", "items": {"type": "object"}},
-        "benunit": {"type": "object"},
-        "household": {"type": "object"},
-        "year": YEAR_SCHEMA,
-        "reform": REFORM_SCHEMA,
+        **HOUSEHOLD_INPUT_PROPERTIES,
         "axis": AXIS_SCHEMA,
         "outputs": {
             "type": "array",
@@ -389,7 +392,8 @@ GENERATE_CHART_DESCRIPTION = (
     "Generate frontend-renderable chart markdown. For preset chart kinds, the layout, "
     "colours, axes, labels, and legend are deterministic app-v2-style choices and "
     "result_id must identify the matching derivative output. Explicit data is accepted "
-    "for generic chart kinds and the earnings-variation preset."
+    "for generic chart kinds and the earnings-variation preset. Pass the compact "
+    "get_axes_series result directly as data to chart an axes series."
 )
 
 

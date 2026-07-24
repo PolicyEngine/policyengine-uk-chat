@@ -217,7 +217,7 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
     assert calls == [("run_household_simulation", {"year": 2025})]
 
 
-def test_offline_tool_loop_resolves_prior_tool_result_fields(
+def test_offline_tool_loop_resolves_prior_tool_results_and_fields(
     tmp_path,
     monkeypatch,
 ):
@@ -237,6 +237,15 @@ def test_offline_tool_loop_resolves_prior_tool_result_fields(
                                 "name": "get_axes_series",
                                 "input_contains": {
                                     "simulation_id": "axes_simulation_test"
+                                },
+                            },
+                            {
+                                "name": "generate_chart",
+                                "input_contains": {
+                                    "data": {
+                                        "x": [0, 1],
+                                        "y": [2, 3],
+                                    }
                                 },
                             },
                         ],
@@ -263,6 +272,19 @@ def test_offline_tool_loop_resolves_prior_tool_result_fields(
                                     }
                                 ]
                             },
+                            {
+                                "tool_calls": [
+                                    {
+                                        "name": "generate_chart",
+                                        "input": {
+                                            "chart_kind": "generic_line",
+                                            "data": {
+                                                "$tool_result": "get_axes_series"
+                                            },
+                                        },
+                                    }
+                                ]
+                            },
                             {"text": "done"},
                         ],
                     }
@@ -278,6 +300,8 @@ def test_offline_tool_loop_resolves_prior_tool_result_fields(
         calls.append((tool_name, tool_input))
         if tool_name == "run_axes_simulation":
             return {"simulation_id": "axes_simulation_test"}
+        if tool_name == "generate_chart":
+            return {"status": "success"}
         return {"x": [0, 1], "y": [2, 3]}
 
     monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
@@ -296,6 +320,13 @@ def test_offline_tool_loop_resolves_prior_tool_result_fields(
         (
             "get_axes_series",
             {"simulation_id": "axes_simulation_test"},
+        ),
+        (
+            "generate_chart",
+            {
+                "chart_kind": "generic_line",
+                "data": {"x": [0, 1], "y": [2, 3]},
+            },
         ),
     ]
 

@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional
 
 from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_sync_client
-from gateway.policy import OUTPUT_VOCAB, SlotFact, gate
+from gateway.policy import OUTPUT_VOCAB, SlotFact, complete_required_slots, gate
 from prompts import (
     DEFAULT_SCOPE_DESCRIPTOR,
     GATEWAY_IRRELEVANT_DIRECTIVE,
@@ -129,6 +129,7 @@ def _verdict_from_plan(plan: dict, prompt: str) -> GatewayVerdict:
             kind = "tool_input"
         slots.append(SlotFact(name=str(s["name"]), source=source, kind=kind, value=s.get("value")))
 
+    slots = complete_required_slots(tool, slots)
     unmodellable = [str(x) for x in (plan.get("unmodellable_outputs") or []) if x]
     result = gate(in_domain, tool, slots, unmodellable, prompt)
     return GatewayVerdict(

@@ -95,6 +95,8 @@ def test_axes_tools_have_standalone_bounded_schemas():
     }
     assert "limit" not in get_schema["properties"]
     assert "offset" not in get_schema["properties"]
+    for name in ("people", "benunit", "household", "year", "reform"):
+        assert run_schema["properties"][name] == validation_properties[name]
 
 
 def test_list_datasets_exposes_enhanced_frs_and_certified_standard():
@@ -531,6 +533,86 @@ def test_generate_chart_supports_explicit_generic_kinds():
     assert result["status"] == "success"
     assert result["spec"]["type"] == "bar"
     assert result["spec"]["y"]["format"] == "currency"
+
+
+def test_generate_chart_accepts_complete_compact_axes_series():
+    result = agent_tools.generate_chart(
+        chart_kind="generic_line",
+        data={
+            "household_input": {
+                "people": [{"age": 30}],
+                "benunit": {},
+                "household": {},
+                "year": 2026,
+            },
+            "axis": {"name": "employment_income", "index": 0},
+            "series": {
+                "name": "household_net_income",
+                "index": 0,
+                "target": "baseline",
+            },
+            "x": [index * 1_000 for index in range(101)],
+            "y": [5_000 + index * 600 for index in range(101)],
+        },
+        x_field="model_supplied_wrong_field",
+        y_fields=["another_wrong_field"],
+        x_format="currency",
+        y_format="currency",
+    )
+
+    assert result["status"] == "success"
+    assert result["spec"]["x"]["field"] == "employment_income"
+    assert result["spec"]["y"]["field"] == "household_net_income"
+    assert len(result["spec"]["data"]) == 101
+    assert result["spec"]["data"][-1] == {
+        "employment_income": 100_000,
+        "household_net_income": 65_000,
+    }
+
+
+def test_generate_chart_rejects_misaligned_compact_axes_series():
+    result = agent_tools.generate_chart(
+        chart_kind="generic_line",
+        data={
+            "axis": {"name": "employment_income", "index": 0},
+            "series": {
+                "name": "household_net_income",
+                "index": 0,
+                "target": "baseline",
+            },
+            "x": [0, 50_000, 100_000],
+            "y": [5_000, 35_000],
+        },
+    )
+
+    assert result == {
+        "error": (
+            "Compact axes chart data requires non-empty x and y arrays "
+            "with the same length."
+        )
+    }
+
+
+def test_earnings_preset_accepts_compact_axes_series():
+    result = agent_tools.generate_chart(
+        chart_kind="earnings_variation_line",
+        data={
+            "axis": {"name": "employment_income", "index": 0},
+            "series": {
+                "name": "household_net_income",
+                "index": 0,
+                "target": "baseline",
+            },
+            "x": [0, 100_000],
+            "y": [5_000, 65_000],
+        },
+    )
+
+    assert result["status"] == "success"
+    assert result["spec"]["data"] == [
+        {"earnings": 0, "value": 5_000},
+        {"earnings": 100_000, "value": 65_000},
+    ]
 
 
 def test_program_waterfall_filters_zero_rows_and_appends_official_total():

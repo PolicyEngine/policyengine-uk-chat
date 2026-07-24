@@ -64,7 +64,8 @@ dispatched by `execute_tool()`. At present, the exposed tools are:
   series exceeds the 12,000-character axes JSON limit, retrieval returns an
   actionable error rather than partial x/y arrays. The stored multi-output run
   stays outside model context, while a successfully retrieved series enters it.
-  Axes handles are not chart inputs.
+  Axes handles are not chart inputs, but the compact result returned by
+  `get_axes_series` can be passed directly to `generate_chart`.
 - Derivatives: `compute_budgetary_impact`, `compute_program_breakdown`,
   `compute_decile_impacts`, `compute_winners_losers`,
   `compute_poverty_metrics`, `compute_inequality_metrics`, and

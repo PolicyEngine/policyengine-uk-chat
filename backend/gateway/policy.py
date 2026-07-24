@@ -168,6 +168,42 @@ def is_inferable(tool: Optional[str], slot_name: str) -> bool:
     return (tool, slot_name) in INFERABLE
 
 
+def complete_required_slots(
+    tool: Optional[str],
+    slots: List[SlotFact],
+) -> List[SlotFact]:
+    """Add unresolved facts for required tool inputs omitted by the classifier."""
+
+    if tool is None:
+        return list(slots)
+
+    required = [
+        slot_name
+        for (tool_name, slot_name), requirement in TOOL_SLOT_REQUIREMENT.items()
+        if tool_name == tool and requirement == "required"
+    ]
+    completed = [
+        slot
+        for slot in slots
+        if not (
+            slot.kind == "tool_input"
+            and slot.name in required
+            and (slot.value is None or not str(slot.value).strip())
+        )
+    ]
+    present = {
+        slot.name
+        for slot in completed
+        if slot.kind == "tool_input" and slot.name in required
+    }
+    completed.extend(
+        SlotFact(name=name, source="assumed")
+        for name in required
+        if name not in present
+    )
+    return completed
+
+
 def slot_gates(tool: Optional[str], slot: SlotFact, prompt: str = "") -> bool:
     """True if this slot should force a clarifying question."""
     if slot.source != "assumed":

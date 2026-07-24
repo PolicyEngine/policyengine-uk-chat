@@ -109,6 +109,13 @@ cases:
     prompt: Plot the income tax schedule on employment income from £0 to £150,000.
     expected_outcome: ready
     expected_tool: run_axes_simulation
+    expected_slots:
+      - slot: people
+        gates: false
+      - slot: axis
+        gates: false
+      - slot: outputs
+        gates: false
 
   - id: gw_ready_parameter_lookup
     suite: gateway

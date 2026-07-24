@@ -16,6 +16,7 @@ from gateway.policy import (
     gate,
     is_inferable,
 )
+from gateway.runtime import _verdict_from_plan
 
 
 def sf(name, source, kind="tool_input", value=None):
@@ -156,6 +157,64 @@ class TestGate:
 
     def test_irrelevant_not_in_domain(self):
         assert gate(False, None, [], []).outcome == "irrelevant"
+
+
+def test_gateway_plan_gates_omitted_required_axes_slots():
+    verdict = _verdict_from_plan(
+        {
+            "in_domain": True,
+            "tool": "run_axes_simulation",
+            "slots": [],
+            "unmodellable_outputs": [],
+        },
+        "Show household net income from £0 to £100,000.",
+    )
+
+    assert verdict.outcome == "needs_plan"
+    assert verdict.route == "lightweight"
+    assert set(verdict.gating_slots) == {"people", "axis", "outputs"}
+    assert {
+        slot.name
+        for slot in verdict.slots
+        if slot.source == "assumed"
+    } == {"people", "axis", "outputs"}
+
+
+def test_gateway_plan_treats_blank_required_axes_slot_as_unresolved():
+    verdict = _verdict_from_plan(
+        {
+            "in_domain": True,
+            "tool": "run_axes_simulation",
+            "slots": [
+                {
+                    "name": "people",
+                    "kind": "tool_input",
+                    "value": "single adult aged 30",
+                    "source": "prompt",
+                },
+                {
+                    "name": "axis",
+                    "kind": "tool_input",
+                    "value": "",
+                    "source": "prompt",
+                },
+                {
+                    "name": "outputs",
+                    "kind": "tool_input",
+                    "value": "household net income",
+                    "source": "prompt",
+                },
+            ],
+            "unmodellable_outputs": [],
+        },
+        "Show household net income from £0 to £100,000.",
+    )
+
+    assert verdict.outcome == "needs_plan"
+    assert verdict.gating_slots == ["axis"]
+    axis = next(slot for slot in verdict.slots if slot.name == "axis")
+    assert axis.source == "assumed"
+    assert axis.value is None
 
 
 def _stub_client(plan):

@@ -15,7 +15,7 @@ Society-wide analysis is a multi-step lifecycle:
    simulation handle.
 4. Retrieve one complete axes series, or pass the society handle to a
    derivative tool.
-5. Pass a derivative result handle to a deterministic preset chart.
+5. Pass a compact axes series or derivative result handle to a chart.
 
 `ToolExecutionContext` owns the result store for one chat turn. Handles are
 opaque and turn-local. The model cannot inspect or serialize the underlying
@@ -83,8 +83,9 @@ alignment. If the complete series exceeds the 12,000-character axes JSON limit,
 retrieval returns a descriptive error instead of partial x/y arrays. The stored
 multi-output run stays outside model context, but each successfully retrieved
 series enters it. Handles expire after the current chat turn. Request baseline
-and reform separately. Axes handles are deliberately not accepted by chart
-tools.
+and reform separately. Axes handles are not chart inputs, but `generate_chart`
+accepts the compact `get_axes_series` result directly and converts its aligned
+coordinates into chart rows.
 
 ## Derivative tools
 

@@ -215,6 +215,79 @@ cases:
           The complete illustrative household net income series was retrieved
           from PolicyEngine.
 
+  - id: tool_loop_axes_simulation_to_chart
+    suite: tool_loop
+    description: A compact axes result should feed the chart tool without manual row reshaping.
+    requirements: [policyengine_py]
+    charts_mode: true
+    prompt: >
+      The variables employment_income and household_net_income are verified.
+      Plot household net income for an illustrative single 30-year-old in 2026
+      at five evenly spaced employment income levels from GBP 0 to GBP 100,000.
+    expected_tools:
+      - name: run_axes_simulation
+        input_contains:
+          year: 2026
+          axis:
+            name: employment_income
+            min: 0
+            max: 100000
+            count: 5
+          outputs: [household_net_income]
+      - name: get_axes_series
+        input_contains:
+          variable: household_net_income
+          target: baseline
+      - name: generate_chart
+        input_contains:
+          chart_kind: generic_line
+          data:
+            axis:
+              name: employment_income
+            series:
+              name: household_net_income
+    forbidden_tools:
+      - run_household_simulation
+      - run_society_simulation
+    expect:
+      required:
+        - illustrative
+        - chart
+      forbidden:
+        - actual household
+      grounded_numbers: false
+    offline_responses:
+      - tool_calls:
+          - name: run_axes_simulation
+            input:
+              year: 2026
+              people:
+                - age: 30
+              benunit: {}
+              household: {}
+              axis:
+                name: employment_income
+                min: 0
+                max: 100000
+                count: 5
+              outputs: [household_net_income]
+      - tool_calls:
+          - name: get_axes_series
+            input:
+              simulation_id: $tool_result.run_axes_simulation.simulation_id
+              variable: household_net_income
+              target: baseline
+      - tool_calls:
+          - name: generate_chart
+            input:
+              chart_kind: generic_line
+              data:
+                $tool_result: get_axes_series
+              x_format: currency
+              y_format: currency
+      - text: >
+          The illustrative household net income chart is ready.
+
   - id: tool_loop_validate_reform_then_household
     suite: tool_loop
     description: Explicit reform validation can precede household calculation and final answer.

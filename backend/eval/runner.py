@@ -240,6 +240,18 @@ def _resolve_offline_tool_input(
     """Resolve deterministic references to prior tool-loop outputs."""
 
     if isinstance(value, dict):
+        if set(value) == {"$tool_result"}:
+            tool_name = value["$tool_result"]
+            if not isinstance(tool_name, str) or not tool_name:
+                raise ValueError(
+                    "Whole tool-result references require a non-empty tool name."
+                )
+            if tool_name not in tool_outputs:
+                raise ValueError(
+                    "Offline tool-result reference has no prior output for "
+                    f"{tool_name!r}."
+                )
+            return tool_outputs[tool_name]
         return {
             key: _resolve_offline_tool_input(item, tool_outputs)
             for key, item in value.items()

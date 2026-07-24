@@ -65,7 +65,7 @@ def test_main_prompt_describes_py_lifecycle_tools():
     assert "Do not run broad Python code for normal analysis" in SYSTEM_PROMPT
     assert "It does not define new" in SYSTEM_PROMPT
     assert "wait for the\n  result before running the simulation" in SYSTEM_PROMPT
-    assert "Do not send axes through" in SYSTEM_PROMPT
+    assert "pass that compact series directly to `generate_chart`" in SYSTEM_PROMPT
 
 
 def test_public_tools_exclude_removed_public_tools():
@@ -97,6 +97,9 @@ def test_generate_chart_tool_describes_deterministic_presets():
     assert "budget_waterfall" in enum
     assert "decile_relative_bar" in enum
     assert "winners_losers_stacked_bar" in enum
+    assert "compact x/y object returned by get_axes_series" in chart_tool[
+        "input_schema"
+    ]["properties"]["data"]["description"]
 
 
 def test_gateway_prompt_renders_caller_supplied_default_year():
