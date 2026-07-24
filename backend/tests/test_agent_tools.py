@@ -7,6 +7,7 @@ from conftest import requires_policyengine_py
 from engine import axes as axes_engine
 from engine import households as household_engine
 from engine import simulations as simulation_engine
+from engine.axes import MAX_AXES_SERIES_CHARS
 from engine.constants import DEFAULT_UK_DATASET, STANDARD_POLICYENGINE_UK_DATASET
 from engine.py_runtime import DatasetSpec
 from engine.simulations import SocietySimulationRun
@@ -78,7 +79,7 @@ def test_axes_tools_have_standalone_bounded_schemas():
     assert run_schema["properties"]["axis"]["properties"]["count"] == {
         "type": "integer",
         "minimum": 2,
-        "maximum": 401,
+        "maximum": 101,
         "description": (
             "Number of evenly spaced values, including both endpoints."
         ),
@@ -229,6 +230,52 @@ def test_axes_simulation_handle_retrieves_one_complete_series(monkeypatch):
         "x": [0, 50_000, 100_000],
         "y": [20_000, 50_000, 80_000],
     }
+
+
+def test_axes_series_returns_actionable_error_instead_of_partial_coordinates():
+    run = axes_engine.AxesSimulationRun(
+        household_input={
+            "people": [{"age": 30, "note": "x" * MAX_AXES_SERIES_CHARS}],
+            "benunit": {},
+            "household": {},
+            "year": 2026,
+        },
+        axis={
+            "name": "employment_income",
+            "index": 0,
+            "min": 0,
+            "max": 100_000,
+            "count": 3,
+        },
+        output_entities={"household_net_income": "household"},
+        series_by_target={
+            "baseline": {
+                "household_net_income": [[20_000, 50_000, 80_000]],
+            }
+        },
+        x=[0, 50_000, 100_000],
+    )
+    context = new_tool_context("axes-too-large")
+    simulation_id = context.result_store.put(
+        "axes_simulation",
+        run,
+        run.metadata(),
+    )
+
+    result = agent_tools.execute_tool(
+        "get_axes_series",
+        {
+            "simulation_id": simulation_id,
+            "variable": "household_net_income",
+        },
+        context=context,
+    )
+
+    assert result["actual_char_count"] > MAX_AXES_SERIES_CHARS
+    assert result["max_char_count"] == MAX_AXES_SERIES_CHARS
+    assert "fewer points" in result["detail"]
+    assert "x" not in result
+    assert "y" not in result
 
 
 def test_axes_handles_are_turn_local_and_not_chart_inputs():

@@ -177,6 +177,15 @@ def test_build_axes_simulation_keeps_baseline_and_reform_separate(monkeypatch):
         (
             {
                 "name": "employment_income",
+                "min": 0,
+                "max": 100,
+                "count": 102,
+            },
+            "axis.count",
+        ),
+        (
+            {
+                "name": "employment_income",
                 "min": 100,
                 "max": 0,
                 "count": 3,
@@ -296,7 +305,7 @@ def test_axes_calculator_length_must_match_requested_count(monkeypatch):
 
 
 @requires_policyengine_py
-def test_policyengine_py_runs_a_401_point_axis():
+def test_policyengine_py_runs_a_101_point_axis():
     from chat.orchestrator import (
         MAX_TOOL_RESULT_CHARS,
         _serialise_tool_result_for_model,
@@ -312,14 +321,14 @@ def test_policyengine_py_runs_a_401_point_axis():
             "name": "employment_income",
             "min": 0,
             "max": 100_000,
-            "count": 401,
+            "count": 101,
         },
         outputs=["household_net_income"],
     )
 
     series = run.get_series(variable="household_net_income")
-    assert len(series["x"]) == 401
-    assert len(series["y"]) == 401
+    assert len(series["x"]) == 101
+    assert len(series["y"]) == 101
     assert series["x"][0] == 0
     assert series["x"][-1] == 100_000
     result_json = _serialise_tool_result_for_model(series)

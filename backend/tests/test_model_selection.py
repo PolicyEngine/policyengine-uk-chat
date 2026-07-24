@@ -29,6 +29,17 @@ class TestSelectChatModel:
             == DEFAULT_REASONING_MODEL
         )
 
+    def test_gateway_axes_reform_slot_routes_to_reasoning_model(self):
+        verdict = _verdict("run_axes_simulation", [_slot("reform")])
+
+        assert (
+            select_chat_model(
+                _messages("Show the household income curve under this reform"),
+                gateway_verdict=verdict,
+            )
+            == DEFAULT_REASONING_MODEL
+        )
+
     def test_gateway_distributional_output_routes_to_reasoning_model(self):
         verdict = _verdict(
             "run_society_simulation",

@@ -104,10 +104,11 @@ cases:
 
   - id: gw_ready_schedule_lookup
     suite: gateway
-    description: A schedule lookup is fully determined by the prompt — no user input needed.
+    description: A household schedule is fully determined and should select the axes tool.
     requirements: [live_model]
     prompt: Plot the income tax schedule on employment income from £0 to £150,000.
     expected_outcome: ready
+    expected_tool: run_axes_simulation
 
   - id: gw_ready_parameter_lookup
     suite: gateway

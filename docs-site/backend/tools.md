@@ -54,7 +54,7 @@ inequality results. Its `result_id` is consumed by the derivative tools below.
 `run_household_simulation` models one household containing one benefit unit;
 multiple benefit units or unrelated households require separate calls.
 
-`run_axes_simulation` accepts one verified numeric axis with 2–401 points and
+`run_axes_simulation` accepts one verified numeric axis with 2–101 points and
 1–5 verified numeric outputs. It returns metadata and a turn-local
 `simulation_id`, not the full calculation. `get_axes_series` then retrieves one
 baseline or reform output with no pagination. An abbreviated response is:
@@ -78,11 +78,13 @@ baseline or reform output with no pagination. An abbreviated response is:
 }
 ```
 
-Parallel arrays keep a complete 401-point series within the model tool-result
-limit. The stored multi-output run stays outside model context, but each
-retrieved series enters it. Handles expire after the current chat turn.
-Request baseline and reform separately. Axes handles are deliberately not
-accepted by chart tools.
+Parallel arrays keep a complete 101-point series compact and preserve coordinate
+alignment. If the complete series exceeds the 12,000-character axes JSON limit,
+retrieval returns a descriptive error instead of partial x/y arrays. The stored
+multi-output run stays outside model context, but each successfully retrieved
+series enters it. Handles expire after the current chat turn. Request baseline
+and reform separately. Axes handles are deliberately not accepted by chart
+tools.
 
 ## Derivative tools
 

@@ -59,10 +59,12 @@ dispatched by `execute_tool()`. At present, the exposed tools are:
   sweep, and `run_society_simulation` for aggregate society-wide simulations.
 - Axes retrieval: `get_axes_series` consumes a turn-local axes `simulation_id`
   and returns one complete selected output as parallel `x` and `y` arrays. A
-  run accepts one axis with 2–401 points and 1–5 numeric outputs. Retrieval has
-  no pagination; request baseline and reform series separately. The stored
-  multi-output run stays outside model context, while the retrieved series
-  enters it. Axes handles are not chart inputs.
+  run accepts one axis with 2–101 points and 1–5 numeric outputs. Retrieval has
+  no pagination; request baseline and reform series separately. If a complete
+  series exceeds the 12,000-character axes JSON limit, retrieval returns an
+  actionable error rather than partial x/y arrays. The stored multi-output run
+  stays outside model context, while a successfully retrieved series enters it.
+  Axes handles are not chart inputs.
 - Derivatives: `compute_budgetary_impact`, `compute_program_breakdown`,
   `compute_decile_impacts`, `compute_winners_losers`,
   `compute_poverty_metrics`, `compute_inequality_metrics`, and

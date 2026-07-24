@@ -18,3 +18,30 @@ cases:
     forbidden_tools:
       - run_society_simulation
       - aggregate_result
+
+  - id: trajectory_live_anthropic_household_earnings_axis
+    suite: trajectory
+    description: Live Anthropic baseline for selecting the standalone axes tool.
+    tags: [live_baseline, axes]
+    requirements: [live_model]
+    prompt: >
+      Using PolicyEngine UK, show how household net income changes for an
+      illustrative single 30-year-old as annual employment income rises from
+      GBP 0 to GBP 100,000 across 101 evenly spaced points in 2026.
+    expected_tools:
+      - name: run_axes_simulation
+        input_contains:
+          year: 2026
+          axis:
+            name: employment_income
+            min: 0
+            max: 100000
+            count: 101
+          outputs: [household_net_income]
+        required_input_paths:
+          - people
+    forbidden_tools:
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+      - generate_chart

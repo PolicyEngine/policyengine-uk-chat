@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 _REFORM_CAPABLE_TOOLS = {
     "validate_reform",
     "run_household_simulation",
+    "run_axes_simulation",
     "run_society_simulation",
     "compute_budgetary_impact",
     "compute_decile_impacts",

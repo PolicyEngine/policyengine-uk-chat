@@ -1,6 +1,11 @@
 """Model-facing tool definitions for the UK chat runtime."""
 
-from engine.axes import MAX_AXIS_OUTPUTS, MAX_AXIS_POINTS, MIN_AXIS_POINTS
+from engine.axes import (
+    MAX_AXES_SERIES_CHARS,
+    MAX_AXIS_OUTPUTS,
+    MAX_AXIS_POINTS,
+    MIN_AXIS_POINTS,
+)
 from engine.constants import DEFAULT_UK_DATASET
 
 
@@ -366,7 +371,9 @@ RUN_AXES_SIMULATION_DESCRIPTION = (
 )
 GET_AXES_SERIES_DESCRIPTION = (
     "Retrieve every x/y point for one output selected by a prior "
-    "run_axes_simulation call. Returns one compact series with no pagination."
+    "run_axes_simulation call. Returns one compact series with no pagination. "
+    f"If the complete JSON would exceed {MAX_AXES_SERIES_CHARS:,} characters, "
+    "returns an error instead of a partial series; rerun with fewer points."
 )
 RUN_SOCIETY_SIMULATION_DESCRIPTION = (
     "Run baseline and reform policyengine.py UK simulations and return metadata plus a turn-local result handle. "

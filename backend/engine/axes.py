@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -14,8 +15,9 @@ from engine.serialization import json_safe
 
 
 MIN_AXIS_POINTS = 2
-MAX_AXIS_POINTS = 401
+MAX_AXIS_POINTS = 101
 MAX_AXIS_OUTPUTS = 5
+MAX_AXES_SERIES_CHARS = 12_000
 
 
 @dataclass(frozen=True)
@@ -76,7 +78,7 @@ class AxesSimulationRun:
                 f"{len(values_by_index)} value set(s)."
             )
 
-        return {
+        result = {
             "household_input": self.household_input,
             "axis": {
                 "name": self.axis["name"],
@@ -90,6 +92,23 @@ class AxesSimulationRun:
             "x": self.x,
             "y": values_by_index[index],
         }
+        result_chars = len(json.dumps(result, ensure_ascii=False, default=str))
+        if result_chars > MAX_AXES_SERIES_CHARS:
+            return {
+                "error": (
+                    "The complete axes series is too large to return safely "
+                    f"({result_chars:,} JSON characters; limit "
+                    f"{MAX_AXES_SERIES_CHARS:,})."
+                ),
+                "detail": (
+                    "No partial x/y series was returned. Run a new axes "
+                    "simulation with fewer points or a smaller household input, "
+                    "then call get_axes_series with the new simulation_id."
+                ),
+                "actual_char_count": result_chars,
+                "max_char_count": MAX_AXES_SERIES_CHARS,
+            }
+        return result
 
 
 def _numeric_variable(name: str) -> tuple[Any, str]:

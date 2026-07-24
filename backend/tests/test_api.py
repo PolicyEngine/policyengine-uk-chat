@@ -46,7 +46,7 @@ def test_oversized_tool_results_remain_valid_json():
     }
 
 
-def test_complete_401_point_axes_series_fits_model_tool_result_limit():
+def test_complete_101_point_axes_series_fits_model_tool_result_limit():
     result = {
         "household_input": {
             "people": [{"age": 30}],
@@ -60,8 +60,8 @@ def test_complete_401_point_axes_series_fits_model_tool_result_limit():
             "index": 0,
             "target": "baseline",
         },
-        "x": [index * 250 for index in range(401)],
-        "y": [4_939.7548828125 + index * 158.646484375 for index in range(401)],
+        "x": [index * 1_000 for index in range(101)],
+        "y": [4_939.7548828125 + index * 634.5859375 for index in range(101)],
     }
 
     result_json = _serialise_tool_result_for_model(result)
