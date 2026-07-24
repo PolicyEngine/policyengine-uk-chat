@@ -78,6 +78,13 @@ baseline or reform output with no pagination. An abbreviated response is:
 }
 ```
 
+Successful retrievals always contain exactly the required
+`household_input`, `axis`, `series`, `x`, and `y` fields. Axis coordinates and
+numeric output values are numbers; unavailable output values may be `null`.
+`series.target` is either `baseline` or `reform`. Oversized results instead
+return the required `error`, `detail`, `actual_char_count`, and
+`max_char_count` fields, with no partial coordinates.
+
 Parallel arrays keep a complete 101-point series compact and preserve coordinate
 alignment. If the complete series exceeds the 12,000-character axes JSON limit,
 retrieval returns a descriptive error instead of partial x/y arrays. The stored

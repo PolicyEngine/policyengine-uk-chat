@@ -5,10 +5,20 @@ from __future__ import annotations
 import inspect
 import json
 import logging
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 from engine import derivatives, discovery
 from engine.axes import AxesSimulationRun, build_axes_simulation
+from engine.axes_schemas import (
+    AxesChartDefaults,
+    AxesInput,
+    AxesSeriesToolResult,
+    AxesSimulationResult,
+    AxesTarget,
+    RunAxesToolResult,
+    ToolError,
+)
 from engine.households import calculate_household, validate_household_dict
 from engine.reforms import validate_reform_dict
 from engine.serialization import explore_tabular_data, json_safe
@@ -16,6 +26,7 @@ from engine.simulations import (
     SocietySimulationRun,
     build_society_simulation,
 )
+from schema_types import JsonObject, JsonValue
 from tools.context import ToolExecutionContext
 from tools.definitions import (
     AGGREGATE_RESULT_INPUT_SCHEMA,
@@ -227,15 +238,15 @@ def run_household_simulation(
     input_schema=RUN_AXES_SIMULATION_INPUT_SCHEMA,
 )
 def run_axes_simulation(
-    people: list[dict[str, Any]],
-    axis: dict[str, Any],
+    people: list[JsonObject],
+    axis: AxesInput,
     outputs: list[str],
-    benunit: Optional[Dict[str, Any]] = None,
-    household: Optional[Dict[str, Any]] = None,
+    benunit: JsonObject | None = None,
+    household: JsonObject | None = None,
     year: int = DEFAULT_SIMULATION_YEAR,
-    reform: Optional[Dict[str, Any]] = None,
+    reform: JsonObject | None = None,
     _context: ToolExecutionContext | None = None,
-) -> Dict[str, Any]:
+) -> RunAxesToolResult:
     try:
         payload = build_axes_simulation(
             people=people,
@@ -248,23 +259,35 @@ def run_axes_simulation(
         )
     except Exception as exc:
         logger.exception("Error in run_axes_simulation")
-        return {"error": f"{type(exc).__name__}: {exc}"}
+        return ToolError(error=f"{type(exc).__name__}: {exc}")
 
-    result = payload.metadata()
-    result["simulation_id"] = _store(
+    metadata = payload.metadata()
+    simulation_id = _store(
         _context,
         "axes_simulation",
         payload,
-        result,
+        metadata,
     )
-    return result
+    return AxesSimulationResult(
+        **metadata,
+        simulation_id=simulation_id,
+    )
 
 
 def _axes_payload(
     context: ToolExecutionContext | None,
     simulation_id: str,
 ) -> AxesSimulationRun:
-    return _get_stored(context, simulation_id, "axes_simulation").payload
+    payload = _get_stored(
+        context,
+        simulation_id,
+        "axes_simulation",
+    ).payload
+    if not isinstance(payload, AxesSimulationRun):
+        raise TypeError(
+            f"Result {simulation_id} does not contain an axes simulation."
+        )
+    return payload
 
 
 @register_tool(
@@ -276,9 +299,9 @@ def get_axes_series(
     simulation_id: str,
     variable: str,
     index: int = 0,
-    target: str = "baseline",
+    target: AxesTarget = "baseline",
     _context: ToolExecutionContext | None = None,
-) -> Dict[str, Any]:
+) -> AxesSeriesToolResult:
     return _axes_payload(_context, simulation_id).get_series(
         variable=variable,
         target=target,
@@ -527,14 +550,22 @@ _GENERIC_CHART_KINDS = {
 }
 
 
+@dataclass(frozen=True)
+class NormalizedChartData:
+    """Chart data plus any fields derived from compact axes metadata."""
+
+    data: JsonValue | None
+    axes_defaults: AxesChartDefaults | None = None
+
+
 def _normalise_compact_axes_chart_data(
     chart_kind: str,
-    data: Any,
-) -> tuple[Any, dict[str, Any]]:
+    data: JsonValue | None,
+) -> NormalizedChartData:
     """Convert one compact axes x/y result into chart rows and field defaults."""
 
     if not isinstance(data, dict) or not ({"x", "y"} & set(data)):
-        return data, {}
+        return NormalizedChartData(data=data)
 
     x = data.get("x")
     y = data.get("y")
@@ -567,19 +598,22 @@ def _normalise_compact_axes_chart_data(
             {"earnings": x_value, "value": y_value}
             for x_value, y_value in zip(x, y, strict=True)
         ]
-        return rows, {}
+        return NormalizedChartData(data=rows)
 
     y_field = series_name if series_name != axis_name else f"{series_name}_output"
     rows = [
         {axis_name: x_value, y_field: y_value}
         for x_value, y_value in zip(x, y, strict=True)
     ]
-    return rows, {
-        "x_field": axis_name,
-        "y_fields": [y_field],
-        "x_label": axis_name.replace("_", " ").title(),
-        "y_label": series_name.replace("_", " ").title(),
-    }
+    return NormalizedChartData(
+        data=rows,
+        axes_defaults=AxesChartDefaults(
+            x_field=axis_name,
+            y_fields=[y_field],
+            x_label=axis_name.replace("_", " ").title(),
+            y_label=series_name.replace("_", " ").title(),
+        ),
+    )
 
 
 def _preset_chart_data(chart_kind: str, result: dict[str, Any]) -> list[dict[str, Any]]:
@@ -643,7 +677,7 @@ def _preset_chart_data(chart_kind: str, result: dict[str, Any]) -> list[dict[str
 def generate_chart(
     chart_kind: str,
     result_id: str | None = None,
-    data: Any = None,
+    data: JsonValue | None = None,
     title: str | None = None,
     subtitle: str | None = None,
     source: str | None = None,
@@ -668,18 +702,19 @@ def generate_chart(
     ):
         return {"error": f"Unknown chart kind: {chart_kind}"}
     try:
-        data, axes_defaults = _normalise_compact_axes_chart_data(
+        normalized_data = _normalise_compact_axes_chart_data(
             chart_kind,
             data,
         )
     except ValueError as exc:
         return {"error": str(exc)}
-    if axes_defaults:
+    data = normalized_data.data
+    if normalized_data.axes_defaults is not None:
         # Compact axes metadata is authoritative for the generated row keys.
-        x_field = axes_defaults["x_field"]
-        y_fields = axes_defaults["y_fields"]
-        x_label = x_label or axes_defaults["x_label"]
-        y_label = y_label or axes_defaults["y_label"]
+        x_field = normalized_data.axes_defaults["x_field"]
+        y_fields = normalized_data.axes_defaults["y_fields"]
+        x_label = x_label or normalized_data.axes_defaults["x_label"]
+        y_label = y_label or normalized_data.axes_defaults["y_label"]
     if chart_kind in _GENERIC_CHART_KINDS:
         if result_id:
             stored = _get_stored(

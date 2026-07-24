@@ -24,7 +24,9 @@ The backend is organized by topic — one package per concern:
   duplicating object/array/dataset/format shapes.
 - `backend/engine/` owns the deterministic PolicyEngine compute helpers
   (policyengine.py runtime loading, catalog discovery, households, official
-  derivative adapters, reforms, simulations, and serialization).
+  derivative adapters, reforms, simulations, and serialization). Axes JSON
+  contracts live in `engine/axes_schemas.py`; use those named schemas instead
+  of returning or storing untyped dictionaries.
 - `backend/config/` owns model-call configuration (model ids, temperatures, the
   Anthropic client factories, and environment settings).
 - `backend/api/` owns the HTTP surface (`main.py` app + router mounting,
@@ -64,6 +66,8 @@ dispatched by `execute_tool()`. At present, the exposed tools are:
   series exceeds the 12,000-character axes JSON limit, retrieval returns an
   actionable error rather than partial x/y arrays. The stored multi-output run
   stays outside model context, while a successfully retrieved series enters it.
+  `AxesSimulationResult`, `AxesSeriesResult`, and `AxesSeriesLimitError` define
+  the required result keys and their concrete JSON-compatible value types.
   Axes handles are not chart inputs, but the compact result returned by
   `get_axes_series` can be passed directly to `generate_chart`.
 - Derivatives: `compute_budgetary_impact`, `compute_program_breakdown`,

@@ -2,11 +2,20 @@
 
 import json
 from types import SimpleNamespace
+from typing import Literal, get_type_hints
 
 import pytest
 
 from conftest import requires_policyengine_py
 from engine import axes
+from engine.axes_schemas import (
+    AxesInput,
+    AxesSeriesLimitError,
+    AxesSeriesMetadata,
+    AxesSeriesResult,
+    AxesSimulationResult,
+    HouseholdInput,
+)
 
 
 def _model():
@@ -72,6 +81,48 @@ def _patch_runtime(monkeypatch):
     monkeypatch.setattr(axes, "uk_model_version", _model)
     monkeypatch.setattr(axes, "validate_household_dict", _validation)
     monkeypatch.setattr(axes, "calculate_household_py", _calculator)
+
+
+def test_axes_result_schemas_define_required_keys_and_literal_targets():
+    assert AxesInput.__required_keys__ == {
+        "name",
+        "min",
+        "max",
+        "count",
+    }
+    assert AxesInput.__optional_keys__ == {"index"}
+    assert HouseholdInput.__required_keys__ == {
+        "people",
+        "benunit",
+        "household",
+        "year",
+    }
+    assert AxesSimulationResult.__required_keys__ == {
+        "status",
+        "year",
+        "axis",
+        "outputs",
+        "targets",
+        "point_count",
+        "simulation_id",
+    }
+    assert AxesSeriesResult.__required_keys__ == {
+        "household_input",
+        "axis",
+        "series",
+        "x",
+        "y",
+    }
+    assert AxesSeriesLimitError.__required_keys__ == {
+        "error",
+        "detail",
+        "actual_char_count",
+        "max_char_count",
+    }
+    assert get_type_hints(AxesSeriesMetadata)["target"] == Literal[
+        "baseline",
+        "reform",
+    ]
 
 
 def test_build_axes_simulation_keeps_only_selected_series(monkeypatch):
@@ -302,6 +353,25 @@ def test_axes_calculator_length_must_match_requested_count(monkeypatch):
             },
             outputs=["income_tax"],
         )
+
+
+def test_axes_calculator_values_must_be_numeric_or_null():
+    with pytest.raises(ValueError, match="non-numeric axes value"):
+        axes._extract_series(
+            {
+                "household": {
+                    "household_net_income": [20_000, "not-a-number"],
+                }
+            },
+            variable="household_net_income",
+            entity="household",
+            index=0,
+        )
+
+
+def test_axes_coordinates_must_not_be_null():
+    with pytest.raises(ValueError, match="null axis coordinate"):
+        axes._axis_coordinates([0, None, 100])
 
 
 @requires_policyengine_py

@@ -7,11 +7,30 @@ import math
 from collections.abc import Mapping
 from dataclasses import dataclass
 from numbers import Number
-from typing import Any
+from typing import cast
 
+from engine.axes_schemas import (
+    AxesOutputEntities,
+    AxesOutputMetadata,
+    AxesSeriesAxis,
+    AxesSeriesByTarget,
+    AxesSeriesByVariable,
+    AxesSeriesLimitError,
+    AxesSeriesMetadata,
+    AxesSeriesResult,
+    AxesSeriesToolResult,
+    AxesSimulationMetadata,
+    AxesTarget,
+    AxisNumber,
+    AxisValue,
+    HouseholdEntity,
+    HouseholdInput,
+    NormalizedAxis,
+)
 from engine.households import validate_household_dict
 from engine.py_runtime import calculate_household_py, uk_model_version
 from engine.serialization import json_safe
+from schema_types import JsonObject, JsonValue
 
 
 MIN_AXIS_POINTS = 2
@@ -24,38 +43,38 @@ MAX_AXES_SERIES_CHARS = 12_000
 class AxesSimulationRun:
     """Selected household series retained behind a turn-local result handle."""
 
-    household_input: dict[str, Any]
-    axis: dict[str, Any]
-    output_entities: dict[str, str]
-    series_by_target: dict[str, dict[str, list[list[Any]]]]
-    x: list[Any]
+    household_input: HouseholdInput
+    axis: NormalizedAxis
+    output_entities: AxesOutputEntities
+    series_by_target: AxesSeriesByTarget
+    x: list[AxisNumber]
 
-    def metadata(self) -> dict[str, Any]:
-        return {
-            "status": "success",
-            "year": self.household_input["year"],
-            "axis": dict(self.axis),
-            "outputs": [
-                {
-                    "name": name,
-                    "entity": entity,
-                    "entity_count": len(
+    def metadata(self) -> AxesSimulationMetadata:
+        return AxesSimulationMetadata(
+            status="success",
+            year=self.household_input["year"],
+            axis=NormalizedAxis(**self.axis),
+            outputs=[
+                AxesOutputMetadata(
+                    name=name,
+                    entity=entity,
+                    entity_count=len(
                         self.series_by_target["baseline"][name]
                     ),
-                }
+                )
                 for name, entity in self.output_entities.items()
             ],
-            "targets": list(self.series_by_target),
-            "point_count": len(self.x),
-        }
+            targets=list(self.series_by_target),
+            point_count=len(self.x),
+        )
 
     def get_series(
         self,
         *,
         variable: str,
-        target: str = "baseline",
+        target: AxesTarget = "baseline",
         index: int = 0,
-    ) -> dict[str, Any]:
+    ) -> AxesSeriesToolResult:
         if target not in self.series_by_target:
             available = ", ".join(self.series_by_target)
             raise ValueError(
@@ -78,40 +97,40 @@ class AxesSimulationRun:
                 f"{len(values_by_index)} value set(s)."
             )
 
-        result = {
-            "household_input": self.household_input,
-            "axis": {
-                "name": self.axis["name"],
-                "index": self.axis["index"],
-            },
-            "series": {
-                "name": variable,
-                "index": index,
-                "target": target,
-            },
-            "x": self.x,
-            "y": values_by_index[index],
-        }
+        result = AxesSeriesResult(
+            household_input=self.household_input,
+            axis=AxesSeriesAxis(
+                name=self.axis["name"],
+                index=self.axis["index"],
+            ),
+            series=AxesSeriesMetadata(
+                name=variable,
+                index=index,
+                target=target,
+            ),
+            x=self.x,
+            y=values_by_index[index],
+        )
         result_chars = len(json.dumps(result, ensure_ascii=False, default=str))
         if result_chars > MAX_AXES_SERIES_CHARS:
-            return {
-                "error": (
+            return AxesSeriesLimitError(
+                error=(
                     "The complete axes series is too large to return safely "
                     f"({result_chars:,} JSON characters; limit "
                     f"{MAX_AXES_SERIES_CHARS:,})."
                 ),
-                "detail": (
+                detail=(
                     "No partial x/y series was returned. Run a new axes "
                     "simulation with fewer points or a smaller household input, "
                     "then call get_axes_series with the new simulation_id."
                 ),
-                "actual_char_count": result_chars,
-                "max_char_count": MAX_AXES_SERIES_CHARS,
-            }
+                actual_char_count=result_chars,
+                max_char_count=MAX_AXES_SERIES_CHARS,
+            )
         return result
 
 
-def _numeric_variable(name: str) -> tuple[Any, str]:
+def _numeric_variable(name: str) -> tuple[object, HouseholdEntity]:
     model = uk_model_version()
     variable = model.variables_by_name.get(name)
     if variable is None:
@@ -137,18 +156,28 @@ def _numeric_variable(name: str) -> tuple[Any, str]:
         raise ValueError(
             f"Household variable {name!r} has unsupported entity {entity!r}."
         )
-    return variable, entity
+    return variable, cast(HouseholdEntity, entity)
 
 
-def _entity_count(entity: str, people: list[dict[str, Any]]) -> int:
+def _entity_count(entity: HouseholdEntity, people: list[JsonObject]) -> int:
     return len(people) if entity == "person" else 1
 
 
+def _finite_axis_number(field: str, value: object) -> int | float:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(value)
+    ):
+        raise ValueError(f"axis.{field} must be a finite number.")
+    return value
+
+
 def _normalise_axis(
-    axis: Mapping[str, Any],
+    axis: Mapping[str, object],
     *,
-    people: list[dict[str, Any]],
-) -> tuple[dict[str, Any], str]:
+    people: list[JsonObject],
+) -> tuple[NormalizedAxis, HouseholdEntity]:
     if not isinstance(axis, Mapping):
         raise ValueError("axis must be an object.")
 
@@ -172,15 +201,8 @@ def _normalise_axis(
             f"the {entity} entity has {entity_count} member(s)."
         )
 
-    lower = axis.get("min")
-    upper = axis.get("max")
-    for field, value in (("min", lower), ("max", upper)):
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, Number)
-            or not math.isfinite(float(value))
-        ):
-            raise ValueError(f"axis.{field} must be a finite number.")
+    lower = _finite_axis_number("min", axis.get("min"))
+    upper = _finite_axis_number("max", axis.get("max"))
     if lower >= upper:
         raise ValueError("axis.min must be less than axis.max.")
 
@@ -195,18 +217,18 @@ def _normalise_axis(
             f"through {MAX_AXIS_POINTS}."
         )
 
-    return {
-        "name": name,
-        "index": index,
-        "min": lower,
-        "max": upper,
-        "count": count,
-    }, entity
+    return NormalizedAxis(
+        name=name,
+        index=index,
+        min=lower,
+        max=upper,
+        count=count,
+    ), entity
 
 
 def _normalise_outputs(
     outputs: list[str],
-) -> dict[str, str]:
+) -> AxesOutputEntities:
     if not isinstance(outputs, list) or not 1 <= len(outputs) <= MAX_AXIS_OUTPUTS:
         raise ValueError(
             f"outputs must contain between 1 and {MAX_AXIS_OUTPUTS} variables."
@@ -219,37 +241,54 @@ def _normalise_outputs(
 
 
 def _extract_series(
-    result: dict[str, Any],
+    result: JsonObject,
     *,
     variable: str,
-    entity: str,
+    entity: HouseholdEntity,
     index: int,
-) -> list[Any]:
+) -> list[AxisValue]:
     if entity == "person":
         rows = result.get("person", [])
-        if index >= len(rows):
+        if not isinstance(rows, list) or index >= len(rows):
             raise ValueError(
                 f"Calculator returned no person index {index} for {variable!r}."
             )
-        values = rows[index].get(variable)
+        row = rows[index]
+        values = row.get(variable) if isinstance(row, dict) else None
     else:
         if index != 0:
             raise ValueError(f"{entity} variables only support index 0.")
-        values = result.get(entity, {}).get(variable)
+        entity_result = result.get(entity, {})
+        values = (
+            entity_result.get(variable)
+            if isinstance(entity_result, dict)
+            else None
+        )
 
     if not isinstance(values, list):
         raise ValueError(
             f"Calculator did not return an axes series for {variable!r}."
         )
-    return values
+    if any(
+        value is not None
+        and (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+        )
+        for value in values
+    ):
+        raise ValueError(
+            f"Calculator returned a non-numeric axes value for {variable!r}."
+        )
+    return cast(list[AxisValue], values)
 
 
 def _selected_series(
-    result: dict[str, Any],
+    result: JsonObject,
     *,
-    output_entities: dict[str, str],
-    people: list[dict[str, Any]],
-) -> dict[str, list[list[Any]]]:
+    output_entities: AxesOutputEntities,
+    people: list[JsonObject],
+) -> AxesSeriesByVariable:
     return {
         name: [
             _extract_series(
@@ -264,14 +303,29 @@ def _selected_series(
     }
 
 
+def _axis_coordinates(values: list[AxisValue]) -> list[AxisNumber]:
+    if any(value is None for value in values):
+        raise ValueError("Calculator returned a null axis coordinate.")
+    return cast(list[AxisNumber], values)
+
+
+def _json_object(value: object) -> JsonObject:
+    """Serialize a calculator result and assert its object root."""
+
+    serialized = json_safe(value)
+    if not isinstance(serialized, dict):
+        raise TypeError("Axes calculator results must serialize to an object.")
+    return cast(JsonObject, serialized)
+
+
 def build_axes_simulation(
     *,
-    people: list[dict[str, Any]],
-    benunit: dict[str, Any] | None,
-    household: dict[str, Any] | None,
+    people: list[JsonObject],
+    benunit: JsonObject | None,
+    household: JsonObject | None,
     year: int,
-    reform: Mapping[str, Any] | None,
-    axis: Mapping[str, Any],
+    reform: Mapping[str, JsonValue] | None,
+    axis: Mapping[str, object],
     outputs: list[str],
 ) -> AxesSimulationRun:
     """Run one numeric household axis and retain only selected output series."""
@@ -306,8 +360,8 @@ def build_axes_simulation(
         "extra_variables": extra_variables,
         "axes": [normalized_axis],
     }
-    baseline = json_safe(calculate_household_py(**calculation_kwargs))
-    targets = {
+    baseline = _json_object(calculate_household_py(**calculation_kwargs))
+    targets: AxesSeriesByTarget = {
         "baseline": _selected_series(
             baseline,
             output_entities=output_entities,
@@ -315,7 +369,7 @@ def build_axes_simulation(
         )
     }
     if normalized_reform:
-        reformed = json_safe(
+        reformed = _json_object(
             calculate_household_py(
                 **calculation_kwargs,
                 reform=normalized_reform,
@@ -327,11 +381,13 @@ def build_axes_simulation(
             people=people_input,
         )
 
-    x = _extract_series(
-        baseline,
-        variable=normalized_axis["name"],
-        entity=axis_entity,
-        index=normalized_axis["index"],
+    x = _axis_coordinates(
+        _extract_series(
+            baseline,
+            variable=normalized_axis["name"],
+            entity=axis_entity,
+            index=normalized_axis["index"],
+        )
     )
     expected_count = normalized_axis["count"]
     all_series = [
@@ -349,15 +405,13 @@ def build_axes_simulation(
         )
 
     return AxesSimulationRun(
-        household_input=json_safe(
-            {
-                "people": people_input,
-                "benunit": benunit_input,
-                "household": household_entity_input,
-                "year": effective_year,
-            }
+        household_input=HouseholdInput(
+            people=people_input,
+            benunit=benunit_input,
+            household=household_entity_input,
+            year=effective_year,
         ),
-        axis=json_safe(normalized_axis),
+        axis=normalized_axis,
         output_entities=output_entities,
         series_by_target=targets,
         x=x,

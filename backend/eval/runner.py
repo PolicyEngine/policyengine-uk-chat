@@ -4,11 +4,13 @@ import importlib.util
 import json
 import os
 import subprocess
+from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable, List, cast
 
 from prompts import CHARTS_MODE_DIRECTIVE, SYSTEM_PROMPT
+from schema_types import JsonObject, JsonValue
 from tools.context import new_tool_context
 from tools.definitions import TOOL_DEFINITIONS
 from tools.dispatch import execute_tool
@@ -234,9 +236,9 @@ def _tool_use_id(case: ToolLoopCase, iteration: int, index: int, call_id: str) -
 
 
 def _resolve_offline_tool_input(
-    value: Any,
-    tool_outputs: Dict[str, Dict[str, Any]],
-) -> Any:
+    value: JsonValue,
+    tool_outputs: Mapping[str, JsonObject],
+) -> JsonValue:
     """Resolve deterministic references to prior tool-loop outputs."""
 
     if isinstance(value, dict):
@@ -276,7 +278,7 @@ def _resolve_offline_tool_input(
             f"Offline tool-result reference has no prior output for {tool_name!r}."
         )
 
-    resolved: Any = tool_outputs[tool_name]
+    resolved: JsonValue = tool_outputs[tool_name]
     for field in path.split("."):
         if not isinstance(resolved, dict) or field not in resolved:
             raise ValueError(
@@ -290,7 +292,7 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
     messages: List[Dict[str, Any]] = _messages_for_case(case)
     tool_context = new_tool_context(turn_id=case.id)
     tool_calls = []
-    tool_outputs: Dict[str, Dict[str, Any]] = {}
+    tool_outputs: dict[str, JsonObject] = {}
     final_text = ""
     errors: List[str] = []
 
@@ -318,11 +320,18 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
         prior_tool_outputs = dict(tool_outputs)
         for index, call in enumerate(turn.tool_calls, start=1):
             try:
-                tool_input = (
-                    _resolve_offline_tool_input(call.input, prior_tool_outputs)
-                    if isinstance(client, FakeModelClient)
-                    else call.input
-                )
+                if isinstance(client, FakeModelClient):
+                    resolved_input = _resolve_offline_tool_input(
+                        cast(JsonObject, call.input),
+                        prior_tool_outputs,
+                    )
+                    if not isinstance(resolved_input, dict):
+                        raise ValueError(
+                            "A resolved tool input must remain an object."
+                        )
+                    tool_input = resolved_input
+                else:
+                    tool_input = cast(JsonObject, call.input)
             except ValueError as exc:
                 return _result(case, "failed", 0.0, [str(exc)])
             resolved_call = call.model_copy(update={"input": tool_input})
@@ -336,7 +345,10 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
                     "input": tool_input,
                 }
             )
-            output = execute_tool(call.name, tool_input, context=tool_context)
+            output = cast(
+                JsonObject,
+                execute_tool(call.name, tool_input, context=tool_context),
+            )
             tool_outputs[call.name] = output
             tool_results.append(
                 {
