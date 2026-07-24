@@ -15,6 +15,7 @@ from policyengine_observability.runtime import EVENT_LOGGER
 from policyengine_observability.runtime import OPERATION_LOGGER
 from api.main import app
 from chat.orchestrator import MAX_TOOL_RESULT_CHARS, _serialise_tool_result_for_model
+from conftest import requires_policyengine_py
 
 client = TestClient(app)
 
@@ -488,6 +489,107 @@ class TestChatMessage:
 
 
 class TestChatRouteWithMockedAnthropic:
+    @requires_policyengine_py
+    def test_chat_route_executes_real_policyengine_tool_contract(self, monkeypatch):
+        import chat.orchestrator as chatbot
+        from gateway.runtime import GatewayVerdict
+
+        async def no_suggestions(*_args, **_kwargs):
+            return []
+
+        tool_input = {
+            "year": 2026,
+            "people": [{"age": 35, "employment_income": 35000}],
+            "benunit": {},
+            "household": {"country": "ENGLAND"},
+        }
+        fake_client = _FakeAnthropicClient(
+            [
+                _FakeAnthropicStream(
+                    final_content=[
+                        _tool_use_block(
+                            "run_household_simulation",
+                            tool_input,
+                        ),
+                    ],
+                ),
+                _FakeAnthropicStream(
+                    chunks=[
+                        "Income tax is £4,486.00, employee National Insurance "
+                        "is £1,794.40, and household net income is £28,539.55."
+                    ],
+                    final_content=[],
+                ),
+            ]
+        )
+        monkeypatch.setattr(chatbot, "get_async_client", lambda: fake_client)
+        monkeypatch.setattr(
+            chatbot,
+            "run_gateway",
+            lambda _prompt: GatewayVerdict(
+                outcome="ready",
+                route="compute",
+                tool="run_household_simulation",
+                slots=[],
+                gating_slots=[],
+                unmodellable_outputs=[],
+            ),
+        )
+        monkeypatch.setattr(
+            chatbot,
+            "generate_followup_suggestions",
+            no_suggestions,
+        )
+        monkeypatch.setattr(
+            "billing.record_usage",
+            lambda **_kwargs: {"cost_gbp": 0.0, "balance": 10.0},
+        )
+
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": (
+                            "Calculate income tax, employee National Insurance, "
+                            "and net income for a single 35-year-old in England "
+                            "earning £35,000 in 2026."
+                        ),
+                    }
+                ]
+            },
+        ) as response:
+            assert response.status_code == 200
+            text = response.read().decode()
+
+        events = parse_sse(text)
+        assert [
+            event["type"]
+            for event in events
+            if event["type"] in {"tool_use", "tool_result", "done"}
+        ] == ["tool_use", "tool_result", "done"]
+        done = next(event for event in events if event["type"] == "done")
+        assert "£4,486.00" in done["content"]
+        assert "£1,794.40" in done["content"]
+        assert "£28,539.55" in done["content"]
+
+        tool_result = fake_client.messages.calls[1]["messages"][-1]["content"][0]
+        calculated = json.loads(tool_result["content"])
+        assert calculated["person"][0]["income_tax"] == pytest.approx(
+            4486,
+            abs=0.05,
+        )
+        assert calculated["person"][0]["national_insurance"] == pytest.approx(
+            1794.4029541015625,
+            abs=0.05,
+        )
+        assert calculated["household"]["household_net_income"] == pytest.approx(
+            28539.552734375,
+            abs=0.05,
+        )
+
     def test_chat_route_executes_tool_loop_and_returns_final_answer(self, monkeypatch):
         import chat.orchestrator as chatbot
 
