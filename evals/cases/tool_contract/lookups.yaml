@@ -70,3 +70,63 @@ cases:
         query: universal credit standard allowance
       required_paths:
         - parameters.0.path
+
+  - id: get_parameter_personal_allowance_2026
+    suite: tool_contract
+    description: get_parameter returns the 2026 personal allowance.
+    tags: [uk_2026_golden, parameter]
+    requirements: [policyengine_py]
+    tool_name: get_parameter
+    input:
+      path: gov.hmrc.income_tax.allowances.personal_allowance.amount
+      year: 2026
+    expect:
+      contains:
+        status: success
+        parameter:
+          year: 2026
+      numeric:
+        - path: parameter.value
+          equals: 12570
+
+  - id: get_parameter_basic_income_tax_rate_2026
+    suite: tool_contract
+    description: get_parameter returns the 2026 basic income-tax rate.
+    tags: [uk_2026_golden, parameter]
+    requirements: [policyengine_py]
+    tool_name: get_parameter
+    input:
+      path: gov.hmrc.income_tax.rates.uk[0].rate
+      year: 2026
+    expect:
+      numeric:
+        - path: parameter.value
+          equals: 0.2
+
+  - id: get_parameter_employer_ni_rate_2026
+    suite: tool_contract
+    description: get_parameter returns the 2026 employer NI rate.
+    tags: [uk_2026_golden, parameter]
+    requirements: [policyengine_py]
+    tool_name: get_parameter
+    input:
+      path: gov.hmrc.national_insurance.class_1.rates.employer
+      year: 2026
+    expect:
+      numeric:
+        - path: parameter.value
+          equals: 0.15
+
+  - id: get_parameter_employer_ni_threshold_2026
+    suite: tool_contract
+    description: get_parameter returns the 2026 weekly secondary threshold.
+    tags: [uk_2026_golden, parameter]
+    requirements: [policyengine_py]
+    tool_name: get_parameter
+    input:
+      path: gov.hmrc.national_insurance.class_1.thresholds.secondary_threshold
+      year: 2026
+    expect:
+      numeric:
+        - path: parameter.value
+          equals: 96

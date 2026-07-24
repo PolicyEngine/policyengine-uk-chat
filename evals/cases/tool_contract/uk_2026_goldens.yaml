@@ -1,0 +1,303 @@
+cases:
+  - id: uk_2026_single_employee_35000
+    suite: tool_contract
+    description: A single employee in England has stable 2026 tax, NI, and net income.
+    tags: [uk_2026_golden, household]
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
+    input:
+      year: 2026
+      people:
+        - age: 35
+          employment_income: 35000
+      benunit: {}
+      household:
+        country: ENGLAND
+    expect:
+      contains:
+        status: success
+        year: 2026
+        reform_applied: false
+      numeric:
+        - path: person.0.income_tax
+          equals: 4486
+          tolerance: 0.05
+        - path: person.0.national_insurance
+          equals: 1794.4029541015625
+          tolerance: 0.05
+        - path: person.0.ni_employer
+          equals: 4501.2001953125
+          tolerance: 0.05
+        - path: household.household_net_income
+          equals: 28539.552734375
+          tolerance: 0.05
+
+  - id: uk_2026_single_employee_60000
+    suite: tool_contract
+    description: A higher-rate employee in England has stable 2026 results.
+    tags: [uk_2026_golden, household]
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
+    input:
+      year: 2026
+      people:
+        - age: 35
+          employment_income: 60000
+      benunit: {}
+      household:
+        country: ENGLAND
+    expect:
+      numeric:
+        - path: person.0.income_tax
+          equals: 11432
+          tolerance: 0.05
+        - path: person.0.national_insurance
+          equals: 3210.600830078125
+          tolerance: 0.05
+        - path: household.household_net_income
+          equals: 45177.35546875
+          tolerance: 0.05
+
+  - id: uk_2026_scotland_employee_50000
+    suite: tool_contract
+    description: A Scottish employee exercises the country-specific 2026 income-tax schedule.
+    tags: [uk_2026_golden, household, country]
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
+    input:
+      year: 2026
+      people:
+        - age: 35
+          employment_income: 50000
+      benunit: {}
+      household:
+        country: SCOTLAND
+    expect:
+      numeric:
+        - path: person.0.income_tax
+          equals: 8982.0498046875
+          tolerance: 0.05
+        - path: person.0.national_insurance
+          equals: 2994.4033203125
+          tolerance: 0.05
+        - path: household.household_net_income
+          equals: 37843.5
+          tolerance: 0.05
+
+  - id: uk_2026_self_employed_30000
+    suite: tool_contract
+    description: A self-employed person exercises the supported aggregate NI output.
+    tags: [uk_2026_golden, household]
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
+    input:
+      year: 2026
+      people:
+        - age: 35
+          self_employment_income: 30000
+      benunit: {}
+      household:
+        country: ENGLAND
+    expect:
+      numeric:
+        - path: person.0.income_tax
+          equals: 3286
+          tolerance: 0.05
+        - path: person.0.national_insurance
+          equals: 1045.7999267578125
+          tolerance: 0.05
+        - path: household.household_net_income
+          equals: 25488.15625
+          tolerance: 0.05
+
+  - id: uk_2026_single_parent_two_children
+    suite: tool_contract
+    description: A single parent exercises 2026 tax, NI, Child Benefit, and Universal Credit.
+    tags: [uk_2026_golden, household, benefits]
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
+    input:
+      year: 2026
+      people:
+        - age: 35
+          employment_income: 22000
+        - age: 4
+        - age: 9
+      benunit:
+        would_claim_child_benefit: true
+        would_claim_uc: true
+      household:
+        country: ENGLAND
+    expect:
+      numeric:
+        - path: person.0.income_tax
+          equals: 1886
+          tolerance: 0.05
+        - path: person.0.national_insurance
+          equals: 754.4032592773438
+          tolerance: 0.05
+        - path: benunit.child_benefit
+          equals: 2337.39990234375
+          tolerance: 0.05
+        - path: benunit.universal_credit
+          equals: 6431.5810546875
+          tolerance: 0.05
+        - path: household.household_net_income
+          equals: 31500.72265625
+          tolerance: 0.05
+
+  - id: uk_2026_child_benefit_tax_charge
+    suite: tool_contract
+    description: A higher-income family exercises the Child Benefit tax charge.
+    tags: [uk_2026_golden, household, benefits]
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
+    input:
+      year: 2026
+      people:
+        - age: 35
+          employment_income: 65000
+        - age: 35
+        - age: 4
+        - age: 9
+      benunit:
+        would_claim_child_benefit: true
+      household:
+        country: ENGLAND
+      extra_variables:
+        - child_benefit_less_tax_charge
+    expect:
+      numeric:
+        - path: benunit.child_benefit
+          equals: 2337.39990234375
+          tolerance: 0.05
+        - path: benunit.child_benefit_less_tax_charge
+          equals: 1753.0499267578125
+          tolerance: 0.05
+        - path: person.0.income_tax
+          equals: 14016.349609375
+          tolerance: 0.05
+
+  - id: uk_2026_personal_allowance_15000_reform
+    suite: tool_contract
+    description: Raising the personal allowance to 15000 changes a 60000 salary by 972.
+    tags: [uk_2026_golden, reform]
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
+    input:
+      year: 2026
+      people:
+        - age: 35
+          employment_income: 60000
+      benunit: {}
+      household:
+        country: ENGLAND
+      reform:
+        gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
+    expect:
+      numeric:
+        - path: baseline.person.0.income_tax
+          equals: 11432
+          tolerance: 0.05
+        - path: reform.person.0.income_tax
+          equals: 10460
+          tolerance: 0.05
+        - path: baseline.household.household_net_income
+          equals: 45177.35546875
+          tolerance: 0.05
+        - path: reform.household.household_net_income
+          equals: 46149.35546875
+          tolerance: 0.05
+
+  - id: uk_2026_basic_rate_18_percent_reform
+    suite: tool_contract
+    description: Cutting the basic rate to 18 percent changes a 35000 salary by 448.60.
+    tags: [uk_2026_golden, reform]
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
+    input:
+      year: 2026
+      people:
+        - age: 35
+          employment_income: 35000
+      benunit: {}
+      household:
+        country: ENGLAND
+      reform:
+        gov.hmrc.income_tax.rates.uk[0].rate: 0.18
+    expect:
+      numeric:
+        - path: baseline.person.0.income_tax
+          equals: 4486
+          tolerance: 0.05
+        - path: reform.person.0.income_tax
+          equals: 4037.39990234375
+          tolerance: 0.05
+        - path: baseline.household.household_net_income
+          equals: 28539.552734375
+          tolerance: 0.05
+        - path: reform.household.household_net_income
+          equals: 28988.15234375
+          tolerance: 0.05
+
+  - id: uk_2026_cgt_pre_budget_rates
+    suite: tool_contract
+    description: Rolling CGT rates back to 10 and 20 percent lowers CGT by 1600.
+    tags: [uk_2026_golden, reform]
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
+    input:
+      year: 2026
+      people:
+        - age: 35
+          adjusted_net_income: 20000
+          capital_gains: 23000
+      benunit: {}
+      household:
+        country: ENGLAND
+      extra_variables:
+        - capital_gains_tax
+      reform:
+        gov.hmrc.cgt.basic_rate: 0.1
+        gov.hmrc.cgt.higher_rate: 0.2
+        gov.hmrc.cgt.additional_rate: 0.2
+    expect:
+      numeric:
+        - path: baseline.person.0.capital_gains_tax
+          equals: 3600.000244140625
+          tolerance: 0.05
+        - path: reform.person.0.capital_gains_tax
+          equals: 2000
+          tolerance: 0.05
+
+  - id: uk_2026_employer_ni_pre_budget_rates
+    suite: tool_contract
+    description: Rolling employer NI back exercises the modelled wage response.
+    tags: [uk_2026_golden, reform]
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
+    input:
+      year: 2026
+      people:
+        - age: 35
+          employment_income: 35000
+      benunit: {}
+      household:
+        country: ENGLAND
+      reform:
+        gov.hmrc.national_insurance.class_1.rates.employer: 0.138
+        gov.hmrc.national_insurance.class_1.thresholds.secondary_threshold: 175
+    expect:
+      numeric:
+        - path: baseline.person.0.ni_employer
+          equals: 4501.2001953125
+          tolerance: 0.05
+        - path: reform.person.0.ni_employer
+          equals: 3686.61279296875
+          tolerance: 0.05
+        - path: reform.person.0.employment_income
+          equals: 35814.5859375
+          tolerance: 0.05
+        - path: reform.household.household_net_income
+          equals: 29126.0546875
+          tolerance: 0.05
