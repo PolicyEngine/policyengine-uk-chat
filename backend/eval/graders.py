@@ -1,4 +1,4 @@
-"""Deterministic graders shared by the manual AI evaluation suites."""
+"""Deterministic graders shared by the AI evaluation suites."""
 
 import json
 import math
@@ -6,6 +6,7 @@ import re
 from typing import Any, Dict, Iterable, List
 
 from eval.schemas import (
+    ExecutedToolResult,
     ModelToolCall,
     OutputExpectation,
     TextExpectation,
@@ -159,18 +160,23 @@ def grade_tool_calls(
     if forbidden_seen:
         errors.append(f"forbidden tool call(s): {forbidden_seen}")
 
-    start = 0
-    for expected in expected_calls:
-        match_index = None
-        for index in range(start, len(actual_calls)):
-            if actual_calls[index].name == expected.name:
-                match_index = index
-                break
-        if match_index is None:
-            errors.append(f"expected tool {expected.name!r} after position {start}")
-            continue
+    if len(actual_calls) != len(expected_calls):
+        errors.append(
+            "expected exactly "
+            f"{len(expected_calls)} tool call(s), got {len(actual_calls)}"
+        )
 
-        call = actual_calls[match_index]
+    for index, expected in enumerate(expected_calls):
+        if index >= len(actual_calls):
+            errors.append(f"expected tool {expected.name!r} at position {index + 1}")
+            continue
+        call = actual_calls[index]
+        if call.name != expected.name:
+            errors.append(
+                f"expected tool {expected.name!r} at position {index + 1}, "
+                f"got {call.name!r}"
+            )
+            continue
         _compare_partial(call.input, expected.input_contains, f"{expected.name}.input", errors)
         for path in expected.required_input_paths:
             if value_at_path(call.input, path) is MISSING:
@@ -178,8 +184,6 @@ def grade_tool_calls(
         for path in expected.absent_input_paths:
             if value_at_path(call.input, path) is not MISSING:
                 errors.append(f"{expected.name}.input.{path}: should be absent")
-        start = match_index + 1
-
     return errors
 
 
@@ -201,9 +205,36 @@ def _number_allowed(value: float, allowed: List[float], tolerance: float) -> boo
     return any(math.isclose(value, expected, abs_tol=tolerance) for expected in allowed)
 
 
-def grade_text(text: str, expectation: TextExpectation) -> List[str]:
+def _numeric_leaves(value: Any) -> List[float]:
+    if isinstance(value, bool) or value is None:
+        return []
+    if isinstance(value, int | float):
+        return [float(value)]
+    if isinstance(value, list):
+        return [
+            number
+            for item in value
+            for number in _numeric_leaves(item)
+        ]
+    if isinstance(value, dict):
+        return [
+            number
+            for item in value.values()
+            for number in _numeric_leaves(item)
+        ]
+    return []
+
+
+def grade_text(
+    text: str,
+    expectation: TextExpectation,
+    tool_results: Iterable[ExecutedToolResult] = (),
+) -> List[str]:
     errors: List[str] = []
     lowered = text.lower()
+    executed = list(tool_results)
+    mentioned_numbers = extract_numbers(text)
+    required_answer_numbers: List[tuple[float, float]] = []
 
     for required in expectation.required:
         if required.lower() not in lowered:
@@ -217,11 +248,71 @@ def grade_text(text: str, expectation: TextExpectation) -> List[str]:
         if re.search(pattern, text, flags=re.IGNORECASE):
             errors.append(f"forbidden regex matched: {pattern!r}")
 
+    for required_value in expectation.required_values:
+        matching_results = [
+            result
+            for result in executed
+            if result.name == required_value.tool_name
+        ]
+        if len(matching_results) < required_value.occurrence:
+            errors.append(
+                f"required answer value tool result missing: "
+                f"{required_value.tool_name} occurrence "
+                f"{required_value.occurrence}"
+            )
+            continue
+        source = matching_results[required_value.occurrence - 1].output
+        value = value_at_path(source, required_value.path)
+        if value is MISSING or not isinstance(value, int | float) or isinstance(
+            value,
+            bool,
+        ):
+            errors.append(
+                f"required answer value path missing or non-numeric: "
+                f"{required_value.tool_name}.{required_value.path}"
+            )
+            continue
+        expected_number = float(value) * required_value.scale
+        required_answer_numbers.append(
+            (expected_number, required_value.tolerance)
+        )
+        if not _number_allowed(
+            expected_number,
+            mentioned_numbers,
+            required_value.tolerance,
+        ):
+            errors.append(
+                f"answer omitted required value {expected_number} from "
+                f"{required_value.tool_name}.{required_value.path}"
+            )
+        for context in required_value.required_context:
+            if context.lower() not in lowered:
+                errors.append(
+                    f"required value context missing: {context!r}"
+                )
+
     if expectation.grounded_numbers:
+        grounded = list(expectation.allowed_numbers)
+        for result in executed:
+            grounded.extend(_numeric_leaves(result.output))
         unexpected = [
             value
-            for value in extract_numbers(text)
-            if not _number_allowed(value, expectation.allowed_numbers, expectation.number_tolerance)
+            for value in mentioned_numbers
+            if (
+                not _number_allowed(
+                    value,
+                    grounded,
+                    expectation.number_tolerance,
+                )
+                and not any(
+                    math.isclose(
+                        value,
+                        expected,
+                        abs_tol=tolerance,
+                    )
+                    for expected, tolerance in required_answer_numbers
+                )
+            )
         ]
         if unexpected:
             errors.append(f"ungrounded number(s): {unexpected}")

@@ -17,12 +17,15 @@ from eval.schemas import (
     CaseResult,
     CaseSkip,
     EvalReport,
+    ExecutedToolResult,
     ModelTurn,
     ModelToolCall,
     NumericExpectation,
     OutputExpectation,
+    RequiredAnswerValue,
     TextExpectation,
     ToolContractCase,
+    ToolContractDetails,
     ToolCallExpectation,
     ToolLoopCase,
     TrajectoryCase,
@@ -40,6 +43,24 @@ def test_loads_yaml_cases_with_typed_schemas():
     assert cases
     assert {case.suite for case in cases} == {"trajectory"}
     assert cases[0].expected_tools[0].name == "run_household_simulation"
+
+
+def test_yaml_loader_normalizes_dated_reform_keys_to_json_strings():
+    cases = load_case_file(
+        REPO_ROOT / "evals" / "cases" / "tool_contract" / "reforms.yaml"
+    )
+    case = next(
+        case
+        for case in cases
+        if case.id == "validate_reform_accepts_dated_parameter"
+    )
+
+    assert (
+        case.input["reform"][
+            "gov.hmrc.income_tax.allowances.personal_allowance.amount"
+        ]
+        == {"2026-01-01": 15_000}
+    )
 
 
 def test_grade_output_supports_partial_paths_and_numeric_tolerance():
@@ -114,6 +135,18 @@ def test_grade_tool_calls_matches_ordered_semantic_expectations():
     assert grade_tool_calls(actual, expected, forbidden_tools=["aggregate_result"]) == []
 
 
+def test_grade_tool_calls_rejects_unexpected_extra_calls():
+    actual = [
+        ModelToolCall(name="run_household_simulation"),
+        ModelToolCall(name="generate_chart"),
+    ]
+    expected = [ToolCallExpectation(name="run_household_simulation")]
+
+    errors = grade_tool_calls(actual, expected, forbidden_tools=[])
+
+    assert "expected exactly 1 tool call(s), got 2" in errors
+
+
 def test_grade_text_checks_required_forbidden_and_grounded_numbers():
     expectation = TextExpectation(
         required=["illustrative", "£200"],
@@ -123,6 +156,83 @@ def test_grade_text_checks_required_forbidden_and_grounded_numbers():
     )
 
     assert grade_text("In 2025, this illustrative household changes by £200.", expectation) == []
+
+
+def test_grade_text_requires_values_from_named_tool_results():
+    expectation = TextExpectation(
+        grounded_numbers=True,
+        required_values=[
+            RequiredAnswerValue(
+                tool_name="run_household_simulation",
+                path="household.0.baseline_household_net_income",
+                tolerance=0.01,
+                required_context=["net income"],
+            )
+        ],
+    )
+    results = [
+        ExecutedToolResult(
+            name="run_household_simulation",
+            output={"household": [{"baseline_household_net_income": 31_234.56}]},
+        )
+    ]
+
+    assert (
+        grade_text(
+            "Baseline net income is £31,234.56.",
+            expectation,
+            results,
+        )
+        == []
+    )
+    assert "omitted required value" in grade_text(
+        "Baseline net income is unavailable.",
+        expectation,
+        results,
+    )[0]
+
+
+def test_grade_text_supports_scaled_required_percentages():
+    expectation = TextExpectation(
+        grounded_numbers=True,
+        required_values=[
+            RequiredAnswerValue(
+                tool_name="get_parameter",
+                path="parameter.value",
+                scale=100,
+                required_context=["rate"],
+            )
+        ],
+    )
+    results = [
+        ExecutedToolResult(
+            name="get_parameter",
+            output={"parameter": {"value": 0.2}},
+        )
+    ]
+
+    assert grade_text("The rate is 20%.", expectation, results) == []
+
+
+def test_required_value_tolerance_also_applies_to_grounding():
+    expectation = TextExpectation(
+        grounded_numbers=True,
+        required_values=[
+            RequiredAnswerValue(
+                tool_name="run_household_simulation",
+                path="household.household_net_income",
+                tolerance=1,
+            )
+        ],
+    )
+    results = [
+        ExecutedToolResult(
+            name="run_household_simulation",
+            output={"household": {"household_net_income": 28_539.55}},
+        )
+    ]
+
+    assert grade_text("Net income is £28,540.", expectation, results) == []
 
 
 def test_offline_eval_runs_seed_trajectory_and_answer_cases_without_reports():
@@ -217,6 +327,168 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
     assert calls == [("run_household_simulation", {"year": 2025})]
 
 
+def test_tool_loop_reports_tool_execution_errors(tmp_path, monkeypatch):
+    case_file = tmp_path / "tool_loop.yaml"
+    case_file.write_text(
+        yaml.safe_dump(
+            {
+                "cases": [
+                    {
+                        "id": "failing_loop",
+                        "suite": "tool_loop",
+                        "description": "Tool errors become case failures.",
+                        "prompt": "Calculate.",
+                        "expected_tools": [
+                            {"name": "run_household_simulation"}
+                        ],
+                        "offline_responses": [
+                            {
+                                "tool_calls": [
+                                    {
+                                        "name": "run_household_simulation",
+                                        "input": {},
+                                    }
+                                ]
+                            }
+                        ],
+                    }
+                ]
+            },
+            sort_keys=False,
+        )
+    )
+
+    def fail_tool(*_args, **_kwargs):
+        raise RuntimeError("calculation failed")
+
+    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+    monkeypatch.setattr(runner, "execute_tool", fail_tool)
+
+    report = runner.run_eval(
+        suites=["tool_loop"],
+        mode="offline",
+        write_reports=False,
+    )
+
+    assert report.failed == 1
+    assert "RuntimeError: calculation failed" in report.results[0].errors[0]
+
+
+def test_offline_tool_loop_resolves_prior_tool_results_and_fields(
+    tmp_path,
+    monkeypatch,
+):
+    case_file = tmp_path / "tool_loop.yaml"
+    case_file.write_text(
+        yaml.safe_dump(
+            {
+                "cases": [
+                    {
+                        "id": "stored_result_loop_case",
+                        "suite": "tool_loop",
+                        "description": "A stored simulation handle feeds retrieval.",
+                        "prompt": "Run a simulation, then retrieve its impact.",
+                        "expected_tools": [
+                            {"name": "run_society_simulation"},
+                            {
+                                "name": "compute_budgetary_impact",
+                                "input_contains": {
+                                    "simulation_id": "society_simulation_test"
+                                },
+                            },
+                            {
+                                "name": "generate_chart",
+                                "input_contains": {
+                                    "data": {
+                                        "net_budgetary_impact": 42,
+                                    }
+                                },
+                            },
+                        ],
+                        "expect": {"required": ["done"]},
+                        "offline_responses": [
+                            {
+                                "tool_calls": [
+                                    {
+                                        "name": "run_society_simulation",
+                                        "input": {},
+                                    }
+                                ]
+                            },
+                            {
+                                "tool_calls": [
+                                    {
+                                        "name": "compute_budgetary_impact",
+                                        "input": {
+                                            "simulation_id": (
+                                                "$tool_result."
+                                                "run_society_simulation.result_id"
+                                            )
+                                        },
+                                    }
+                                ]
+                            },
+                            {
+                                "tool_calls": [
+                                    {
+                                        "name": "generate_chart",
+                                        "input": {
+                                            "chart_kind": "generic_line",
+                                            "data": {
+                                                "$tool_result": (
+                                                    "compute_budgetary_impact"
+                                                )
+                                            },
+                                        },
+                                    }
+                                ]
+                            },
+                            {"text": "done"},
+                        ],
+                    }
+                ]
+            },
+            sort_keys=False,
+        )
+    )
+    calls = []
+
+    def record_tool_call(tool_name, tool_input, context=None):
+        assert context is not None
+        calls.append((tool_name, tool_input))
+        if tool_name == "run_society_simulation":
+            return {"result_id": "society_simulation_test"}
+        if tool_name == "generate_chart":
+            return {"status": "success"}
+        return {"net_budgetary_impact": 42}
+
+    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+    monkeypatch.setattr(runner, "execute_tool", record_tool_call)
+
+    report = runner.run_eval(
+        suites=["tool_loop"],
+        mode="offline",
+        write_reports=False,
+    )
+
+    assert report.failed == 0
+    assert report.passed == 1
+    assert calls == [
+        ("run_society_simulation", {}),
+        (
+            "compute_budgetary_impact",
+            {"simulation_id": "society_simulation_test"},
+        ),
+        (
+            "generate_chart",
+            {
+                "chart_kind": "generic_line",
+                "data": {"net_budgetary_impact": 42},
+            },
+        ),
+    ]
+
+
 def test_charts_mode_trajectory_adds_directive_and_keeps_tools():
     class RecordingClient:
         def __init__(self):
@@ -301,6 +573,51 @@ def test_report_markdown_exposes_counts_and_case_status_for_regression_review():
     assert "expected tool" in markdown
 
 
+def test_report_computes_pass_at_1_and_pass_all_trials_for_model_cases_only():
+    results = [
+        CaseResult(
+            id="stable",
+            suite="trajectory",
+            trial=trial,
+            status="passed",
+            score=1.0,
+        )
+        for trial in range(1, 4)
+    ]
+    results.extend(
+        CaseResult(
+            id="flaky",
+            suite="trajectory",
+            trial=trial,
+            status="passed" if trial == 1 else "failed",
+            score=1.0 if trial == 1 else 0.0,
+        )
+        for trial in range(1, 4)
+    )
+    results.append(
+        CaseResult(
+            id="deterministic",
+            suite="tool_contract",
+            status="passed",
+            score=1.0,
+        )
+    )
+    report = EvalReport(
+        mode="live",
+        suites=["trajectory", "tool_contract"],
+        provider="anthropic",
+        started_at="2026-07-21T00:00:00+00:00",
+        finished_at="2026-07-21T00:00:01+00:00",
+        results=results,
+    )
+
+    assert report.trial_count == 3
+    assert report.pass_at_1 == 1.0
+    assert report.pass_all_trials == 0.5
+    assert report.model_dump()["pass_all_trials"] == 0.5
+    assert "Model pass^3: `50.0%`" in render_markdown(report)
+
+
 def test_report_markdown_serializes_policyengine_date_keys():
     report = EvalReport(
         mode="offline",
@@ -314,7 +631,11 @@ def test_report_markdown_serializes_policyengine_date_keys():
                 suite="tool_contract",
                 status="passed",
                 score=1.0,
-                details={"actual": {"reform_object": {date(2026, 1, 1): 15_000}}},
+                details=ToolContractDetails(
+                    output=runner._json_object(
+                        {"reform_object": {date(2026, 1, 1): 15_000}}
+                    )
+                ),
             )
         ],
     )
@@ -322,6 +643,69 @@ def test_report_markdown_serializes_policyengine_date_keys():
     markdown = render_markdown(report)
 
     assert '"2026-01-01": 15000' in markdown
+
+
+def test_live_eval_runs_three_trials_through_production_model_routing(
+    tmp_path,
+    monkeypatch,
+):
+    case_file = tmp_path / "trajectory.yaml"
+    case_file.write_text(
+        yaml.safe_dump(
+            {
+                "cases": [
+                    {
+                        "id": "routed_case",
+                        "suite": "trajectory",
+                        "description": "A live case uses production routing.",
+                        "requirements": ["live_model"],
+                        "prompt": "Calculate this household.",
+                        "expected_tools": [
+                            {"name": "run_household_simulation"}
+                        ],
+                    }
+                ]
+            },
+            sort_keys=False,
+        )
+    )
+    calls = []
+
+    class RecordingLiveClient:
+        def __init__(self, model=None):
+            self.model_override = model
+
+        def generate(self, **kwargs):
+            calls.append(kwargs)
+            return ModelTurn(
+                tool_calls=[
+                    ModelToolCall(name="run_household_simulation")
+                ]
+            )
+
+    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+    monkeypatch.setattr(runner, "AnthropicModelClient", RecordingLiveClient)
+    monkeypatch.setattr(
+        runner,
+        "select_chat_model",
+        lambda _messages, charts_mode=False: "production-model",
+    )
+
+    report = runner.run_eval(
+        suites=["trajectory"],
+        mode="live",
+        trials=3,
+        model_cases_only=True,
+        strict_requirements=True,
+        write_reports=False,
+    )
+
+    assert report.failed == 0
+    assert [result.trial for result in report.results] == [1, 2, 3]
+    assert {result.model for result in report.results} == {"production-model"}
+    assert [call["model"] for call in calls] == ["production-model"] * 3
+    assert report.pass_at_1 == 1.0
+    assert report.pass_all_trials == 1.0
 
 
 def test_skipped_tool_contract_cases_require_source_metadata():
@@ -383,6 +767,42 @@ def test_skipped_tool_contract_case_reports_skip_without_execution(tmp_path, mon
     assert report.skipped == 1
     assert report.failed == 0
     assert "policyengine_py_coverage_gap" in report.results[0].errors[0]
+
+
+def test_strict_requirements_turns_unavailable_cases_into_failures(
+    tmp_path,
+    monkeypatch,
+):
+    case_file = tmp_path / "cases.yaml"
+    case_file.write_text(
+        yaml.safe_dump(
+            {
+                "cases": [
+                    {
+                        "id": "data_case",
+                        "suite": "tool_contract",
+                        "description": "Data is mandatory in strict mode.",
+                        "requirements": ["data"],
+                        "tool_name": "run_society_simulation",
+                        "input": {},
+                    }
+                ]
+            }
+        )
+    )
+    monkeypatch.delenv("RUN_DATA_EVALS", raising=False)
+    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+
+    report = runner.run_eval(
+        suites=["tool_contract"],
+        mode="offline",
+        strict_requirements=True,
+        write_reports=False,
+    )
+
+    assert report.failed == 1
+    assert report.skipped == 0
+    assert "RUN_DATA_EVALS" in report.results[0].errors[0]
 
 
 def test_policyengine_uk_generated_cases_validate():

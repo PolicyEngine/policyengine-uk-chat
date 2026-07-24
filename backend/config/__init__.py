@@ -9,6 +9,7 @@ dragging in the chat route.
 
 from config.clients import get_async_client, get_sync_client
 from config.models import (
+    CHAT_MAX_TOKENS,
     DEFAULT_COMPLEX_MODEL,
     DEFAULT_FAST_MODEL,
     DEFAULT_REASONING_MODEL,
@@ -22,6 +23,7 @@ from config.sampling import DEFAULT_TEMPERATURE, SUGGESTION_TEMPERATURE
 __all__ = [
     "DEFAULT_TEMPERATURE",
     "SUGGESTION_TEMPERATURE",
+    "CHAT_MAX_TOKENS",
     "DEFAULT_FAST_MODEL",
     "DEFAULT_COMPLEX_MODEL",
     "DEFAULT_REASONING_MODEL",

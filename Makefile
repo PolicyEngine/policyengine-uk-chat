@@ -63,4 +63,4 @@ eval-ai-offline: check-policyengine-uk-evals
 	PYTHONPATH=backend python -m eval.run --mode offline
 
 eval-ai-live: check-policyengine-uk-evals
-	PYTHONPATH=backend python -m eval.run --mode live --provider anthropic
+	PYTHONPATH=backend python -m eval.run --mode live --provider anthropic --trials 3 --model-cases-only --strict-requirements

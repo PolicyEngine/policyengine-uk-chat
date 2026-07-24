@@ -1,8 +1,28 @@
-"""Typed contracts for manual UK chat AI evaluations."""
+"""Typed contracts for UK chat AI evaluations."""
 
-from typing import Any, Dict, List, Literal, Optional
+from typing import Annotated, Dict, List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    computed_field,
+    model_validator,
+)
+
+JsonObjectValue = Dict[str, JsonValue]
+EvalSuite = Literal["tool_contract", "trajectory", "answer", "tool_loop", "gateway"]
+CaseStatus = Literal["passed", "failed", "skipped"]
+GatewayOutcome = Literal[
+    "irrelevant",
+    "out_of_scope",
+    "partial",
+    "needs_plan",
+    "ready",
+]
+GatewaySlotKind = Literal["tool_input", "output"]
+GatewaySlotSource = Literal["prompt", "default", "assumed"]
 
 
 class StrictModel(BaseModel):
@@ -31,8 +51,8 @@ class CaseSkip(StrictModel):
 
 
 class OutputExpectation(StrictModel):
-    contains: Dict[str, Any] = Field(default_factory=dict)
-    chart_contains: Dict[str, Any] = Field(default_factory=dict)
+    contains: JsonObjectValue = Field(default_factory=dict)
+    chart_contains: JsonObjectValue = Field(default_factory=dict)
     required_paths: List[str] = Field(default_factory=list)
     absent_paths: List[str] = Field(default_factory=list)
     error_contains: Optional[str] = None
@@ -46,11 +66,21 @@ class TextExpectation(StrictModel):
     grounded_numbers: bool = False
     allowed_numbers: List[float] = Field(default_factory=list)
     number_tolerance: float = 0.01
+    required_values: List["RequiredAnswerValue"] = Field(default_factory=list)
+
+
+class RequiredAnswerValue(StrictModel):
+    tool_name: str
+    path: str
+    occurrence: int = Field(default=1, ge=1)
+    tolerance: float = Field(default=0.01, ge=0)
+    scale: float = 1.0
+    required_context: List[str] = Field(default_factory=list)
 
 
 class ToolCallExpectation(StrictModel):
     name: str
-    input_contains: Dict[str, Any] = Field(default_factory=dict)
+    input_contains: JsonObjectValue = Field(default_factory=dict)
     required_input_paths: List[str] = Field(default_factory=list)
     absent_input_paths: List[str] = Field(default_factory=list)
 
@@ -58,7 +88,7 @@ class ToolCallExpectation(StrictModel):
 class ModelToolCall(StrictModel):
     id: str = ""
     name: str
-    input: Dict[str, Any] = Field(default_factory=dict)
+    input: JsonObjectValue = Field(default_factory=dict)
 
 
 class ModelTurn(StrictModel):
@@ -68,14 +98,14 @@ class ModelTurn(StrictModel):
 
 class FrozenToolCall(StrictModel):
     name: str
-    input: Dict[str, Any] = Field(default_factory=dict)
+    input: JsonObjectValue = Field(default_factory=dict)
     output_fixture: Optional[str] = None
-    output: Optional[Dict[str, Any]] = None
+    output: Optional[JsonObjectValue] = None
 
 
 class CaseBase(StrictModel):
     id: str
-    suite: str
+    suite: EvalSuite
     description: str
     tags: List[str] = Field(default_factory=list)
     requirements: List[str] = Field(default_factory=list)
@@ -92,14 +122,14 @@ class CaseBase(StrictModel):
 class ToolContractCase(CaseBase):
     suite: Literal["tool_contract"] = "tool_contract"
     tool_name: str
-    input: Dict[str, Any] = Field(default_factory=dict)
+    input: JsonObjectValue = Field(default_factory=dict)
     expect: OutputExpectation = Field(default_factory=OutputExpectation)
 
 
 class TrajectoryCase(CaseBase):
     suite: Literal["trajectory"] = "trajectory"
     prompt: str
-    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    messages: List[JsonObjectValue] = Field(default_factory=list)
     charts_mode: bool = False
     expected_tools: List[ToolCallExpectation] = Field(default_factory=list)
     forbidden_tools: List[str] = Field(default_factory=list)
@@ -117,7 +147,7 @@ class AnswerCase(CaseBase):
 class ToolLoopCase(CaseBase):
     suite: Literal["tool_loop"] = "tool_loop"
     prompt: str
-    messages: List[Dict[str, Any]] = Field(default_factory=list)
+    messages: List[JsonObjectValue] = Field(default_factory=list)
     charts_mode: bool = False
     expected_tools: List[ToolCallExpectation] = Field(default_factory=list)
     forbidden_tools: List[str] = Field(default_factory=list)
@@ -135,9 +165,7 @@ class SlotExpectation(StrictModel):
 class GatewayCase(CaseBase):
     suite: Literal["gateway"] = "gateway"
     prompt: str
-    expected_outcome: Literal[
-        "irrelevant", "out_of_scope", "partial", "needs_plan", "ready"
-    ]
+    expected_outcome: GatewayOutcome
     expected_tool: Optional[str] = None
     forbidden_tool: Optional[str] = None
     expected_gating_slots: List[str] = Field(default_factory=list)
@@ -147,18 +175,75 @@ class GatewayCase(CaseBase):
 EvalCase = ToolContractCase | TrajectoryCase | AnswerCase | ToolLoopCase | GatewayCase
 
 
+class ToolContractDetails(StrictModel):
+    kind: Literal["tool_contract"] = "tool_contract"
+    output: JsonObjectValue = Field(default_factory=dict)
+
+
+class TrajectoryDetails(StrictModel):
+    kind: Literal["trajectory"] = "trajectory"
+    text: str = ""
+    tool_calls: List[ModelToolCall] = Field(default_factory=list)
+
+
+class AnswerDetails(StrictModel):
+    kind: Literal["answer"] = "answer"
+    text: str = ""
+
+
+class ExecutedToolResult(StrictModel):
+    name: str
+    input: JsonObjectValue = Field(default_factory=dict)
+    output: JsonObjectValue = Field(default_factory=dict)
+
+
+class ToolLoopDetails(StrictModel):
+    kind: Literal["tool_loop"] = "tool_loop"
+    text: str = ""
+    tool_calls: List[ModelToolCall] = Field(default_factory=list)
+    tool_results: List[ExecutedToolResult] = Field(default_factory=list)
+
+
+class GatewaySlotDetails(StrictModel):
+    name: str
+    kind: GatewaySlotKind
+    source: GatewaySlotSource
+    value: JsonValue = None
+
+
+class GatewayDetails(StrictModel):
+    kind: Literal["gateway"] = "gateway"
+    outcome: GatewayOutcome
+    tool: Optional[str] = None
+    gating_slots: List[str] = Field(default_factory=list)
+    unmodellable_outputs: List[str] = Field(default_factory=list)
+    slots: List[GatewaySlotDetails] = Field(default_factory=list)
+
+
+CaseResultDetails = Annotated[
+    ToolContractDetails
+    | TrajectoryDetails
+    | AnswerDetails
+    | ToolLoopDetails
+    | GatewayDetails,
+    Field(discriminator="kind"),
+]
+
+
 class CaseResult(StrictModel):
     id: str
-    suite: str
-    status: Literal["passed", "failed", "skipped"]
+    suite: EvalSuite
+    trial: int = Field(default=1, ge=1)
+    model: Optional[str] = None
+    status: CaseStatus
     score: float
     errors: List[str] = Field(default_factory=list)
-    details: Dict[str, Any] = Field(default_factory=dict)
+    details: Optional[CaseResultDetails] = None
 
 
 class EvalReport(StrictModel):
     mode: Literal["offline", "live"]
-    suites: List[str]
+    suites: List[EvalSuite]
     provider: str
     model: Optional[str] = None
     git_sha: Optional[str] = None
@@ -166,14 +251,59 @@ class EvalReport(StrictModel):
     finished_at: str
     results: List[CaseResult]
 
+    def _model_results(self) -> List[CaseResult]:
+        return [
+            result
+            for result in self.results
+            if result.suite in {"trajectory", "answer", "tool_loop", "gateway"}
+        ]
+
+    @computed_field
     @property
     def passed(self) -> int:
         return sum(1 for result in self.results if result.status == "passed")
 
+    @computed_field
     @property
     def failed(self) -> int:
         return sum(1 for result in self.results if result.status == "failed")
 
+    @computed_field
     @property
     def skipped(self) -> int:
         return sum(1 for result in self.results if result.status == "skipped")
+
+    @computed_field
+    @property
+    def trial_count(self) -> int:
+        return max((result.trial for result in self._model_results()), default=0)
+
+    @computed_field
+    @property
+    def pass_at_1(self) -> float:
+        first_trials = [
+            result
+            for result in self._model_results()
+            if result.trial == 1 and result.status != "skipped"
+        ]
+        if not first_trials:
+            return 0.0
+        return sum(
+            result.status == "passed" for result in first_trials
+        ) / len(first_trials)
+
+    @computed_field
+    @property
+    def pass_all_trials(self) -> float:
+        by_case: Dict[tuple[str, str], List[CaseResult]] = {}
+        for result in self._model_results():
+            if result.status == "skipped":
+                continue
+            by_case.setdefault((result.suite, result.id), []).append(result)
+        if not by_case:
+            return 0.0
+        return sum(
+            len(case_results) == self.trial_count
+            and all(result.status == "passed" for result in case_results)
+            for case_results in by_case.values()
+        ) / len(by_case)

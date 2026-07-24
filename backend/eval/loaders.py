@@ -1,10 +1,11 @@
-"""YAML case loading for manual AI evaluations."""
+"""YAML case loading for AI evaluations."""
 
 from pathlib import Path
 from typing import Iterable, List
 
 import yaml
 
+from engine.serialization import json_safe
 from eval.schemas import (
     AnswerCase,
     EvalCase,
@@ -29,6 +30,9 @@ def load_case_file(path: Path) -> List[EvalCase]:
     raw_cases = data.get("cases", data if isinstance(data, list) else [data])
     cases: List[EvalCase] = []
     for raw in raw_cases:
+        raw = json_safe(raw)
+        if not isinstance(raw, dict):
+            raise ValueError(f"{path}: every eval case must be an object")
         suite = raw.get("suite")
         if suite not in CASE_MODELS:
             raise ValueError(f"{path}: unknown suite {suite!r}")

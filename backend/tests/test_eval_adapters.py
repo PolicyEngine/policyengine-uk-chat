@@ -85,9 +85,10 @@ def test_anthropic_client_translates_text_and_tool_blocks(monkeypatch):
     anthropic.Anthropic = Anthropic
     monkeypatch.setitem(sys.modules, "anthropic", anthropic)
     monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
-    monkeypatch.setenv("ANTHROPIC_EVAL_MODEL", "test-model")
-
-    client = providers.AnthropicModelClient(max_tokens=123)
+    client = providers.AnthropicModelClient(
+        model="test-model",
+        max_tokens=123,
+    )
     turn = client.generate(
         case_id="case-1",
         messages=[{"role": "user", "content": "hello"}],
@@ -113,7 +114,7 @@ def test_anthropic_client_omits_empty_tools(monkeypatch):
             create=lambda **kwargs: calls.append(kwargs) or SimpleNamespace(content=[])
         )
     )
-    client.model = "test-model"
+    client.model_override = "test-model"
     client.max_tokens = 50
 
     assert client.generate(case_id="case", messages=[], system="", tools=[]).text == ""
@@ -123,10 +124,47 @@ def test_anthropic_client_omits_empty_tools(monkeypatch):
 @pytest.mark.parametrize(
     ("argv", "expected"),
     [
-        (["eval"], {"suite": None, "mode": "offline", "provider": None}),
         (
-            ["eval", "--suite", "trajectory", "--suite", "answer", "--mode", "live", "--provider", "anthropic"],
-            {"suite": ["trajectory", "answer"], "mode": "live", "provider": "anthropic"},
+            ["eval"],
+            {
+                "suite": None,
+                "mode": "offline",
+                "provider": None,
+                "trials": 1,
+                "model_cases_only": False,
+                "strict_requirements": False,
+            },
+        ),
+        (
+            [
+                "eval",
+                "--suite",
+                "trajectory",
+                "--suite",
+                "answer",
+                "--mode",
+                "live",
+                "--provider",
+                "anthropic",
+                "--trials",
+                "3",
+                "--model-cases-only",
+                "--strict-requirements",
+                "--case",
+                "case-1",
+                "--tag",
+                "critical",
+            ],
+            {
+                "suite": ["trajectory", "answer"],
+                "mode": "live",
+                "provider": "anthropic",
+                "trials": 3,
+                "model_cases_only": True,
+                "strict_requirements": True,
+                "case": ["case-1"],
+                "tag": ["critical"],
+            },
         ),
     ],
 )
@@ -147,9 +185,14 @@ def test_eval_main_expands_all_suites_and_returns_failure_status(
         lambda: SimpleNamespace(
             suite=suites,
             mode="offline",
-            provider=None,
-            model=None,
-            report_dir=None,
+                provider=None,
+                model=None,
+                trials=1,
+                case=None,
+                tag=None,
+                model_cases_only=False,
+                strict_requirements=False,
+                report_dir=None,
             no_report=False,
         ),
     )
@@ -174,6 +217,11 @@ def test_eval_main_preserves_selected_suites_and_no_report(monkeypatch):
             mode="live",
             provider="anthropic",
             model="test-model",
+            trials=3,
+            case=["one"],
+            tag=["critical"],
+            model_cases_only=True,
+            strict_requirements=True,
             report_dir=None,
             no_report=True,
         ),
@@ -187,6 +235,11 @@ def test_eval_main_preserves_selected_suites_and_no_report(monkeypatch):
     assert run.main() == 0
     assert calls[0]["suites"] == ["answer"]
     assert calls[0]["write_reports"] is False
+    assert calls[0]["trials"] == 3
+    assert calls[0]["case_ids"] == ["one"]
+    assert calls[0]["tags"] == ["critical"]
+    assert calls[0]["model_cases_only"] is True
+    assert calls[0]["strict_requirements"] is True
 
 
 def test_write_report_creates_json_and_markdown_files(tmp_path):

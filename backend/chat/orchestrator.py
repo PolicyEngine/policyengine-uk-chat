@@ -25,7 +25,12 @@ from policyengine_observability import record_error
 from policyengine_observability import record_event
 from policyengine_observability import segment
 
-from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_async_client
+from config import (
+    CHAT_MAX_TOKENS,
+    DEFAULT_FAST_MODEL,
+    DEFAULT_TEMPERATURE,
+    get_async_client,
+)
 from gateway import run_gateway, serialise_plan_for_system
 from observability.segments import SegmentName
 from tools.context import new_tool_context
@@ -424,7 +429,7 @@ def stream_chat(request: Request, chat_request: ChatRequest):
                                 # than a prompt-level promise.
                                 stream_kwargs: Dict[str, Any] = {
                                     "model": model,
-                                    "max_tokens": 16000,
+                                    "max_tokens": CHAT_MAX_TOKENS,
                                     "temperature": DEFAULT_TEMPERATURE,
                                     "system": system_blocks,
                                     "messages": conversation,

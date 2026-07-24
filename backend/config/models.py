@@ -13,6 +13,8 @@ DEFAULT_COMPLEX_MODEL = os.environ.get("ANTHROPIC_COMPLEX_MODEL", "claude-sonnet
 # the fast model tends to spend iterations guessing at the reform API shape.
 DEFAULT_REASONING_MODEL = os.environ.get("ANTHROPIC_REASONING_MODEL", "claude-opus-4-5")
 
+CHAT_MAX_TOKENS = int(os.environ.get("ANTHROPIC_CHAT_MAX_TOKENS", "16000"))
+
 TITLE_MODEL = os.environ.get("ANTHROPIC_TITLE_MODEL", DEFAULT_FAST_MODEL)
 
 # Follow-up suggestion chips run on the same fast model — cheap, latency-tolerant.

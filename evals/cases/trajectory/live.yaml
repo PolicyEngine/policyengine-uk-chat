@@ -2,17 +2,17 @@ cases:
   - id: trajectory_live_anthropic_household_single_adult
     suite: trajectory
     description: Live Anthropic baseline for routing a simple household calculation.
-    tags: [live_baseline]
+    tags: [live_baseline, critical, uk_2026]
     requirements: [live_model]
     prompt: >
-      Calculate an illustrative 2025 household result for a single adult
-      earning GBP 30k.
+      Calculate an illustrative 2026 household result for a single adult
+      earning GBP 35k.
     expected_tools:
       - name: run_household_simulation
         input_contains:
-          year: 2025
+          year: 2026
           people:
-            - employment_income: 30000
+            - employment_income: 35000
           benunit: {}
           household: {}
     forbidden_tools:

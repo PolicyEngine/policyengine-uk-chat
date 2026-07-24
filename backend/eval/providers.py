@@ -1,9 +1,9 @@
-"""Model-provider adapters for manual AI evaluations."""
+"""Model-provider adapters for AI evaluations."""
 
 import os
 from typing import Any, Dict, List, Protocol
 
-from config import DEFAULT_TEMPERATURE
+from config import CHAT_MAX_TOKENS, DEFAULT_TEMPERATURE
 from eval.schemas import ModelToolCall, ModelTurn
 
 
@@ -15,6 +15,7 @@ class ModelClient(Protocol):
         messages: List[Dict[str, Any]],
         system: str,
         tools: List[Dict[str, Any]] | None = None,
+        model: str | None = None,
     ) -> ModelTurn:
         ...
 
@@ -33,6 +34,7 @@ class FakeModelClient:
         messages: List[Dict[str, Any]],
         system: str,
         tools: List[Dict[str, Any]] | None = None,
+        model: str | None = None,
     ) -> ModelTurn:
         if case_id not in self._turns:
             raise ValueError(f"No offline response configured for {case_id}")
@@ -49,14 +51,18 @@ class FakeModelClient:
 class AnthropicModelClient:
     """Anthropic adapter behind the provider-neutral eval interface."""
 
-    def __init__(self, model: str | None = None, max_tokens: int = 4000):
+    def __init__(
+        self,
+        model: str | None = None,
+        max_tokens: int = CHAT_MAX_TOKENS,
+    ):
         import anthropic
 
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise RuntimeError("ANTHROPIC_API_KEY is required for live Anthropic evals")
         self.client = anthropic.Anthropic(api_key=api_key)
-        self.model = model or os.environ.get("ANTHROPIC_EVAL_MODEL", "claude-sonnet-4-6")
+        self.model_override = model
         self.max_tokens = max_tokens
 
     def generate(
@@ -66,9 +72,13 @@ class AnthropicModelClient:
         messages: List[Dict[str, Any]],
         system: str,
         tools: List[Dict[str, Any]] | None = None,
+        model: str | None = None,
     ) -> ModelTurn:
+        selected_model = self.model_override or model
+        if not selected_model:
+            raise ValueError("A model must be selected for every live eval call.")
         kwargs: Dict[str, Any] = {
-            "model": self.model,
+            "model": selected_model,
             "max_tokens": self.max_tokens,
             "temperature": DEFAULT_TEMPERATURE,
             "system": system,
