@@ -364,6 +364,24 @@ def test_live_grounding_accepts_tool_inputs_and_declared_derivations():
     )
 
 
+def test_live_text_accepts_any_authored_semantic_alternative():
+    expectation = LiveTextExpectation(
+        required_any=[
+            [
+                "illustrative",
+                "simulation",
+                "synthetic",
+            ]
+        ]
+    )
+
+    assert grade_live_text("Based on the simulation result.", expectation) == []
+    assert "missing required alternative" in grade_live_text(
+        "Here is the result.",
+        expectation,
+    )[0]
+
+
 def test_live_required_value_can_select_last_successful_retry():
     expectation = LiveTextExpectation(
         required_values=[

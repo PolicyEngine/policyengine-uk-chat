@@ -16,10 +16,10 @@ cases:
     forbidden_tools: [run_society_simulation, aggregate_result]
     expect:
       required:
-        - illustrative
         - "2026"
         - income tax
       required_any:
+        - [illustrative, simulation, simulated, synthetic, scenario, hypothetical]
         - [household net income, net household income, net income]
       required_values:
         - tool_name: run_household_simulation

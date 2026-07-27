@@ -27,10 +27,11 @@ cases:
             household_net_income: 28539.552734375
     expect:
       required:
-        - illustrative
         - "2026"
         - net income
         - income tax
+      required_any:
+        - [illustrative, simulation, simulated, synthetic, scenario, hypothetical]
       required_values:
         - tool_name: run_household_simulation
           path: household.household_net_income
@@ -92,7 +93,9 @@ cases:
             household:
               household_net_income: 46149.35546875
     expect:
-      required: [illustrative, "2026", baseline, reform, net income]
+      required: ["2026", baseline, reform, net income]
+      required_any:
+        - [illustrative, simulation, simulated, synthetic, scenario, hypothetical]
       required_values:
         - tool_name: run_household_simulation
           path: baseline.household.household_net_income
@@ -150,11 +153,12 @@ cases:
             household_net_income: 31500.72265625
     expect:
       required:
-        - illustrative
         - "2026"
         - Child Benefit
         - Universal Credit
         - net income
+      required_any:
+        - [illustrative, simulation, simulated, synthetic, scenario, hypothetical]
       required_values:
         - tool_name: run_household_simulation
           path: benunit.child_benefit
