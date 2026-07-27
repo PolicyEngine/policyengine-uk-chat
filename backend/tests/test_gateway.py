@@ -164,14 +164,18 @@ class TestRunGateway:
             "in_domain": True, "tool": "run_society_simulation",
             "slots": [
                 {"name": "reform", "kind": "tool_input", "source": "assumed"},
-                {"name": "output", "kind": "output", "source": "assumed"},
+                {
+                    "name": "budgetary_impact",
+                    "kind": "output",
+                    "source": "assumed",
+                },
             ],
             "unmodellable_outputs": [],
         }
         with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             v = gateway.run_gateway("compare the two reforms")
         assert v.outcome == "needs_plan" and v.route == "lightweight"
-        assert set(v.gating_slots) == {"reform", "output"}
+        assert set(v.gating_slots) == {"reform", "budgetary_impact"}
 
     def test_unknown_tool_becomes_none(self):
         from gateway import runtime as gateway
@@ -307,6 +311,42 @@ class TestRunGateway:
 
         assert verdict.outcome == "partial"
         assert verdict.unmodellable_outputs == ["inflation effect"]
+
+    def test_unknown_output_slot_cannot_gate_on_internal_intermediate(self):
+        from gateway import runtime as gateway
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                },
+                {
+                    "name": "simulation_id",
+                    "kind": "output",
+                    "source": "assumed",
+                    "value": "<simulation_result>",
+                },
+                {
+                    "name": "decile_impact",
+                    "kind": "output",
+                    "source": "prompt",
+                },
+            ],
+            "unmodellable_outputs": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(
+                "Show the distributional impact by decile of this reform."
+            )
+
+        assert verdict.outcome == "ready"
+        assert [slot.name for slot in verdict.slots] == [
+            "reform",
+            "decile_impact",
+        ]
 
 
 class TestGatewaySystemPrompt:

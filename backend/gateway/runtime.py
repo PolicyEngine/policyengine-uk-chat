@@ -190,7 +190,21 @@ def _verdict_from_plan(plan: dict, prompt: str) -> GatewayVerdict:
         kind = s.get("kind", "tool_input")
         if kind not in ("tool_input", "output"):
             kind = "tool_input"
-        slots.append(SlotFact(name=str(s["name"]), source=source, kind=kind, value=s.get("value")))
+        name = str(s["name"])
+        value = s.get("value")
+        if kind == "output" and name not in OUTPUT_VOCAB:
+            canonical_value = str(value) if value in OUTPUT_VOCAB else None
+            if canonical_value is None:
+                continue
+            name = canonical_value
+        slots.append(
+            SlotFact(
+                name=name,
+                source=source,
+                kind=kind,
+                value=value,
+            )
+        )
 
     raw_unmodellable = plan.get("unmodellable_outputs")
     unmodellable = (
