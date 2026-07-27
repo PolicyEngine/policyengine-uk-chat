@@ -117,6 +117,7 @@ cases:
         - actual household
       grounded_numbers: true
       allowed_numbers: [15000, 972]
+      allowed_derived_numbers: [81]
       number_tolerance: 0.01
 
   - id: answer_live_anthropic_2026_single_parent_benefits
