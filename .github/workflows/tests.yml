@@ -119,11 +119,9 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up Node
-        uses: actions/setup-node@v6
+        uses: actions/setup-python@v6
         with:
-          node-version: "20.19"
-          cache: npm
-          cache-dependency-path: frontend/package-lock.json
+          python-version: "3.13"
 
       - name: Install frontend dependencies
         working-directory: frontend
@@ -200,14 +198,21 @@ jobs:
         include:
           - label: gateway
             target: eval-ai-live-gateway
+            requires_data: false
           - label: trajectory
             target: eval-ai-live-trajectory
+            requires_data: false
           - label: answer
             target: eval-ai-live-answer
+            requires_data: false
           - label: tool-loop
             target: eval-ai-live-tool-loop
+            requires_data: true
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      HUGGING_FACE_TOKEN: ${{ matrix.requires_data && secrets.HUGGING_FACE_TOKEN || '' }}
+      HF_TOKEN: ${{ matrix.requires_data && secrets.HUGGING_FACE_TOKEN || '' }}
+      RUN_DATA_EVALS: ${{ matrix.requires_data && '1' || '0' }}
 
     steps:
       - name: Checkout
@@ -222,6 +227,14 @@ jobs:
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
             echo "::error::ANTHROPIC_API_KEY is required for model-facing pull requests."
+            exit 1
+          fi
+
+      - name: Require the Enhanced FRS credential for data-backed live cases
+        if: matrix.requires_data
+        run: |
+          if [ -z "$HUGGING_FACE_TOKEN" ]; then
+            echo "::error::HUGGING_FACE_TOKEN is required for data-backed live evals."
             exit 1
           fi
 
