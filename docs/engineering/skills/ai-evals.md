@@ -3,9 +3,13 @@
 Use this skill when adding, reviewing, or running AI evaluation cases for
 the UK chat pathway.
 
+See `test-eval-architecture.md` for the complete test/eval matrix, what each
+suite proves, and how the suites should be presented as separate CI checks.
+
 ## Scope
 
-- AI eval cases live under `evals/`.
+- Deterministic eval cases live under `evals/cases/`.
+- Separate live-model eval cases live under `evals/live/`.
 - The reusable harness lives under `backend/eval/`.
 - Production chat code must not import evaluation modules.
 - Deterministic evals run on every pull request.
@@ -20,6 +24,12 @@ the UK chat pathway.
 - `answer`: frozen tool output to final prose.
 - `tool_loop`: user prompt through one or more real tool executions to final
   prose.
+
+The same case must never run in both layers. Deterministic trajectory, answer,
+and tool-loop cases require scripted model responses. Live cases require
+`live_model`, cannot contain scripted responses, and must have distinct IDs.
+When a deterministic scenario also needs live coverage, create a separate case
+under `evals/live/`.
 
 Keep cases focused on one boundary. If a case needs to check both tool choice
 and final prose, split it into one trajectory case and one answer case.
@@ -37,8 +47,7 @@ validate-then-calculate flows.
 - Mark cases requiring local microdata with `requirements: [data]`.
 - Mark cases requiring the policyengine.py UK packages with
   `requirements: [policyengine_py]`.
-- Mark Anthropic-only baseline cases with `requirements: [live_model]`; these
-  must skip in offline mode and run only through `make eval-ai-live`.
+- Mark every case under `evals/live/` with `requirements: [live_model]`.
 - Use `messages` on trajectory or tool-loop cases when the expected behavior
   depends on prior conversation turns.
 - Use `charts_mode: true` when the chart-mode directive is part of the behavior
@@ -46,13 +55,14 @@ validate-then-calculate flows.
 - Use deterministic graders first: JSON partial match, path checks, numeric
   tolerance, forbidden terms, required caveats, privacy statements, and grounded
   number checks.
-- `expected_tools` is an exact ordered sequence. Declare every expected call;
-  unexpected extra calls fail the case.
+- `expected_tools` is an ordered subsequence. Declare load-bearing calls and
+  use `forbidden_tools` for calls that must never occur. Discovery and recovery
+  calls may appear between expected calls.
 - Use `expect.required_values` when final prose must include a numeric result
   from a named tool result. Specify the result path, occurrence, tolerance, and
-  nearby required context. `grounded_numbers: true` automatically permits
-  numeric leaves from typed tool results; use `allowed_numbers` only for
-  legitimate derived values or prompt inputs that are not returned.
+  nearby required context. In live cases, `grounded_numbers: true`
+  automatically permits numeric leaves from tool inputs and outputs; declare
+  legitimate derivations with `allowed_derived_numbers`.
 - In an offline tool-loop fixture, reference one field from a prior tool result
   as `$tool_result.<tool_name>.<field>`. To pass the complete result into an
   object-valued tool input, use `{$tool_result: <tool_name>}`. The harness
@@ -91,24 +101,23 @@ Checks that generated source-synced cases are fresh.
 make eval-ai-offline
 ```
 
-Runs schema validation, deterministic tool-contract evals, fake-provider
+Runs only `evals/cases/`: deterministic tool-contract evals, fake-provider
 trajectory/answer cases, and fake-provider tool-loop cases with deterministic
-tool execution. PR CI runs this command on every change. The 2026 exact-value
-household and reform canaries live in
+tool execution. PR CI runs these as separately named checks. The 2026
+exact-value household and reform canaries live in
 `evals/cases/tool_contract/uk_2026_goldens.yaml`.
 
 ```bash
 ANTHROPIC_API_KEY=... make eval-ai-live
 ```
 
-Runs every model-invoking case through the live provider three times, using the
-same production model-selection function as UK Chat. Missing runtime
-requirements fail rather than skip. Reports under `evals/reports/` include the
-routed model for each trial, pass@1, and pass^3. A case contributes to pass^3
-only when all three independent trials pass.
+Runs only the separate cases under `evals/live/` through the live provider
+three times, using the same production model-selection function as UK Chat.
+Missing runtime requirements fail rather than skip. Reports under
+`evals/reports/` include the routed model for each trial, pass@1, and pass^3. A
+case contributes to pass^3 only when all three independent trials pass.
 
-The `Live model evals (3 trials)` PR job runs this command whenever chat,
-configuration, engine, eval, gateway, prompt, tool, or deployment model paths
-change. It is intentionally the full live suite, not a smaller PR subset and
-not a nightly job. `--model` remains available for explicit debugging; CI omits
-it so production routing is exercised.
+Model-facing PRs run separate gateway, trajectory, answer, and tool-loop live
+jobs. Their union is the full live suite; no deterministic case is sent to the
+provider. There is no nightly job. `--model` remains available for explicit
+debugging; CI omits it so production routing is exercised.

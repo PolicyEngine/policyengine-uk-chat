@@ -2,6 +2,9 @@
 
 Use this skill whenever adding, moving, or reviewing tests.
 
+See `test-eval-architecture.md` for the boundary between deterministic tests,
+scripted model contracts, live-model evals, and the recommended CI checks.
+
 ## Layout
 
 - Backend tests live under `backend/tests/`.

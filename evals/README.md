@@ -2,7 +2,13 @@
 
 This directory contains evaluation cases for the UK chat AI pathway.
 Deterministic cases run on every pull request. Model-facing pull requests also
-run the complete live-model suite.
+run the separate live-model suite.
+
+- `evals/cases/` contains deterministic tool contracts and scripted model
+  contracts.
+- `evals/live/` contains live-model cases only.
+
+The roots are disjoint. Scripted cases are never sent to a live provider.
 
 ## Commands
 
@@ -32,13 +38,13 @@ calling a live model.
 ANTHROPIC_API_KEY=... make eval-ai-live
 ```
 
-Runs every model-invoking case three times against the configured live provider
-with production model routing. Reports include per-trial model IDs, pass@1, and
-pass^3 and are written to `evals/reports/`, which is ignored by git.
+Runs every case under `evals/live/` three times against the configured live
+provider with production model routing. Reports include per-trial model IDs,
+pass@1, and pass^3 and are written to `evals/reports/`, which is ignored by git.
 
 Set `RUN_DATA_EVALS=1` to include cases that require local microdata.
-Cases marked `requirements: [live_model]` are skipped offline and run only
-through `make eval-ai-live`.
+Every live case must include `requirements: [live_model]` and must not include
+an `offline_response` or `offline_responses` fixture.
 
 There is no nightly-only suite and no browser E2E layer. The deterministic
 HTTP/SSE integration test controls the model boundary while exercising the
