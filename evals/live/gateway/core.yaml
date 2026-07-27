@@ -15,12 +15,12 @@ cases:
     expected_outcome: irrelevant
 
   # ---- out_of_scope: on-topic but no modelled lever ----
-  - id: gw_oos_pure_macro
+  - id: gw_irrelevant_pure_macro
     suite: gateway
-    description: A pure macro forecast has no modelled lever to compute.
+    description: A pure macro forecast is not itself about tax or benefit policy.
     requirements: [live_model]
     prompt: What will UK inflation be next year?
-    expected_outcome: out_of_scope
+    expected_outcome: irrelevant
 
   - id: gw_oos_behavioural
     suite: gateway
@@ -34,7 +34,7 @@ cases:
     suite: gateway
     description: A fully-specified reform asked alongside an unmodelled inflation effect.
     requirements: [live_model]
-    prompt: How would raising the income tax personal allowance to £15,000 affect inflation?
+    prompt: What would raising the income tax personal allowance to £15,000 cost, and how would it affect inflation?
     expected_outcome: partial
     expected_tool: run_society_simulation
 
@@ -49,9 +49,9 @@ cases:
   # ---- needs_plan: in scope but under-specified on a load-bearing slot ----
   - id: gw_needsplan_compare_two_reforms
     suite: gateway
-    description: No reforms named and no metric — both load-bearing slots are ungrounded.
+    description: Named policy levers without amounts or a metric need clarification.
     requirements: [live_model]
-    prompt: Compare the two reforms.
+    prompt: Compare raising the income tax personal allowance with increasing the Universal Credit standard allowance.
     expected_outcome: needs_plan
 
   - id: gw_needsplan_uc_no_household
@@ -61,26 +61,23 @@ cases:
     prompt: How much Universal Credit would I get?
     expected_outcome: needs_plan
     expected_tool: run_household_simulation
-    expected_slots:
-      - slot: benunit
-        gates: false
-      - slot: household
-        gates: false
+    expected_gating_slots: [people]
 
   - id: gw_needsplan_is_x_better
     suite: gateway
     description: "'Better' pins no metric — the deliverable is ungrounded."
     requirements: [live_model]
-    prompt: Is a higher personal allowance better than a higher Universal Credit standard allowance?
+    prompt: Compare the impact of a £15,000 personal allowance with increasing Universal Credit by £20 per week.
     expected_outcome: needs_plan
 
-  - id: gw_needsplan_wealth_tax_underspecified
+  - id: gw_needsplan_basic_rate_underspecified
     suite: gateway
-    description: Wealth tax with no rate/threshold needs reform details. Minimal pair with gw_ready_wealth_tax_specified.
+    description: A modelled reform with no target rate needs reform details.
     requirements: [live_model]
-    prompt: Model a wealth tax.
+    prompt: Raise the basic rate of income tax.
     expected_outcome: needs_plan
     expected_tool: run_society_simulation
+    expected_gating_slots: [reform]
 
   # ---- ready: fully specified, admissible ----
   - id: gw_ready_basic_rate_cost

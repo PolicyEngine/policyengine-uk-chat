@@ -43,10 +43,19 @@ def _build_tool_summary() -> str:
     tool schemas so it can't drift."""
     lines = []
     for t in TOOL_DEFINITIONS:
-        required = t.get("input_schema", {}).get("required", []) or []
+        schema = t.get("input_schema", {})
+        required = schema.get("required", []) or []
+        defaulted = [
+            f"{name}={spec['default']}"
+            for name, spec in (schema.get("properties", {}) or {}).items()
+            if isinstance(spec, dict) and "default" in spec
+        ]
         purpose = (t.get("description") or "").strip().split(". ")[0].rstrip(".")
         req = ", ".join(required) if required else "none"
-        lines.append(f"- {t['name']} — {purpose}. Required: {req}.")
+        defaults = ", ".join(defaulted) if defaulted else "none"
+        lines.append(
+            f"- {t['name']} — {purpose}. Required: {req}. Defaults: {defaults}."
+        )
     return "\n".join(lines)
 
 
@@ -129,7 +138,12 @@ def _verdict_from_plan(plan: dict, prompt: str) -> GatewayVerdict:
             kind = "tool_input"
         slots.append(SlotFact(name=str(s["name"]), source=source, kind=kind, value=s.get("value")))
 
-    unmodellable = [str(x) for x in (plan.get("unmodellable_outputs") or []) if x]
+    raw_unmodellable = plan.get("unmodellable_outputs")
+    unmodellable = (
+        [str(item) for item in raw_unmodellable if item]
+        if isinstance(raw_unmodellable, list)
+        else []
+    )
     result = gate(in_domain, tool, slots, unmodellable, prompt)
     return GatewayVerdict(
         outcome=result.outcome,

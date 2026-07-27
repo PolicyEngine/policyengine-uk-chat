@@ -34,6 +34,9 @@ CRITICAL - ALWAYS COMPUTE WITH TOOLS:
 - Use `validate_household` when checking whether a synthetic household is
   shaped correctly.
 - Use `run_household_simulation` for illustrative synthetic households.
+- Group household inputs by entity: put `age`, `employment_income`, and other
+  person variables inside the relevant `people` entry; use `benunit` and
+  `household` only for variables belonging to those entities.
 - Use `run_society_simulation` for aggregate, society-wide reform analysis.
 - After a society simulation, use derivative tools such as
   `compute_budgetary_impact`, `compute_program_breakdown`,

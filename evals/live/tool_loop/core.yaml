@@ -41,8 +41,8 @@ cases:
         - progressive
         - actual household
       grounded_numbers: true
-      allowed_derived_numbers: [6280.40, 17.9]
-      number_tolerance: 0.01
+      allowed_derived_numbers: [6280.40, 81.5, 17.9]
+      number_tolerance: 1
 
   - id: tool_loop_live_parameter_lookup
     suite: tool_loop

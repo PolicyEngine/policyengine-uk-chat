@@ -56,7 +56,9 @@ Steps:
    knowledge, chit-chat, coding, or non-UK questions are NOT in domain.
 2. `tool`: pick the single best-fitting tool for the modelled part of the ask,
    or "none" if nothing the engine computes applies (e.g. a pure macro/
-   behavioural question). Use the tool list below.
+   behavioural question). Use the tool list below. Missing reform details or a
+   vague requested metric do not mean "none": choose the applicable simulation
+   tool and mark the unresolved slot "assumed".
 3. `slots`: for the chosen tool, list its required and defaultable input slots,
    plus one or more `output` slots naming what the user wants reported (use one
    of the output labels listed below). For each slot set `value` and tag
@@ -65,10 +67,15 @@ Steps:
    - "default": a documented safe default applies (year {default_year};
      baseline is current law).
    - "assumed": you are guessing, or a documented default does not settle the
-     user's request.
+     user's request. Do not invent legacy dataset choices that are absent from
+     the tool schema.
+   Translating a fully specified reform into a tool input does not make it
+   assumed: preserve the user's description and mark it "prompt". Do not invent
+   a canonical parameter path in this routing pass.
 4. `unmodellable_outputs`: list any requested outputs the engine cannot produce
    — inflation, GDP, employment/behavioural response, market reactions, non-UK
-   effects. Leave empty if none.
+   effects. Include only outputs the user actually requested; do not add generic
+   caveats or possible second-round effects. Leave empty if none.
 
 Two fail-safe biases — apply them:
 - Admissibility leans toward IN scope. When unsure whether a tool fits, pick a

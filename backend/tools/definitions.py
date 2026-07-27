@@ -41,6 +41,37 @@ FILTER_LIMIT_SCHEMA = {
     "maximum": 100,
 }
 
+HOUSEHOLD_PEOPLE_SCHEMA = {
+    "type": "array",
+    "description": (
+        "One object per person. Put person-level variables such as age and "
+        "employment_income inside the relevant person object, never under "
+        "benunit or household."
+    ),
+    "items": {
+        "type": "object",
+        "description": "PolicyEngine person-level household inputs.",
+    },
+}
+
+HOUSEHOLD_BENUNIT_SCHEMA = {
+    "type": "object",
+    "description": (
+        "Benefit-unit-level inputs only, such as benefit claim choices. "
+        "Do not put person income or age variables here."
+    ),
+}
+
+HOUSEHOLD_ENTITY_SCHEMA = {
+    "type": "object",
+    "description": (
+        "Household-level inputs only, such as tenure or country. "
+        "Do not put person income or age variables here."
+    ),
+    "properties": HOUSEHOLD_SCHEMA["properties"],
+    "additionalProperties": True,
+}
+
 CHART_FORMAT_SCHEMA = {
     "type": "string",
     "enum": ["currency", "percent", "percent_decimal", "number", "compact", "year"],
@@ -125,9 +156,9 @@ VALIDATE_REFORM_INPUT_SCHEMA = _object_schema(
 
 VALIDATE_HOUSEHOLD_INPUT_SCHEMA = _object_schema(
     {
-        "people": {"type": "array", "items": {"type": "object"}},
-        "benunit": {"type": "object"},
-        "household": HOUSEHOLD_SCHEMA,
+        "people": HOUSEHOLD_PEOPLE_SCHEMA,
+        "benunit": HOUSEHOLD_BENUNIT_SCHEMA,
+        "household": HOUSEHOLD_ENTITY_SCHEMA,
         "year": YEAR_SCHEMA,
         "reform": REFORM_SCHEMA,
         "extra_variables": STRING_ARRAY_SCHEMA,

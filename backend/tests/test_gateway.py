@@ -227,6 +227,26 @@ class TestRunGateway:
         # garbage source → assumed → reform (high) gates → needs_plan
         assert v.outcome == "needs_plan" and v.gating_slots == ["reform"]
 
+    def test_malformed_unmodellable_outputs_fail_safe_to_empty(self):
+        from gateway import runtime as gateway
+        plan = {
+            "in_domain": True,
+            "tool": "run_household_simulation",
+            "slots": [
+                {
+                    "name": "people",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                }
+            ],
+            "unmodellable_outputs": "[]</unmodellable_outputs>",
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway("Calculate this household.")
+
+        assert verdict.outcome == "ready"
+        assert verdict.unmodellable_outputs == []
+
 
 class TestGatewaySystemPrompt:
     def test_rendered_prompt_contains_default_simulation_year(self):
@@ -239,6 +259,17 @@ class TestGatewaySystemPrompt:
 
         assert f"year {DEFAULT_SIMULATION_YEAR}" in gateway.GATEWAY_SYSTEM
         assert "{default_year}" not in gateway.GATEWAY_SYSTEM
+
+    def test_tool_summary_lists_schema_defaults(self):
+        from gateway import runtime as gateway
+        from tools.definitions import DEFAULT_SIMULATION_YEAR
+
+        get_parameter = next(
+            line
+            for line in gateway.TOOL_SUMMARY.splitlines()
+            if line.startswith("- get_parameter ")
+        )
+        assert f"Defaults: year={DEFAULT_SIMULATION_YEAR}" in get_parameter
 
 
 class TestWriterDirective:

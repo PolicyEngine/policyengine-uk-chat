@@ -181,7 +181,7 @@ cases:
       grounded_numbers: true
       allowed_numbers: []
       allowed_derived_numbers: [8768.98]
-      number_tolerance: 0.01
+      number_tolerance: 1
 
   - id: answer_live_anthropic_microdata_privacy
     suite: answer

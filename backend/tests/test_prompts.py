@@ -76,6 +76,22 @@ def test_main_prompt_describes_py_lifecycle_tools():
     assert "wait for the\n  result before running the simulation" in SYSTEM_PROMPT
 
 
+def test_household_prompt_and_schema_keep_person_inputs_under_people():
+    household_tool = _tool("run_household_simulation")
+    properties = household_tool["input_schema"]["properties"]
+
+    assert "employment_income" in SYSTEM_PROMPT
+    assert "relevant `people` entry" in SYSTEM_PROMPT
+    assert "employment_income" in properties["people"]["description"]
+    assert "never under benunit or household" in properties["people"]["description"]
+    assert "Do not put person income or age variables here" in (
+        properties["benunit"]["description"]
+    )
+    assert "Do not put person income or age variables here" in (
+        properties["household"]["description"]
+    )
+
+
 def test_public_tools_exclude_removed_public_tools():
     names = {tool["name"] for tool in TOOL_DEFINITIONS}
     assert "run_python" not in names
