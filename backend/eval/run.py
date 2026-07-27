@@ -4,7 +4,7 @@ import argparse
 import sys
 from pathlib import Path
 
-from eval.runner import SUITE_DIRS, run_eval
+from eval.runner import SUITE_NAMES, run_eval
 
 
 def parse_args() -> argparse.Namespace:
@@ -12,7 +12,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--suite",
         action="append",
-        choices=["all", *SUITE_DIRS.keys()],
+        choices=["all", *SUITE_NAMES],
         default=None,
         help="Suite to run. Repeat for multiple suites. Defaults to all.",
     )
@@ -38,11 +38,6 @@ def parse_args() -> argparse.Namespace:
         help="Run cases with any selected tag. Repeat to select multiple tags.",
     )
     parser.add_argument(
-        "--model-cases-only",
-        action="store_true",
-        help="Exclude deterministic tool-contract cases.",
-    )
-    parser.add_argument(
         "--strict-requirements",
         action="store_true",
         help="Fail, instead of skip, when a selected case cannot run.",
@@ -54,10 +49,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> int:
     args = parse_args()
-    if not args.suite or "all" in args.suite:
-        suites = list(SUITE_DIRS)
-    else:
-        suites = args.suite
+    suites = None if not args.suite or "all" in args.suite else args.suite
 
     report = run_eval(
         suites=suites,
@@ -67,7 +59,6 @@ def main() -> int:
         trials=args.trials,
         case_ids=args.case,
         tags=args.tag,
-        model_cases_only=args.model_cases_only,
         strict_requirements=args.strict_requirements,
         report_dir=args.report_dir,
         write_reports=not args.no_report,

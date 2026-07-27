@@ -66,16 +66,22 @@ class TextExpectation(StrictModel):
     grounded_numbers: bool = False
     allowed_numbers: List[float] = Field(default_factory=list)
     number_tolerance: float = 0.01
-    required_values: List["RequiredAnswerValue"] = Field(default_factory=list)
 
 
 class RequiredAnswerValue(StrictModel):
     tool_name: str
     path: str
     occurrence: int = Field(default=1, ge=1)
+    result_selection: Literal["occurrence", "last_successful"] = "occurrence"
     tolerance: float = Field(default=0.01, ge=0)
     scale: float = 1.0
     required_context: List[str] = Field(default_factory=list)
+
+
+class LiveTextExpectation(TextExpectation):
+    required_any: List[List[str]] = Field(default_factory=list)
+    required_values: List[RequiredAnswerValue] = Field(default_factory=list)
+    allowed_derived_numbers: List[float] = Field(default_factory=list)
 
 
 class ToolCallExpectation(StrictModel):
@@ -172,7 +178,51 @@ class GatewayCase(CaseBase):
     expected_slots: List[SlotExpectation] = Field(default_factory=list)
 
 
-EvalCase = ToolContractCase | TrajectoryCase | AnswerCase | ToolLoopCase | GatewayCase
+class LiveTrajectoryCase(TrajectoryCase):
+    offline_response: None = None
+
+    @model_validator(mode="after")
+    def require_live_model(self):
+        if "live_model" not in self.requirements:
+            raise ValueError("live trajectory cases require 'live_model'")
+        return self
+
+
+class LiveAnswerCase(AnswerCase):
+    expect: LiveTextExpectation = Field(default_factory=LiveTextExpectation)
+    offline_response: None = None
+
+    @model_validator(mode="after")
+    def require_live_model(self):
+        if "live_model" not in self.requirements:
+            raise ValueError("live answer cases require 'live_model'")
+        return self
+
+
+class LiveToolLoopCase(ToolLoopCase):
+    expect: LiveTextExpectation = Field(default_factory=LiveTextExpectation)
+    offline_responses: List[ModelTurn] = Field(default_factory=list, max_length=0)
+
+    @model_validator(mode="after")
+    def require_live_model(self):
+        if "live_model" not in self.requirements:
+            raise ValueError("live tool-loop cases require 'live_model'")
+        return self
+
+
+class LiveGatewayCase(GatewayCase):
+    @model_validator(mode="after")
+    def require_live_model(self):
+        if "live_model" not in self.requirements:
+            raise ValueError("live gateway cases require 'live_model'")
+        return self
+
+
+DeterministicEvalCase = ToolContractCase | TrajectoryCase | AnswerCase | ToolLoopCase
+LiveEvalCase = (
+    LiveTrajectoryCase | LiveAnswerCase | LiveToolLoopCase | LiveGatewayCase
+)
+EvalCase = DeterministicEvalCase | LiveEvalCase
 
 
 class ToolContractDetails(StrictModel):

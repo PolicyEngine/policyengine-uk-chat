@@ -8,7 +8,7 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 import eval.runner as runner
-from eval.graders import grade_output, grade_text, grade_tool_calls
+from eval.graders import grade_live_text, grade_output, grade_text, grade_tool_calls
 from eval.loaders import load_case_file
 from eval.reporting import render_markdown
 from eval.runner import run_eval
@@ -18,6 +18,8 @@ from eval.schemas import (
     CaseSkip,
     EvalReport,
     ExecutedToolResult,
+    LiveAnswerCase,
+    LiveTextExpectation,
     ModelTurn,
     ModelToolCall,
     NumericExpectation,
@@ -43,6 +45,109 @@ def test_loads_yaml_cases_with_typed_schemas():
     assert cases
     assert {case.suite for case in cases} == {"trajectory"}
     assert cases[0].expected_tools[0].name == "run_household_simulation"
+
+
+def test_deterministic_and_live_case_roots_are_disjoint():
+    deterministic_cases = [
+        case
+        for path in runner._case_paths(runner.DETERMINISTIC_SUITE_DIRS)
+        for case in load_case_file(path)
+    ]
+    live_cases = [
+        case
+        for path in runner._case_paths(runner.LIVE_SUITE_DIRS, live=True)
+        for case in load_case_file(path, live=True)
+    ]
+
+    deterministic_ids = {case.id for case in deterministic_cases}
+    live_ids = {case.id for case in live_cases}
+
+    assert deterministic_ids.isdisjoint(live_ids)
+    assert all("live_model" not in case.requirements for case in deterministic_cases)
+    assert all("live_model" in case.requirements for case in live_cases)
+
+
+def test_deterministic_loader_rejects_live_model_cases(tmp_path):
+    path = tmp_path / "trajectory.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "cases": [
+                    {
+                        "id": "misplaced_live_case",
+                        "suite": "trajectory",
+                        "description": "Live cases do not belong in deterministic roots.",
+                        "requirements": ["live_model"],
+                        "prompt": "Calculate.",
+                        "offline_response": {"text": "scripted"},
+                    }
+                ]
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="cannot require a live model"):
+        load_case_file(path)
+
+
+def test_deterministic_loader_requires_scripted_model_response(tmp_path):
+    path = tmp_path / "answer.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "cases": [
+                    {
+                        "id": "unscripted_deterministic_case",
+                        "suite": "answer",
+                        "description": "Deterministic cases need authored output.",
+                        "prompt": "Calculate.",
+                    }
+                ]
+            }
+        )
+    )
+
+    with pytest.raises(ValueError, match="require offline_response"):
+        load_case_file(path)
+
+
+def test_live_loader_rejects_scripted_model_responses(tmp_path):
+    path = tmp_path / "trajectory.yaml"
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "cases": [
+                    {
+                        "id": "misplaced_scripted_case",
+                        "suite": "trajectory",
+                        "description": "Scripted responses do not belong in live roots.",
+                        "requirements": ["live_model"],
+                        "prompt": "Calculate.",
+                        "offline_response": {"text": "scripted"},
+                    }
+                ]
+            }
+        )
+    )
+
+    with pytest.raises(ValidationError):
+        load_case_file(path, live=True)
+
+
+@pytest.mark.parametrize(
+    ("mode", "suite", "layer"),
+    [
+        ("offline", "gateway", "deterministic"),
+        ("live", "tool_contract", "live"),
+    ],
+)
+def test_runner_rejects_suites_from_the_other_eval_layer(mode, suite, layer):
+    with pytest.raises(ValueError, match=f"not a {layer} eval suite"):
+        run_eval(
+            suites=[suite],
+            mode=mode,
+            write_reports=False,
+        )
 
 
 def test_yaml_loader_normalizes_dated_reform_keys_to_json_strings():
@@ -135,8 +240,9 @@ def test_grade_tool_calls_matches_ordered_semantic_expectations():
     assert grade_tool_calls(actual, expected, forbidden_tools=["aggregate_result"]) == []
 
 
-def test_grade_tool_calls_rejects_unexpected_extra_calls():
+def test_grade_tool_calls_allows_additional_calls_around_ordered_expectations():
     actual = [
+        ModelToolCall(name="search_parameters"),
         ModelToolCall(name="run_household_simulation"),
         ModelToolCall(name="generate_chart"),
     ]
@@ -144,7 +250,7 @@ def test_grade_tool_calls_rejects_unexpected_extra_calls():
 
     errors = grade_tool_calls(actual, expected, forbidden_tools=[])
 
-    assert "expected exactly 1 tool call(s), got 2" in errors
+    assert errors == []
 
 
 def test_grade_text_checks_required_forbidden_and_grounded_numbers():
@@ -159,7 +265,7 @@ def test_grade_text_checks_required_forbidden_and_grounded_numbers():
 
 
 def test_grade_text_requires_values_from_named_tool_results():
-    expectation = TextExpectation(
+    expectation = LiveTextExpectation(
         grounded_numbers=True,
         required_values=[
             RequiredAnswerValue(
@@ -178,14 +284,14 @@ def test_grade_text_requires_values_from_named_tool_results():
     ]
 
     assert (
-        grade_text(
+        grade_live_text(
             "Baseline net income is £31,234.56.",
             expectation,
             results,
         )
         == []
     )
-    assert "omitted required value" in grade_text(
+    assert "omitted required value" in grade_live_text(
         "Baseline net income is unavailable.",
         expectation,
         results,
@@ -193,7 +299,7 @@ def test_grade_text_requires_values_from_named_tool_results():
 
 
 def test_grade_text_supports_scaled_required_percentages():
-    expectation = TextExpectation(
+    expectation = LiveTextExpectation(
         grounded_numbers=True,
         required_values=[
             RequiredAnswerValue(
@@ -211,11 +317,11 @@ def test_grade_text_supports_scaled_required_percentages():
         )
     ]
 
-    assert grade_text("The rate is 20%.", expectation, results) == []
+    assert grade_live_text("The rate is 20%.", expectation, results) == []
 
 
 def test_required_value_tolerance_also_applies_to_grounding():
-    expectation = TextExpectation(
+    expectation = LiveTextExpectation(
         grounded_numbers=True,
         required_values=[
             RequiredAnswerValue(
@@ -232,7 +338,58 @@ def test_required_value_tolerance_also_applies_to_grounding():
         )
     ]
 
-    assert grade_text("Net income is £28,540.", expectation, results) == []
+    assert grade_live_text("Net income is £28,540.", expectation, results) == []
+
+
+def test_live_grounding_accepts_tool_inputs_and_declared_derivations():
+    expectation = LiveTextExpectation(
+        grounded_numbers=True,
+        allowed_derived_numbers=[81.5],
+    )
+    results = [
+        ExecutedToolResult(
+            name="run_household_simulation",
+            input={"people": [{"age": 35, "employment_income": 35_000}]},
+            output={"household": {"household_net_income": 28_539.55}},
+        )
+    ]
+
+    assert (
+        grade_live_text(
+            "Age 35, income £35,000, net income £28,539.55, retained 81.5%.",
+            expectation,
+            results,
+        )
+        == []
+    )
+
+
+def test_live_required_value_can_select_last_successful_retry():
+    expectation = LiveTextExpectation(
+        required_values=[
+            RequiredAnswerValue(
+                tool_name="run_household_simulation",
+                path="household.household_net_income",
+                result_selection="last_successful",
+                tolerance=1,
+            )
+        ],
+    )
+    results = [
+        ExecutedToolResult(
+            name="run_household_simulation",
+            output={"error": "invalid input"},
+        ),
+        ExecutedToolResult(
+            name="run_household_simulation",
+            output={
+                "status": "success",
+                "household": {"household_net_income": 28_539.55},
+            },
+        ),
+    ]
+
+    assert grade_live_text("Net income is £28,540.", expectation, results) == []
 
 
 def test_offline_eval_runs_seed_trajectory_and_answer_cases_without_reports():
@@ -245,14 +402,9 @@ def test_offline_eval_runs_seed_trajectory_and_answer_cases_without_reports():
         len(load_case_file(REPO_ROOT / "evals" / "cases" / "trajectory" / "core.yaml"))
         + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answer" / "core.yaml"))
     )
-    live_only_cases = (
-        len(load_case_file(REPO_ROOT / "evals" / "cases" / "trajectory" / "live.yaml"))
-        + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answer" / "live.yaml"))
-    )
-
     assert report.failed == 0
-    assert report.passed + report.skipped == expected_cases + live_only_cases
-    assert report.skipped >= live_only_cases
+    assert report.passed == expected_cases
+    assert report.skipped == 0
 
 
 def test_offline_eval_runs_tool_loop_cases_without_reports():
@@ -313,7 +465,11 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
         calls.append((tool_name, tool_input))
         return {"value": 42}
 
-    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+    monkeypatch.setattr(
+        runner,
+        "_case_paths",
+        lambda _suites, live=False: [case_file],
+    )
     monkeypatch.setattr(runner, "execute_tool", record_tool_call)
 
     report = runner.run_eval(
@@ -361,7 +517,11 @@ def test_tool_loop_reports_tool_execution_errors(tmp_path, monkeypatch):
     def fail_tool(*_args, **_kwargs):
         raise RuntimeError("calculation failed")
 
-    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+    monkeypatch.setattr(
+        runner,
+        "_case_paths",
+        lambda _suites, live=False: [case_file],
+    )
     monkeypatch.setattr(runner, "execute_tool", fail_tool)
 
     report = runner.run_eval(
@@ -462,7 +622,11 @@ def test_offline_tool_loop_resolves_prior_tool_results_and_fields(
             return {"status": "success"}
         return {"net_budgetary_impact": 42}
 
-    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+    monkeypatch.setattr(
+        runner,
+        "_case_paths",
+        lambda _suites, live=False: [case_file],
+    )
     monkeypatch.setattr(runner, "execute_tool", record_tool_call)
 
     report = runner.run_eval(
@@ -573,7 +737,7 @@ def test_report_markdown_exposes_counts_and_case_status_for_regression_review():
     assert "expected tool" in markdown
 
 
-def test_report_computes_pass_at_1_and_pass_all_trials_for_model_cases_only():
+def test_report_computes_pass_at_1_and_pass_all_trials_for_live_cases():
     results = [
         CaseResult(
             id="stable",
@@ -683,7 +847,11 @@ def test_live_eval_runs_three_trials_through_production_model_routing(
                 ]
             )
 
-    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+    monkeypatch.setattr(
+        runner,
+        "_case_paths",
+        lambda _suites, live=False: [case_file],
+    )
     monkeypatch.setattr(runner, "AnthropicModelClient", RecordingLiveClient)
     monkeypatch.setattr(
         runner,
@@ -695,7 +863,6 @@ def test_live_eval_runs_three_trials_through_production_model_routing(
         suites=["trajectory"],
         mode="live",
         trials=3,
-        model_cases_only=True,
         strict_requirements=True,
         write_reports=False,
     )
@@ -755,7 +922,11 @@ def test_skipped_tool_contract_case_reports_skip_without_execution(tmp_path, mon
     def fail_if_called(*_args, **_kwargs):
         raise AssertionError("skipped cases must not execute tools")
 
-    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+    monkeypatch.setattr(
+        runner,
+        "_case_paths",
+        lambda _suites, live=False: [case_file],
+    )
     monkeypatch.setattr(runner, "execute_tool", fail_if_called)
 
     report = runner.run_eval(
@@ -791,7 +962,11 @@ def test_strict_requirements_turns_unavailable_cases_into_failures(
         )
     )
     monkeypatch.delenv("RUN_DATA_EVALS", raising=False)
-    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+    monkeypatch.setattr(
+        runner,
+        "_case_paths",
+        lambda _suites, live=False: [case_file],
+    )
 
     report = runner.run_eval(
         suites=["tool_contract"],
@@ -817,60 +992,72 @@ def test_all_eval_tool_calls_match_current_tool_schemas():
     schemas = {tool["name"]: tool["input_schema"] for tool in TOOL_DEFINITIONS}
     errors = []
 
-    for suite, case_dir in runner.SUITE_DIRS.items():
-        for path in sorted(case_dir.glob("*.yaml")):
-            for case in load_case_file(path):
-                calls = []
-                if isinstance(case, ToolContractCase):
-                    if "schema_negative" in case.tags:
-                        continue
-                    calls = [(case.tool_name, case.input)]
-                elif isinstance(case, AnswerCase):
-                    calls = [(call.name, call.input) for call in case.tool_calls]
-                elif isinstance(case, TrajectoryCase) and case.offline_response:
-                    calls = [
-                        (call.name, call.input)
-                        for call in case.offline_response.tool_calls
-                    ]
-                elif isinstance(case, ToolLoopCase):
-                    calls = [
-                        (call.name, call.input)
-                        for turn in case.offline_responses
-                        for call in turn.tool_calls
-                    ]
+    layers = [
+        (runner.DETERMINISTIC_SUITE_DIRS, False),
+        (runner.LIVE_SUITE_DIRS, True),
+    ]
+    for suite_dirs, live in layers:
+        for case_dir in suite_dirs.values():
+            for path in sorted(case_dir.glob("*.yaml")):
+                for case in load_case_file(path, live=live):
+                    calls = []
+                    if isinstance(case, ToolContractCase):
+                        if "schema_negative" in case.tags:
+                            continue
+                        calls = [(case.tool_name, case.input)]
+                    elif isinstance(case, AnswerCase):
+                        calls = [(call.name, call.input) for call in case.tool_calls]
+                    elif isinstance(case, TrajectoryCase) and case.offline_response:
+                        calls = [
+                            (call.name, call.input)
+                            for call in case.offline_response.tool_calls
+                        ]
+                    elif isinstance(case, ToolLoopCase):
+                        calls = [
+                            (call.name, call.input)
+                            for turn in case.offline_responses
+                            for call in turn.tool_calls
+                        ]
 
-                expected_calls = getattr(case, "expected_tools", [])
-                for expected_call in expected_calls:
-                    schema = schemas.get(expected_call.name)
-                    if schema is None:
-                        errors.append(
-                            f"{path.name}:{case.id}: unknown expected tool "
-                            f"{expected_call.name}"
-                        )
-                        continue
-                    partial_schema = deepcopy(schema)
-                    partial_schema["required"] = []
-                    for error in Draft202012Validator(partial_schema).iter_errors(
-                        expected_call.input_contains
-                    ):
-                        location = ".".join(
-                            str(part) for part in error.absolute_path
-                        )
-                        errors.append(
-                            f"{path.name}:{case.id}:{expected_call.name}:"
-                            f"{location}: {error.message}"
-                        )
+                    expected_calls = getattr(case, "expected_tools", [])
+                    for expected_call in expected_calls:
+                        schema = schemas.get(expected_call.name)
+                        if schema is None:
+                            errors.append(
+                                f"{path.name}:{case.id}: unknown expected tool "
+                                f"{expected_call.name}"
+                            )
+                            continue
+                        partial_schema = deepcopy(schema)
+                        partial_schema["required"] = []
+                        for error in Draft202012Validator(
+                            partial_schema
+                        ).iter_errors(expected_call.input_contains):
+                            location = ".".join(
+                                str(part) for part in error.absolute_path
+                            )
+                            errors.append(
+                                f"{path.name}:{case.id}:{expected_call.name}:"
+                                f"{location}: {error.message}"
+                            )
 
-                for tool_name, tool_input in calls:
-                    schema = schemas.get(tool_name)
-                    if schema is None:
-                        errors.append(f"{path.name}:{case.id}: unknown tool {tool_name}")
-                        continue
-                    for error in Draft202012Validator(schema).iter_errors(tool_input):
-                        location = ".".join(str(part) for part in error.absolute_path)
-                        errors.append(
-                            f"{path.name}:{case.id}:{tool_name}:{location}: {error.message}"
-                        )
+                    for tool_name, tool_input in calls:
+                        schema = schemas.get(tool_name)
+                        if schema is None:
+                            errors.append(
+                                f"{path.name}:{case.id}: unknown tool {tool_name}"
+                            )
+                            continue
+                        for error in Draft202012Validator(schema).iter_errors(
+                            tool_input
+                        ):
+                            location = ".".join(
+                                str(part) for part in error.absolute_path
+                            )
+                            errors.append(
+                                f"{path.name}:{case.id}:{tool_name}:{location}: "
+                                f"{error.message}"
+                            )
 
     assert errors == []
 

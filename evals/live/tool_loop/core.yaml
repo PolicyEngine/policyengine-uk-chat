@@ -1,0 +1,76 @@
+cases:
+  - id: tool_loop_live_household_calculation
+    suite: tool_loop
+    description: Live model completes a real 2026 household calculation and grounds its answer.
+    tags: [live_baseline, critical, uk_2026, household]
+    requirements: [live_model, policyengine_py]
+    prompt: >
+      Calculate the current-policy household net income and income tax for an
+      illustrative single adult aged 35 earning GBP 35,000 in 2026.
+    expected_tools:
+      - name: run_household_simulation
+        input_contains:
+          year: 2026
+          people:
+            - employment_income: 35000
+    forbidden_tools: [run_society_simulation, aggregate_result]
+    expect:
+      required:
+        - illustrative
+        - "2026"
+        - income tax
+      required_any:
+        - [household net income, net household income, net income]
+      required_values:
+        - tool_name: run_household_simulation
+          path: household.household_net_income
+          result_selection: last_successful
+          tolerance: 1
+          required_context: [net income]
+        - tool_name: run_household_simulation
+          path: person.0.income_tax
+          result_selection: last_successful
+          tolerance: 1
+          required_context: [income tax]
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - actual household
+      grounded_numbers: true
+      allowed_derived_numbers: [6280.40, 17.9]
+      number_tolerance: 0.01
+
+  - id: tool_loop_live_parameter_lookup
+    suite: tool_loop
+    description: Live model discovers and retrieves the 2025 basic-rate-band threshold.
+    tags: [live_baseline, critical, parameter]
+    requirements: [live_model, policyengine_py]
+    prompt: What is the basic-rate-band threshold in 2025?
+    expected_tools:
+      - name: search_parameters
+      - name: get_parameter
+        input_contains:
+          year: 2025
+    forbidden_tools:
+      - run_household_simulation
+      - run_society_simulation
+      - validate_reform
+    expect:
+      required:
+        - "2025"
+        - basic
+        - threshold
+      required_values:
+        - tool_name: get_parameter
+          path: parameter.value
+          result_selection: last_successful
+          tolerance: 1
+          required_context: [threshold]
+      forbidden:
+        - simulated household
+        - good
+        - bad

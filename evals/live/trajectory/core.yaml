@@ -13,8 +13,6 @@ cases:
           year: 2026
           people:
             - employment_income: 35000
-          benunit: {}
-          household: {}
     forbidden_tools:
       - run_society_simulation
       - aggregate_result

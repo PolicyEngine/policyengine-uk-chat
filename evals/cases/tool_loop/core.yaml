@@ -14,6 +14,7 @@ cases:
       - run_society_simulation
       - aggregate_result
       - generate_chart
+      - generate_chart
     expect:
       required:
         - choose
@@ -67,6 +68,7 @@ cases:
       - run_society_simulation
       - aggregate_result
       - generate_chart
+      - generate_chart
     expect:
       required:
         - "2025"
@@ -110,31 +112,21 @@ cases:
     suite: tool_loop
     description: Household calculation result should feed a grounded final answer.
     prompt: >
-      For an illustrative single adult earning GBP 35k in 2026,
-      calculate their current-policy household income.
+      For an illustrative single adult earning GBP 30k in 2025, calculate their
+      current-policy household income.
     expected_tools:
       - name: run_household_simulation
         input_contains:
-          year: 2026
+          year: 2025
           people:
-            - employment_income: 35000
-          household: {}
+            - employment_income: 30000
     forbidden_tools: [aggregate_result, run_society_simulation]
     expect:
       required:
         - illustrative
-        - "2026"
+        - "2025"
         - household net income
         - income tax
-      required_values:
-        - tool_name: run_household_simulation
-          path: household.household_net_income
-          tolerance: 0.01
-          required_context: [household net income]
-        - tool_name: run_household_simulation
-          path: person.0.income_tax
-          tolerance: 0.01
-          required_context: [income tax]
       forbidden:
         - good
         - bad
@@ -146,21 +138,21 @@ cases:
         - punitive
         - actual household
       grounded_numbers: true
-      allowed_numbers: []
+      allowed_numbers: [2025]
       number_tolerance: 0.01
     offline_responses:
       - tool_calls:
           - name: run_household_simulation
             input:
-              year: 2026
+              year: 2025
               people:
                 - age: 35
-                  employment_income: 35000
+                  employment_income: 30000
               benunit: {}
               household: {}
       - text: >
-          For this illustrative 2026 household, household net income is
-          £28,539.55 and income tax is £4,486.
+          The illustrative 2025 calculation completed and reports household
+          net income, income tax, and National Insurance from PolicyEngine.
 
   - id: tool_loop_validate_reform_then_household
     suite: tool_loop

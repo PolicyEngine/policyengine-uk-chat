@@ -131,7 +131,6 @@ def test_anthropic_client_omits_empty_tools(monkeypatch):
                 "mode": "offline",
                 "provider": None,
                 "trials": 1,
-                "model_cases_only": False,
                 "strict_requirements": False,
             },
         ),
@@ -148,7 +147,6 @@ def test_anthropic_client_omits_empty_tools(monkeypatch):
                 "anthropic",
                 "--trials",
                 "3",
-                "--model-cases-only",
                 "--strict-requirements",
                 "--case",
                 "case-1",
@@ -160,7 +158,6 @@ def test_anthropic_client_omits_empty_tools(monkeypatch):
                 "mode": "live",
                 "provider": "anthropic",
                 "trials": 3,
-                "model_cases_only": True,
                 "strict_requirements": True,
                 "case": ["case-1"],
                 "tag": ["critical"],
@@ -175,7 +172,7 @@ def test_eval_cli_parses_defaults_and_repeated_suites(monkeypatch, argv, expecte
 
 
 @pytest.mark.parametrize(("suites", "failed", "exit_code"), [(None, 0, 0), (["all"], 1, 1)])
-def test_eval_main_expands_all_suites_and_returns_failure_status(
+def test_eval_main_uses_mode_default_suites_and_returns_failure_status(
     monkeypatch, capsys, suites, failed, exit_code
 ):
     calls = []
@@ -190,7 +187,6 @@ def test_eval_main_expands_all_suites_and_returns_failure_status(
                 trials=1,
                 case=None,
                 tag=None,
-                model_cases_only=False,
                 strict_requirements=False,
                 report_dir=None,
             no_report=False,
@@ -203,7 +199,7 @@ def test_eval_main_expands_all_suites_and_returns_failure_status(
     )
 
     assert run.main() == exit_code
-    assert calls[0]["suites"] == list(run.SUITE_DIRS)
+    assert calls[0]["suites"] is None
     assert "AI evals:" in capsys.readouterr().out
 
 
@@ -220,7 +216,6 @@ def test_eval_main_preserves_selected_suites_and_no_report(monkeypatch):
             trials=3,
             case=["one"],
             tag=["critical"],
-            model_cases_only=True,
             strict_requirements=True,
             report_dir=None,
             no_report=True,
@@ -238,7 +233,6 @@ def test_eval_main_preserves_selected_suites_and_no_report(monkeypatch):
     assert calls[0]["trials"] == 3
     assert calls[0]["case_ids"] == ["one"]
     assert calls[0]["tags"] == ["critical"]
-    assert calls[0]["model_cases_only"] is True
     assert calls[0]["strict_requirements"] is True
 
 

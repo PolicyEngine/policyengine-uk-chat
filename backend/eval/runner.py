@@ -17,7 +17,7 @@ from tools.context import new_tool_context
 from tools.definitions import TOOL_DEFINITIONS
 from tools.dispatch import execute_tool
 
-from eval.graders import grade_output, grade_text, grade_tool_calls
+from eval.graders import grade_live_text, grade_output, grade_text, grade_tool_calls
 from eval.loaders import load_cases
 from eval.providers import AnthropicModelClient, FakeModelClient, ModelClient
 from eval.reporting import write_report
@@ -33,6 +33,8 @@ from eval.schemas import (
     GatewayDetails,
     GatewaySlotDetails,
     GatewayCase,
+    LiveAnswerCase,
+    LiveToolLoopCase,
     ModelTurn,
     ToolContractCase,
     ToolContractDetails,
@@ -47,16 +49,24 @@ JsonObject = dict[str, JsonValue]
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EVAL_ROOT = REPO_ROOT / "evals"
 CASE_ROOT = EVAL_ROOT / "cases"
+LIVE_CASE_ROOT = EVAL_ROOT / "live"
 FIXTURE_ROOT = EVAL_ROOT / "fixtures" / "tool_outputs"
 
-SUITE_DIRS = {
+DETERMINISTIC_SUITE_DIRS = {
     "tool_contract": CASE_ROOT / "tool_contract",
     "trajectory": CASE_ROOT / "trajectory",
     "answer": CASE_ROOT / "answer",
     "tool_loop": CASE_ROOT / "tool_loop",
-    "gateway": CASE_ROOT / "gateway",
 }
-MODEL_SUITES = {"trajectory", "answer", "tool_loop", "gateway"}
+LIVE_SUITE_DIRS = {
+    "gateway": LIVE_CASE_ROOT / "gateway",
+    "trajectory": LIVE_CASE_ROOT / "trajectory",
+    "answer": LIVE_CASE_ROOT / "answer",
+    "tool_loop": LIVE_CASE_ROOT / "tool_loop",
+}
+SUITE_NAMES = tuple(
+    dict.fromkeys([*DETERMINISTIC_SUITE_DIRS, *LIVE_SUITE_DIRS])
+)
 
 
 def _utc_now() -> str:
@@ -75,11 +85,15 @@ def _git_sha() -> str | None:
         return None
 
 
-def _case_paths(suites: Iterable[str]) -> List[Path]:
+def _case_paths(suites: Iterable[str], *, live: bool = False) -> List[Path]:
     paths: List[Path] = []
+    suite_dirs = LIVE_SUITE_DIRS if live else DETERMINISTIC_SUITE_DIRS
     for suite in suites:
-        paths.extend(SUITE_DIRS[suite].glob("*.yaml"))
-        paths.extend(SUITE_DIRS[suite].glob("*.yml"))
+        if suite not in suite_dirs:
+            layer = "live" if live else "deterministic"
+            raise ValueError(f"Suite {suite!r} is not a {layer} eval suite.")
+        paths.extend(suite_dirs[suite].glob("*.yaml"))
+        paths.extend(suite_dirs[suite].glob("*.yml"))
     return paths
 
 
@@ -320,7 +334,10 @@ def _run_answer(
             trial=trial,
             model=model,
         )
-    errors = grade_text(turn.text, case.expect, tool_results)
+    if isinstance(case, LiveAnswerCase):
+        errors = grade_live_text(turn.text, case.expect, tool_results)
+    else:
+        errors = grade_text(turn.text, case.expect)
     return _result(
         case,
         "failed" if errors else "passed",
@@ -517,7 +534,10 @@ def _run_tool_loop(
         errors.append("max iterations reached before final answer")
 
     errors.extend(grade_tool_calls(tool_calls, case.expected_tools, case.forbidden_tools))
-    errors.extend(grade_text(final_text, case.expect, executions))
+    if isinstance(case, LiveToolLoopCase):
+        errors.extend(grade_live_text(final_text, case.expect, executions))
+    else:
+        errors.extend(grade_text(final_text, case.expect))
     return _result(
         case,
         "failed" if errors else "passed",
@@ -612,7 +632,6 @@ def run_eval(
     trials: int = 1,
     case_ids: List[str] | None = None,
     tags: List[str] | None = None,
-    model_cases_only: bool = False,
     strict_requirements: bool = False,
     report_dir: Path | None = None,
     write_reports: bool = True,
@@ -622,10 +641,13 @@ def run_eval(
     if mode != "live" and trials != 1:
         raise ValueError("multiple trials are only supported in live mode")
 
-    selected_suites = suites or list(SUITE_DIRS)
-    cases = load_cases(_case_paths(selected_suites))
-    if model_cases_only:
-        cases = [case for case in cases if case.suite in MODEL_SUITES]
+    live = mode == "live"
+    suite_dirs = LIVE_SUITE_DIRS if live else DETERMINISTIC_SUITE_DIRS
+    selected_suites = suites or list(suite_dirs)
+    cases = load_cases(
+        _case_paths(selected_suites, live=live),
+        live=live,
+    )
     if case_ids:
         requested_ids = set(case_ids)
         available_ids = {case.id for case in cases}
@@ -670,14 +692,7 @@ def run_eval(
             )
             results.append(_result(case, status, 0.0, [skip_reason]))
             continue
-        if case.suite in {"trajectory", "answer"} and mode == "offline" and getattr(case, "offline_response", None) is None:
-            results.append(_result(case, "skipped", 0.0, ["offline_response is required for offline model evals"]))
-            continue
-        if isinstance(case, ToolLoopCase) and mode == "offline" and not case.offline_responses:
-            results.append(_result(case, "skipped", 0.0, ["offline_responses are required for offline tool-loop evals"]))
-            continue
-
-        case_trials = trials if mode == "live" and case.suite in MODEL_SUITES else 1
+        case_trials = trials if live else 1
         for trial in range(1, case_trials + 1):
             if isinstance(case, ToolContractCase):
                 results.append(_run_tool_contract(case))
