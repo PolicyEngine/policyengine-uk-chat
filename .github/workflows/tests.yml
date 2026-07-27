@@ -62,9 +62,6 @@ jobs:
       - name: Run backend tests with coverage
         run: make test-backend
 
-      - name: Run deterministic AI and tool-contract evals
-        run: make eval-ai-offline
-
       - name: Upload backend coverage to Codecov
         uses: codecov/codecov-action@v6
         with:
@@ -74,6 +71,41 @@ jobs:
           name: backend
           use_oidc: true
           verbose: true
+
+  deterministic-evals:
+    name: Deterministic eval — ${{ matrix.label }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: PolicyEngine tool contracts
+            target: eval-tool-contracts
+          - label: scripted trajectories
+            target: eval-scripted-trajectories
+          - label: scripted answers
+            target: eval-scripted-answers
+          - label: scripted tool loops
+            target: eval-scripted-tool-loops
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
+
+      - name: Run ${{ matrix.label }}
+        run: make ${{ matrix.target }}
 
   frontend:
     name: Frontend tests and build
@@ -155,13 +187,25 @@ jobs:
             backend/tests/test_data_integration.py -v
 
   live-model-evals:
-    name: Live model evals (3 trials)
+    name: Live ${{ matrix.label }} evals (3 trials)
     needs: changes
     if: needs.changes.outputs.model_facing == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
       contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: gateway
+            target: eval-ai-live-gateway
+          - label: trajectory
+            target: eval-ai-live-trajectory
+          - label: answer
+            target: eval-ai-live-answer
+          - label: tool-loop
+            target: eval-ai-live-tool-loop
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 
@@ -186,13 +230,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
 
-      - name: Run every live model case three times
-        run: make eval-ai-live
+      - name: Run live ${{ matrix.label }} cases three times
+        run: make ${{ matrix.target }}
 
       - name: Upload live eval reports
         if: always()
         uses: actions/upload-artifact@v6
         with:
-          name: live-model-eval-report
+          name: live-${{ matrix.label }}-eval-report
           path: evals/reports/
           if-no-files-found: warn

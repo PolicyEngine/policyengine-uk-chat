@@ -1,4 +1,4 @@
-.PHONY: up down build logs restart shell-backend shell-frontend test test-backend test-frontend sync-policyengine-uk-evals check-policyengine-uk-evals eval-ai-offline eval-ai-live
+.PHONY: up down build logs restart shell-backend shell-frontend test test-backend test-frontend sync-policyengine-uk-evals check-policyengine-uk-evals eval-ai-offline eval-tool-contracts eval-scripted-trajectories eval-scripted-answers eval-scripted-tool-loops eval-ai-live eval-ai-live-gateway eval-ai-live-trajectory eval-ai-live-answer eval-ai-live-tool-loop
 
 # Start all services in dev mode (live reload)
 up:
@@ -62,5 +62,29 @@ check-policyengine-uk-evals:
 eval-ai-offline: check-policyengine-uk-evals
 	PYTHONPATH=backend python -m eval.run --mode offline
 
+eval-tool-contracts: check-policyengine-uk-evals
+	PYTHONPATH=backend python -m eval.run --mode offline --suite tool_contract
+
+eval-scripted-trajectories:
+	PYTHONPATH=backend python -m eval.run --mode offline --suite trajectory
+
+eval-scripted-answers:
+	PYTHONPATH=backend python -m eval.run --mode offline --suite answer
+
+eval-scripted-tool-loops:
+	PYTHONPATH=backend python -m eval.run --mode offline --suite tool_loop
+
 eval-ai-live: check-policyengine-uk-evals
-	PYTHONPATH=backend python -m eval.run --mode live --provider anthropic --trials 3 --model-cases-only --strict-requirements
+	PYTHONPATH=backend python -m eval.run --mode live --provider anthropic --trials 3 --strict-requirements
+
+eval-ai-live-gateway:
+	PYTHONPATH=backend python -m eval.run --mode live --provider anthropic --trials 3 --strict-requirements --suite gateway
+
+eval-ai-live-trajectory:
+	PYTHONPATH=backend python -m eval.run --mode live --provider anthropic --trials 3 --strict-requirements --suite trajectory
+
+eval-ai-live-answer:
+	PYTHONPATH=backend python -m eval.run --mode live --provider anthropic --trials 3 --strict-requirements --suite answer
+
+eval-ai-live-tool-loop:
+	PYTHONPATH=backend python -m eval.run --mode live --provider anthropic --trials 3 --strict-requirements --suite tool_loop
