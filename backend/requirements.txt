@@ -3,9 +3,7 @@ uvicorn[standard]
 sqlmodel
 psycopg2-binary
 anthropic
-# Temporary immutable pin to policyengine.py#486. Replace with the first
-# released version containing commit a289cc49731ff375f54d5c0a6f5fc817c54d833d.
-policyengine[uk] @ https://github.com/PolicyEngine/policyengine.py/archive/a289cc49731ff375f54d5c0a6f5fc817c54d833d.zip
+policyengine[uk]==5.0.0
 pandas
 pyyaml
 httpx
