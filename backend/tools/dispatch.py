@@ -589,6 +589,7 @@ def generate_chart(
             )
         )
     expected_kind = _PRESET_RESULT_KINDS.get(chart_kind)
+    preset_metadata: dict[str, Any] = {}
     if expected_kind is not None:
         if not result_id:
             return {
@@ -599,6 +600,15 @@ def generate_chart(
             }
         stored = _get_stored(_context, result_id, expected_kind)
         data = _preset_chart_data(chart_kind, stored.summary)
+        if expected_kind == "decile_impacts":
+            preset_metadata = {
+                "measureLabel": stored.summary["measure_label"],
+                "groupLabel": stored.summary["grouping_label"],
+            }
+        elif expected_kind == "winners_losers":
+            preset_metadata = {
+                "groupLabel": stored.summary["grouping_label"],
+            }
     elif data is None:
         return {"error": f"{chart_kind} requires chart data."}
     spec = {
@@ -608,6 +618,7 @@ def generate_chart(
         "subtitle": subtitle,
         "data": data,
         "source": source or "PolicyEngine UK via policyengine.py",
+        **preset_metadata,
     }
     return _chart_markdown(spec)
 

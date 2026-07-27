@@ -301,8 +301,10 @@ DECILE_IMPACTS_DESCRIPTION = (
     "Compute policyengine.py changes in mean income for exactly one of three "
     "decile concepts. Household net income is the default; equivalised HBAI net "
     "income is used only when explicitly requested. Computed household income "
-    "groups use policyengine.py's person-weighted ranks. Wealth deciles rank "
-    "households by wealth and measure household net income."
+    "groups use policyengine.py's person-weighted ranks and exclude negative or "
+    "non-finite ranking incomes from reported deciles. Wealth deciles rank "
+    "households by wealth and measure household net income. Empty groups return "
+    "null impacts, not zero."
 )
 GENERATE_CHART_DESCRIPTION = (
     "Generate frontend-renderable chart markdown. For preset chart kinds, the layout, "

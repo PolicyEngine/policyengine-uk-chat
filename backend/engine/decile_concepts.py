@@ -23,6 +23,9 @@ class DecileConfiguration:
     income_variable: str
     decile_variable: str | None
     entity: str
+    quantiles: int
+    measure_label: str
+    grouping_label: str
 
 
 DEFAULT_DECILE_CONCEPT = DecileConcept.HOUSEHOLD_NET_INCOME
@@ -34,18 +37,27 @@ _DECILE_CONFIGURATIONS = {
         income_variable="household_net_income",
         decile_variable=None,
         entity="household",
+        quantiles=10,
+        measure_label="household net income",
+        grouping_label="Household net income decile",
     ),
     DecileConcept.EQUIVALISED_HBAI_NET_INCOME: DecileConfiguration(
         basis="income",
         income_variable="equiv_hbai_household_net_income",
         decile_variable=None,
         entity="household",
+        quantiles=10,
+        measure_label="equivalised HBAI net income",
+        grouping_label="Equivalised HBAI net income decile",
     ),
     DecileConcept.WEALTH: DecileConfiguration(
         basis="wealth",
         income_variable="household_net_income",
         decile_variable="household_wealth_decile",
         entity="household",
+        quantiles=10,
+        measure_label="household net income",
+        grouping_label="Wealth decile",
     ),
 }
 
