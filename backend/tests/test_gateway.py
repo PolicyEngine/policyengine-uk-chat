@@ -247,6 +247,67 @@ class TestRunGateway:
         assert verdict.outcome == "ready"
         assert verdict.unmodellable_outputs == []
 
+    def test_unrequested_unmodellable_riders_do_not_force_partial(self):
+        from gateway import runtime as gateway
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                },
+                {
+                    "name": "budgetary_impact",
+                    "kind": "output",
+                    "source": "prompt",
+                },
+            ],
+            "unmodellable_outputs": [
+                "behavioural response",
+                "employment effects",
+                "macroeconomic effects",
+            ],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(
+                "What is the budgetary cost of raising the basic rate to 21%?"
+            )
+
+        assert verdict.outcome == "ready"
+        assert verdict.unmodellable_outputs == []
+
+    def test_explicit_unmodellable_rider_still_forces_partial(self):
+        from gateway import runtime as gateway
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                },
+                {
+                    "name": "budgetary_impact",
+                    "kind": "output",
+                    "source": "prompt",
+                },
+            ],
+            "unmodellable_outputs": [
+                "inflation effect",
+                "employment effects",
+            ],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(
+                "What would raising the personal allowance cost and do to inflation?"
+            )
+
+        assert verdict.outcome == "partial"
+        assert verdict.unmodellable_outputs == ["inflation effect"]
+
 
 class TestGatewaySystemPrompt:
     def test_rendered_prompt_contains_default_simulation_year(self):

@@ -67,7 +67,7 @@ cases:
     suite: gateway
     description: "'Better' pins no metric — the deliverable is ungrounded."
     requirements: [live_model]
-    prompt: Compare the impact of a £15,000 personal allowance with increasing Universal Credit by £20 per week.
+    prompt: Which is better, a £15,000 personal allowance or increasing Universal Credit by £20 per week?
     expected_outcome: needs_plan
 
   - id: gw_needsplan_basic_rate_underspecified
@@ -77,7 +77,7 @@ cases:
     prompt: Raise the basic rate of income tax.
     expected_outcome: needs_plan
     expected_tool: run_society_simulation
-    expected_gating_slots: [reform]
+    expected_gating_slots: [reform, budgetary_impact]
 
   # ---- ready: fully specified, admissible ----
   - id: gw_ready_basic_rate_cost

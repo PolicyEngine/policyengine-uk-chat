@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass, field
 from typing import List, Optional
 
@@ -36,6 +37,59 @@ GATEWAY_MODEL = os.environ.get("POLICYENGINE_CHAT_GATEWAY_MODEL", DEFAULT_FAST_M
 GATEWAY_MAX_TOKENS = int(os.environ.get("POLICYENGINE_CHAT_GATEWAY_MAX_TOKENS", "1024"))
 
 _TOOL_NAMES = [t["name"] for t in TOOL_DEFINITIONS]
+
+_UNMODELLABLE_TERM_GROUPS = (
+    {"inflation", "price", "prices"},
+    {"gdp", "growth", "macro", "macroeconomic"},
+    {"employment", "job", "jobs", "work", "working", "labour", "labor"},
+    {"behaviour", "behavioural", "behavior", "behavioral"},
+    {"market", "markets"},
+)
+_GENERIC_UNMODELLABLE_TERMS = {
+    "change",
+    "changes",
+    "effect",
+    "effects",
+    "impact",
+    "impacts",
+    "response",
+    "responses",
+}
+
+
+def _tokens(value: str) -> set[str]:
+    return set(re.findall(r"[a-z]+", value.lower().replace("_", " ")))
+
+
+def _requested_unmodellable_outputs(
+    prompt: str,
+    outputs: list[str],
+    *,
+    has_modellable_tool: bool,
+) -> list[str]:
+    """Keep only explicitly requested riders on otherwise modellable asks.
+
+    A no-tool refusal retains the classifier's reasons for the lightweight
+    writer. When a modellable tool exists, an invented generic caveat must not
+    turn a ready or under-specified request into ``partial``.
+    """
+    if not has_modellable_tool:
+        return outputs
+
+    prompt_tokens = _tokens(prompt)
+    kept: list[str] = []
+    for output in outputs:
+        output_tokens = _tokens(output)
+        shared_specific = (
+            prompt_tokens & output_tokens
+        ) - _GENERIC_UNMODELLABLE_TERMS
+        shared_category = any(
+            prompt_tokens & group and output_tokens & group
+            for group in _UNMODELLABLE_TERM_GROUPS
+        )
+        if shared_specific or shared_category:
+            kept.append(output)
+    return kept
 
 
 def _build_tool_summary() -> str:
@@ -143,6 +197,11 @@ def _verdict_from_plan(plan: dict, prompt: str) -> GatewayVerdict:
         [str(item) for item in raw_unmodellable if item]
         if isinstance(raw_unmodellable, list)
         else []
+    )
+    unmodellable = _requested_unmodellable_outputs(
+        prompt,
+        unmodellable,
+        has_modellable_tool=tool is not None,
     )
     result = gate(in_domain, tool, slots, unmodellable, prompt)
     return GatewayVerdict(

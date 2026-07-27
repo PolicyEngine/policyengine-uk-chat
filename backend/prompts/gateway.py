@@ -76,6 +76,10 @@ Steps:
    — inflation, GDP, employment/behavioural response, market reactions, non-UK
    effects. Include only outputs the user actually requested; do not add generic
    caveats or possible second-round effects. Leave empty if none.
+   "Compare" or "impact" alone does not request every possible macroeconomic or
+   behavioural effect. If the user asks which modelled reform is "better"
+   without naming a metric, use an "assumed" output slot so the server asks what
+   "better" means; do not classify the comparison itself as unmodellable.
 
 Two fail-safe biases — apply them:
 - Admissibility leans toward IN scope. When unsure whether a tool fits, pick a
