@@ -12,6 +12,8 @@ from eval.schemas import (
     OutputExpectation,
     TextExpectation,
     ToolCallExpectation,
+    ToolResultExpectation,
+    ToolResultSelector,
 )
 
 
@@ -184,6 +186,48 @@ def grade_tool_calls(
     return errors
 
 
+def _matching_tool_results(
+    executed: Iterable[ExecutedToolResult],
+    selector: ToolResultSelector,
+) -> List[ExecutedToolResult]:
+    matching = [
+        result
+        for result in executed
+        if result.name == selector.tool_name
+    ]
+    if selector.result_selection == "last_successful":
+        successful = [
+            result
+            for result in matching
+            if result.output.get("status") == "success"
+            and "error" not in result.output
+        ]
+        return successful[-1:]
+    return matching
+
+
+def grade_tool_results(
+    executed: Iterable[ExecutedToolResult],
+    expectations: Iterable[ToolResultExpectation],
+) -> List[str]:
+    results = list(executed)
+    errors: List[str] = []
+    for expectation in expectations:
+        matching = _matching_tool_results(results, expectation)
+        if len(matching) < expectation.occurrence:
+            errors.append(
+                "expected tool result missing: "
+                f"{expectation.tool_name} occurrence {expectation.occurrence}"
+            )
+            continue
+        output = matching[expectation.occurrence - 1].output
+        errors.extend(
+            f"{expectation.tool_name} result: {error}"
+            for error in grade_output(output, expectation.expect)
+        )
+    return errors
+
+
 NUMBER_RE = re.compile(r"(?<![A-Za-z0-9_])-?£?\d[\d,]*(?:\.\d+)?%?")
 
 
@@ -273,19 +317,7 @@ def grade_live_text(
             )
 
     for required_value in expectation.required_values:
-        matching_results = [
-            result
-            for result in executed
-            if result.name == required_value.tool_name
-        ]
-        if required_value.result_selection == "last_successful":
-            successful_results = [
-                result
-                for result in matching_results
-                if result.output.get("status") == "success"
-                and "error" not in result.output
-            ]
-            matching_results = successful_results[-1:]
+        matching_results = _matching_tool_results(executed, required_value)
         if len(matching_results) < required_value.occurrence:
             errors.append(
                 f"required answer value tool result missing: "

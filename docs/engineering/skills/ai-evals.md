@@ -58,6 +58,11 @@ validate-then-calculate flows.
 - `expected_tools` is an ordered subsequence. Declare load-bearing calls and
   use `forbidden_tools` for calls that must never occur. Discovery and recovery
   calls may appear between expected calls.
+- Use `expected_tool_results` in tool-loop cases when the executed tool output
+  itself must satisfy a partial schema or numeric range. Select the last
+  successful result when retries are allowed. This is separate from
+  `expect.required_values`, which proves that final prose reports a value from
+  that result.
 - Use `expect.required_values` when final prose must include a numeric result
   from a named tool result. Specify the result path, occurrence, tolerance, and
   nearby required context. In live cases, `grounded_numbers: true`

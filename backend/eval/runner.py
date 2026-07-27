@@ -17,7 +17,13 @@ from tools.context import new_tool_context
 from tools.definitions import TOOL_DEFINITIONS
 from tools.dispatch import execute_tool
 
-from eval.graders import grade_live_text, grade_output, grade_text, grade_tool_calls
+from eval.graders import (
+    grade_live_text,
+    grade_output,
+    grade_text,
+    grade_tool_calls,
+    grade_tool_results,
+)
 from eval.loaders import load_cases
 from eval.providers import AnthropicModelClient, FakeModelClient, ModelClient
 from eval.reporting import write_report
@@ -534,6 +540,7 @@ def _run_tool_loop(
         errors.append("max iterations reached before final answer")
 
     errors.extend(grade_tool_calls(tool_calls, case.expected_tools, case.forbidden_tools))
+    errors.extend(grade_tool_results(executions, case.expected_tool_results))
     if isinstance(case, LiveToolLoopCase):
         errors.extend(grade_live_text(final_text, case.expect, executions))
     else:

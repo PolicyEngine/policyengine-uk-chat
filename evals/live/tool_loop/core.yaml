@@ -74,3 +74,348 @@ cases:
         - simulated household
         - good
         - bad
+
+  - id: tool_loop_live_autumn_budget_tax_avoidance_proxy
+    suite: tool_loop
+    description: >
+      Live model runs the article's high-income tax-avoidance proxy and reports
+      a plausible 2026 budgetary impact.
+    tags: [live_baseline, uk_2026, autumn_budget_2024, tax_avoidance, society]
+    requirements: [live_model, policyengine_py, data]
+    prompt: >
+      Model the tax-avoidance policy area from PolicyEngine's 2024 Autumn
+      Budget article as an explicit 2026 high-income proxy: set the UK
+      additional Income Tax threshold to GBP 100,000 and its rate to 50%.
+      Use exactly
+      `gov.hmrc.income_tax.rates.uk[2].threshold: 100000` and
+      `gov.hmrc.income_tax.rates.uk[2].rate: 0.5` in a society simulation.
+      Report the net budgetary impact in GBP billions.
+    expected_tools:
+      - name: run_society_simulation
+        input_contains:
+          year: 2026
+          reform:
+            gov.hmrc.income_tax.rates.uk[2].threshold: 100000
+            gov.hmrc.income_tax.rates.uk[2].rate: 0.5
+      - name: compute_budgetary_impact
+        required_input_paths: [simulation_id]
+    expected_tool_results:
+      - tool_name: compute_budgetary_impact
+        result_selection: last_successful
+        expect:
+          contains:
+            status: success
+          numeric:
+            - path: net_budgetary_impact
+              min: 5000000000
+              max: 12000000000
+    forbidden_tools: [run_household_simulation]
+    max_iterations: 6
+    expect:
+      required:
+        - "2026"
+      required_any:
+        - [tax avoidance, high-income, high income]
+        - [billion, bn]
+        - [budgetary impact, budget impact, revenue]
+      required_values:
+        - tool_name: compute_budgetary_impact
+          path: net_budgetary_impact
+          result_selection: last_successful
+          tolerance: 0.3
+          scale: 0.000000001
+      forbidden: [good, bad, fair, unfair, regressive, progressive]
+      grounded_numbers: true
+      allowed_numbers: [2023, 24, 2024]
+      allowed_derived_numbers: [50]
+      number_tolerance: 0.3
+
+  - id: tool_loop_live_autumn_budget_private_school_vat
+    suite: tool_loop
+    description: >
+      Live model applies private-school VAT and reports a plausible 2026
+      budgetary impact.
+    tags: [live_baseline, uk_2026, autumn_budget_2024, private_school_vat, society]
+    requirements: [live_model, policyengine_py, data]
+    prompt: >
+      Estimate the 2026 society-wide net budgetary impact of the private-school
+      VAT policy area from PolicyEngine's 2024 Autumn Budget article. Apply a
+      20% rate using exactly `gov.contrib.labour.private_school_vat: 0.2`.
+      Report the result in GBP billions.
+    expected_tools:
+      - name: run_society_simulation
+        input_contains:
+          year: 2026
+          reform:
+            gov.contrib.labour.private_school_vat: 0.2
+      - name: compute_budgetary_impact
+        required_input_paths: [simulation_id]
+    expected_tool_results:
+      - tool_name: compute_budgetary_impact
+        result_selection: last_successful
+        expect:
+          contains:
+            status: success
+          numeric:
+            - path: net_budgetary_impact
+              min: 1000000000
+              max: 2500000000
+    forbidden_tools: [run_household_simulation]
+    max_iterations: 6
+    expect:
+      required:
+        - "2026"
+      required_any:
+        - [private-school, private school]
+        - [VAT, value added tax]
+        - [billion, bn]
+      required_values:
+        - tool_name: compute_budgetary_impact
+          path: net_budgetary_impact
+          result_selection: last_successful
+          tolerance: 0.2
+          scale: 0.000000001
+      forbidden: [good, bad, fair, unfair, regressive, progressive]
+      grounded_numbers: true
+      allowed_numbers: [2023, 24, 2024]
+      allowed_derived_numbers: [20]
+      number_tolerance: 0.2
+
+  - id: tool_loop_live_autumn_budget_employer_pension_ni
+    suite: tool_loop
+    description: >
+      Live model levies employer NI on pension contributions with the article's
+      2026 incidence assumption and reports a plausible budgetary impact.
+    tags: [live_baseline, uk_2026, autumn_budget_2024, employer_ni, behavioural, society]
+    requirements: [live_model, policyengine_py, data]
+    prompt: >
+      Estimate the 2026 society-wide net budgetary impact of levying employer
+      National Insurance on employer pension contributions, as discussed in
+      PolicyEngine's 2024 Autumn Budget article. Set
+      `gov.contrib.policyengine.employer_ni.exempt_employer_pension_contributions:
+      false`, employee incidence to 0.475, and consumer and capital incidence
+      to 0.5 each using their corresponding
+      `gov.contrib.policyengine.employer_ni` parameter paths. Report the result
+      in GBP billions.
+    expected_tools:
+      - name: run_society_simulation
+        input_contains:
+          year: 2026
+          reform:
+            gov.contrib.policyengine.employer_ni.exempt_employer_pension_contributions: false
+            gov.contrib.policyengine.employer_ni.employee_incidence: 0.475
+            gov.contrib.policyengine.employer_ni.consumer_incidence: 0.5
+            gov.contrib.policyengine.employer_ni.capital_incidence: 0.5
+      - name: compute_budgetary_impact
+        required_input_paths: [simulation_id]
+    expected_tool_results:
+      - tool_name: compute_budgetary_impact
+        result_selection: last_successful
+        expect:
+          contains:
+            status: success
+          numeric:
+            - path: net_budgetary_impact
+              min: 5000000000
+              max: 12000000000
+    forbidden_tools: [run_household_simulation]
+    max_iterations: 6
+    expect:
+      required:
+        - "2026"
+      required_any:
+        - [employer NI, employer National Insurance, employer NICs]
+        - [pension contribution, pension contributions]
+        - [billion, bn]
+      required_values:
+        - tool_name: compute_budgetary_impact
+          path: net_budgetary_impact
+          result_selection: last_successful
+          tolerance: 0.3
+          scale: 0.000000001
+      forbidden: [good, bad, fair, unfair, regressive, progressive]
+      grounded_numbers: true
+      allowed_numbers: [2023, 24, 2024]
+      allowed_derived_numbers: [47.5, 50]
+      number_tolerance: 0.3
+
+  - id: tool_loop_live_autumn_budget_cgt_counterfactual
+    suite: tool_loop
+    description: >
+      Live model reverses the enacted CGT rise with the article's behavioural
+      elasticity and reports a plausible signed 2026 budgetary impact.
+    tags: [live_baseline, uk_2026, autumn_budget_2024, cgt, behavioural, society]
+    requirements: [live_model, policyengine_py, data]
+    prompt: >
+      Current 2026 policy already contains the 2024 Autumn Budget's 24% higher
+      and additional Capital Gains Tax rates. Estimate the society-wide
+      counterfactual cost of reversing both rates to 20%, using exactly
+      `gov.hmrc.cgt.higher_rate: 0.2`,
+      `gov.hmrc.cgt.additional_rate: 0.2`, and the article's behavioural
+      assumption `gov.simulation.capital_gains_responses.elasticity: -0.5`.
+      Report the revenue reduction as a positive magnitude in GBP billions.
+    expected_tools:
+      - name: run_society_simulation
+        input_contains:
+          year: 2026
+          reform:
+            gov.hmrc.cgt.higher_rate: 0.2
+            gov.hmrc.cgt.additional_rate: 0.2
+            gov.simulation.capital_gains_responses.elasticity: -0.5
+      - name: compute_budgetary_impact
+        required_input_paths: [simulation_id]
+    expected_tool_results:
+      - tool_name: compute_budgetary_impact
+        result_selection: last_successful
+        expect:
+          contains:
+            status: success
+          numeric:
+            - path: net_budgetary_impact
+              min: -5000000000
+              max: -2000000000
+    forbidden_tools: [run_household_simulation]
+    max_iterations: 6
+    expect:
+      required:
+        - "2026"
+      required_any:
+        - [Capital Gains Tax, CGT]
+        - [cost, reduction, reduce, lower, loss]
+        - [billion, bn]
+      required_values:
+        - tool_name: compute_budgetary_impact
+          path: net_budgetary_impact
+          result_selection: last_successful
+          tolerance: 0.3
+          scale: -0.000000001
+      forbidden: [good, bad, fair, unfair, regressive, progressive]
+      grounded_numbers: true
+      allowed_numbers: [2023, 24, 2024]
+      allowed_derived_numbers: [20, 24, 50]
+      number_tolerance: 0.3
+
+  - id: tool_loop_live_autumn_budget_combined_distribution
+    suite: tool_loop
+    description: >
+      Live model runs a combined 2026 Budget proxy and reports grounded fiscal,
+      decile, poverty, and inequality results.
+    tags: [live_baseline, critical, uk_2026, autumn_budget_2024, distribution, poverty, inequality, society]
+    requirements: [live_model, policyengine_py, data]
+    prompt: >
+      Run a combined 2026 society simulation for three positive-revenue proxies
+      from PolicyEngine's 2024 Autumn Budget article: private-school VAT at 20%;
+      employer NI on pension contributions with 47.5% employee incidence and
+      the remainder split equally between consumer and capital incidence; and
+      an additional Income Tax rate of 50% starting at GBP 100,000. Use exactly
+      these reform values:
+      `gov.contrib.labour.private_school_vat: 0.2`,
+      `gov.contrib.policyengine.employer_ni.exempt_employer_pension_contributions:
+      false`, `gov.contrib.policyengine.employer_ni.employee_incidence: 0.475`,
+      `gov.contrib.policyengine.employer_ni.consumer_incidence: 0.5`,
+      `gov.contrib.policyengine.employer_ni.capital_incidence: 0.5`,
+      `gov.hmrc.income_tax.rates.uk[2].threshold: 100000`, and
+      `gov.hmrc.income_tax.rates.uk[2].rate: 0.5`.
+      Call compute_budgetary_impact, then compute_decile_impacts with income as
+      the basis, then compute_poverty_metrics, and then
+      compute_inequality_metrics. Report the budgetary impact in GBP billions,
+      the decile 10 average income reduction as a positive GBP magnitude, the
+      all-person absolute before-housing-costs poverty-rate change in percentage
+      points, and the Gini reduction as a positive percentage.
+    expected_tools:
+      - name: run_society_simulation
+        input_contains:
+          year: 2026
+          reform:
+            gov.contrib.labour.private_school_vat: 0.2
+            gov.contrib.policyengine.employer_ni.exempt_employer_pension_contributions: false
+            gov.contrib.policyengine.employer_ni.employee_incidence: 0.475
+            gov.contrib.policyengine.employer_ni.consumer_incidence: 0.5
+            gov.contrib.policyengine.employer_ni.capital_incidence: 0.5
+            gov.hmrc.income_tax.rates.uk[2].threshold: 100000
+            gov.hmrc.income_tax.rates.uk[2].rate: 0.5
+      - name: compute_budgetary_impact
+        required_input_paths: [simulation_id]
+      - name: compute_decile_impacts
+        input_contains:
+          basis: income
+        required_input_paths: [simulation_id]
+      - name: compute_poverty_metrics
+        required_input_paths: [simulation_id]
+      - name: compute_inequality_metrics
+        required_input_paths: [simulation_id]
+    expected_tool_results:
+      - tool_name: compute_budgetary_impact
+        result_selection: last_successful
+        expect:
+          contains:
+            status: success
+          numeric:
+            - path: net_budgetary_impact
+              min: 14000000000
+              max: 25000000000
+      - tool_name: compute_decile_impacts
+        result_selection: last_successful
+        expect:
+          contains:
+            status: success
+            basis: income
+          numeric:
+            - path: deciles.9.absolute_change
+              min: -6000
+              max: -2000
+      - tool_name: compute_poverty_metrics
+        result_selection: last_successful
+        expect:
+          contains:
+            status: success
+          numeric:
+            - path: rates.5.rate_change
+              min: -0.0005
+              max: 0.0005
+      - tool_name: compute_inequality_metrics
+        result_selection: last_successful
+        expect:
+          contains:
+            status: success
+          numeric:
+            - path: metrics.gini.relative_change
+              min: -0.03
+              max: -0.005
+    forbidden_tools: [run_household_simulation]
+    max_iterations: 8
+    expect:
+      required:
+        - "2026"
+      required_any:
+        - [billion, bn]
+        - [decile 10, tenth decile, highest-income decile, top decile]
+        - [poverty, before-housing-costs, before housing costs, BHC]
+        - [Gini, inequality]
+        - [reduction, decrease, lower, loss]
+      required_values:
+        - tool_name: compute_budgetary_impact
+          path: net_budgetary_impact
+          result_selection: last_successful
+          tolerance: 0.5
+          scale: 0.000000001
+        - tool_name: compute_decile_impacts
+          path: deciles.9.absolute_change
+          result_selection: last_successful
+          tolerance: 100
+          scale: -1
+        - tool_name: compute_poverty_metrics
+          path: rates.5.rate_change
+          result_selection: last_successful
+          tolerance: 0.002
+          scale: 100
+        - tool_name: compute_inequality_metrics
+          path: metrics.gini.relative_change
+          result_selection: last_successful
+          tolerance: 0.2
+          scale: -100
+      forbidden: [good, bad, fair, unfair, regressive, progressive]
+      grounded_numbers: true
+      allowed_numbers: [2023, 24, 2024]
+      allowed_derived_numbers: [20, 47.5, 50]
+      number_tolerance: 0.5

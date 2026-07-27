@@ -68,14 +68,21 @@ class TextExpectation(StrictModel):
     number_tolerance: float = 0.01
 
 
-class RequiredAnswerValue(StrictModel):
+class ToolResultSelector(StrictModel):
     tool_name: str
-    path: str
     occurrence: int = Field(default=1, ge=1)
     result_selection: Literal["occurrence", "last_successful"] = "occurrence"
+
+
+class RequiredAnswerValue(ToolResultSelector):
+    path: str
     tolerance: float = Field(default=0.01, ge=0)
     scale: float = 1.0
     required_context: List[str] = Field(default_factory=list)
+
+
+class ToolResultExpectation(ToolResultSelector):
+    expect: OutputExpectation = Field(default_factory=OutputExpectation)
 
 
 class LiveTextExpectation(TextExpectation):
@@ -156,6 +163,7 @@ class ToolLoopCase(CaseBase):
     messages: List[JsonObjectValue] = Field(default_factory=list)
     charts_mode: bool = False
     expected_tools: List[ToolCallExpectation] = Field(default_factory=list)
+    expected_tool_results: List[ToolResultExpectation] = Field(default_factory=list)
     forbidden_tools: List[str] = Field(default_factory=list)
     expect: TextExpectation = Field(default_factory=TextExpectation)
     max_iterations: int = Field(default=4, ge=1, le=8)

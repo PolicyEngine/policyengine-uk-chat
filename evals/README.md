@@ -35,14 +35,16 @@ between frozen model turns. This checks schemas, runners, and graders without
 calling a live model.
 
 ```bash
-ANTHROPIC_API_KEY=... make eval-ai-live
+ANTHROPIC_API_KEY=... HUGGING_FACE_TOKEN=... RUN_DATA_EVALS=1 \
+  make eval-ai-live
 ```
 
 Runs every case under `evals/live/` three times against the configured live
 provider with production model routing. Reports include per-trial model IDs,
 pass@1, and pass^3 and are written to `evals/reports/`, which is ignored by git.
 
-Set `RUN_DATA_EVALS=1` to include cases that require local microdata.
+Set `RUN_DATA_EVALS=1` and provide `HUGGING_FACE_TOKEN` to include cases that
+require the managed aggregate Enhanced FRS dataset.
 Every live case must include `requirements: [live_model]` and must not include
 an `offline_response` or `offline_responses` fixture.
 
@@ -57,6 +59,10 @@ real PolicyEngine tool path.
 - `answer`: frozen tool output to final prose.
 - `tool_loop`: prompt through model tool calls, deterministic tool execution,
   and final prose.
+
+Tool-loop cases can use `expected_tool_results` for range or schema assertions
+on the real executed output and `expect.required_values` to separately require
+the final answer to report a grounded value from that output.
 
 Trajectory and tool-loop cases can set `messages` for multi-turn transcripts
 and `charts_mode: true` to test the chart-mode directive.

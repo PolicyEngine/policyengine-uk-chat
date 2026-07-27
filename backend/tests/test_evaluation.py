@@ -8,7 +8,13 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 import eval.runner as runner
-from eval.graders import grade_live_text, grade_output, grade_text, grade_tool_calls
+from eval.graders import (
+    grade_live_text,
+    grade_output,
+    grade_text,
+    grade_tool_calls,
+    grade_tool_results,
+)
 from eval.loaders import load_case_file
 from eval.reporting import render_markdown
 from eval.runner import run_eval
@@ -30,6 +36,7 @@ from eval.schemas import (
     ToolContractDetails,
     ToolCallExpectation,
     ToolLoopCase,
+    ToolResultExpectation,
     TrajectoryCase,
 )
 from eval.sync_policyengine_uk import render_generated_cases
@@ -253,6 +260,46 @@ def test_grade_tool_calls_allows_additional_calls_around_ordered_expectations():
     assert errors == []
 
 
+def test_grade_tool_results_supports_ranges_and_last_successful_retry():
+    results = [
+        ExecutedToolResult(
+            name="compute_budgetary_impact",
+            output={"error": "temporary failure"},
+        ),
+        ExecutedToolResult(
+            name="compute_budgetary_impact",
+            output={
+                "status": "success",
+                "net_budgetary_impact": 18_667_418_015,
+            },
+        ),
+    ]
+    expectations = [
+        ToolResultExpectation(
+            tool_name="compute_budgetary_impact",
+            result_selection="last_successful",
+            expect=OutputExpectation(
+                contains={"status": "success"},
+                numeric=[
+                    NumericExpectation(
+                        path="net_budgetary_impact",
+                        min=14_000_000_000,
+                        max=25_000_000_000,
+                    )
+                ],
+            ),
+        )
+    ]
+
+    assert grade_tool_results(results, expectations) == []
+
+    expectations[0].expect.numeric[0].max = 10_000_000_000
+    assert "expected <= 10000000000" in grade_tool_results(
+        results,
+        expectations,
+    )[0]
+
+
 def test_grade_text_checks_required_forbidden_and_grounded_numbers():
     expectation = TextExpectation(
         required=["illustrative", "£200"],
@@ -454,6 +501,21 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
                                 "input_contains": {"year": 2025},
                             }
                         ],
+                        "expected_tool_results": [
+                            {
+                                "tool_name": "run_household_simulation",
+                                "expect": {
+                                    "contains": {"status": "success"},
+                                    "numeric": [
+                                        {
+                                            "path": "value",
+                                            "min": 40,
+                                            "max": 45,
+                                        }
+                                    ],
+                                },
+                            }
+                        ],
                         "expect": {
                             "required": ["done", "£42"],
                             "grounded_numbers": True,
@@ -481,7 +543,7 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
     def record_tool_call(tool_name, tool_input, context=None):
         assert context is not None
         calls.append((tool_name, tool_input))
-        return {"value": 42}
+        return {"status": "success", "value": 42}
 
     monkeypatch.setattr(
         runner,

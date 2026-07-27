@@ -36,15 +36,24 @@ permanent target counts.
 | Live gateway evals | 15 YAML cases in `evals/live/gateway/` | Opening-turn classification, route, selected tool, gating slots, and extracted plan | Each prompt goes through `run_gateway`; typed gateway results are graded against outcome and slot expectations. | Live Anthropic call. Model-facing PRs run three trials per case. | `Live gateway evals (3 trials)` |
 | Live trajectory evals | 1 YAML case in `evals/live/trajectory/` | The live model's first tool-selection turn and tool arguments | The harness sends the production system prompt and public tool definitions directly to the selected model, then grades the returned calls. It does not execute tools in this suite. | Live Anthropic call. Three trials per case. The harness currently bypasses gateway-plan injection. | `Live trajectory evals (3 trials)` |
 | Live answer evals | 4 YAML cases in `evals/live/answer/` | Live prose grounded in frozen tool results | Frozen results are serialised into a second user message; the selected model answers without tools; live-specific graders inspect the response. | Live Anthropic call. Three trials per case. This message shape is an eval seam, not the production tool-result transcript. | `Live answer evals (3 trials)` |
-| Live tool-loop evals | 2 YAML cases in `evals/live/tool_loop/` | Live model planning, real tool execution, recovery, and final prose across multiple turns | The selected model can call public tools for up to four iterations. Every call is executed through `execute_tool`, returned to the model, and the complete trace and final answer are graded. | Live Anthropic plus deterministic PolicyEngine execution. Three trials per case. The loop currently bypasses the production gateway and HTTP/SSE route. | `Live tool-loop evals (3 trials)` |
+| Live tool-loop evals | 7 YAML cases in `evals/live/tool_loop/` | Live model planning, real tool execution, recovery, final prose, and the four 2024 Autumn Budget policy areas plus combined fiscal/distributional outputs | The selected model can call public tools within each case's bounded iteration limit. Every call is executed through `execute_tool`, returned to the model, and the trace, result ranges, and final grounded answer are graded. | Live Anthropic plus deterministic PolicyEngine execution. Five cases also use the managed Enhanced FRS dataset. Three trials per case. The loop currently bypasses the production gateway and HTTP/SSE route. | `Live tool-loop evals (3 trials)` |
 | Enhanced FRS integration | 1 lifecycle test | Managed dataset resolution and a full 2026 society simulation followed by budget, programme, decile, winners/losers, poverty, inequality, and aggregate derivatives | Pytest downloads the configured Enhanced FRS dataset and asserts identities, finite values, shapes, and policy-specific ranges. | Deterministic calculation with external managed data and credentials. | `Configured Enhanced FRS integration` |
 
-There are 153 YAML eval cases in total:
+There are 158 YAML eval cases in total:
 
 - 69 deterministic tool-contract cases;
 - 62 scripted model contracts: 36 trajectory, 19 answer, and 7 tool-loop;
-- 22 separate live-model cases: 15 gateway, 1 trajectory, 4 answer, and 2
+- 27 separate live-model cases: 15 gateway, 1 trajectory, 4 answer, and 7
   tool-loop.
+
+Five live tool-loop cases exercise the 2024 Autumn Budget topic areas against
+the 2026 model. Their numeric bounds are broad regression bands observed with
+the pinned PolicyEngine runtime and configured Enhanced FRS dataset, not
+confidence intervals for the published article estimates. The tax-avoidance
+case defines an explicit high-income Income Tax proxy, and the CGT case reverses
+the enacted 24% rates because those rates are already part of the 2026
+baseline. The combined distribution case covers the three positive-revenue
+proxies rather than claiming to recreate the article's historical baseline.
 
 The roots are disjoint by construction:
 
@@ -148,7 +157,7 @@ separate it by boundary so a check name identifies what regressed.
 | `Live gateway evals (3 trials)` | Model-facing PRs | All 15 gateway cases | Reports routing and plan-extraction stability directly. |
 | `Live trajectory evals (3 trials)` | Model-facing PRs | Only cases under `evals/live/trajectory/` | Reports live tool-selection and argument stability directly. |
 | `Live answer evals (3 trials)` | Model-facing PRs | Only cases under `evals/live/answer/` | Reports grounded answer quality separately from tool choice. |
-| `Live tool-loop evals (3 trials)` | Model-facing PRs | Only cases under `evals/live/tool_loop/` | Reports end-to-end model/tool recovery without hiding it among first-turn or prose failures. |
+| `Live tool-loop evals (3 trials)` | Model-facing PRs | All seven cases under `evals/live/tool_loop/`, including five credentialed Enhanced FRS Budget cases | Reports end-to-end model/tool recovery, real numeric result ranges, and final grounding without hiding them among first-turn or prose failures. |
 
 The live jobs can use a CI matrix over `gateway`, `trajectory`, `answer`, and
 `tool_loop`, with a separately named report artifact per suite. Splitting the

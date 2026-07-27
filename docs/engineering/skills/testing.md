@@ -78,7 +78,9 @@ ANTHROPIC_API_KEY=... make eval-ai-live
 
 Every live model case runs three independent trials with production model
 routing. The report exposes pass@1 and pass^3, and any failed trial fails the
-job. There is no nightly-only coverage tier.
+job. Data-backed live tool-loop cases additionally require
+`HUGGING_FACE_TOKEN` and `RUN_DATA_EVALS=1`. There is no nightly-only coverage
+tier.
 
 `make test-backend` writes branch-aware Python coverage to `coverage.xml` and
 prints missing lines. Its coverage boundary includes all repository Python:
