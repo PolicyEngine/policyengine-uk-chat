@@ -311,6 +311,45 @@ class TestRunGateway:
             if slot.kind == "output"
         ] == [("tax_revenue", "prompt")]
 
+    def test_explicit_household_output_is_grounded_from_prompt(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_household_simulation",
+            "slots": [
+                {
+                    "name": "people",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                },
+                {
+                    "name": "year",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                },
+                {
+                    "name": "benefit_entitlement",
+                    "kind": "output",
+                    "source": "assumed",
+                },
+            ],
+            "unmodellable_outputs": [],
+        }
+        prompt = (
+            "What Universal Credit would a single parent with two children "
+            "aged 4 and 9 earning £20,000 receive in 2025?"
+        )
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(prompt)
+
+        assert verdict.outcome == "ready"
+        assert [
+            (slot.name, slot.source)
+            for slot in verdict.slots
+            if slot.kind == "output"
+        ] == [("benefit_entitlement", "prompt")]
+
     def test_better_off_is_an_explicit_winners_losers_metric(self):
         from gateway import runtime as gateway
 

@@ -79,10 +79,11 @@ _UNRESOLVED_REFORM_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-# Only these explicit, measurable outputs settle an otherwise vague comparison.
-# Keep the labels in OUTPUT_VOCAB and use word-aware patterns so policy inputs
-# such as "childcare costs" are not mistaken for a requested fiscal output.
-_COMPARISON_OUTPUT_PATTERNS = (
+# These explicit, measurable outputs can be grounded directly from simulation
+# prompts. Keep the labels in OUTPUT_VOCAB and use word-aware patterns so policy
+# inputs such as "childcare costs" are not mistaken for a requested fiscal
+# output.
+_SIMULATION_OUTPUT_PATTERNS = (
     (
         "budgetary_impact",
         re.compile(
@@ -128,7 +129,9 @@ _COMPARISON_OUTPUT_PATTERNS = (
         "benefit_entitlement",
         re.compile(
             r"\b(?:benefit (?:amount|entitlement)"
-            r"|universal credit (?:amount|entitlement))\b",
+            r"|universal credit (?:amount|entitlement))\b"
+            r"|\b(?:what|how much) universal credit\b"
+            r"|\buniversal credit\b.{0,120}\b(?:receive|get|entitled)\b",
             re.IGNORECASE,
         ),
     ),
@@ -196,18 +199,18 @@ def _requested_unmodellable_outputs(
     return kept
 
 
-def _normalise_comparison_outputs(
+def _normalise_simulation_outputs(
     prompt: str,
     slots: List[SlotFact],
     *,
     tool: Optional[str],
 ) -> List[SlotFact]:
-    """Ground comparison outputs deterministically before applying the gate.
+    """Ground simulation outputs deterministically before applying the gate.
 
-    The gateway model may omit output slots or guess a metric. For a comparison
-    request, explicit measurable outputs in the prompt are authoritative. If
-    none are present, replace any guessed outputs with one assumed
-    ``comparison_metric`` slot so the server must ask what "better" means.
+    Explicit measurable outputs in the prompt are authoritative for all
+    household and society simulations. For a comparison with no explicit
+    metric, replace any guessed outputs with one assumed ``comparison_metric``
+    slot so the server must ask what "better" means.
     """
     requests_comparison = any(
         pattern.search(prompt) for pattern in _COMPARISON_REQUEST_PATTERNS
@@ -219,7 +222,7 @@ def _normalise_comparison_outputs(
         for slot in slots
         if not (slot.kind == "output" and slot.name == "comparison_metric")
     ]
-    if tool not in _COMPARISON_SIMULATION_TOOLS or not requests_comparison:
+    if tool not in _COMPARISON_SIMULATION_TOOLS:
         return normalised_slots
 
     input_slots = [slot for slot in normalised_slots if slot.kind != "output"]
@@ -240,7 +243,7 @@ def _normalise_comparison_outputs(
     ]
     explicit_outputs = [
         label
-        for label, pattern in _COMPARISON_OUTPUT_PATTERNS
+        for label, pattern in _SIMULATION_OUTPUT_PATTERNS
         if pattern.search(prompt)
     ]
     if explicit_outputs:
@@ -253,6 +256,9 @@ def _normalise_comparison_outputs(
             )
             for label in explicit_outputs
         ]
+
+    if not requests_comparison:
+        return normalised_slots
 
     return input_slots + [
         SlotFact(
@@ -378,7 +384,7 @@ def _verdict_from_plan(plan: dict, prompt: str) -> GatewayVerdict:
             )
         )
 
-    slots = _normalise_comparison_outputs(
+    slots = _normalise_simulation_outputs(
         prompt,
         slots,
         tool=tool,
