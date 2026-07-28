@@ -67,6 +67,9 @@ class TestInferable:
     def test_people_not_inferable(self):
         assert not is_inferable("run_household_simulation", "people")
 
+    def test_internal_parameter_path_is_inferable(self):
+        assert is_inferable("get_parameter", "path")
+
 
 class TestGate:
     def test_ready_all_grounded(self):
@@ -91,6 +94,15 @@ class TestGate:
         r = gate(
             True, "run_household_simulation",
             [sf("people", "prompt"), sf("benunit", "assumed"), sf("household", "assumed")],
+            [],
+        )
+        assert r.outcome == "ready"
+
+    def test_internal_parameter_path_does_not_gate(self):
+        r = gate(
+            True,
+            "get_parameter",
+            [sf("path", "assumed"), sf("year", "prompt")],
             [],
         )
         assert r.outcome == "ready"
@@ -189,7 +201,7 @@ class TestRunGateway:
                     "name": "reform",
                     "kind": "tool_input",
                     "value": "PA £15,000 versus UC £20 per week",
-                    "source": "prompt",
+                    "source": "assumed",
                 }
             ],
             "unmodellable_outputs": [],
@@ -203,6 +215,9 @@ class TestRunGateway:
 
         assert verdict.outcome == "needs_plan"
         assert verdict.gating_slots == ["comparison_metric"]
+        assert next(
+            slot for slot in verdict.slots if slot.name == "reform"
+        ).source == "prompt"
         output_slots = [slot for slot in verdict.slots if slot.kind == "output"]
         assert output_slots == [
             gateway.SlotFact(
@@ -240,6 +255,33 @@ class TestRunGateway:
         assert [slot.name for slot in verdict.slots if slot.kind == "output"] == [
             "comparison_metric"
         ]
+
+    def test_vague_comparison_does_not_ground_hallucinated_reform_values(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "value": "PA £15,000 versus UC £20 per week",
+                    "source": "assumed",
+                }
+            ],
+            "unmodellable_outputs": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(
+                "Compare raising the personal allowance with increasing "
+                "Universal Credit."
+            )
+
+        assert verdict.gating_slots == ["reform", "comparison_metric"]
+        assert next(
+            slot for slot in verdict.slots if slot.name == "reform"
+        ).source == "assumed"
 
     def test_explicit_comparison_metric_is_grounded_from_prompt(self):
         from gateway import runtime as gateway
@@ -316,6 +358,32 @@ class TestRunGateway:
 
         assert verdict.outcome == "ready"
         assert all(slot.kind != "output" for slot in verdict.slots)
+
+    def test_comparison_metric_is_dropped_outside_comparisons(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "source": "assumed",
+                },
+                {
+                    "name": "comparison_metric",
+                    "kind": "output",
+                    "source": "assumed",
+                },
+            ],
+            "unmodellable_outputs": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway("Raise the basic rate of income tax.")
+
+        assert verdict.gating_slots == ["reform"]
+        assert all(slot.name != "comparison_metric" for slot in verdict.slots)
 
     def test_lookup_comparison_is_not_treated_as_a_reform_comparison(self):
         from gateway import runtime as gateway

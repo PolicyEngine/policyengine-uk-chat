@@ -78,12 +78,12 @@ cases:
 
   - id: gw_needsplan_basic_rate_underspecified
     suite: gateway
-    description: A modelled reform with no target rate needs reform details.
+    description: A modelled reform with no target rate needs reform details; an unrequested comparison output must not gate.
     requirements: [live_model]
     prompt: Raise the basic rate of income tax.
     expected_outcome: needs_plan
     expected_tool: run_society_simulation
-    expected_gating_slots: [reform, budgetary_impact]
+    expected_gating_slots: [reform]
 
   # ---- ready: fully specified, admissible ----
   - id: gw_ready_basic_rate_cost

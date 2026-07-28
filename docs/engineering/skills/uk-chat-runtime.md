@@ -113,7 +113,13 @@ comparison requests before applying the gate. An explicitly named measurable
 output is grounded from the prompt. A comparison using “better”, “worse”,
 “compare”, or similar language without a measurable output receives an assumed
 `comparison_metric` slot and must return `needs_plan`; this safeguard must not
-depend on the classifier emitting a slot.
+depend on the classifier emitting a slot. `comparison_metric` is reserved for
+these comparison requests and must be discarded if a classifier uses it as a
+generic missing-output label.
+
+Canonical parameter paths are internal discovery details and do not gate. A
+user-facing parameter name may proceed to the compute model, which resolves the
+path with `search_parameters` before calling `get_parameter`.
 
 Tool choice is model-mediated unless the route layer deliberately forces a
 specific tool. Prompt and schema guidance improve selection consistency, but

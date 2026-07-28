@@ -82,7 +82,8 @@ Steps:
    without naming a measurable metric, use an "assumed" `comparison_metric`
    output slot so the server asks what "better" means; do not classify the
    comparison itself as unmodellable. When the prompt names a measurable metric,
-   use its specific output label and mark it "prompt".
+   use its specific output label and mark it "prompt". Never use
+   `comparison_metric` for a request that does not ask for a comparison.
 
 Two fail-safe biases — apply them:
 - Admissibility leans toward IN scope. When unsure whether a tool fits, pick a

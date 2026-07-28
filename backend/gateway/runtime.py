@@ -68,6 +68,17 @@ _COMPARISON_SIMULATION_TOOLS = {
     "run_society_simulation",
 }
 
+_EXPLICIT_POLICY_QUANTITY_PATTERN = re.compile(
+    r"£\s*\d[\d,]*(?:\.\d+)?"
+    r"|\b\d+(?:\.\d+)?\s*(?:%|per cent|pence)\b",
+    re.IGNORECASE,
+)
+
+_UNRESOLVED_REFORM_PATTERN = re.compile(
+    r"\b(?:assum(?:e|ed|ing|ption)|illustrative|pending|unknown|unspecified)\b",
+    re.IGNORECASE,
+)
+
 # Only these explicit, measurable outputs settle an otherwise vague comparison.
 # Keep the labels in OUTPUT_VOCAB and use word-aware patterns so policy inputs
 # such as "childcare costs" are not mistaken for a requested fiscal output.
@@ -128,6 +139,32 @@ def _tokens(value: str) -> set[str]:
     return set(re.findall(r"[a-z]+", value.lower().replace("_", " ")))
 
 
+def _explicit_policy_quantities(value: str) -> list[str]:
+    return [
+        re.sub(r"[^0-9.]", "", match)
+        for match in _EXPLICIT_POLICY_QUANTITY_PATTERN.findall(value)
+    ]
+
+
+def _comparison_reform_is_prompt_grounded(
+    prompt: str,
+    slot: SlotFact,
+) -> bool:
+    """Whether an assumed comparison reform only repeats two prompt quantities."""
+    slot_value = str(slot.value or "")
+    if _UNRESOLVED_REFORM_PATTERN.search(slot_value):
+        return False
+    slot_quantities = _explicit_policy_quantities(slot_value)
+    if len(slot_quantities) < 2:
+        return False
+    prompt_quantities = _explicit_policy_quantities(prompt)
+    for quantity in slot_quantities:
+        if quantity not in prompt_quantities:
+            return False
+        prompt_quantities.remove(quantity)
+    return True
+
+
 def _requested_unmodellable_outputs(
     prompt: str,
     outputs: list[str],
@@ -172,12 +209,35 @@ def _normalise_comparison_outputs(
     none are present, replace any guessed outputs with one assumed
     ``comparison_metric`` slot so the server must ask what "better" means.
     """
-    if tool not in _COMPARISON_SIMULATION_TOOLS or not any(
+    requests_comparison = any(
         pattern.search(prompt) for pattern in _COMPARISON_REQUEST_PATTERNS
-    ):
-        return slots
+    )
+    # comparison_metric is reserved for actual simulation comparisons. Drop a
+    # classifier's use of it as a generic "requested output unknown" label.
+    normalised_slots = [
+        slot
+        for slot in slots
+        if not (slot.kind == "output" and slot.name == "comparison_metric")
+    ]
+    if tool not in _COMPARISON_SIMULATION_TOOLS or not requests_comparison:
+        return normalised_slots
 
-    input_slots = [slot for slot in slots if slot.kind != "output"]
+    input_slots = [slot for slot in normalised_slots if slot.kind != "output"]
+    input_slots = [
+        SlotFact(
+            name=slot.name,
+            source="prompt",
+            kind=slot.kind,
+            value=slot.value,
+        )
+        if (
+            slot.name == "reform"
+            and slot.source == "assumed"
+            and _comparison_reform_is_prompt_grounded(prompt, slot)
+        )
+        else slot
+        for slot in input_slots
+    ]
     explicit_outputs = [
         label
         for label, pattern in _COMPARISON_OUTPUT_PATTERNS

@@ -86,6 +86,9 @@ _CRITICALITY_OVERRIDES: dict = {
 INFERABLE: set = {
     ("run_household_simulation", "benunit"),
     ("run_household_simulation", "household"),
+    # Canonical parameter paths are internal discovery details. The compute
+    # model can resolve a user-named parameter with search_parameters.
+    ("get_parameter", "path"),
     ("generate_chart", "chart_kind"),
     ("generate_chart", "title"),
     ("generate_chart", "x_field"),
