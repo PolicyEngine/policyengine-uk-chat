@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import PurePosixPath
 from typing import Any
 
 from engine.constants import (
@@ -43,6 +45,28 @@ def _manifest_module():
     return resolve_dataset_reference
 
 
+def _dataset_name_from_uri(uri: str, fallback: str) -> str:
+    """Derive the materialized dataset name from a resolved reference."""
+
+    path = uri.rsplit("@", 1)[0]
+    filename = PurePosixPath(path).name
+    if filename.endswith(".h5"):
+        filename = filename[:-3]
+    return filename or fallback
+
+
+def _dataset_label(name: str) -> str:
+    """Return a human-readable label for a materialized dataset name."""
+
+    known_label = DATASET_LABELS.get(name)
+    if known_label is not None:
+        return known_label
+    enhanced_frs = re.fullmatch(r"enhanced_frs_(\d{4})_(\d{2})", name)
+    if enhanced_frs is not None:
+        return f"Enhanced FRS {enhanced_frs.group(1)}-{enhanced_frs.group(2)}"
+    return name
+
+
 @lru_cache(maxsize=1)
 def uk_model_version():
     """Return the managed policyengine.py UK model version."""
@@ -61,15 +85,20 @@ def resolve_dataset(dataset: str | None = None) -> DatasetSpec:
         else name
     )
     uri = _manifest_module()("uk", reference)
+    resolved_name = _dataset_name_from_uri(uri, name)
     return DatasetSpec(
-        name=name,
-        label=DATASET_LABELS.get(name, name),
+        name=resolved_name,
+        label=_dataset_label(resolved_name),
         uri=uri,
         is_default=name == DEFAULT_UK_DATASET,
         is_policyengine_standard_default=name == STANDARD_POLICYENGINE_UK_DATASET,
-        row_level_access=not is_row_level_restricted_dataset(name),
+        row_level_access=not (
+            is_row_level_restricted_dataset(name)
+            or is_row_level_restricted_dataset(resolved_name)
+        ),
         notes=(
-            "UK Chat default. Uses the configured pinned Enhanced FRS release."
+            "UK Chat configured default. The reported name and label are "
+            "derived from the resolved dataset reference."
             if name == DEFAULT_UK_DATASET
             else (
                 "policyengine.py standard certified UK dataset."
@@ -97,7 +126,7 @@ def list_dataset_specs() -> list[DatasetSpec]:
             specs.append(
                 DatasetSpec(
                     name=name,
-                    label=DATASET_LABELS.get(name, name),
+                    label=_dataset_label(name),
                     uri="unavailable",
                     is_default=name == DEFAULT_UK_DATASET,
                     is_policyengine_standard_default=(

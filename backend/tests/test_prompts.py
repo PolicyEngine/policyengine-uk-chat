@@ -96,6 +96,8 @@ def test_dataset_schema_defaults_to_enhanced_frs():
     schema = _tool("run_society_simulation")["input_schema"]["properties"]["dataset"]
     assert schema["default"] == DEFAULT_UK_DATASET
     assert DEFAULT_UK_DATASET in schema["description"]
+    assert "deployment-resolved artifact" in schema["description"]
+    assert "returned by the\n  tools as authoritative" in SYSTEM_PROMPT
 
 
 def test_generate_chart_tool_describes_deterministic_presets():

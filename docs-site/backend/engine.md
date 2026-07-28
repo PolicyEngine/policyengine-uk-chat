@@ -25,7 +25,9 @@ PolicyEngine UK data release in `backend/engine/constants.py`, with
 `POLICYENGINE_UK_DEFAULT_DATASET` available as a deployment override. The
 resolved URI is then materialized through policyengine.py. This direct Enhanced
 FRS reference is intentional; UK Chat does not use the certified Populace
-dataset as its default.
+dataset as its default. Discovery and simulation responses derive their
+reported dataset name and label from the resolved URI, so an operational
+override reports the artifact that was actually selected.
 
 The standard policyengine.py UK default is `populace_uk_2023`; the constant and
 discovery metadata retain that option so the chat default can be switched to the

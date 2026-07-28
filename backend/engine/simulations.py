@@ -45,10 +45,11 @@ def build_society_simulation(
     """Materialize baseline and reform policyengine.py Simulations."""
 
     normalized_reform = normalize_reform_dict(reform)
-    dataset_spec = resolve_dataset(dataset or DEFAULT_UK_DATASET)
+    requested_dataset = dataset or DEFAULT_UK_DATASET
+    dataset_spec = resolve_dataset(requested_dataset)
     baseline, reform_simulation = managed_simulation_pair(
         year=year,
-        dataset=dataset_spec.name,
+        dataset=requested_dataset,
         reform=normalized_reform or None,
         extra_variables=extra_variables,
     )

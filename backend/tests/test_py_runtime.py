@@ -33,7 +33,10 @@ def test_default_dataset_resolves_pinned_release_reference(monkeypatch):
 
 
 def test_default_dataset_honours_deployment_override(monkeypatch):
-    override = "hf://policyengine/example/default.h5@release"
+    override = (
+        "hf://policyengine/policyengine-uk-data-private/"
+        "enhanced_frs_2023_24.h5@incident-fallback"
+    )
     calls = []
 
     monkeypatch.setenv("POLICYENGINE_UK_DEFAULT_DATASET", override)
@@ -51,6 +54,11 @@ def test_default_dataset_honours_deployment_override(monkeypatch):
 
     assert calls == [("uk", override)]
     assert spec.uri == override
+    assert spec.name == "enhanced_frs_2023_24"
+    assert spec.label == "Enhanced FRS 2023-24"
+    assert "2024-25" not in (spec.notes or "")
+    assert spec.is_default is True
+    assert spec.row_level_access is False
 
 
 def test_managed_dataset_materializes_resolved_reference(monkeypatch):

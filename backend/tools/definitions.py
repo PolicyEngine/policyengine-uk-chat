@@ -38,8 +38,9 @@ DATASET_SCHEMA = {
     "type": "string",
     "default": DEFAULT_UK_DATASET,
     "description": (
-        "Managed policyengine.py UK dataset name. UK Chat defaults to "
-        f"`{DEFAULT_UK_DATASET}`."
+        "Managed policyengine.py UK dataset name. UK Chat's logical default is "
+        f"`{DEFAULT_UK_DATASET}`; the simulation result reports the name, label, "
+        "and URI of the deployment-resolved artifact."
     ),
 }
 

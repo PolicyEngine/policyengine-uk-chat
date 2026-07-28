@@ -252,6 +252,36 @@ def test_society_simulation_normalizes_unset_reform_values(monkeypatch):
     assert result.reform_applied is False
 
 
+def test_society_simulation_keeps_logical_default_for_materialization(monkeypatch):
+    """A derived override name must not bypass the configured default URI."""
+
+    captured = {}
+    dataset = DatasetSpec(
+        name="enhanced_frs_2023_24",
+        label="Enhanced FRS 2023-24",
+        uri="hf://example/enhanced_frs_2023_24.h5@incident-fallback",
+        is_default=True,
+        is_policyengine_standard_default=False,
+        row_level_access=False,
+    )
+    monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda _name: dataset)
+
+    def fake_pair(**kwargs):
+        captured.update(kwargs)
+        baseline = object()
+        return baseline, baseline
+
+    monkeypatch.setattr(simulation_engine, "managed_simulation_pair", fake_pair)
+
+    result = simulation_engine.build_society_simulation(
+        year=2026,
+        reform=None,
+    )
+
+    assert captured["dataset"] == DEFAULT_UK_DATASET
+    assert result.dataset == dataset
+
+
 def test_household_simulation_does_not_run_empty_normalized_reform(monkeypatch):
     calls = []
     monkeypatch.setattr(
