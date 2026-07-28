@@ -4,6 +4,51 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 from engine import py_runtime
+from engine.constants import UK_CHAT_DATASET
+
+
+def test_fixed_dataset_resolves_pinned_release_reference(monkeypatch):
+    calls = []
+
+    def fake_resolve(country, reference):
+        calls.append((country, reference))
+        return reference
+
+    monkeypatch.setattr(py_runtime, "_manifest_module", lambda: fake_resolve)
+    py_runtime.resolve_dataset.cache_clear()
+    try:
+        spec = py_runtime.resolve_dataset()
+    finally:
+        py_runtime.resolve_dataset.cache_clear()
+
+    assert calls == [("uk", UK_CHAT_DATASET.uri)]
+    assert spec.name == UK_CHAT_DATASET.name
+    assert spec.label == UK_CHAT_DATASET.label
+    assert spec.uri == UK_CHAT_DATASET.uri
+    assert spec.row_level_access is False
+
+
+def test_managed_dataset_materializes_resolved_reference(monkeypatch):
+    calls = []
+    spec = py_runtime.DatasetSpec(
+        name=UK_CHAT_DATASET.name,
+        label="Enhanced FRS 2024-25",
+        uri=UK_CHAT_DATASET.uri,
+        row_level_access=False,
+    )
+
+    monkeypatch.setattr(py_runtime, "resolve_dataset", lambda: spec)
+    monkeypatch.setattr(
+        py_runtime,
+        "_managed_dataset",
+        lambda reference, year, folder: calls.append((reference, year, folder))
+        or "dataset",
+    )
+
+    assert py_runtime.managed_dataset(year=2026) == "dataset"
+    assert calls == [
+        (UK_CHAT_DATASET.uri, 2026, "/tmp/policyengine-uk-chat-data")
+    ]
 
 
 def test_managed_simulation_pair_uses_high_level_simulation(monkeypatch):
@@ -52,7 +97,6 @@ def test_managed_simulation_pair_uses_high_level_simulation(monkeypatch):
 
     baseline, reform = py_runtime.managed_simulation_pair(
         year=2026,
-        dataset="enhanced_frs_2023_24",
         reform={"gov.example": 1},
         extra_variables={"household": ["rent"]},
     )
@@ -70,7 +114,6 @@ def test_managed_simulation_pair_uses_high_level_simulation(monkeypatch):
 
     baseline_only, empty_reform = py_runtime.managed_simulation_pair(
         year=2026,
-        dataset="enhanced_frs_2023_24",
         reform={"gov.example": None},
     )
 

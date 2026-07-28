@@ -43,8 +43,8 @@ deployment is serving.
 ## Model catalog and scope
 
 The compute agent discovers the live model through typed tools. Variable,
-parameter, entity, dataset, reform-target, household-input, and output discovery
-are separate calls so the model retrieves only the catalog area it needs.
+parameter, entity, reform-target, household-input, and output discovery are
+separate calls so the model retrieves only the catalog area it needs.
 
 The lightweight gateway uses the curated scope descriptor in
 `backend/prompts/gateway.py`. No generated engine reference or scope file is

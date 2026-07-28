@@ -28,7 +28,6 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
         "run_society_simulation",
         {
             "year": 2026,
-            "dataset": "enhanced_frs_2023_24",
             "reform": {
                 "gov.hmrc.income_tax.allowances.personal_allowance.amount": 15_000,
             },

@@ -7,8 +7,8 @@ package. The pinned runtime dependencies are in `backend/requirements.txt`.
 
 `backend/engine/py_runtime.py` owns package access:
 
-- resolves dataset names through the policyengine.py release manifest;
-- materializes a certified dataset/year with `pe.uk.ensure_datasets`;
+- resolves the pinned UK Chat dataset URI;
+- materializes the fixed dataset/year with `pe.uk.ensure_datasets`;
 - creates baseline and reform `policyengine.core.Simulation` objects;
 - runs the UK synthetic-household calculator; and
 - exposes model metadata for discovery.
@@ -20,14 +20,12 @@ are run in memory rather than persisted into policyengine.py's process cache.
 
 ## Datasets
 
-UK Chat defaults to `enhanced_frs_2023_24`. The logical name is resolved to the
-URI certified by the installed policyengine.py release manifest. This preserves
-the app's Enhanced FRS workflow while using policyengine.py provenance and
-materialization.
-
-The standard policyengine.py UK default is `populace_uk_2023`; the constant and
-discovery metadata retain that option so the chat default can be switched to the
-standard bundle default if needed. `frs_2023_24` is also exposed.
+UK Chat always uses the pinned `enhanced_frs_2024_25` PolicyEngine UK data
+release declared by `UK_CHAT_DATASET` in `backend/engine/constants.py`. The
+dataset is not a deployment override or model-facing input. Its name and label
+are derived from the single pinned URI, and simulation results report the
+resolved metadata for transparency. Changing the dataset requires a code change
+and redeployment.
 
 Datasets are cached under `POLICYENGINE_DATA_FOLDER`, defaulting to
 `/tmp/policyengine-uk-chat-data`.

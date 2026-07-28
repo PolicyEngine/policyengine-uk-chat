@@ -1,7 +1,6 @@
 from types import SimpleNamespace
 
 from engine import discovery
-from engine.py_runtime import DatasetSpec
 
 
 class ParameterCore:
@@ -128,18 +127,7 @@ def test_parameter_discovery_resolves_year_and_aliases(monkeypatch):
     assert discovery._parameter_value(SimpleNamespace(_core_param=None), 2026) is None
 
 
-def test_dataset_reform_input_and_output_catalogs(monkeypatch):
-    spec = DatasetSpec(
-        name="example",
-        label="Example",
-        uri="hf://example",
-        is_default=True,
-        is_policyengine_standard_default=False,
-        row_level_access=False,
-    )
-    monkeypatch.setattr(discovery, "list_dataset_specs", lambda: [spec])
-    assert discovery.list_datasets()["datasets"][0]["name"] == "example"
-
+def test_reform_input_and_output_catalogs(monkeypatch):
     monkeypatch.setattr(
         discovery,
         "search_variables",

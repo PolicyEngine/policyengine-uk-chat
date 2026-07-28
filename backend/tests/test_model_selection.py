@@ -45,7 +45,6 @@ class TestSelectChatModel:
             "run_society_simulation",
             [
                 _slot("year", source="default"),
-                _slot("dataset", source="default"),
                 _slot("budgetary_impact", kind="output"),
             ],
         )

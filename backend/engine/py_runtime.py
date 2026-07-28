@@ -7,12 +7,7 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
-from engine.constants import (
-    DATASET_LABELS,
-    DEFAULT_UK_DATASET,
-    ROW_LEVEL_RESTRICTED_DATASETS,
-    STANDARD_POLICYENGINE_UK_DATASET,
-)
+from engine.constants import DatasetConfig, UK_CHAT_DATASET
 
 
 @dataclass(frozen=True)
@@ -20,8 +15,6 @@ class DatasetSpec:
     name: str
     label: str
     uri: str
-    is_default: bool
-    is_policyengine_standard_default: bool
     row_level_access: bool
     notes: str | None = None
 
@@ -49,59 +42,19 @@ def uk_model_version():
     return _policyengine_module().uk.model
 
 
-@lru_cache(maxsize=16)
-def resolve_dataset(dataset: str | None = None) -> DatasetSpec:
-    """Resolve a UK Chat dataset name through the policyengine.py manifest."""
+@lru_cache(maxsize=1)
+def resolve_dataset() -> DatasetSpec:
+    """Resolve UK Chat's fixed dataset to its managed reference."""
 
-    name = dataset or DEFAULT_UK_DATASET
-    uri = _manifest_module()("uk", name)
+    uri = _manifest_module()("uk", UK_CHAT_DATASET.uri)
+    resolved = DatasetConfig(uri=uri)
     return DatasetSpec(
-        name=name,
-        label=DATASET_LABELS.get(name, name),
+        name=resolved.name,
+        label=resolved.label,
         uri=uri,
-        is_default=name == DEFAULT_UK_DATASET,
-        is_policyengine_standard_default=name == STANDARD_POLICYENGINE_UK_DATASET,
-        row_level_access=name not in ROW_LEVEL_RESTRICTED_DATASETS,
-        notes=(
-            "UK Chat default. Resolved through the policyengine.py release manifest."
-            if name == DEFAULT_UK_DATASET
-            else (
-                "policyengine.py standard certified UK dataset."
-                if name == STANDARD_POLICYENGINE_UK_DATASET
-                else None
-            )
-        ),
+        row_level_access=False,
+        notes="UK Chat's fixed society dataset.",
     )
-
-
-def list_dataset_specs() -> list[DatasetSpec]:
-    """Return the managed datasets UK Chat intentionally exposes."""
-
-    names = [
-        DEFAULT_UK_DATASET,
-        STANDARD_POLICYENGINE_UK_DATASET,
-        "frs_2023_24",
-    ]
-    specs: list[DatasetSpec] = []
-    for name in names:
-        try:
-            specs.append(resolve_dataset(name))
-        except Exception:
-            # Keep discovery useful even when local package metadata is missing.
-            specs.append(
-                DatasetSpec(
-                    name=name,
-                    label=DATASET_LABELS.get(name, name),
-                    uri="unavailable",
-                    is_default=name == DEFAULT_UK_DATASET,
-                    is_policyengine_standard_default=(
-                        name == STANDARD_POLICYENGINE_UK_DATASET
-                    ),
-                    row_level_access=name not in ROW_LEVEL_RESTRICTED_DATASETS,
-                    notes="Could not resolve in this environment.",
-                )
-            )
-    return specs
 
 
 def _managed_dataset_folder() -> str:
@@ -109,34 +62,32 @@ def _managed_dataset_folder() -> str:
 
 
 @lru_cache(maxsize=16)
-def _managed_dataset(name: str, year: int, data_folder: str):
-    """Load one certified policyengine.py dataset/year combination."""
+def _managed_dataset(reference: str, year: int, data_folder: str):
+    """Load one configured policyengine.py dataset/year combination."""
 
     datasets = _policyengine_module().uk.ensure_datasets(
-        datasets=[name],
+        datasets=[reference],
         years=[year],
         data_folder=data_folder,
     )
     if len(datasets) != 1:
         raise RuntimeError(
-            f"Expected one managed UK dataset for {name!r} in {year}, "
+            f"Expected one managed UK dataset for {reference!r} in {year}, "
             f"received {list(datasets)}."
         )
     return next(iter(datasets.values()))
 
 
-def managed_dataset(*, dataset: str | None = None, year: int):
-    """Return a certified policyengine.py Dataset ready for Simulation."""
+def managed_dataset(*, year: int):
+    """Return UK Chat's fixed policyengine.py Dataset ready for Simulation."""
 
-    name = dataset or DEFAULT_UK_DATASET
-    resolve_dataset(name)
-    return _managed_dataset(name, year, _managed_dataset_folder())
+    spec = resolve_dataset()
+    return _managed_dataset(spec.uri, year, _managed_dataset_folder())
 
 
 def managed_simulation_pair(
     *,
     year: int,
-    dataset: str | None = None,
     reform: dict[str, Any] | None = None,
     extra_variables: dict[str, list[str]] | None = None,
 ):
@@ -154,7 +105,7 @@ def managed_simulation_pair(
         year=year,
         model_version=pe.uk.model,
     )
-    simulation_dataset = managed_dataset(dataset=dataset, year=year)
+    simulation_dataset = managed_dataset(year=year)
     simulation_kwargs = {
         "dataset": simulation_dataset,
         "tax_benefit_model_version": pe.uk.model,

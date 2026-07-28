@@ -1,16 +1,4 @@
 cases:
-  - id: enhanced_frs_is_aggregate_only
-    suite: tool_contract
-    description: Enhanced FRS discovery explicitly disallows row-level access.
-    tool_name: list_datasets
-    input: {}
-    expect:
-      contains:
-        status: success
-      required_paths:
-        - datasets.0.name
-        - datasets.0.row_level_access
-
   - id: society_outputs_are_aggregate_only
     suite: tool_contract
     description: Supported-output discovery exposes simulation handles and aggregate derivatives, not rows.

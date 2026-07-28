@@ -65,15 +65,14 @@ cases:
       - name: run_society_simulation
         input:
           year: 2026
-          dataset: enhanced_frs_2023_24
           reform:
             gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
         output:
           status: success
           year: 2026
           dataset:
-            name: enhanced_frs_2023_24
-            label: Enhanced FRS
+            name: enhanced_frs_2024_25
+            label: Enhanced FRS 2024-25
           reform_applied: true
           result_id: society_simulation_1
       - name: compute_budgetary_impact
@@ -400,15 +399,14 @@ cases:
       - name: run_society_simulation
         input:
           year: 2026
-          dataset: enhanced_frs_2023_24
           reform:
             gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
         output:
           status: success
           year: 2026
           dataset:
-            name: enhanced_frs_2023_24
-            label: Enhanced FRS
+            name: enhanced_frs_2024_25
+            label: Enhanced FRS 2024-25
           result_id: society_simulation_1
       - name: compute_winners_losers
         input:
@@ -456,15 +454,14 @@ cases:
       - name: run_society_simulation
         input:
           year: 2026
-          dataset: enhanced_frs_2023_24
           reform:
             gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
         output:
           status: success
           year: 2026
           dataset:
-            name: enhanced_frs_2023_24
-            label: Enhanced FRS
+            name: enhanced_frs_2024_25
+            label: Enhanced FRS 2024-25
           result_id: society_simulation_1
       - name: compute_decile_impacts
         input:
@@ -510,15 +507,14 @@ cases:
       - name: run_society_simulation
         input:
           year: 2026
-          dataset: enhanced_frs_2023_24
           reform:
             gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
         output:
           status: success
           year: 2026
           dataset:
-            name: enhanced_frs_2023_24
-            label: Enhanced FRS
+            name: enhanced_frs_2024_25
+            label: Enhanced FRS 2024-25
           result_id: society_simulation_1
       - name: compute_poverty_metrics
         input:
@@ -564,13 +560,12 @@ cases:
       - name: run_society_simulation
         input:
           year: 2026
-          dataset: enhanced_frs_2023_24
         output:
           status: success
           year: 2026
           dataset:
-            name: enhanced_frs_2023_24
-            label: Enhanced FRS
+            name: enhanced_frs_2024_25
+            label: Enhanced FRS 2024-25
           result_id: society_simulation_1
       - name: aggregate_result
         input:

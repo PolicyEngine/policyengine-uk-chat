@@ -9,7 +9,7 @@ DEFAULT_SCOPE_DESCRIPTOR = """
 This assistant models UK taxes and benefits with a microsimulation engine.
 Modelled: income tax, National Insurance, Universal Credit, child benefit,
 pension credit, tax credits, and related UK tax-and-benefit programmes, over the
-FRS and Enhanced FRS datasets for the supported tax years.
+pinned Enhanced FRS 2024-25 dataset for the supported tax years.
 NOT modelled: macroeconomic / second-round effects (inflation, GDP, employment,
 market reactions), behavioural response, non-UK policy, unannounced or future
 Budgets, and legal or individual tax-filing advice.
@@ -62,11 +62,10 @@ Steps:
    of the output labels listed below). For each slot set `value` and tag
    `source`:
    - "prompt": the user stated it or clearly implied it.
-   - "default": a documented safe default applies (year {default_year}; dataset
-     Enhanced FRS for general income/benefit work; baseline is current law).
+   - "default": a documented safe default applies (year {default_year};
+     baseline is current law).
    - "assumed": you are guessing, or a documented default does not settle the
-     user's request. Do not invent legacy dataset choices that are absent from
-     the tool schema.
+     user's request.
 4. `unmodellable_outputs`: list any requested outputs the engine cannot produce
    — inflation, GDP, employment/behavioural response, market reactions, non-UK
    effects. Leave empty if none.

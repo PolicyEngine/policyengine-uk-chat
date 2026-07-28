@@ -23,7 +23,7 @@ FastAPI API
 For a society-wide request, the chat loop creates one shared
 `ToolExecutionContext`:
 
-1. `run_society_simulation` resolves the certified dataset and runs baseline
+1. `run_society_simulation` resolves the fixed dataset and runs baseline
    and reform `Simulation` objects in memory.
 2. The result store keeps the pair and returns an opaque `simulation_id`.
 3. A derivative tool retrieves the pair and invokes a policyengine.py output

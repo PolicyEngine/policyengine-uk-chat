@@ -23,18 +23,6 @@ cases:
       required_paths:
         - chart_markdown
 
-  - id: list_datasets_marks_enhanced_frs_restricted
-    suite: tool_contract
-    description: Dataset discovery identifies Enhanced FRS as aggregate-only.
-    tool_name: list_datasets
-    input: {}
-    expect:
-      contains:
-        status: success
-      required_paths:
-        - datasets.0.name
-        - datasets.0.row_level_access
-
   - id: validate_reform_accepts_personal_allowance
     suite: tool_contract
     description: validate_reform accepts a valid parametric reform.
@@ -106,7 +94,6 @@ cases:
     tool_name: run_society_simulation
     input:
       year: 2026
-      dataset: enhanced_frs_2023_24
       reform:
         gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
     expect:

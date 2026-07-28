@@ -1,12 +1,16 @@
 """Tests for the model-facing UK policy tool lifecycle."""
 
+import inspect
 from pathlib import Path
 
 import tools.dispatch as agent_tools
 from conftest import requires_policyengine_py
 from engine import households as household_engine
 from engine import simulations as simulation_engine
-from engine.constants import DEFAULT_UK_DATASET, STANDARD_POLICYENGINE_UK_DATASET
+from engine.constants import (
+    HOUSEHOLD_COUNTRY_IDS,
+    UK_CHAT_DATASET,
+)
 from engine.py_runtime import DatasetSpec
 from engine.simulations import SocietySimulationRun
 from tools.context import new_tool_context
@@ -20,7 +24,6 @@ def _tool(name: str) -> dict:
 def test_tool_inventory_matches_py_lifecycle():
     names = {tool["name"] for tool in TOOL_DEFINITIONS}
     assert {
-        "list_datasets",
         "list_entities",
         "search_variables",
         "get_variable",
@@ -48,24 +51,24 @@ def test_tool_inventory_matches_py_lifecycle():
     assert "run_economy_simulation" not in names
     assert "analyse_microdata" not in names
     assert "lookup_parameter" not in names
+    assert "list_datasets" not in names
 
 
-def test_default_year_and_dataset_are_py_migration_defaults():
+def test_simulation_schema_uses_fixed_dataset():
     assert DEFAULT_SIMULATION_YEAR == 2026
-    assert DEFAULT_UK_DATASET == "enhanced_frs_2023_24"
-    assert STANDARD_POLICYENGINE_UK_DATASET == "populace_uk_2023"
+    assert UK_CHAT_DATASET.name == "enhanced_frs_2024_25"
+    assert UK_CHAT_DATASET.label == "Enhanced FRS 2024-25"
+    assert UK_CHAT_DATASET.uri.startswith("hf://")
+    assert "@" in UK_CHAT_DATASET.uri
     society_schema = _tool("run_society_simulation")["input_schema"]
     assert society_schema["properties"]["year"]["default"] == 2026
-    assert society_schema["properties"]["dataset"]["default"] == DEFAULT_UK_DATASET
-
-
-def test_list_datasets_exposes_enhanced_frs_and_certified_standard():
-    result = agent_tools.list_datasets()
-    assert result["status"] == "success"
-    by_name = {dataset["name"]: dataset for dataset in result["datasets"]}
-    assert by_name[DEFAULT_UK_DATASET]["is_default"] is True
-    assert by_name[STANDARD_POLICYENGINE_UK_DATASET]["is_policyengine_standard_default"] is True
-    assert by_name[DEFAULT_UK_DATASET]["row_level_access"] is False
+    assert "dataset" not in society_schema["properties"]
+    assert "dataset" not in inspect.signature(
+        agent_tools.run_society_simulation
+    ).parameters
+    assert "dataset" not in inspect.signature(
+        simulation_engine.build_society_simulation
+    ).parameters
 
 
 def test_discovery_tools_are_split_by_catalog_area():
@@ -79,7 +82,6 @@ def test_discovery_tools_are_split_by_catalog_area():
     assert any("personal_allowance" in target["path"] for target in targets)
     assert "input_only" not in _tool("search_variables")["input_schema"]["properties"]
     assert _tool("search_parameters")["input_schema"]["properties"]["query"]["type"] == "string"
-    assert _tool("list_datasets")["input_schema"]["properties"] == {}
 
 
 def test_run_household_simulation_passes_policyengine_py_shape_unchanged(monkeypatch):
@@ -110,13 +112,38 @@ def test_run_household_simulation_passes_policyengine_py_shape_unchanged(monkeyp
     assert captured["year"] == 2026
 
 
+def test_household_country_schema_only_accepts_categorical_ids():
+    household_schema = _tool("run_household_simulation")["input_schema"][
+        "properties"
+    ]["household"]
+
+    assert household_schema["properties"]["country"]["enum"] == list(
+        HOUSEHOLD_COUNTRY_IDS
+    )
+    assert household_schema["additionalProperties"] is True
+
+
+def test_validate_household_rejects_non_categorical_country_values():
+    for country in ("E92000001", "England", "england", "UNKNOWN"):
+        result = household_engine.validate_household_dict(
+            people=[{"age": 40}],
+            benunit={},
+            household={"country": country},
+            year=2026,
+        )
+
+        assert result["valid"] is False
+        assert result["errors"][0]["path"] == "household.country"
+        assert "ENGLAND, NORTHERN_IRELAND, SCOTLAND, WALES" in result["errors"][0][
+            "message"
+        ]
+
+
 def test_society_simulation_result_handle_feeds_derivative_and_chart_tools(monkeypatch):
     dataset = DatasetSpec(
-        name=DEFAULT_UK_DATASET,
-        label="Enhanced FRS",
-        uri="hf://policyengine/uk/enhanced_frs_2023_24",
-        is_default=True,
-        is_policyengine_standard_default=False,
+        name=UK_CHAT_DATASET.name,
+        label="Enhanced FRS 2024-25",
+        uri="hf://policyengine/uk/enhanced_frs_2024_25",
         row_level_access=False,
     )
     payload = SocietySimulationRun(
@@ -165,11 +192,9 @@ def test_society_simulation_passes_extra_variables(monkeypatch):
         return SocietySimulationRun(
             year=kwargs["year"],
             dataset=DatasetSpec(
-                name=DEFAULT_UK_DATASET,
-                label="Enhanced FRS",
+                name=UK_CHAT_DATASET.name,
+                label="Enhanced FRS 2024-25",
                 uri="hf://example",
-                is_default=True,
-                is_policyengine_standard_default=False,
                 row_level_access=False,
             ),
             reform_applied=False,
@@ -191,14 +216,12 @@ def test_society_simulation_passes_extra_variables(monkeypatch):
 def test_society_simulation_normalizes_unset_reform_values(monkeypatch):
     captured = {}
     dataset = DatasetSpec(
-        name=DEFAULT_UK_DATASET,
-        label="Enhanced FRS",
+        name=UK_CHAT_DATASET.name,
+        label="Enhanced FRS 2024-25",
         uri="hf://example",
-        is_default=True,
-        is_policyengine_standard_default=False,
         row_level_access=False,
     )
-    monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda _name: dataset)
+    monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda: dataset)
 
     def fake_pair(**kwargs):
         captured.update(kwargs)
@@ -215,6 +238,32 @@ def test_society_simulation_normalizes_unset_reform_values(monkeypatch):
     assert captured["reform"] is None
     assert result.reform is None
     assert result.reform_applied is False
+
+
+def test_society_simulation_uses_fixed_dataset(monkeypatch):
+    captured = {}
+    dataset = DatasetSpec(
+        name=UK_CHAT_DATASET.name,
+        label=UK_CHAT_DATASET.label,
+        uri=UK_CHAT_DATASET.uri,
+        row_level_access=False,
+    )
+    monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda: dataset)
+
+    def fake_pair(**kwargs):
+        captured.update(kwargs)
+        baseline = object()
+        return baseline, baseline
+
+    monkeypatch.setattr(simulation_engine, "managed_simulation_pair", fake_pair)
+
+    result = simulation_engine.build_society_simulation(
+        year=2026,
+        reform=None,
+    )
+
+    assert "dataset" not in captured
+    assert result.dataset == dataset
 
 
 def test_household_simulation_does_not_run_empty_normalized_reform(monkeypatch):

@@ -3,6 +3,8 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
+from engine.constants import UK_CHAT_DATASET
+
 
 class FakeApp:
     def __init__(self, name):
@@ -31,9 +33,6 @@ class FakeImage:
 
     def pip_install_from_requirements(self, *args):
         return self._step("pip_install_from_requirements", *args)
-
-    def run_function(self, *args):
-        return self._step("run_function", *args)
 
     def add_local_dir(self, *args, **kwargs):
         return self._step("add_local_dir", *args, **kwargs)
@@ -73,11 +72,31 @@ def test_modal_deployment_definition_imports_without_remote_calls(monkeypatch):
             "debian_slim",
             "apt_install",
             "pip_install_from_requirements",
-            "run_function",
             "add_local_dir",
         ]
     finally:
         sys.modules.pop("modal_app", None)
+
+
+def test_dataset_reference_is_not_deployment_configuration():
+    repo_root = Path(__file__).resolve().parents[2]
+    workflow = (repo_root / ".github/workflows/deploy.yml").read_text()
+    modal_app = (repo_root / "modal_app.py").read_text()
+    env_example = (repo_root / ".env.example").read_text()
+    compose = (repo_root / "docker-compose.yml").read_text()
+
+    for content in (workflow, modal_app, env_example, compose):
+        assert "POLICYENGINE_UK_DEFAULT_DATASET" not in content
+        assert UK_CHAT_DATASET.uri not in content
+
+
+def test_local_docker_exposes_enhanced_frs_credentials():
+    repo_root = Path(__file__).resolve().parents[2]
+    env_example = (repo_root / ".env.example").read_text()
+    compose = (repo_root / "docker-compose.yml").read_text()
+
+    assert "HUGGING_FACE_TOKEN=your_token_here" in env_example
+    assert "HUGGING_FACE_TOKEN=${HUGGING_FACE_TOKEN}" in compose
 
 
 def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():

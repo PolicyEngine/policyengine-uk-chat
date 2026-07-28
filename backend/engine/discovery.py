@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from difflib import get_close_matches
 from typing import Any
 
-from engine.py_runtime import list_dataset_specs, uk_model_version
+from engine.py_runtime import uk_model_version
 from engine.reforms import COMMON_REFORM_TARGETS, search_reform_targets
 from engine.serialization import json_safe
 
@@ -174,13 +173,6 @@ def get_parameter(path: str, year: int) -> dict[str, Any]:
         suggestions = get_close_matches(path, list(model.parameters_by_name), n=5, cutoff=0.6)
         return {"status": "error", "error": f"Unknown parameter: {path}", "suggestions": suggestions}
     return {"status": "success", "parameter": _parameter_item(path, parameter, year)}
-
-
-def list_datasets() -> dict[str, Any]:
-    return {
-        "status": "success",
-        "datasets": [asdict(spec) for spec in list_dataset_specs()],
-    }
 
 
 def list_household_input_variables(entity: str | None = None) -> dict[str, Any]:

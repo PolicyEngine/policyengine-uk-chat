@@ -3,7 +3,7 @@
 import pytest
 
 from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
-from engine.constants import DEFAULT_UK_DATASET
+from engine.constants import HOUSEHOLD_COUNTRY_IDS, UK_CHAT_DATASET
 from prompts import (
     SYSTEM_PROMPT,
     SUGGESTION_SYSTEM,
@@ -41,11 +41,22 @@ def test_main_prompt_contains_microdata_privacy_rules():
     assert "Do not combine unrelated adults" in SYSTEM_PROMPT
 
 
+def test_main_prompt_describes_household_country_ids():
+    assert HOUSEHOLD_COUNTRY_IDS == (
+        "ENGLAND",
+        "NORTHERN_IRELAND",
+        "SCOTLAND",
+        "WALES",
+    )
+    for country_id in HOUSEHOLD_COUNTRY_IDS:
+        assert f"`{country_id}`" in SYSTEM_PROMPT
+    assert "do not use ONS codes such as `E92000001`" in SYSTEM_PROMPT
+
+
 def test_main_prompt_describes_py_lifecycle_tools():
     assert f"default simulation year is {DEFAULT_SIMULATION_YEAR}" in SYSTEM_PROMPT
-    assert DEFAULT_UK_DATASET in SYSTEM_PROMPT
+    assert UK_CHAT_DATASET.name in SYSTEM_PROMPT
     for name in (
-        "list_datasets",
         "list_entities",
         "search_variables",
         "list_society_output_variables",
@@ -80,10 +91,11 @@ def test_validate_reform_tool_is_not_routine_preflight():
     assert "routine preflight" in description
 
 
-def test_dataset_schema_defaults_to_enhanced_frs():
-    schema = _tool("run_society_simulation")["input_schema"]["properties"]["dataset"]
-    assert schema["default"] == DEFAULT_UK_DATASET
-    assert DEFAULT_UK_DATASET in schema["description"]
+def test_society_tool_and_prompt_fix_the_dataset():
+    schema = _tool("run_society_simulation")["input_schema"]
+    assert "dataset" not in schema["properties"]
+    assert f"`{UK_CHAT_DATASET.name}` dataset" in SYSTEM_PROMPT
+    assert "cannot select another dataset" in SYSTEM_PROMPT
 
 
 def test_generate_chart_tool_describes_deterministic_presets():

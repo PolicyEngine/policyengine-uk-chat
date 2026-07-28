@@ -8,7 +8,7 @@ model-authored Python execution tool.
 
 Society-wide analysis is a multi-step lifecycle:
 
-1. Discover datasets, entities, variables, parameters, reform targets, household
+1. Discover entities, variables, parameters, reform targets, household
    inputs, or supported outputs.
 2. Validate the reform or synthetic household.
 3. Run a household simulation or create a society simulation handle.
@@ -23,7 +23,6 @@ opaque and turn-local. The model cannot inspect or serialize the underlying
 
 | Tool | Purpose |
 | --- | --- |
-| `list_datasets` | List the UK datasets deliberately exposed by the app. |
 | `list_entities` | List model entities and variable counts. |
 | `search_variables` | Search variables, optionally by entity. |
 | `get_variable` | Return one variable's metadata. |
@@ -88,7 +87,6 @@ layout.
 
 ## Privacy boundary
 
-The Enhanced FRS, the standard certified UK dataset, and the standard FRS are
-aggregate-only in chat. `json_safe` rejects pandas `DataFrame` and `Series`
-objects so an accidental raw society payload fails closed instead of becoming a
-tool response.
+The fixed Enhanced FRS dataset is aggregate-only in chat. `json_safe` rejects
+pandas `DataFrame` and `Series` objects so an accidental raw society payload
+fails closed instead of becoming a tool response.

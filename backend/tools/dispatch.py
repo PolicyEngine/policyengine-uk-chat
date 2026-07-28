@@ -32,7 +32,6 @@ from tools.definitions import (
     GET_PARAMETER_INPUT_SCHEMA,
     GET_VARIABLE_DESCRIPTION,
     GET_VARIABLE_INPUT_SCHEMA,
-    LIST_DATASETS_INPUT_SCHEMA,
     LIST_ENTITIES_INPUT_SCHEMA,
     LIST_HOUSEHOLD_INPUT_VARIABLES_INPUT_SCHEMA,
     LIST_REFORM_TARGETS_INPUT_SCHEMA,
@@ -72,7 +71,6 @@ __all__ = [
     "generate_chart",
     "get_parameter",
     "get_variable",
-    "list_datasets",
     "list_entities",
     "list_household_input_variables",
     "list_reform_targets",
@@ -102,11 +100,6 @@ def _get_stored(context: ToolExecutionContext | None, result_id: str, expected: 
     if context is None:
         raise KeyError("Tool result handles are only available within a chat turn.")
     return context.result_store.get(result_id, expected)
-
-
-@register_tool(name="list_datasets", description=DISCOVERY_DESCRIPTION, input_schema=LIST_DATASETS_INPUT_SCHEMA)
-def list_datasets() -> Dict[str, Any]:
-    return discovery.list_datasets()
 
 
 @register_tool(name="list_entities", description=DISCOVERY_DESCRIPTION, input_schema=LIST_ENTITIES_INPUT_SCHEMA)
@@ -218,7 +211,6 @@ def run_household_simulation(
 def run_society_simulation(
     year: int = DEFAULT_SIMULATION_YEAR,
     reform: Optional[Dict[str, Any]] = None,
-    dataset: Optional[str] = None,
     extra_variables: Optional[Dict[str, List[str]]] = None,
     _context: ToolExecutionContext | None = None,
 ) -> Dict[str, Any]:
@@ -226,7 +218,6 @@ def run_society_simulation(
         payload = build_society_simulation(
             year=year,
             reform=reform,
-            dataset=dataset,
             extra_variables=extra_variables,
         )
     except FileNotFoundError as exc:

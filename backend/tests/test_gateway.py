@@ -32,9 +32,9 @@ class TestSlotInventory:
         assert TOOL_SLOT_REQUIREMENT[("aggregate_result", "operation")] == "required"
 
     def test_defaulted_slots_detected(self):
-        assert TOOL_SLOT_REQUIREMENT[("run_society_simulation", "dataset")] == "defaulted"
         assert TOOL_SLOT_REQUIREMENT[("run_household_simulation", "year")] == "defaulted"
         assert TOOL_SLOT_REQUIREMENT[("get_parameter", "year")] == "defaulted"
+        assert ("run_society_simulation", "dataset") not in TOOL_SLOT_REQUIREMENT
 
     def test_optional_undefaulted_slots_detected(self):
         assert TOOL_SLOT_REQUIREMENT[("run_household_simulation", "reform")] == "optional"
@@ -44,9 +44,6 @@ class TestCriticality:
     def test_required_is_high(self):
         assert criticality("run_household_simulation", sf("people", "assumed")) == "high"
 
-    def test_defaulted_is_low(self):
-        assert criticality("run_society_simulation", sf("dataset", "default")) == "low"
-
     def test_output_is_high(self):
         assert criticality("run_society_simulation", sf("output", "assumed", kind="output")) == "high"
 
@@ -54,17 +51,6 @@ class TestCriticality:
         # Schema marks reform optional, but the curated override makes it high:
         # a society-wide sim with no reform is never the intent.
         assert criticality("run_society_simulation", sf("reform", "assumed")) == "high"
-
-    def test_enhanced_frs_default_is_not_overridden_for_wealth(self):
-        assert criticality(
-            "run_society_simulation", sf("dataset", "assumed"), prompt="model a wealth tax"
-        ) == "low"
-
-    def test_dataset_not_promoted_for_income(self):
-        assert criticality(
-            "run_society_simulation", sf("dataset", "assumed"),
-            prompt="raise the personal allowance to 15000",
-        ) == "low"
 
     def test_year_promoted_to_medium_on_nondefault(self):
         assert criticality(
@@ -85,7 +71,7 @@ class TestGate:
     def test_ready_all_grounded(self):
         r = gate(
             True, "run_society_simulation",
-            [sf("reform", "prompt"), sf("dataset", "default"), sf("output", "prompt", kind="output")],
+            [sf("reform", "prompt"), sf("output", "prompt", kind="output")],
             [],
         )
         assert r.outcome == "ready" and r.gating_slots == []
@@ -111,7 +97,7 @@ class TestGate:
     def test_default_source_does_not_gate(self):
         r = gate(
             True, "run_society_simulation",
-            [sf("reform", "prompt"), sf("dataset", "default")], [],
+            [sf("reform", "prompt")], [],
         )
         assert r.outcome == "ready"
 
@@ -121,14 +107,6 @@ class TestGate:
             [sf("simulation_id", "prompt"), sf("entity", "prompt"), sf("variable", "prompt"), sf("operation", "prompt"), sf("group_by", "assumed")], [],
         )
         assert r.outcome == "ready"
-
-    def test_wealth_dataset_default_does_not_gate(self):
-        r = gate(
-            True, "run_society_simulation",
-            [sf("reform", "prompt"), sf("dataset", "assumed")], [],
-            prompt="model a 1% wealth tax on net wealth above 10m",
-        )
-        assert r.outcome == "ready" and r.gating_slots == []
 
     def test_partial(self):
         r = gate(True, "run_society_simulation", [sf("reform", "prompt")], ["inflation"])
