@@ -121,10 +121,6 @@ cases:
           tolerance: 0.2
           scale: 0.000000001
       forbidden: [good, bad, fair, unfair, regressive, progressive]
-      grounded_numbers: true
-      allowed_numbers: [2023, 24, 2024]
-      allowed_derived_numbers: [20]
-      number_tolerance: 0.2
 
   - id: tool_loop_live_autumn_budget_employer_pension_ni
     suite: tool_loop
@@ -179,10 +175,6 @@ cases:
           tolerance: 0.3
           scale: 0.000000001
       forbidden: [good, bad, fair, unfair, regressive, progressive]
-      grounded_numbers: true
-      allowed_numbers: [2023, 24, 2024]
-      allowed_derived_numbers: [47.5, 50]
-      number_tolerance: 0.3
 
   - id: tool_loop_live_autumn_budget_cgt_counterfactual
     suite: tool_loop
@@ -235,10 +227,6 @@ cases:
           tolerance: 0.3
           scale: -0.000000001
       forbidden: [good, bad, fair, unfair, regressive, progressive]
-      grounded_numbers: true
-      allowed_numbers: [2023, 24, 2024]
-      allowed_derived_numbers: [20, 24, 50]
-      number_tolerance: 0.3
 
   - id: tool_loop_live_autumn_budget_combined_distribution
     suite: tool_loop
@@ -356,7 +344,3 @@ cases:
           tolerance: 0.2
           scale: -100
       forbidden: [good, bad, fair, unfair, regressive, progressive]
-      grounded_numbers: true
-      allowed_numbers: [2023, 24, 2024]
-      allowed_derived_numbers: [20, 47.5, 50]
-      number_tolerance: 0.5

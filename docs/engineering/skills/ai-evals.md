@@ -65,9 +65,16 @@ validate-then-calculate flows.
   that result.
 - Use `expect.required_values` when final prose must include a numeric result
   from a named tool result. Specify the result path, occurrence, tolerance, and
-  nearby required context. In live cases, `grounded_numbers: true`
-  automatically permits numeric leaves from tool inputs and outputs; declare
-  legitimate derivations with `allowed_derived_numbers`.
+  nearby required context. Prefer this source-aware contract for fiscal or
+  multi-output answers: declare every requested headline value explicitly,
+  including its scale, sign, and rounding tolerance.
+- Use `grounded_numbers: true` only when the answer has a small, predictable
+  numeric vocabulary. It automatically permits raw numeric leaves from tool
+  inputs and outputs, but it does not infer unit conversions, rounded
+  components, or arithmetic derivations. Declare any permitted derivations
+  with `allowed_derived_numbers`. Do not use the blanket check for rich fiscal
+  prose when `expected_tool_results` and `required_values` already cover the
+  calculated outputs.
 - In an offline tool-loop fixture, reference one field from a prior tool result
   as `$tool_result.<tool_name>.<field>`. To pass the complete result into an
   object-valued tool input, use `{$tool_result: <tool_name>}`. The harness

@@ -62,7 +62,10 @@ real PolicyEngine tool path.
 
 Tool-loop cases can use `expected_tool_results` for range or schema assertions
 on the real executed output and `expect.required_values` to separately require
-the final answer to report a grounded value from that output.
+the final answer to report a grounded value from that output. For fiscal or
+multi-output answers, declare each requested headline value this way instead of
+using the blanket `grounded_numbers` check, which does not infer arbitrary unit
+conversions or derived secondary figures.
 
 Trajectory and tool-loop cases can set `messages` for multi-turn transcripts
 and `charts_mode: true` to test the chart-mode directive.
