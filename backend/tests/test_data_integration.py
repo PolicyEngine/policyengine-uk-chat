@@ -104,8 +104,8 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
     assert math.isfinite(aggregate["result"]["value"])
 
 
-def test_cgt_basic_rate_reaches_default_income_deciles():
-    """CGT changes reach household net income but not equivalised HBAI income."""
+def test_cgt_basic_rate_income_deciles_reconcile_with_budgetary_impact():
+    """CGT-driven net-income changes reconcile with the fiscal impact."""
 
     context = new_tool_context("enhanced-frs-cgt-deciles")
     simulation = _execute(
@@ -124,7 +124,7 @@ def test_cgt_basic_rate_reaches_default_income_deciles():
         {"simulation_id": simulation_id},
         context,
     )
-    default_deciles = _execute(
+    income_deciles = _execute(
         "compute_decile_impacts",
         {
             "simulation_id": simulation_id,
@@ -132,23 +132,24 @@ def test_cgt_basic_rate_reaches_default_income_deciles():
         },
         context,
     )
-    hbai_deciles = _execute(
-        "compute_decile_impacts",
-        {
-            "simulation_id": simulation_id,
-            "decile_concept": "equivalised_hbai_net_income",
-        },
-        context,
-    )
 
     assert budget["net_budgetary_impact"] > 0
-    assert default_deciles["income_variable"] == "household_net_income"
-    assert any(
-        not math.isclose(row["absolute_change"], 0, abs_tol=1e-9)
-        for row in default_deciles["deciles"]
-    )
-    assert hbai_deciles["income_variable"] == "equiv_hbai_household_net_income"
-    assert all(
-        math.isclose(row["absolute_change"], 0, abs_tol=1e-9)
-        for row in hbai_deciles["deciles"]
+    assert income_deciles["income_variable"] == "household_net_income"
+
+    total_income_change = 0.0
+    for row in income_deciles["deciles"]:
+        analysis_weight = (
+            row["count_better_off"]
+            + row["count_worse_off"]
+            + row["count_no_change"]
+        )
+        if row["absolute_change"] is None:
+            assert analysis_weight == 0
+            continue
+        total_income_change += row["absolute_change"] * analysis_weight
+
+    assert total_income_change < 0
+    assert total_income_change == pytest.approx(
+        -budget["net_budgetary_impact"],
+        rel=0.10,
     )

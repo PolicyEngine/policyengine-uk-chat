@@ -103,6 +103,24 @@ def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
     repo_root = Path(__file__).resolve().parents[2]
     workflow = (repo_root / ".github/workflows/pr-beta-deploy.yml").read_text()
 
+    assert (
+        "MODAL_PREVIEW_APP_NAME: pe-uk-chat-${{ github.event.pull_request.number }}"
+        in workflow
+    )
+    assert (
+        "MODAL_PREVIEW_SECRET_NAME: "
+        "pe-uk-chat-${{ github.event.pull_request.number }}-secrets"
+        in workflow
+    )
+    assert "peukchat-$branch_slug" not in workflow
+    assert (
+        'modal.Function.from_name(os.environ["MODAL_APP_NAME"], "web")'
+        in workflow
+    )
+    assert (
+        'backend_url="${{ steps.modal_deploy.outputs.modal_url }}"'
+        in workflow
+    )
     assert workflow.count(
         "HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}"
     ) == 1
