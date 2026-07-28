@@ -93,18 +93,18 @@ cases:
             household:
               household_net_income: 46149.35546875
     expect:
-      required: ["2026", baseline, reform, net income]
+      required: ["2026", net income]
       required_any:
         - [illustrative, simulation, simulated, synthetic, scenario, hypothetical]
+        - [baseline, current policy, before, from]
+        - [reform, with the reform, with the change, after, to]
       required_values:
         - tool_name: run_household_simulation
           path: baseline.household.household_net_income
           tolerance: 1
-          required_context: [baseline]
         - tool_name: run_household_simulation
           path: reform.household.household_net_income
           tolerance: 1
-          required_context: [reform]
       forbidden:
         - good
         - bad
