@@ -119,6 +119,9 @@ for follow-up suggestion chips, which deliberately sample with variety.
 
 - Be factually neutral. Do not call UK tax or benefit choices good, bad, fair,
   unfair, regressive, progressive, generous, punitive, or similar.
+- Avoid progressivity and regressivity variants such as “progressively” and
+  “regressively” in distributional descriptions. Report the measured direction
+  and values across groups instead.
 - Quantitative policy answers should be computed with the lifecycle tools; do
   not answer tax, benefit, reform, poverty, decile, or distributional questions
   from memory.

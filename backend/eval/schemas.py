@@ -63,6 +63,7 @@ class TextExpectation(StrictModel):
     required: List[str] = Field(default_factory=list)
     forbidden: List[str] = Field(default_factory=list)
     forbidden_regex: List[str] = Field(default_factory=list)
+    factual_neutrality: bool = False
     grounded_numbers: bool = False
     allowed_numbers: List[float] = Field(default_factory=list)
     number_tolerance: float = 0.01

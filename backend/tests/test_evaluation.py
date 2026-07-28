@@ -311,6 +311,35 @@ def test_grade_text_checks_required_forbidden_and_grounded_numbers():
     assert grade_text("In 2025, this illustrative household changes by £200.", expectation) == []
 
 
+@pytest.mark.parametrize(
+    ("text", "label"),
+    [
+        ("The policy is progressive.", "progressive"),
+        ("The impact rises progressively through the deciles.", "progressive"),
+        ("This changes tax progressivity.", "progressive"),
+        ("The policy is regressive.", "regressive"),
+        ("The impact falls regressively through the deciles.", "regressive"),
+        ("This changes tax regressivity.", "regressive"),
+    ],
+)
+def test_factual_neutrality_rejects_intended_word_families(text, label):
+    errors = grade_text(text, TextExpectation(factual_neutrality=True))
+
+    assert errors == [f"factual neutrality label present: {label!r}"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The average reduction increases from decile 1 to decile 10.",
+        "The analysis shows progression across the income distribution.",
+        "A nonprogressive identifier is mentioned as code.",
+    ],
+)
+def test_factual_neutrality_allows_measured_or_unrelated_language(text):
+    assert grade_text(text, TextExpectation(factual_neutrality=True)) == []
+
+
 def test_grade_text_requires_values_from_named_tool_results():
     expectation = LiveTextExpectation(
         grounded_numbers=True,

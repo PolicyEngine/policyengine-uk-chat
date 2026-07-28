@@ -19,15 +19,8 @@ cases:
         - illustrative
         - "2025"
         - £200
+      factual_neutrality: true
       forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
         - actual household
       grounded_numbers: true
       allowed_numbers: [2025, 30000, 15000, 25200, 25000, 200]
@@ -99,15 +92,7 @@ cases:
         - "2026"
         - £1.2 billion
         - decile
-      forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
+      factual_neutrality: true
       grounded_numbers: true
       allowed_numbers: [2026, 1.2, 10, 120]
       number_tolerance: 0.01
@@ -148,15 +133,8 @@ cases:
         - £37,700
         - taxable income
         - £50,270
+      factual_neutrality: true
       forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
         - simulated household
       grounded_numbers: true
       allowed_numbers: [2025, 37700, 12570, 50270]
@@ -191,19 +169,12 @@ cases:
         - single under 25
         - couple over 25
         - couple under 25
+      factual_neutrality: true
       forbidden:
         - £628.10
         - £497.55
         - £400.14
         - £316.98
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
     offline_response:
       text: >
         I found several Universal Credit standard allowance parameters for
@@ -240,15 +211,8 @@ cases:
         - "2025"
         - £25119.60
         - income tax
+      factual_neutrality: true
       forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
         - actual household
       grounded_numbers: true
       allowed_numbers: [2025, 30000, 25119.60, 3486, 1394.40]
@@ -286,15 +250,7 @@ cases:
         - "```chart"
         - Baseline
         - Reform
-      forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
+      factual_neutrality: true
       grounded_numbers: true
       allowed_numbers: [25119.60, 25584.70]
       number_tolerance: 0.01
@@ -342,15 +298,7 @@ cases:
         - not valid
         - gov.made_up.parameter
         - parameter path
-      forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
+      factual_neutrality: true
     offline_response:
       text: >
         The reform JSON is not valid because gov.made_up.parameter is not a
@@ -373,15 +321,7 @@ cases:
         - could not calculate
         - unsupported_program
         - no quantified result
-      forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
+      factual_neutrality: true
       forbidden_regex:
         - "£\\s?\\d"
         - "\\b\\d+(?:\\.\\d+)?%"
@@ -429,15 +369,7 @@ cases:
         - losers
         - 35.8%
         - 64.2%
-      forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
+      factual_neutrality: true
       grounded_numbers: true
       allowed_numbers: [2026, 35.8, 64.2, 0]
       number_tolerance: 0.01
@@ -482,15 +414,7 @@ cases:
         - £0
         - £40
         - £120
-      forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
+      factual_neutrality: true
       grounded_numbers: true
       allowed_numbers: [1, 5, 10, 0, 40, 120]
       number_tolerance: 0.01
@@ -535,15 +459,7 @@ cases:
         - reform
         - 14.2%
         - 13.9%
-      forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
+      factual_neutrality: true
       grounded_numbers: true
       allowed_numbers: [2026, 14.2, 13.9]
       number_tolerance: 0.01
@@ -730,15 +646,8 @@ cases:
         - £465.10
         - income tax
         - National Insurance
+      factual_neutrality: true
       forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
         - actual household
       grounded_numbers: true
       allowed_numbers: [2025, 30000, 15000, 3486, 2994.20, 1394.40, 1392.08, 25119.60, 25584.70, 465.10, 6936.89, 6477.24]

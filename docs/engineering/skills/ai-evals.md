@@ -55,6 +55,11 @@ validate-then-calculate flows.
 - Use deterministic graders first: JSON partial match, path checks, numeric
   tolerance, forbidden terms, required caveats, privacy statements, and grounded
   number checks.
+- Set `factual_neutrality: true` for policy answers that must follow the shared
+  neutrality contract. Do not copy the policy-value term list into each case.
+  The shared matcher intentionally covers progressivity and regressivity word
+  families, including `progressively` and `regressively`, while using word-aware
+  patterns rather than arbitrary substring matches.
 - `expected_tools` is an ordered subsequence. Declare load-bearing calls and
   use `forbidden_tools` for calls that must never occur. Discovery and recovery
   calls may appear between expected calls.

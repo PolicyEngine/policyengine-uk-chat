@@ -67,6 +67,9 @@ multi-output answers, declare each requested headline value this way instead of
 using the blanket `grounded_numbers` check, which does not infer arbitrary unit
 conversions or derived secondary figures.
 
+Set `expect.factual_neutrality: true` when policy prose must avoid the shared
+policy-value vocabulary. Do not copy that term list into individual cases.
+
 Trajectory and tool-loop cases can set `messages` for multi-turn transcripts
 and `charts_mode: true` to test the chart-mode directive.
 

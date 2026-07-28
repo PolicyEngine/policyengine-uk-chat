@@ -32,13 +32,8 @@ cases:
           result_selection: last_successful
           tolerance: 1
           required_context: [income tax]
+      factual_neutrality: true
       forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
         - actual household
       grounded_numbers: true
       allowed_derived_numbers: [6280.40, 81.5, 17.9]
@@ -70,10 +65,9 @@ cases:
           result_selection: last_successful
           tolerance: 1
           required_context: [threshold]
+      factual_neutrality: true
       forbidden:
         - simulated household
-        - good
-        - bad
 
   - id: tool_loop_live_autumn_budget_private_school_vat
     suite: tool_loop
@@ -120,7 +114,7 @@ cases:
           result_selection: last_successful
           tolerance: 0.2
           scale: 0.000000001
-      forbidden: [good, bad, fair, unfair, regressive, progressive]
+      factual_neutrality: true
 
   - id: tool_loop_live_autumn_budget_employer_pension_ni
     suite: tool_loop
@@ -174,7 +168,7 @@ cases:
           result_selection: last_successful
           tolerance: 0.3
           scale: 0.000000001
-      forbidden: [good, bad, fair, unfair, regressive, progressive]
+      factual_neutrality: true
 
   - id: tool_loop_live_autumn_budget_cgt_counterfactual
     suite: tool_loop
@@ -226,7 +220,7 @@ cases:
           result_selection: last_successful
           tolerance: 0.3
           scale: -0.000000001
-      forbidden: [good, bad, fair, unfair, regressive, progressive]
+      factual_neutrality: true
 
   - id: tool_loop_live_autumn_budget_combined_distribution
     suite: tool_loop
@@ -343,4 +337,4 @@ cases:
           result_selection: last_successful
           tolerance: 0.2
           scale: -100
-      forbidden: [good, bad, fair, unfair, regressive, progressive]
+      factual_neutrality: true

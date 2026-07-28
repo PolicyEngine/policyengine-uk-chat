@@ -2,6 +2,7 @@
 
 import pytest
 
+from neutrality import POLICY_VALUE_LABELS
 from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
 from engine.constants import HOUSEHOLD_COUNTRY_IDS, UK_CHAT_DATASET
 from prompts import (
@@ -19,17 +20,10 @@ def _tool(name: str) -> dict:
 def test_main_prompt_contains_factual_neutrality_rules():
     assert "Be factually neutral." in SYSTEM_PROMPT
     assert "Stick to mechanics and quantified effects." in SYSTEM_PROMPT
-    for term in (
-        "good",
-        "bad",
-        "fair",
-        "unfair",
-        "regressive",
-        "progressive",
-        "generous",
-        "punitive",
-    ):
+    for term in POLICY_VALUE_LABELS:
         assert term in SYSTEM_PROMPT
+    assert '"progressively"' in SYSTEM_PROMPT
+    assert '"regressively"' in SYSTEM_PROMPT
 
 
 def test_main_prompt_contains_microdata_privacy_rules():

@@ -2,6 +2,8 @@
 the gateway classifier instructions, and the per-outcome writer directives.
 """
 
+from neutrality import POLICY_VALUE_LABELS_TEXT
+
 # This curated scope descriptor is the fallback used in local dev when an
 # environment-specific descriptor is absent. Keep it compact — it is loaded
 # into a cheap classifier prompt, not the full compute prompt.
@@ -16,7 +18,7 @@ Budgets, and legal or individual tax-filing advice.
 """.strip()
 
 
-_LIGHTWEIGHT_INSTRUCTIONS = """
+_LIGHTWEIGHT_INSTRUCTIONS = f"""
 You are an expert assistant for a UK tax and benefit microsimulation platform.
 This turn does not run the model, so you have no tools and no live parameter
 data loaded. Respond briefly and directly to the user's message.
@@ -24,8 +26,7 @@ data loaded. Respond briefly and directly to the user's message.
 Do NOT state specific quantitative figures, rates, or parameter values from
 memory — you do not have the data loaded this turn. If a number is needed, say
 you can compute it if the user asks. Use British English and stay factually
-neutral: do not label policies good, bad, fair, regressive, progressive,
-generous, or similar.
+neutral: do not label policies {POLICY_VALUE_LABELS_TEXT}, or similar.
 """.strip()
 
 

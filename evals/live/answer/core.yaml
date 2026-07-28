@@ -41,15 +41,8 @@ cases:
           path: person.0.income_tax
           tolerance: 1
           required_context: [income tax]
+      factual_neutrality: true
       forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
         - actual household
       grounded_numbers: true
       allowed_numbers: []
@@ -105,15 +98,8 @@ cases:
         - tool_name: run_household_simulation
           path: reform.household.household_net_income
           tolerance: 1
+      factual_neutrality: true
       forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
         - actual household
       grounded_numbers: true
       allowed_numbers: [15000, 972]
@@ -173,15 +159,8 @@ cases:
           path: household.household_net_income
           tolerance: 1
           required_context: [net income]
+      factual_neutrality: true
       forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
         - actual household
       grounded_numbers: true
       allowed_numbers: []

@@ -22,19 +22,12 @@ cases:
         - single over 25
         - couple under 25
         - couple over 25
+      factual_neutrality: true
       forbidden:
         - £628.10
         - £497.55
         - £400.14
         - £316.98
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
     offline_responses:
       - tool_calls:
           - name: search_parameters
@@ -75,15 +68,8 @@ cases:
         - £37,700
         - taxable income
         - £50,270
+      factual_neutrality: true
       forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
         - simulated household
       grounded_numbers: true
       allowed_numbers: [2025, 37700, 12570, 50270]
@@ -127,15 +113,8 @@ cases:
         - "2025"
         - household net income
         - income tax
+      factual_neutrality: true
       forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
         - actual household
       grounded_numbers: true
       allowed_numbers: [2025]
@@ -180,15 +159,8 @@ cases:
         - illustrative
         - baseline
         - reform
+      factual_neutrality: true
       forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
         - actual household
       grounded_numbers: true
       allowed_numbers: [2025]
@@ -240,15 +212,8 @@ cases:
         - "```chart"
         - Baseline
         - Reform
+      factual_neutrality: true
       forbidden:
-        - good
-        - bad
-        - fair
-        - unfair
-        - regressive
-        - progressive
-        - generous
-        - punitive
         - actual household
       grounded_numbers: false
     offline_responses:

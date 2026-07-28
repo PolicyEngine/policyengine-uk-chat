@@ -5,6 +5,8 @@ import math
 import re
 from typing import Any, Dict, Iterable, List
 
+from neutrality import FACTUAL_NEUTRALITY_PATTERNS
+
 from eval.schemas import (
     ExecutedToolResult,
     LiveTextExpectation,
@@ -281,6 +283,11 @@ def grade_text(text: str, expectation: TextExpectation) -> List[str]:
     for pattern in expectation.forbidden_regex:
         if re.search(pattern, text, flags=re.IGNORECASE):
             errors.append(f"forbidden regex matched: {pattern!r}")
+
+    if expectation.factual_neutrality:
+        for label, pattern in FACTUAL_NEUTRALITY_PATTERNS:
+            if re.search(pattern, text, flags=re.IGNORECASE):
+                errors.append(f"factual neutrality label present: {label!r}")
 
     if expectation.grounded_numbers:
         unexpected = [
