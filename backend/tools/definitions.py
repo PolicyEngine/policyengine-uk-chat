@@ -1,6 +1,6 @@
 """Model-facing tool definitions for the UK chat runtime."""
 
-from engine.constants import DEFAULT_UK_DATASET, HOUSEHOLD_COUNTRY_IDS
+from engine.constants import HOUSEHOLD_COUNTRY_IDS
 
 
 DEFAULT_SIMULATION_YEAR = 2026
@@ -32,16 +32,6 @@ HOUSEHOLD_SCHEMA = {
 FILTER_VALUE_SCHEMA = {
     "type": ["number", "string", "boolean"],
     "description": "Comparison value interpreted using the filter variable's type.",
-}
-
-DATASET_SCHEMA = {
-    "type": "string",
-    "default": DEFAULT_UK_DATASET,
-    "description": (
-        "Managed policyengine.py UK dataset name. UK Chat's logical default is "
-        f"`{DEFAULT_UK_DATASET}`; the simulation result reports the name, label, "
-        "and URI of the deployment-resolved artifact."
-    ),
 }
 
 FILTER_LIMIT_SCHEMA = {
@@ -90,7 +80,6 @@ def _object_schema(properties: dict, required: list[str] | None = None) -> dict:
     }
 
 
-LIST_DATASETS_INPUT_SCHEMA = _object_schema({})
 LIST_ENTITIES_INPUT_SCHEMA = _object_schema({})
 SEARCH_VARIABLES_INPUT_SCHEMA = _object_schema(
     {
@@ -152,7 +141,6 @@ RUN_SOCIETY_SIMULATION_INPUT_SCHEMA = _object_schema(
     {
         "year": YEAR_SCHEMA,
         "reform": REFORM_SCHEMA,
-        "dataset": DATASET_SCHEMA,
         "extra_variables": {
             "type": "object",
             "description": (

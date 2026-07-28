@@ -33,7 +33,6 @@ Then edit `.env`. The key variables (see `.env.example` and
 | `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend Supabase auth |
 | `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Backend Supabase access (billing/credits) |
 | `HUGGING_FACE_TOKEN` | Access to the private Enhanced FRS dataset |
-| `POLICYENGINE_UK_DEFAULT_DATASET` | Optional direct dataset-reference override |
 | `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Billing (optional locally) |
 
 ## 2. Start the stack

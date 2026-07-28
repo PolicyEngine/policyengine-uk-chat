@@ -1,5 +1,6 @@
 """Tests for the model-facing UK policy tool lifecycle."""
 
+import inspect
 from pathlib import Path
 
 import tools.dispatch as agent_tools
@@ -7,10 +8,8 @@ from conftest import requires_policyengine_py
 from engine import households as household_engine
 from engine import simulations as simulation_engine
 from engine.constants import (
-    DEFAULT_UK_DATASET,
-    DEFAULT_UK_DATASET_URI,
     HOUSEHOLD_COUNTRY_IDS,
-    STANDARD_POLICYENGINE_UK_DATASET,
+    UK_CHAT_DATASET,
 )
 from engine.py_runtime import DatasetSpec
 from engine.simulations import SocietySimulationRun
@@ -25,7 +24,6 @@ def _tool(name: str) -> dict:
 def test_tool_inventory_matches_py_lifecycle():
     names = {tool["name"] for tool in TOOL_DEFINITIONS}
     assert {
-        "list_datasets",
         "list_entities",
         "search_variables",
         "get_variable",
@@ -53,27 +51,24 @@ def test_tool_inventory_matches_py_lifecycle():
     assert "run_economy_simulation" not in names
     assert "analyse_microdata" not in names
     assert "lookup_parameter" not in names
+    assert "list_datasets" not in names
 
 
-def test_default_year_and_dataset_are_py_migration_defaults():
+def test_simulation_schema_uses_fixed_dataset():
     assert DEFAULT_SIMULATION_YEAR == 2026
-    assert DEFAULT_UK_DATASET == "enhanced_frs_2024_25"
-    assert DEFAULT_UK_DATASET_URI.endswith(
-        "/enhanced_frs_2024_25.h5@1.56.13"
-    )
-    assert STANDARD_POLICYENGINE_UK_DATASET == "populace_uk_2023"
+    assert UK_CHAT_DATASET.name == "enhanced_frs_2024_25"
+    assert UK_CHAT_DATASET.label == "Enhanced FRS 2024-25"
+    assert UK_CHAT_DATASET.uri.startswith("hf://")
+    assert "@" in UK_CHAT_DATASET.uri
     society_schema = _tool("run_society_simulation")["input_schema"]
     assert society_schema["properties"]["year"]["default"] == 2026
-    assert society_schema["properties"]["dataset"]["default"] == DEFAULT_UK_DATASET
-
-
-def test_list_datasets_exposes_enhanced_frs_and_certified_standard():
-    result = agent_tools.list_datasets()
-    assert result["status"] == "success"
-    by_name = {dataset["name"]: dataset for dataset in result["datasets"]}
-    assert by_name[DEFAULT_UK_DATASET]["is_default"] is True
-    assert by_name[STANDARD_POLICYENGINE_UK_DATASET]["is_policyengine_standard_default"] is True
-    assert by_name[DEFAULT_UK_DATASET]["row_level_access"] is False
+    assert "dataset" not in society_schema["properties"]
+    assert "dataset" not in inspect.signature(
+        agent_tools.run_society_simulation
+    ).parameters
+    assert "dataset" not in inspect.signature(
+        simulation_engine.build_society_simulation
+    ).parameters
 
 
 def test_discovery_tools_are_split_by_catalog_area():
@@ -87,7 +82,6 @@ def test_discovery_tools_are_split_by_catalog_area():
     assert any("personal_allowance" in target["path"] for target in targets)
     assert "input_only" not in _tool("search_variables")["input_schema"]["properties"]
     assert _tool("search_parameters")["input_schema"]["properties"]["query"]["type"] == "string"
-    assert _tool("list_datasets")["input_schema"]["properties"] == {}
 
 
 def test_run_household_simulation_passes_policyengine_py_shape_unchanged(monkeypatch):
@@ -147,11 +141,9 @@ def test_validate_household_rejects_non_categorical_country_values():
 
 def test_society_simulation_result_handle_feeds_derivative_and_chart_tools(monkeypatch):
     dataset = DatasetSpec(
-        name=DEFAULT_UK_DATASET,
+        name=UK_CHAT_DATASET.name,
         label="Enhanced FRS 2024-25",
         uri="hf://policyengine/uk/enhanced_frs_2024_25",
-        is_default=True,
-        is_policyengine_standard_default=False,
         row_level_access=False,
     )
     payload = SocietySimulationRun(
@@ -200,11 +192,9 @@ def test_society_simulation_passes_extra_variables(monkeypatch):
         return SocietySimulationRun(
             year=kwargs["year"],
             dataset=DatasetSpec(
-                name=DEFAULT_UK_DATASET,
+                name=UK_CHAT_DATASET.name,
                 label="Enhanced FRS 2024-25",
                 uri="hf://example",
-                is_default=True,
-                is_policyengine_standard_default=False,
                 row_level_access=False,
             ),
             reform_applied=False,
@@ -226,14 +216,12 @@ def test_society_simulation_passes_extra_variables(monkeypatch):
 def test_society_simulation_normalizes_unset_reform_values(monkeypatch):
     captured = {}
     dataset = DatasetSpec(
-        name=DEFAULT_UK_DATASET,
+        name=UK_CHAT_DATASET.name,
         label="Enhanced FRS 2024-25",
         uri="hf://example",
-        is_default=True,
-        is_policyengine_standard_default=False,
         row_level_access=False,
     )
-    monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda _name: dataset)
+    monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda: dataset)
 
     def fake_pair(**kwargs):
         captured.update(kwargs)
@@ -252,19 +240,15 @@ def test_society_simulation_normalizes_unset_reform_values(monkeypatch):
     assert result.reform_applied is False
 
 
-def test_society_simulation_keeps_logical_default_for_materialization(monkeypatch):
-    """A derived override name must not bypass the configured default URI."""
-
+def test_society_simulation_uses_fixed_dataset(monkeypatch):
     captured = {}
     dataset = DatasetSpec(
-        name="enhanced_frs_2023_24",
-        label="Enhanced FRS 2023-24",
-        uri="hf://example/enhanced_frs_2023_24.h5@incident-fallback",
-        is_default=True,
-        is_policyengine_standard_default=False,
+        name=UK_CHAT_DATASET.name,
+        label=UK_CHAT_DATASET.label,
+        uri=UK_CHAT_DATASET.uri,
         row_level_access=False,
     )
-    monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda _name: dataset)
+    monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda: dataset)
 
     def fake_pair(**kwargs):
         captured.update(kwargs)
@@ -278,7 +262,7 @@ def test_society_simulation_keeps_logical_default_for_materialization(monkeypatc
         reform=None,
     )
 
-    assert captured["dataset"] == DEFAULT_UK_DATASET
+    assert "dataset" not in captured
     assert result.dataset == dataset
 
 

@@ -3,7 +3,7 @@ from pathlib import Path
 import sys
 from types import SimpleNamespace
 
-from engine.constants import DEFAULT_UK_DATASET_URI
+from engine.constants import UK_CHAT_DATASET
 
 
 class FakeApp:
@@ -33,9 +33,6 @@ class FakeImage:
 
     def pip_install_from_requirements(self, *args):
         return self._step("pip_install_from_requirements", *args)
-
-    def run_function(self, *args):
-        return self._step("run_function", *args)
 
     def add_local_dir(self, *args, **kwargs):
         return self._step("add_local_dir", *args, **kwargs)
@@ -69,39 +66,37 @@ def test_modal_deployment_definition_imports_without_remote_calls(monkeypatch):
 
         assert modal_app.APP_NAME == "peukchat-test"
         assert modal_app.SECRET_NAME == "peukchat-test-secrets"
-        assert modal_app.DEFAULT_UK_DATASET_URI == DEFAULT_UK_DATASET_URI
         assert modal_app.app.name == "peukchat-test"
         assert modal_app.chat_secrets.name == "peukchat-test-secrets"
         assert [step[0] for step in modal_app.image.steps] == [
             "debian_slim",
             "apt_install",
             "pip_install_from_requirements",
-            "run_function",
             "add_local_dir",
         ]
     finally:
         sys.modules.pop("modal_app", None)
 
 
-def test_production_deploy_seeds_pinned_default_dataset_reference():
+def test_dataset_reference_is_not_deployment_configuration():
     repo_root = Path(__file__).resolve().parents[2]
     workflow = (repo_root / ".github/workflows/deploy.yml").read_text()
+    modal_app = (repo_root / "modal_app.py").read_text()
+    env_example = (repo_root / ".env.example").read_text()
+    compose = (repo_root / "docker-compose.yml").read_text()
 
-    assert (
-        f'POLICYENGINE_UK_DEFAULT_DATASET="{DEFAULT_UK_DATASET_URI}"'
-        in workflow
-    )
+    for content in (workflow, modal_app, env_example, compose):
+        assert "POLICYENGINE_UK_DEFAULT_DATASET" not in content
+        assert UK_CHAT_DATASET.uri not in content
 
 
-def test_local_docker_exposes_enhanced_frs_configuration():
+def test_local_docker_exposes_enhanced_frs_credentials():
     repo_root = Path(__file__).resolve().parents[2]
     env_example = (repo_root / ".env.example").read_text()
     compose = (repo_root / "docker-compose.yml").read_text()
 
     assert "HUGGING_FACE_TOKEN=your_token_here" in env_example
-    assert f"# POLICYENGINE_UK_DEFAULT_DATASET={DEFAULT_UK_DATASET_URI}" in env_example
     assert "HUGGING_FACE_TOKEN=${HUGGING_FACE_TOKEN}" in compose
-    assert "- POLICYENGINE_UK_DEFAULT_DATASET" in compose
 
 
 def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():

@@ -6,7 +6,7 @@ SUGGESTION_SYSTEM = (
     "You suggest follow-up questions for a UK tax and benefit policy chatbot. "
     "Given the latest user question and the assistant's answer, propose 2-3 short, "
     "specific follow-ups the user is likely to want next (a comparison, a slice by "
-    "region or decile, a different reform, a chart request, an alternative dataset, "
+    "region or decile, a different reform, or a chart request, "
     "etc.). Each question must be under 80 characters, phrased as the user would "
     "type it, in British English, with no numbering or trailing punctuation beyond "
     "a question mark. Use neutral, descriptive wording; do not call policies good, "

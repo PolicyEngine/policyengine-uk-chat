@@ -65,7 +65,6 @@ cases:
       - name: run_society_simulation
         input:
           year: 2026
-          dataset: enhanced_frs_2024_25
           reform:
             gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
         output:
@@ -400,7 +399,6 @@ cases:
       - name: run_society_simulation
         input:
           year: 2026
-          dataset: enhanced_frs_2024_25
           reform:
             gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
         output:
@@ -456,7 +454,6 @@ cases:
       - name: run_society_simulation
         input:
           year: 2026
-          dataset: enhanced_frs_2024_25
           reform:
             gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
         output:
@@ -510,7 +507,6 @@ cases:
       - name: run_society_simulation
         input:
           year: 2026
-          dataset: enhanced_frs_2024_25
           reform:
             gov.hmrc.income_tax.allowances.personal_allowance.amount: 15000
         output:
@@ -564,7 +560,6 @@ cases:
       - name: run_society_simulation
         input:
           year: 2026
-          dataset: enhanced_frs_2024_25
         output:
           status: success
           year: 2026

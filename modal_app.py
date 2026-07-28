@@ -10,32 +10,13 @@ import modal
 
 APP_NAME = os.environ.get("POLICYENGINE_UK_CHAT_MODAL_APP_NAME", "policyengine-uk-chat")
 SECRET_NAME = os.environ.get("POLICYENGINE_UK_CHAT_MODAL_SECRET_NAME", "policyengine-uk-chat-secrets")
-DEFAULT_UK_DATASET_URI = (
-    "hf://policyengine/policyengine-uk-data-private/"
-    "enhanced_frs_2024_25.h5@1.56.13"
-)
 
 app = modal.App(APP_NAME)
-
-
-def _preload_engine():
-    """Import policyengine.py and resolve the default UK dataset at build time."""
-    import policyengine as pe
-    from policyengine.provenance.manifest import resolve_dataset_reference
-
-    pe.uk.model
-    resolve_dataset_reference(
-        "uk",
-        os.environ.get("POLICYENGINE_UK_DEFAULT_DATASET", DEFAULT_UK_DATASET_URI),
-    )
-    print("policyengine.py UK engine pre-loaded.")
-
 
 image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("libpq-dev", "gcc")
     .pip_install_from_requirements("backend/requirements.txt")
-    .run_function(_preload_engine)
     .add_local_dir("backend", remote_path="/app/backend", copy=True)
 )
 

@@ -49,7 +49,7 @@ belong in `backend/prompts/`.
 Only tools registered with `@register_tool` are exposed to the model and
 dispatched by `execute_tool()`. At present, the exposed tools are:
 
-- Discovery: `list_datasets`, `list_entities`, `search_variables`,
+- Discovery: `list_entities`, `search_variables`,
   `get_variable`, `search_parameters`, `get_parameter`,
   `list_reform_targets`, `list_household_input_variables`,
   `list_society_output_variables`, and `list_supported_outputs`.
@@ -75,15 +75,12 @@ does not register, remove, or mutate canonical tools. Use `@register_tool` for
 tool registration.
 
 The runtime uses policyengine.py with the UK country package. The default year
-is `2026`. Society-wide tools default to `enhanced_frs_2024_25`. Its logical
-name maps to a pinned direct Enhanced FRS release URI in
-`backend/engine/constants.py`. This is intentional: UK Chat does not use the
-certified Populace dataset as its default. `POLICYENGINE_UK_DEFAULT_DATASET`
-overrides the pinned reference at deployment time; other named datasets resolve
-through policyengine.py's dataset manifest. Dataset responses derive their
-reported name and label from the resolved URI so an operational override cannot
-be mislabelled as the logical default. The standard certified UK dataset exposed
-by policyengine.py is `populace_uk_2023`; keep both choices explicit.
+is `2026`. Society-wide tools always use the pinned `enhanced_frs_2024_25`
+release declared by `UK_CHAT_DATASET` in `backend/engine/constants.py`. This is
+an application invariant, not deployment configuration or a model-facing tool
+argument. Dataset name and label are derived from that single URI declaration,
+and simulation results include the resolved metadata for transparency. To
+change the dataset, update the constant and redeploy the application.
 
 The public runtime does not expose row-level survey records or a broad
 model-facing Python execution tool. Use discovery and derivative tools rather

@@ -76,14 +76,11 @@ cases:
 
   - id: gw_needsplan_wealth_tax_underspecified
     suite: gateway
-    description: Wealth tax with no rate/threshold needs reform details, while Enhanced FRS remains the settled dataset default. Minimal pair with gw_ready_wealth_tax_specified.
+    description: Wealth tax with no rate/threshold needs reform details. Minimal pair with gw_ready_wealth_tax_specified.
     requirements: [live_model]
     prompt: Model a wealth tax.
     expected_outcome: needs_plan
     expected_tool: run_society_simulation
-    expected_slots:
-      - slot: dataset
-        gates: false
 
   # ---- ready: fully specified, admissible ----
   - id: gw_ready_basic_rate_cost
@@ -124,11 +121,8 @@ cases:
 
   - id: gw_ready_decile_distribution
     suite: gateway
-    description: A fully-specified distributional ask; FRS/EFRS is the correct default (dataset stays settled — confirms dataset is NOT over-promoted for income reforms).
+    description: A fully-specified distributional ask needs no clarification.
     requirements: [live_model]
     prompt: Show the distributional impact by decile of raising the personal allowance to £15,000.
     expected_outcome: ready
     expected_tool: run_society_simulation
-    expected_slots:
-      - slot: dataset
-        gates: false

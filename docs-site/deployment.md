@@ -6,12 +6,11 @@ policyengine.py runtime and its certified UK country package together.
 
 ## Modal
 
-The Modal image uses Python 3.13, installs system build dependencies and Python
-requirements, imports `policyengine.py`, and resolves the pinned Enhanced FRS
-2024-25 URI at build time. Dataset contents are materialized at runtime by
-`pe.uk.ensure_datasets`. `POLICYENGINE_UK_DEFAULT_DATASET` can override that
-reference. The direct Enhanced FRS default is intentional and is separate from
-policyengine.py's certified Populace default.
+The Modal image uses Python 3.13 and installs the system and Python
+dependencies. Dataset contents are materialized at runtime by
+`pe.uk.ensure_datasets`. The application always uses the Enhanced FRS 2024-25
+release pinned in `backend/engine/constants.py`; changing it requires a code
+change and redeployment.
 
 The web function runs FastAPI with the configured Modal secret, two CPUs, 4 GB
 memory, and a 600-second timeout. `POLICYENGINE_DATA_FOLDER` controls the local
@@ -37,10 +36,8 @@ FRS source must also be available through `HUGGING_FACE_TOKEN`.
 ```
 
 Dependency update automation must update the runtime pin, tests, and deployed
-image together. The UK Chat default is the pinned direct URI in
-`backend/engine/constants.py`; Modal deployment configuration must stay in sync
-with it. Other named datasets resolve through policyengine.py's release
-manifest.
+image together. The UK Chat dataset is declared once as the pinned direct URI in
+`backend/engine/constants.py`.
 
 ## Health and observability
 
