@@ -75,61 +75,6 @@ cases:
         - good
         - bad
 
-  - id: tool_loop_live_autumn_budget_tax_avoidance_proxy
-    suite: tool_loop
-    description: >
-      Live model runs the article's high-income tax-avoidance proxy and reports
-      a plausible 2026 budgetary impact.
-    tags: [live_baseline, uk_2026, autumn_budget_2024, tax_avoidance, society]
-    requirements: [live_model, policyengine_py, data]
-    prompt: >
-      Model the tax-avoidance policy area from PolicyEngine's 2024 Autumn
-      Budget article as an explicit 2026 high-income proxy: set the UK
-      additional Income Tax threshold to GBP 100,000 and its rate to 50%.
-      Use exactly
-      `gov.hmrc.income_tax.rates.uk[2].threshold: 100000` and
-      `gov.hmrc.income_tax.rates.uk[2].rate: 0.5` in a society simulation.
-      Report the net budgetary impact in GBP billions.
-    expected_tools:
-      - name: run_society_simulation
-        input_contains:
-          year: 2026
-          reform:
-            gov.hmrc.income_tax.rates.uk[2].threshold: 100000
-            gov.hmrc.income_tax.rates.uk[2].rate: 0.5
-      - name: compute_budgetary_impact
-        required_input_paths: [simulation_id]
-    expected_tool_results:
-      - tool_name: compute_budgetary_impact
-        result_selection: last_successful
-        expect:
-          contains:
-            status: success
-          numeric:
-            - path: net_budgetary_impact
-              min: 5000000000
-              max: 12000000000
-    forbidden_tools: [run_household_simulation]
-    max_iterations: 6
-    expect:
-      required:
-        - "2026"
-      required_any:
-        - [tax avoidance, high-income, high income]
-        - [billion, bn]
-        - [budgetary impact, budget impact, revenue]
-      required_values:
-        - tool_name: compute_budgetary_impact
-          path: net_budgetary_impact
-          result_selection: last_successful
-          tolerance: 0.3
-          scale: 0.000000001
-      forbidden: [good, bad, fair, unfair, regressive, progressive]
-      grounded_numbers: true
-      allowed_numbers: [2023, 24, 2024]
-      allowed_derived_numbers: [50]
-      number_tolerance: 0.3
-
   - id: tool_loop_live_autumn_budget_private_school_vat
     suite: tool_loop
     description: >
@@ -298,24 +243,22 @@ cases:
   - id: tool_loop_live_autumn_budget_combined_distribution
     suite: tool_loop
     description: >
-      Live model runs a combined 2026 Budget proxy and reports grounded fiscal,
-      decile, poverty, and inequality results.
+      Live model combines the two directly modelled positive-revenue Budget
+      reforms and reports grounded fiscal, decile, poverty, and inequality
+      results.
     tags: [live_baseline, critical, uk_2026, autumn_budget_2024, distribution, poverty, inequality, society]
     requirements: [live_model, policyengine_py, data]
     prompt: >
-      Run a combined 2026 society simulation for three positive-revenue proxies
-      from PolicyEngine's 2024 Autumn Budget article: private-school VAT at 20%;
-      employer NI on pension contributions with 47.5% employee incidence and
-      the remainder split equally between consumer and capital incidence; and
-      an additional Income Tax rate of 50% starting at GBP 100,000. Use exactly
-      these reform values:
+      Run a combined 2026 society simulation for two directly modelled
+      positive-revenue reforms from PolicyEngine's 2024 Autumn Budget article:
+      private-school VAT at 20%; and employer NI on pension contributions with
+      47.5% employee incidence and the remainder split equally between consumer
+      and capital incidence. Use exactly these reform values:
       `gov.contrib.labour.private_school_vat: 0.2`,
       `gov.contrib.policyengine.employer_ni.exempt_employer_pension_contributions:
       false`, `gov.contrib.policyengine.employer_ni.employee_incidence: 0.475`,
       `gov.contrib.policyengine.employer_ni.consumer_incidence: 0.5`,
-      `gov.contrib.policyengine.employer_ni.capital_incidence: 0.5`,
-      `gov.hmrc.income_tax.rates.uk[2].threshold: 100000`, and
-      `gov.hmrc.income_tax.rates.uk[2].rate: 0.5`.
+      and `gov.contrib.policyengine.employer_ni.capital_incidence: 0.5`.
       Call compute_budgetary_impact, then compute_decile_impacts with income as
       the basis, then compute_poverty_metrics, and then
       compute_inequality_metrics. Report the budgetary impact in GBP billions,
@@ -332,8 +275,6 @@ cases:
             gov.contrib.policyengine.employer_ni.employee_incidence: 0.475
             gov.contrib.policyengine.employer_ni.consumer_incidence: 0.5
             gov.contrib.policyengine.employer_ni.capital_incidence: 0.5
-            gov.hmrc.income_tax.rates.uk[2].threshold: 100000
-            gov.hmrc.income_tax.rates.uk[2].rate: 0.5
       - name: compute_budgetary_impact
         required_input_paths: [simulation_id]
       - name: compute_decile_impacts
@@ -352,8 +293,8 @@ cases:
             status: success
           numeric:
             - path: net_budgetary_impact
-              min: 14000000000
-              max: 25000000000
+              min: 7000000000
+              max: 14000000000
       - tool_name: compute_decile_impacts
         result_selection: last_successful
         expect:
@@ -362,8 +303,8 @@ cases:
             basis: income
           numeric:
             - path: deciles.9.absolute_change
-              min: -6000
-              max: -2000
+              min: -800
+              max: -250
       - tool_name: compute_poverty_metrics
         result_selection: last_successful
         expect:
@@ -380,8 +321,8 @@ cases:
             status: success
           numeric:
             - path: metrics.gini.relative_change
-              min: -0.03
-              max: -0.005
+              min: -0.004
+              max: -0.0005
     forbidden_tools: [run_household_simulation]
     max_iterations: 8
     expect:
