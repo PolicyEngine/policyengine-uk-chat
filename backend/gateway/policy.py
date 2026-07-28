@@ -98,6 +98,7 @@ INFERABLE: set = {
 # the classifier prompt (via gateway_system) so the model and this module can't
 # drift apart on the label set.
 OUTPUT_VOCAB = (
+    "comparison_metric",
     "budgetary_impact",
     "tax_revenue",
     "benefit_spending",

@@ -60,6 +60,10 @@ validate-then-calculate flows.
   The shared matcher intentionally covers progressivity and regressivity word
   families, including `progressively` and `regressively`, while using word-aware
   patterns rather than arbitrary substring matches.
+- For a gateway case whose outcome depends on an under-specified output, assert
+  the named slot's `source` and `gates` values with `expected_slots`. Do not rely
+  on `expected_outcome` alone: another assumed slot could otherwise make the
+  case pass for the wrong reason.
 - `expected_tools` is an ordered subsequence. Declare load-bearing calls and
   use `forbidden_tools` for calls that must never occur. Discovery and recovery
   calls may appear between expected calls.

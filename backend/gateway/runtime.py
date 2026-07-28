@@ -56,6 +56,73 @@ _GENERIC_UNMODELLABLE_TERMS = {
     "responses",
 }
 
+_COMPARISON_REQUEST_PATTERNS = (
+    re.compile(r"\bcompar(?:e|es|ed|ing|ison)\b", re.IGNORECASE),
+    re.compile(r"\b(?:better|worse)\b", re.IGNORECASE),
+    re.compile(r"\bversus\b|\bvs\.?\b", re.IGNORECASE),
+    re.compile(r"\b(?:prefer|preference)\b", re.IGNORECASE),
+)
+
+_COMPARISON_SIMULATION_TOOLS = {
+    "run_household_simulation",
+    "run_society_simulation",
+}
+
+# Only these explicit, measurable outputs settle an otherwise vague comparison.
+# Keep the labels in OUTPUT_VOCAB and use word-aware patterns so policy inputs
+# such as "childcare costs" are not mistaken for a requested fiscal output.
+_COMPARISON_OUTPUT_PATTERNS = (
+    (
+        "budgetary_impact",
+        re.compile(
+            r"\b(?:budgetary|fiscal|exchequer|government finances|government revenue)\b"
+            r"|\bcost to (?:the )?(?:government|treasury)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    ("tax_revenue", re.compile(r"\btax revenue\b", re.IGNORECASE)),
+    ("benefit_spending", re.compile(r"\bbenefit spending\b", re.IGNORECASE)),
+    ("poverty_impact", re.compile(r"\bpoverty\b", re.IGNORECASE)),
+    (
+        "inequality_impact",
+        re.compile(r"\b(?:inequality|gini)\b", re.IGNORECASE),
+    ),
+    (
+        "decile_impact",
+        re.compile(
+            r"\b(?:deciles?|distributional|income distribution)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "winners_losers",
+        re.compile(
+            r"\b(?:winners?|losers?|better off|worse off)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    ("caseload", re.compile(r"\bcaseload\b", re.IGNORECASE)),
+    (
+        "marginal_rate",
+        re.compile(r"\bmarginal (?:tax )?rate\b", re.IGNORECASE),
+    ),
+    (
+        "net_income",
+        re.compile(
+            r"\b(?:net income|household income|disposable income|take-home pay)\b",
+            re.IGNORECASE,
+        ),
+    ),
+    (
+        "benefit_entitlement",
+        re.compile(
+            r"\b(?:benefit (?:amount|entitlement)"
+            r"|universal credit (?:amount|entitlement))\b",
+            re.IGNORECASE,
+        ),
+    ),
+)
+
 
 def _tokens(value: str) -> set[str]:
     return set(re.findall(r"[a-z]+", value.lower().replace("_", " ")))
@@ -90,6 +157,51 @@ def _requested_unmodellable_outputs(
         if shared_specific or shared_category:
             kept.append(output)
     return kept
+
+
+def _normalise_comparison_outputs(
+    prompt: str,
+    slots: List[SlotFact],
+    *,
+    tool: Optional[str],
+) -> List[SlotFact]:
+    """Ground comparison outputs deterministically before applying the gate.
+
+    The gateway model may omit output slots or guess a metric. For a comparison
+    request, explicit measurable outputs in the prompt are authoritative. If
+    none are present, replace any guessed outputs with one assumed
+    ``comparison_metric`` slot so the server must ask what "better" means.
+    """
+    if tool not in _COMPARISON_SIMULATION_TOOLS or not any(
+        pattern.search(prompt) for pattern in _COMPARISON_REQUEST_PATTERNS
+    ):
+        return slots
+
+    input_slots = [slot for slot in slots if slot.kind != "output"]
+    explicit_outputs = [
+        label
+        for label, pattern in _COMPARISON_OUTPUT_PATTERNS
+        if pattern.search(prompt)
+    ]
+    if explicit_outputs:
+        return input_slots + [
+            SlotFact(
+                name=label,
+                source="prompt",
+                kind="output",
+                value=label,
+            )
+            for label in explicit_outputs
+        ]
+
+    return input_slots + [
+        SlotFact(
+            name="comparison_metric",
+            source="assumed",
+            kind="output",
+            value="unspecified measurable outcome",
+        )
+    ]
 
 
 def _build_tool_summary() -> str:
@@ -205,6 +317,12 @@ def _verdict_from_plan(plan: dict, prompt: str) -> GatewayVerdict:
                 value=value,
             )
         )
+
+    slots = _normalise_comparison_outputs(
+        prompt,
+        slots,
+        tool=tool,
+    )
 
     raw_unmodellable = plan.get("unmodellable_outputs")
     unmodellable = (

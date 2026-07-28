@@ -10,6 +10,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from gateway.policy import (
+    OUTPUT_VOCAB,
     TOOL_SLOT_REQUIREMENT,
     SlotFact,
     criticality,
@@ -175,7 +176,174 @@ class TestRunGateway:
         with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             v = gateway.run_gateway("compare the two reforms")
         assert v.outcome == "needs_plan" and v.route == "lightweight"
-        assert set(v.gating_slots) == {"reform", "budgetary_impact"}
+        assert set(v.gating_slots) == {"reform", "comparison_metric"}
+
+    def test_vague_comparison_adds_assumed_metric_when_model_omits_outputs(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "value": "PA £15,000 versus UC £20 per week",
+                    "source": "prompt",
+                }
+            ],
+            "unmodellable_outputs": [],
+        }
+        prompt = (
+            "Which is better, a £15,000 personal allowance or increasing "
+            "Universal Credit by £20 per week?"
+        )
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(prompt)
+
+        assert verdict.outcome == "needs_plan"
+        assert verdict.gating_slots == ["comparison_metric"]
+        output_slots = [slot for slot in verdict.slots if slot.kind == "output"]
+        assert output_slots == [
+            gateway.SlotFact(
+                name="comparison_metric",
+                source="assumed",
+                kind="output",
+                value="unspecified measurable outcome",
+            )
+        ]
+
+    def test_vague_comparison_replaces_model_guessed_output(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                },
+                {
+                    "name": "budgetary_impact",
+                    "kind": "output",
+                    "source": "prompt",
+                },
+            ],
+            "unmodellable_outputs": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway("Which of these two reforms is better?")
+
+        assert verdict.gating_slots == ["comparison_metric"]
+        assert [slot.name for slot in verdict.slots if slot.kind == "output"] == [
+            "comparison_metric"
+        ]
+
+    def test_explicit_comparison_metric_is_grounded_from_prompt(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                }
+            ],
+            "unmodellable_outputs": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(
+                "Compare these two fully specified reforms by tax revenue."
+            )
+
+        assert verdict.outcome == "ready"
+        assert verdict.gating_slots == []
+        assert [
+            (slot.name, slot.source)
+            for slot in verdict.slots
+            if slot.kind == "output"
+        ] == [("tax_revenue", "prompt")]
+
+    def test_better_off_is_an_explicit_winners_losers_metric(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                }
+            ],
+            "unmodellable_outputs": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(
+                "Compare how many people are better off or worse off under this reform."
+            )
+
+        assert verdict.outcome == "ready"
+        assert [
+            (slot.name, slot.source)
+            for slot in verdict.slots
+            if slot.kind == "output"
+        ] == [("winners_losers", "prompt")]
+
+    def test_noncomparison_missing_output_keeps_existing_fail_safe(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                }
+            ],
+            "unmodellable_outputs": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway("Run this fully specified reform.")
+
+        assert verdict.outcome == "ready"
+        assert all(slot.kind != "output" for slot in verdict.slots)
+
+    def test_lookup_comparison_is_not_treated_as_a_reform_comparison(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "get_parameter",
+            "slots": [
+                {
+                    "name": "path",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                },
+                {
+                    "name": "year",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                },
+            ],
+            "unmodellable_outputs": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(
+                "Compare the basic rate threshold in 2025 and 2026."
+            )
+
+        assert verdict.outcome == "ready"
+        assert all(slot.name != "comparison_metric" for slot in verdict.slots)
 
     def test_unknown_tool_becomes_none(self):
         from gateway import runtime as gateway
@@ -360,6 +528,8 @@ class TestGatewaySystemPrompt:
 
         assert f"year {DEFAULT_SIMULATION_YEAR}" in gateway.GATEWAY_SYSTEM
         assert "{default_year}" not in gateway.GATEWAY_SYSTEM
+        assert "comparison_metric" in OUTPUT_VOCAB
+        assert "`comparison_metric`" in gateway.GATEWAY_SYSTEM
 
     def test_tool_summary_lists_schema_defaults(self):
         from gateway import runtime as gateway
@@ -376,9 +546,15 @@ class TestGatewaySystemPrompt:
 class TestWriterDirective:
     def test_needs_plan_lists_slots(self):
         from gateway import runtime as gateway
-        v = gateway.GatewayVerdict(outcome="needs_plan", route="lightweight", gating_slots=["reform", "output"])
+        v = gateway.GatewayVerdict(
+            outcome="needs_plan",
+            route="lightweight",
+            gating_slots=["reform", "comparison_metric"],
+        )
         d = gateway.gateway_writer_directive(v)
-        assert "reform" in d and "output" in d
+        assert "reform" in d
+        assert "comparison_metric" in d
+        assert "household income" in d
 
     def test_partial_lists_unmodellable(self):
         from gateway import runtime as gateway

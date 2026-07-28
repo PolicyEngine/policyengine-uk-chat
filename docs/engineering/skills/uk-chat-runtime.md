@@ -108,6 +108,13 @@ The gateway's non-`ready` (lightweight) outcomes must remain structurally
 enforced by omitting tools from the model request, not only by prompting the
 model not to call tools.
 
+The server normalises output slots for household and society simulation
+comparison requests before applying the gate. An explicitly named measurable
+output is grounded from the prompt. A comparison using “better”, “worse”,
+“compare”, or similar language without a measurable output receives an assumed
+`comparison_metric` slot and must return `needs_plan`; this safeguard must not
+depend on the classifier emitting a slot.
+
 Tool choice is model-mediated unless the route layer deliberately forces a
 specific tool. Prompt and schema guidance improve selection consistency, but
 they are not deterministic controls. Every model call sets its temperature from

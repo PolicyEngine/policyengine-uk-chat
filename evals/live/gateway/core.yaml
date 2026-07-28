@@ -65,10 +65,16 @@ cases:
 
   - id: gw_needsplan_is_x_better
     suite: gateway
-    description: "'Better' pins no metric — the deliverable is ungrounded."
+    description: "'Better' pins no metric, so the server adds an assumed comparison output even when the model omits or guesses one."
     requirements: [live_model]
     prompt: Which is better, a £15,000 personal allowance or increasing Universal Credit by £20 per week?
     expected_outcome: needs_plan
+    expected_tool: run_society_simulation
+    expected_gating_slots: [comparison_metric]
+    expected_slots:
+      - slot: comparison_metric
+        source: assumed
+        gates: true
 
   - id: gw_needsplan_basic_rate_underspecified
     suite: gateway

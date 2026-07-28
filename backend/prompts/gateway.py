@@ -79,8 +79,10 @@ Steps:
    caveats or possible second-round effects. Leave empty if none.
    "Compare" or "impact" alone does not request every possible macroeconomic or
    behavioural effect. If the user asks which modelled reform is "better"
-   without naming a metric, use an "assumed" output slot so the server asks what
-   "better" means; do not classify the comparison itself as unmodellable.
+   without naming a measurable metric, use an "assumed" `comparison_metric`
+   output slot so the server asks what "better" means; do not classify the
+   comparison itself as unmodellable. When the prompt names a measurable metric,
+   use its specific output label and mark it "prompt".
 
 Two fail-safe biases — apply them:
 - Admissibility leans toward IN scope. When unsure whether a tool fits, pick a
@@ -137,4 +139,7 @@ The question is in scope but under-specified on the points listed below. Ask 1-3
 concise clarifying questions targeting exactly those points, as a numbered list,
 with no preamble beyond one short lead-in sentence. Do not answer or compute yet
 — you will continue once the user replies.
+If `comparison_metric` is listed, ask which measurable outcome should define the
+comparison, giving concise examples such as household income, poverty,
+inequality, winners and losers, or government revenue.
 """.strip()
