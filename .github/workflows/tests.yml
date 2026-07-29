@@ -6,38 +6,6 @@ on:
       - main
 
 jobs:
-  changes:
-    name: Classify changed paths
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    outputs:
-      model_facing: ${{ steps.filter.outputs.model_facing }}
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Detect model-facing changes
-        id: filter
-        uses: dorny/paths-filter@v3
-        with:
-          filters: |
-            model_facing:
-              - "backend/chat/**"
-              - "backend/config/**"
-              - "backend/engine/**"
-              - "backend/eval/**"
-              - "backend/gateway/**"
-              - "backend/prompts/**"
-              - "backend/requirements*.txt"
-              - "backend/tools/**"
-              - "evals/**"
-              - "Makefile"
-              - "modal_app.py"
-              - ".github/workflows/tests.yml"
-
   backend:
     name: Backend pytest
     runs-on: ubuntu-latest
@@ -83,12 +51,20 @@ jobs:
         include:
           - label: PolicyEngine tool contracts
             target: eval-tool-contracts
+            requires_data: true
           - label: scripted trajectories
             target: eval-scripted-trajectories
+            requires_data: false
           - label: scripted answers
             target: eval-scripted-answers
+            requires_data: false
           - label: scripted tool loops
             target: eval-scripted-tool-loops
+            requires_data: false
+    env:
+      HUGGING_FACE_TOKEN: ${{ matrix.requires_data && secrets.HUGGING_FACE_TOKEN || '' }}
+      HF_TOKEN: ${{ matrix.requires_data && secrets.HUGGING_FACE_TOKEN || '' }}
+      RUN_DATA_EVALS: ${{ matrix.requires_data && '1' || '0' }}
 
     steps:
       - name: Checkout
@@ -103,6 +79,14 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
+
+      - name: Require the Enhanced FRS credential for data-backed tool contracts
+        if: matrix.requires_data
+        run: |
+          if [ -z "$HUGGING_FACE_TOKEN" ]; then
+            echo "::error::HUGGING_FACE_TOKEN is required for data-backed tool-contract evals."
+            exit 1
+          fi
 
       - name: Run ${{ matrix.label }}
         run: make ${{ matrix.target }}
@@ -188,8 +172,6 @@ jobs:
 
   live-model-evals:
     name: Live ${{ matrix.label }} evals (3 trials)
-    needs: changes
-    if: needs.changes.outputs.model_facing == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     permissions:
@@ -228,7 +210,7 @@ jobs:
       - name: Require the live-model credential
         run: |
           if [ -z "$ANTHROPIC_API_KEY" ]; then
-            echo "::error::ANTHROPIC_API_KEY is required for model-facing pull requests."
+            echo "::error::ANTHROPIC_API_KEY is required for live evals on every pull request."
             exit 1
           fi
 

@@ -59,18 +59,23 @@ For changes spanning both sides, run:
 make test
 ```
 
-Every pull request also runs:
+Every pull request also runs the four deterministic eval boundaries as separate
+checks:
 
 ```bash
-make eval-ai-offline
+make eval-tool-contracts
+make eval-scripted-trajectories
+make eval-scripted-answers
+make eval-scripted-tool-loops
 ```
 
-This validates eval schemas and errors and executes the public PolicyEngine tool
-contract, including exact and tolerance-based 2026 household and reform
-goldens. It complements pytest rather than replacing backend or frontend
+Together these are equivalent to `make eval-ai-offline`: they validate eval
+schemas and errors and execute the public PolicyEngine tool contract, including
+data-backed cases and exact and tolerance-based 2026 household and reform
+goldens. They complement pytest rather than replacing backend or frontend
 coverage.
 
-Model-facing pull requests additionally run the complete live suite:
+Every pull request also runs the complete live suite:
 
 ```bash
 ANTHROPIC_API_KEY=... make eval-ai-live
@@ -78,8 +83,9 @@ ANTHROPIC_API_KEY=... make eval-ai-live
 
 Every live model case runs three independent trials with production model
 routing. The report exposes pass@1 and pass^3, and any failed trial fails the
-job. Data-backed live tool-loop cases additionally require
-`HUGGING_FACE_TOKEN` and `RUN_DATA_EVALS=1`. There is no nightly-only coverage
+job. Data-backed deterministic tool-contract and live tool-loop cases require
+`HUGGING_FACE_TOKEN` and `RUN_DATA_EVALS=1`; CI supplies both on every pull
+request. There is no path-based, nightly-only, or manually triggered coverage
 tier.
 
 `make test-backend` writes branch-aware Python coverage to `coverage.xml` and

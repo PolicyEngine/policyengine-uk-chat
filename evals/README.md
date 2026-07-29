@@ -1,8 +1,8 @@
 # UK Chat AI Evals
 
 This directory contains evaluation cases for the UK chat AI pathway.
-Deterministic cases run on every pull request. Model-facing pull requests also
-run the separate live-model suite.
+Every pull request runs all deterministic cases and the complete separate
+live-model suite.
 
 - `evals/cases/` contains deterministic tool contracts and scripted model
   contracts.
@@ -48,9 +48,9 @@ require the managed aggregate Enhanced FRS dataset.
 Every live case must include `requirements: [live_model]` and must not include
 an `offline_response` or `offline_responses` fixture.
 
-There is no nightly-only suite and no browser E2E layer. The deterministic
-HTTP/SSE integration test controls the model boundary while exercising the
-real PolicyEngine tool path.
+There is no path-based or nightly-only suite and no browser E2E layer. The
+deterministic HTTP/SSE integration test controls the model boundary while
+exercising the real PolicyEngine tool path.
 
 ## Suites
 

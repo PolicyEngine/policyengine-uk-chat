@@ -13,9 +13,8 @@ suite proves, and how the suites should be presented as separate CI checks.
 - The reusable harness lives under `backend/eval/`.
 - Production chat code must not import evaluation modules.
 - Deterministic evals run on every pull request.
-- Pull requests that change model-facing paths run the complete live-model
-  suite with three independent trials per case. There is no separate nightly
-  suite.
+- Every pull request runs the complete live-model suite with three independent
+  trials per case. There is no path-based or separate nightly suite.
 
 ## Suite Boundaries
 
@@ -138,7 +137,7 @@ Missing runtime requirements fail rather than skip. Reports under
 `evals/reports/` include the routed model for each trial, pass@1, and pass^3. A
 case contributes to pass^3 only when all three independent trials pass.
 
-Model-facing PRs run separate gateway, trajectory, answer, and tool-loop live
-jobs. Their union is the full live suite; no deterministic case is sent to the
-provider. There is no nightly job. `--model` remains available for explicit
-debugging; CI omits it so production routing is exercised.
+Every PR runs separate gateway, trajectory, answer, and tool-loop live jobs.
+Their union is the full live suite; no deterministic case is sent to the
+provider. There is no path filter or nightly job. `--model` remains available
+for explicit debugging; CI omits it so production routing is exercised.
