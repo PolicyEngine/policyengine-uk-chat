@@ -112,7 +112,6 @@ def test_cgt_basic_rate_income_deciles_reconcile_with_budgetary_impact():
         "run_society_simulation",
         {
             "year": 2026,
-            "dataset": "enhanced_frs_2023_24",
             "reform": {"gov.hmrc.cgt.basic_rate": 0.20},
         },
         context,
