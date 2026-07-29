@@ -97,6 +97,8 @@ export interface PresetChartSpec {
   title?: string;
   subtitle?: string;
   source?: string;
+  measureLabel?: string;
+  groupLabel?: string;
   data: unknown;
 }
 

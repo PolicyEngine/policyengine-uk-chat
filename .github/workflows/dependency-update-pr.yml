@@ -63,7 +63,4 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PACKAGE: ${{ github.event.client_payload.package || inputs.package }}
           VERSION: ${{ github.event.client_payload.version || inputs.version }}
-        run: |
-          git config user.name "policyengine[bot]"
-          git config user.email "policyengine[bot]@users.noreply.github.com"
-          python .github/scripts/dependency_bump.py
+        run: .github/scripts/run-dependency-bump.sh

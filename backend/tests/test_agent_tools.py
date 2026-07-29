@@ -71,6 +71,95 @@ def test_simulation_schema_uses_fixed_dataset():
     ).parameters
 
 
+def test_decile_tool_exposes_three_state_concept():
+    tool = _tool("compute_decile_impacts")
+    properties = tool["input_schema"]["properties"]
+
+    assert set(properties) == {"simulation_id", "decile_concept"}
+    assert properties["decile_concept"] == {
+        "type": "string",
+        "enum": [
+            "household_net_income",
+            "equivalised_hbai_net_income",
+            "wealth",
+        ],
+        "default": "household_net_income",
+        "description": properties["decile_concept"]["description"],
+    }
+    assert "Select exactly one" in properties["decile_concept"]["description"]
+    assert "explicitly requests" in properties["decile_concept"]["description"]
+    assert "equivalised HBAI net income" in tool["description"]
+    assert "Wealth deciles" in tool["description"]
+    assert "exclude negative or non-finite" in tool["description"]
+    assert "null impacts, not zero" in tool["description"]
+
+
+def test_decile_tool_passes_explicit_decile_concept_to_derivative(monkeypatch):
+    captured = {}
+
+    def fake_decile_impacts(payload, **kwargs):
+        captured["payload"] = payload
+        captured.update(kwargs)
+        return {
+            "decile_concept": kwargs["decile_concept"],
+            "basis": "income",
+            "income_variable": "equiv_hbai_household_net_income",
+            "decile_variable": None,
+            "entity": "household",
+            "deciles": [],
+        }
+
+    monkeypatch.setattr(
+        agent_tools.derivatives,
+        "decile_impacts",
+        fake_decile_impacts,
+    )
+    context = new_tool_context("decile-income-concept")
+    payload = object()
+    simulation_id = context.result_store.put(
+        "society_simulation",
+        payload,
+        {},
+    )
+
+    result = agent_tools.compute_decile_impacts(
+        simulation_id,
+        decile_concept="equivalised_hbai_net_income",
+        _context=context,
+    )
+
+    assert captured == {
+        "payload": payload,
+        "decile_concept": "equivalised_hbai_net_income",
+    }
+    assert result["income_variable"] == "equiv_hbai_household_net_income"
+
+
+def test_decile_tool_rejects_concepts_outside_three_states():
+    context = new_tool_context("invalid-decile-concept")
+    simulation_id = context.result_store.put(
+        "society_simulation",
+        object(),
+        {},
+    )
+
+    result = agent_tools.execute_tool(
+        "compute_decile_impacts",
+        {
+            "simulation_id": simulation_id,
+            "decile_concept": "household_tax",
+        },
+        context=context,
+    )
+
+    assert result == {
+        "error": (
+            "Unknown decile_concept 'household_tax'; expected one of: "
+            "household_net_income, equivalised_hbai_net_income, wealth."
+        )
+    }
+
+
 def test_discovery_tools_are_split_by_catalog_area():
     assert agent_tools.list_supported_outputs()["status"] == "success"
     society_outputs = agent_tools.list_society_output_variables(entity="household")
@@ -412,6 +501,58 @@ def test_winners_losers_chart_keeps_official_overall_row():
         "winners_losers_stacked_bar",
         {"deciles": rows},
     ) == rows
+
+
+def test_decile_chart_preserves_missing_values_and_concept_labels():
+    context = new_tool_context("missing-wealth-decile")
+    result_id = context.result_store.put(
+        "decile_impacts",
+        object(),
+        {
+            "decile_concept": "wealth",
+            "measure_label": "household net income",
+            "grouping_label": "Wealth decile",
+            "deciles": [
+                {"decile": 1, "absolute_change": None, "relative_change": None},
+                {"decile": 2, "absolute_change": 25, "relative_change": 1.5},
+            ],
+        },
+    )
+
+    chart = agent_tools.generate_chart(
+        chart_kind="decile_absolute_bar",
+        result_id=result_id,
+        _context=context,
+    )
+
+    assert chart["spec"]["measureLabel"] == "household net income"
+    assert chart["spec"]["groupLabel"] == "Wealth decile"
+    assert chart["spec"]["data"] == [
+        {"label": "1", "value": None},
+        {"label": "2", "value": 25},
+    ]
+
+
+def test_winners_losers_chart_uses_stored_grouping_label():
+    context = new_tool_context("wealth-winners-losers")
+    result_id = context.result_store.put(
+        "winners_losers",
+        object(),
+        {
+            "basis": "wealth",
+            "grouping_label": "Wealth decile",
+            "deciles": [{"decile": 1, "no_change": None}],
+        },
+    )
+
+    chart = agent_tools.generate_chart(
+        chart_kind="winners_losers_stacked_bar",
+        result_id=result_id,
+        _context=context,
+    )
+
+    assert chart["spec"]["groupLabel"] == "Wealth decile"
+    assert chart["spec"]["data"][0]["no_change"] is None
 
 
 def test_dispatch_rejects_removed_public_tool_names():

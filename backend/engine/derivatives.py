@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
+from engine.decile_concepts import (
+    DEFAULT_DECILE_CONCEPT,
+    DecileConcept,
+    resolve_decile_concept,
+)
 from engine.simulations import SocietySimulationRun
 
 
@@ -169,29 +174,24 @@ def program_breakdown(
 def decile_impacts(
     run: SocietySimulationRun,
     *,
-    basis: Literal["income", "wealth"] = "income",
+    decile_concept: DecileConcept | str = DEFAULT_DECILE_CONCEPT,
 ) -> dict[str, Any]:
     """Return official policyengine.py decile-impact rows."""
 
-    from policyengine.outputs import DecileImpact
+    concept, config = resolve_decile_concept(decile_concept)
+    from policyengine.outputs import calculate_decile_impacts
 
-    kwargs: dict[str, Any] = {}
-    if basis == "wealth":
-        kwargs = {
-            "income_variable": "household_net_income",
-            "decile_variable": "household_wealth_decile",
-            "entity": "household",
-        }
-    outputs = []
-    for decile in range(1, 11):
-        output = DecileImpact(
-            baseline_simulation=run.baseline,
-            reform_simulation=run.reform_simulation,
-            decile=decile,
-            **kwargs,
-        )
-        output.run()
-        outputs.append(output)
+    # Use policyengine.py's collection helper so the shared grouping analysis
+    # is prepared once. Keep every analytical setting explicit so dependency
+    # defaults cannot silently change a public concept.
+    collection = calculate_decile_impacts(
+        baseline_simulation=run.baseline,
+        reform_simulation=run.reform_simulation,
+        income_variable=config.income_variable,
+        decile_variable=config.decile_variable,
+        entity=config.entity,
+        quantiles=config.quantiles,
+    )
     rows = [
         {
             "decile": output.decile,
@@ -203,9 +203,22 @@ def decile_impacts(
             "count_worse_off": output.count_worse_off,
             "count_no_change": output.count_no_change,
         }
-        for output in outputs
+        for output in collection.outputs
     ]
-    return {"basis": basis, "deciles": rows}
+    return {
+        "decile_concept": concept.value,
+        "basis": config.basis,
+        "income_variable": config.income_variable,
+        "decile_variable": config.decile_variable,
+        "grouping_variable": (
+            config.decile_variable or config.income_variable
+        ),
+        "entity": config.entity,
+        "quantiles": config.quantiles,
+        "measure_label": config.measure_label,
+        "grouping_label": config.grouping_label,
+        "deciles": rows,
+    }
 
 
 def winners_losers(
@@ -240,7 +253,13 @@ def winners_losers(
         }
         for output in collection.outputs
     ]
-    return {"basis": basis, "deciles": rows}
+    return {
+        "basis": basis,
+        "grouping_label": (
+            "Income decile" if basis == "income" else "Wealth decile"
+        ),
+        "deciles": rows,
+    }
 
 
 def _poverty_rows(collection: Any, group: str) -> dict[tuple[str, str], Any]:

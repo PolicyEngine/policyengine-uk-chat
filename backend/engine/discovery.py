@@ -199,7 +199,16 @@ def supported_outputs(scope: str | None = None) -> list[dict[str, str]]:
         {"scope": "society", "name": "simulation_handle", "description": "A policyengine.py baseline/reform Simulation pair."},
         {"scope": "derivative", "name": "budgetary_impact", "description": "Weighted tax, benefit-spending, and net fiscal impacts."},
         {"scope": "derivative", "name": "program_statistics", "description": "Official programme totals, caseloads, winners, and losers."},
-        {"scope": "derivative", "name": "decile_impacts", "description": "Official absolute and relative income changes by decile."},
+        {
+            "scope": "derivative",
+            "name": "decile_impacts",
+            "description": (
+                "Official absolute and relative income changes, measuring and "
+                "ranking by household net income by default, with equivalised "
+                "HBAI net income available when explicitly requested, or "
+                "measuring household net income while ranking by wealth."
+            ),
+        },
         {"scope": "derivative", "name": "winners_losers", "description": "Official people-weighted intra-decile impacts."},
         {"scope": "derivative", "name": "poverty", "description": "Official UK poverty rates overall and by age."},
         {"scope": "derivative", "name": "inequality", "description": "Official UK Gini and income-share metrics."},

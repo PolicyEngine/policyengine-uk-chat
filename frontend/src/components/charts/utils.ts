@@ -1,7 +1,10 @@
 import { AxisConfig, CHART_COLORS } from "./types";
 
-export function formatValue(value: number, format?: AxisConfig["format"]): string {
-  if (value === null || value === undefined || isNaN(value)) return "—";
+export function formatValue(
+  value: number | null | undefined,
+  format?: AxisConfig["format"],
+): string {
+  if (value === null || value === undefined || Number.isNaN(value)) return "—";
   switch (format) {
     case "currency":
       if (Math.abs(value) >= 1e9) return `£${(value / 1e9).toFixed(1)}bn`;

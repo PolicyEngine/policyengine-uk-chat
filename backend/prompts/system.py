@@ -96,6 +96,19 @@ MICRODATA PRIVACY AND ILLUSTRATIVE HOUSEHOLDS:
 ANALYTICAL_NOTES = """
 ANALYTICAL NOTES:
 - Decile impacts are policyengine.py decile-level averages, not economy-wide means.
+- For income-decile impacts, measure household net income and rank households
+  by that income by default, using `decile_concept="household_net_income"`.
+  Only when the user explicitly requests equivalised HBAI net income, use
+  `decile_concept="equivalised_hbai_net_income"`. policyengine.py forms
+  computed household income groups using person-weighted ranks. Households
+  with negative or non-finite values of that income concept are excluded from
+  the final reported deciles, consistently with country-package reporting.
+- For wealth-decile impacts, use `decile_concept="wealth"` to group households
+  by wealth: group households by wealth and measure household net income. Do
+  not describe wealth deciles as income deciles.
+- An empty decile has null income impacts, and a zero baseline mean has a null
+  relative change. These are missing results, not zero impacts: report them as
+  unavailable and do not describe them as no change.
 - Poverty outputs report decimal rates and both absolute and relative changes.
 - If a result is counterintuitive, explain the mechanism briefly.
 - If something is not modelled well enough for a quantitative answer, say so

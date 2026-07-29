@@ -55,7 +55,7 @@ multiple benefit units or unrelated households require separate calls.
 | --- | --- |
 | `compute_budgetary_impact` | Weighted `Aggregate` totals and `ChangeAggregate` changes for household tax and benefits. |
 | `compute_program_breakdown` | `build_program_statistics` with the UK program configuration. |
-| `compute_decile_impacts` | Official `DecileImpact` outputs for deciles 1-10. |
+| `compute_decile_impacts` | `calculate_decile_impacts` with explicit concept configuration for deciles 1-10. |
 | `compute_winners_losers` | `compute_intra_decile_impacts`. |
 | `compute_poverty_metrics` | `calculate_uk_poverty_rates` and `calculate_uk_poverty_by_age`. |
 | `compute_inequality_metrics` | `calculate_uk_inequality`. |
@@ -65,6 +65,15 @@ These adapters may reshape official outputs for the tool contract, but they must
 not call the country microsimulation directly, convert `MicroSeries` to NumPy,
 or implement survey weighting themselves. Row-level society data is never a
 tool result.
+
+`compute_decile_impacts` has three explicit configurations. Ordinary income
+deciles measure and rank `household_net_income`; equivalised HBAI deciles
+measure and rank `equiv_hbai_household_net_income`; wealth deciles group by
+`household_wealth_decile` while measuring `household_net_income`. All three
+pass the income variable, decile variable, household entity, and ten quantiles
+explicitly to policyengine.py. Computed income groups use person-weighted ranks
+and exclude negative or non-finite ranking incomes from final reported
+deciles. Empty groups and undefined relative changes remain null.
 
 ## Charts
 
@@ -83,7 +92,8 @@ already present in a tool result. It also supports deterministic presets:
 Except for the explicit earnings-series preset, policy-result presets require a
 matching derivative `result_id`. The backend maps the typed derivative output to
 the fixed chart rows; the frontend only renders those rows with the preset
-layout.
+layout. Decile charts label both the grouping and measured-income concepts.
+Missing values display as a dash and do not render a bar.
 
 ## Privacy boundary
 

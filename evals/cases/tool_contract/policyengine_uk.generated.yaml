@@ -3,7 +3,7 @@ source:
   package: policyengine-uk
   version: 2.89.2
   runtime_package: policyengine
-  runtime_version: 4.21.1
+  runtime_version: 5.0.0
 cases:
 - id: policyengine_uk_tax_no_income
   suite: tool_contract

@@ -9,6 +9,7 @@ import {
   Label,
   Line,
   LineChart,
+  ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
   Tooltip,
@@ -60,6 +61,11 @@ function numeric(row: ChartRow, field: string): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
+function nullableNumeric(row: ChartRow, field: string): number | null {
+  const value = row[field];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
 function titleFor(spec: PresetChartSpec): string {
   if (spec.title) return spec.title;
   switch (spec.preset) {
@@ -68,11 +74,17 @@ function titleFor(spec: PresetChartSpec): string {
     case "program_budget_waterfall":
       return "Budgetary impact by programme";
     case "decile_absolute_bar":
-      return "Average household income change by decile";
+      return spec.measureLabel && spec.groupLabel
+        ? `Average ${spec.measureLabel} change by ${spec.groupLabel.toLocaleLowerCase("en-GB")}`
+        : "Average household income change by decile";
     case "decile_relative_bar":
-      return "Relative household income change by decile";
+      return spec.measureLabel && spec.groupLabel
+        ? `Relative ${spec.measureLabel} change by ${spec.groupLabel.toLocaleLowerCase("en-GB")}`
+        : "Relative household income change by decile";
     case "winners_losers_stacked_bar":
-      return "Households gaining and losing by decile";
+      return spec.groupLabel
+        ? `Households gaining and losing by ${spec.groupLabel.toLocaleLowerCase("en-GB")}`
+        : "Households gaining and losing by decile";
     case "poverty_relative_bar":
       return "Relative change in poverty";
     case "inequality_relative_bar":
@@ -134,11 +146,16 @@ function ChartShell({
 
 function ValueTooltip({ active, payload, label, format }: any) {
   if (!active || !payload?.length) return null;
-  const value = payload[0]?.payload?.originalValue ?? payload[0]?.value ?? 0;
+  const value = payload[0]?.payload?.originalValue ?? payload[0]?.value;
   return (
     <div style={TOOLTIP_STYLE}>
       <div style={{ fontWeight: 600, marginBottom: 3 }}>{label}</div>
-      <div>{formatValue(Number(value), format)}</div>
+      <div>
+        {formatValue(
+          typeof value === "number" && Number.isFinite(value) ? value : null,
+          format,
+        )}
+      </div>
     </div>
   );
 }
@@ -220,19 +237,20 @@ function ImpactBars({
 }) {
   const data = rows(spec).map((row) => ({
     label: String(row.label ?? ""),
-    value: numeric(row, "value"),
+    value: nullableNumeric(row, "value"),
   }));
   const xAxisLabel =
     spec.preset === "decile_absolute_bar" || spec.preset === "decile_relative_bar"
-      ? "Income decile"
+      ? spec.groupLabel ?? "Income decile"
       : spec.preset === "poverty_relative_bar"
         ? "Population group"
         : "Inequality measure";
+  const measureLabel = spec.measureLabel ?? "household income";
   const yAxisLabel =
     spec.preset === "decile_absolute_bar"
-      ? "Absolute change in household income"
+      ? `Absolute change in ${measureLabel}`
       : spec.preset === "decile_relative_bar"
-        ? "Relative change in household income"
+        ? `Relative change in ${measureLabel}`
         : spec.preset === "poverty_relative_bar"
           ? "Relative change in poverty rate"
           : "Relative change";
@@ -259,12 +277,37 @@ function ImpactBars({
               />
             </YAxis>
             <ReferenceLine y={0} stroke={CHART_COLORS.axis} />
-            <Tooltip content={<ValueTooltip format={format} />} />
+            {data
+              .filter((row) => row.value === null)
+              .map((row) => (
+                <ReferenceDot
+                  key={`missing-${row.label}`}
+                  x={row.label}
+                  y={0}
+                  r={0}
+                  label={{
+                    value: "—",
+                    position: "top",
+                    fill: CHART_COLORS.label,
+                    fontSize: 12,
+                  }}
+                />
+              ))}
+            <Tooltip
+              content={<ValueTooltip format={format} />}
+              filterNull={false}
+            />
             <Bar dataKey="value" isAnimationActive={false}>
               {data.map((row) => (
                 <Cell
                   key={row.label}
-                  fill={row.value < 0 ? CHART_COLORS.negative : CHART_COLORS.positive}
+                  fill={
+                    row.value === null
+                      ? "transparent"
+                      : row.value < 0
+                        ? CHART_COLORS.negative
+                        : CHART_COLORS.positive
+                  }
                 />
               ))}
             </Bar>
@@ -277,14 +320,23 @@ function ImpactBars({
 
 function WinnersLosersTooltip({ active, payload, label }: any) {
   if (!active || !payload?.length) return null;
+  const groupLabel = payload[0]?.payload?.groupLabel ?? "Decile";
   return (
     <div style={TOOLTIP_STYLE}>
-      <div style={{ fontWeight: 600, marginBottom: 4 }}>Decile {label}</div>
+      <div style={{ fontWeight: 600, marginBottom: 4 }}>
+        {groupLabel} {label}
+      </div>
       {payload.map((item: any) => {
         const series = WINNERS_LOSERS_SERIES.find((candidate) => candidate.key === item.dataKey);
         return (
           <div key={item.dataKey} style={{ margin: "2px 0" }}>
-            {series?.label}: {formatValue(Number(item.value), "percent_decimal")}
+            {series?.label}:{" "}
+            {formatValue(
+              typeof item.value === "number" && Number.isFinite(item.value)
+                ? item.value
+                : null,
+              "percent_decimal",
+            )}
           </div>
         );
       })}
@@ -295,10 +347,15 @@ function WinnersLosersTooltip({ active, payload, label }: any) {
 function WinnersLosersPreset({ spec, height }: { spec: PresetChartSpec; height: number }) {
   const sourceRows = rows(spec);
   const overall = sourceRows.find((row) => numeric(row, "decile") === 0);
-  const allData = overall ? [{ ...overall, label: "All" }] : [];
+  const groupLabel = spec.groupLabel ?? "Income decile";
+  const allData = overall ? [{ ...overall, label: "All", groupLabel }] : [];
   const decileData = sourceRows
     .filter((row) => numeric(row, "decile") !== 0)
-    .map((row) => ({ ...row, label: String(row.decile ?? "") }));
+    .map((row) => ({
+      ...row,
+      label: String(row.decile ?? ""),
+      groupLabel,
+    }));
   const barHeight = 18;
   const overallHeight = allData.length ? 42 : 0;
   const gapHeight = allData.length ? 8 : 0;
@@ -337,7 +394,10 @@ function WinnersLosersPreset({ spec, height }: { spec: PresetChartSpec; height: 
                     axisLine={false}
                     width={40}
                   />
-                  <Tooltip content={<WinnersLosersTooltip />} />
+                  <Tooltip
+                    content={<WinnersLosersTooltip />}
+                    filterNull={false}
+                  />
                   {renderBars()}
                 </BarChart>
               </ResponsiveContainer>
@@ -371,13 +431,16 @@ function WinnersLosersPreset({ spec, height }: { spec: PresetChartSpec; height: 
                   interval={0}
                 >
                   <Label
-                    value="Income decile"
+                    value={groupLabel}
                     angle={-90}
                     position="insideLeft"
                     style={{ ...FONT_STYLE, textAnchor: "middle" }}
                   />
                 </YAxis>
-                <Tooltip content={<WinnersLosersTooltip />} />
+                <Tooltip
+                  content={<WinnersLosersTooltip />}
+                  filterNull={false}
+                />
                 {renderBars()}
               </BarChart>
             </ResponsiveContainer>

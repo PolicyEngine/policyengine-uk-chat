@@ -25,6 +25,11 @@ describe("formatValue", () => {
     expect(formatValue(12.345)).toBe("12.35");
     expect(formatValue(Number.NaN)).toBe("—");
   });
+
+  it("renders missing values as a dash rather than zero", () => {
+    expect(formatValue(null, "currency")).toBe("—");
+    expect(formatValue(undefined, "percent")).toBe("—");
+  });
 });
 
 describe("chart style helpers", () => {

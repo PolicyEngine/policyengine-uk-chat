@@ -60,11 +60,46 @@ dispatched by `execute_tool()`. At present, the exposed tools are:
   `compute_decile_impacts`, `compute_winners_losers`,
   `compute_poverty_metrics`, `compute_inequality_metrics`, and
   `aggregate_result`. These tools must delegate aggregation and derivation to
-  policyengine.py output classes; runtime code must not aggregate MicroSeries,
-  NumPy arrays, or survey weights itself.
+  the highest-level public policyengine.py collection helper available. Use
+  individual output classes only where no collection helper exists. Runtime
+  code must not aggregate MicroSeries, NumPy arrays, or survey weights itself.
 - Artifacts: `generate_chart`, including deterministic app-v2-style presets for
   budget waterfalls, programme waterfalls, decile bars, winners/losers stacks,
   poverty/inequality relative bars, and earnings lines.
+
+`compute_decile_impacts` deliberately pins its analytical meaning instead of
+inheriting policyengine.py defaults. Its single `decile_concept` input is a
+runtime-enforced three-state choice, so callers cannot construct inconsistent
+combinations of basis and income measure:
+
+- `household_net_income` measures and ranks by `household_net_income`.
+- `equivalised_hbai_net_income` measures and ranks by
+  `equiv_hbai_household_net_income`.
+- `wealth` measures `household_net_income`, groups by
+  `household_wealth_decile`, and uses the household entity.
+
+Delegate the calculation to policyengine.py's public
+`calculate_decile_impacts` collection helper. Keep the income variable, decile
+variable, entity, and `quantiles=10` explicit at that boundary so dependency
+upgrades cannot silently change these meanings. Do not loop over standalone
+`DecileImpact` objects in UK Chat: the collection helper prepares and validates
+the shared grouping analysis once.
+
+Computed income-decile grouping remains inside policyengine.py, whose default
+household grouping uses person-weighted ranks. UK Chat must not materialize
+decile assignments or manipulate survey weights locally. Computed groups
+exclude households with negative or non-finite values of the selected ranking
+income from the final reported deciles, matching country-package reporting.
+Wealth deciles continue to use the precomputed `household_wealth_decile` model
+variable.
+
+Preserve policyengine.py's missing-value semantics. Empty deciles have null
+means and changes, and relative change is null when the baseline mean is zero.
+These values must remain null through the tool and chart boundaries: charts
+render no bar and display a dash for the missing value, never a zero-valued bar.
+Decile chart metadata must carry both the measured income concept and grouping
+concept so household-net-income, equivalised-HBAI, and wealth axes cannot be
+mislabelled.
 
 Helper functions in `backend/engine/` are implementation details unless they
 are exposed through `@register_tool`.

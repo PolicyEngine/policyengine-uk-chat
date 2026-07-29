@@ -27,9 +27,7 @@ jobs:
           python-version: "3.13"
 
       - name: Install backend dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -r backend/requirements.txt -r backend/requirements-test.txt
+        run: .github/scripts/install-backend-dependencies.sh
 
       - name: Run backend tests with coverage
         run: make test-backend
@@ -106,6 +104,7 @@ jobs:
 
       - name: Sync secrets to Modal
         env:
+          MODAL_SECRET_NAME: policyengine-uk-chat-secrets
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
@@ -123,28 +122,10 @@ jobs:
           # Production stays on stdout until Google Cloud Logging is verified
           # on previews; flip by setting the repo variable — no code change.
           OBSERVABILITY_LOG_DESTINATIONS: ${{ vars.OBSERVABILITY_LOG_DESTINATIONS_PRODUCTION || 'stdout' }}
-        run: |
-          modal secret create policyengine-uk-chat-secrets \
-            ANTHROPIC_API_KEY="$ANTHROPIC_API_KEY" \
-            ANTHROPIC_FAST_MODEL="claude-haiku-4-5" \
-            ANTHROPIC_COMPLEX_MODEL="claude-sonnet-4-6" \
-            ANTHROPIC_TITLE_MODEL="claude-haiku-4-5" \
-            ANTHROPIC_DEFAULT_MODEL="claude-haiku-4-5" \
-            POLICYENGINE_UK_DATA_TOKEN="$POLICYENGINE_UK_DATA_TOKEN" \
-            HUGGING_FACE_TOKEN="$HUGGING_FACE_TOKEN" \
-            DATABASE_URL="$DATABASE_URL" \
-            SUPABASE_URL="$SUPABASE_URL" \
-            SUPABASE_SERVICE_ROLE_KEY="$SUPABASE_SERVICE_ROLE_KEY" \
-            STRIPE_SECRET_KEY="$STRIPE_SECRET_KEY" \
-            STRIPE_WEBHOOK_SECRET="$STRIPE_WEBHOOK_SECRET" \
-            OBSERVABILITY_ENVIRONMENT="production" \
-            OBSERVABILITY_GOOGLE_CLOUD_PROJECT="$OBSERVABILITY_GOOGLE_CLOUD_PROJECT" \
-            OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER="$OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER" \
-            OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL="$OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL" \
-            OBSERVABILITY_LOG_DESTINATIONS="$OBSERVABILITY_LOG_DESTINATIONS" \
-            HOSTNAMES="https://policyengine-uk-chat.vercel.app,https://policyengine-uk-chat-bmxyy36r1-policy-engine.vercel.app" \
-            PUBLIC_BASE_URL="https://policyengine-uk-chat.vercel.app/uk/chat" \
-            --force
+          OBSERVABILITY_ENVIRONMENT: production
+          HOSTNAMES: https://policyengine-uk-chat.vercel.app,https://policyengine-uk-chat-bmxyy36r1-policy-engine.vercel.app
+          PUBLIC_BASE_URL: https://policyengine-uk-chat.vercel.app/uk/chat
+        run: .github/scripts/sync-modal-secret.sh
 
       - name: Deploy to Modal
         env:
@@ -156,16 +137,6 @@ jobs:
       # this run red instead of failing silently (see the #142 outage, where
       # the first log write hung every request in the new containers).
       - name: Smoke test deployed backend
-        run: |
-          url="https://policyengine--policyengine-uk-chat-web.modal.run/version"
-          for attempt in $(seq 1 12); do
-            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 15 "$url" || true)
-            if [ "$code" = "200" ]; then
-              echo "Backend healthy after deploy (attempt $attempt)."
-              exit 0
-            fi
-            echo "Attempt $attempt: got '$code'; retrying in 10s..."
-            sleep 10
-          done
-          echo "Deployed backend failed the smoke test: $url" >&2
-          exit 1
+        env:
+          BACKEND_URL: https://policyengine--policyengine-uk-chat-web.modal.run
+        run: .github/scripts/smoke-test-modal-backend.sh

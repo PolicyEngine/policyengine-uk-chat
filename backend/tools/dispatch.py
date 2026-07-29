@@ -8,6 +8,7 @@ import logging
 from typing import Any, Dict, List, Optional
 
 from engine import derivatives, discovery
+from engine.decile_concepts import DEFAULT_DECILE_CONCEPT
 from engine.households import calculate_household, validate_household_dict
 from engine.reforms import validate_reform_dict
 from engine.serialization import explore_tabular_data, json_safe
@@ -24,6 +25,7 @@ from tools.definitions import (
     COMPUTE_POVERTY_METRICS_INPUT_SCHEMA,
     COMPUTE_PROGRAM_BREAKDOWN_INPUT_SCHEMA,
     COMPUTE_WINNERS_LOSERS_INPUT_SCHEMA,
+    DECILE_IMPACTS_DESCRIPTION,
     DEFAULT_SIMULATION_YEAR,
     DERIVATIVE_DESCRIPTION,
     DISCOVERY_DESCRIPTION,
@@ -271,13 +273,24 @@ def compute_program_breakdown(
     return _derivative_result(_context, "program_breakdown", summary)
 
 
-@register_tool(name="compute_decile_impacts", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_DECILE_IMPACTS_INPUT_SCHEMA)
-def compute_decile_impacts(simulation_id: str, basis: str = "income", _context: ToolExecutionContext | None = None) -> Dict[str, Any]:
+@register_tool(
+    name="compute_decile_impacts",
+    description=DECILE_IMPACTS_DESCRIPTION,
+    input_schema=COMPUTE_DECILE_IMPACTS_INPUT_SCHEMA,
+)
+def compute_decile_impacts(
+    simulation_id: str,
+    decile_concept: str = DEFAULT_DECILE_CONCEPT.value,
+    _context: ToolExecutionContext | None = None,
+) -> Dict[str, Any]:
     payload = _society_payload(_context, simulation_id)
     summary = {
         "status": "success",
         "simulation_id": simulation_id,
-        **derivatives.decile_impacts(payload, basis=basis),
+        **derivatives.decile_impacts(
+            payload,
+            decile_concept=decile_concept,
+        ),
     }
     return _derivative_result(_context, "decile_impacts", summary)
 
@@ -576,6 +589,7 @@ def generate_chart(
             )
         )
     expected_kind = _PRESET_RESULT_KINDS.get(chart_kind)
+    preset_metadata: dict[str, Any] = {}
     if expected_kind is not None:
         if not result_id:
             return {
@@ -586,6 +600,15 @@ def generate_chart(
             }
         stored = _get_stored(_context, result_id, expected_kind)
         data = _preset_chart_data(chart_kind, stored.summary)
+        if expected_kind == "decile_impacts":
+            preset_metadata = {
+                "measureLabel": stored.summary["measure_label"],
+                "groupLabel": stored.summary["grouping_label"],
+            }
+        elif expected_kind == "winners_losers":
+            preset_metadata = {
+                "groupLabel": stored.summary["grouping_label"],
+            }
     elif data is None:
         return {"error": f"{chart_kind} requires chart data."}
     spec = {
@@ -595,6 +618,7 @@ def generate_chart(
         "subtitle": subtitle,
         "data": data,
         "source": source or "PolicyEngine UK via policyengine.py",
+        **preset_metadata,
     }
     return _chart_markdown(spec)
 

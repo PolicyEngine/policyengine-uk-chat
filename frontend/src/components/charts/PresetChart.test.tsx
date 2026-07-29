@@ -7,18 +7,38 @@ import type { PresetChartKind, PresetChartSpec } from "./types";
 
 vi.mock("recharts", () => {
   const Container = ({ children }: PropsWithChildren) => <div>{children}</div>;
+  const BarChart = ({
+    children,
+    data,
+  }: PropsWithChildren<{ data?: unknown }>) => (
+    <div data-testid="bar-chart" data-chart={JSON.stringify(data)}>
+      {children}
+    </div>
+  );
   const Empty = () => null;
+  const Label = ({ value }: { value?: string }) => (
+    <span data-testid="chart-label" data-value={value} />
+  );
+  const Tooltip = ({ filterNull }: { filterNull?: boolean }) => (
+    <span data-testid="chart-tooltip" data-filter-null={String(filterNull)} />
+  );
+  const ReferenceDot = ({
+    label,
+  }: {
+    label?: { value?: string };
+  }) => <span data-testid="missing-value-marker">{label?.value}</span>;
   return {
     Bar: Container,
-    BarChart: Container,
+    BarChart,
     CartesianGrid: Empty,
     Cell: Empty,
-    Label: Empty,
+    Label,
     Line: Empty,
     LineChart: Container,
+    ReferenceDot,
     ReferenceLine: Empty,
     ResponsiveContainer: Container,
-    Tooltip: Empty,
+    Tooltip,
     XAxis: Container,
     YAxis: Container,
   };
@@ -34,6 +54,14 @@ const PRESETS: Array<[PresetChartKind, string, unknown]> = [
   ["inequality_relative_bar", "Relative change in inequality", [{ label: "Gini", value: 0.2 }]],
   ["earnings_variation_line", "Impact by earnings", [{ earnings: 10_000, value: 100 }]],
 ];
+
+function expectChartLabel(value: string) {
+  expect(
+    screen
+      .getAllByTestId("chart-label")
+      .map((label) => label.getAttribute("data-value")),
+  ).toContain(value);
+}
 
 describe("PresetChart", () => {
   it.each(PRESETS)("renders the deterministic title for %s", (preset, title, data) => {
@@ -56,6 +84,65 @@ describe("PresetChart", () => {
     expect(screen.getByText("Custom title")).toBeInTheDocument();
     expect(screen.getByText("Custom subtitle")).toBeInTheDocument();
     expect(screen.getByText("Source: PolicyEngine")).toBeInTheDocument();
+  });
+
+  it("labels wealth-decile impacts with their measured and grouping concepts", () => {
+    const spec: PresetChartSpec = {
+      type: "preset",
+      preset: "decile_absolute_bar",
+      measureLabel: "household net income",
+      groupLabel: "Wealth decile",
+      data: [{ label: "1", value: 10 }],
+    };
+
+    render(<PresetChart spec={spec} />);
+
+    expect(
+      screen.getByText("Average household net income change by wealth decile"),
+    ).toBeInTheDocument();
+    expectChartLabel("Wealth decile");
+    expectChartLabel("Absolute change in household net income");
+  });
+
+  it("keeps missing decile values null so no zero-valued bar is rendered", () => {
+    const spec: PresetChartSpec = {
+      type: "preset",
+      preset: "decile_relative_bar",
+      measureLabel: "equivalised HBAI net income",
+      groupLabel: "Equivalised HBAI net income decile",
+      data: [{ label: "1", value: null }],
+    };
+
+    render(<PresetChart spec={spec} />);
+
+    expect(screen.getByTestId("bar-chart")).toHaveAttribute(
+      "data-chart",
+      JSON.stringify([{ label: "1", value: null }]),
+    );
+    expect(screen.getByTestId("chart-tooltip")).toHaveAttribute(
+      "data-filter-null",
+      "false",
+    );
+    expect(screen.getByTestId("missing-value-marker")).toHaveTextContent("—");
+  });
+
+  it("labels wealth winners and losers by wealth decile", () => {
+    const spec: PresetChartSpec = {
+      type: "preset",
+      preset: "winners_losers_stacked_bar",
+      groupLabel: "Wealth decile",
+      data: [{ decile: 1, no_change: null }],
+    };
+
+    render(<PresetChart spec={spec} />);
+
+    expect(
+      screen.getByText("Households gaining and losing by wealth decile"),
+    ).toBeInTheDocument();
+    expectChartLabel("Wealth decile");
+    for (const tooltip of screen.getAllByTestId("chart-tooltip")) {
+      expect(tooltip).toHaveAttribute("data-filter-null", "false");
+    }
   });
 
   it("rejects unsupported presets", () => {
