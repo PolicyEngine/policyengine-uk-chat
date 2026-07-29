@@ -5,7 +5,7 @@ import os
 
 import pytest
 
-from engine.constants import DATASET_LABELS, DEFAULT_UK_DATASET
+from engine.constants import UK_CHAT_DATASET
 from tools.context import new_tool_context
 from tools.dispatch import execute_tool
 
@@ -38,9 +38,9 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
     simulation_id = simulation["result_id"]
     assert simulation["year"] == 2026
     assert simulation["fiscal_year"] == "2026"
-    assert simulation["dataset"]["name"] == DEFAULT_UK_DATASET
-    assert simulation["dataset"]["label"] == DATASET_LABELS[DEFAULT_UK_DATASET]
-    assert simulation["dataset"]["uri"] != "unavailable"
+    assert simulation["dataset"]["name"] == UK_CHAT_DATASET.name
+    assert simulation["dataset"]["label"] == UK_CHAT_DATASET.label
+    assert simulation["dataset"]["uri"] == UK_CHAT_DATASET.uri
 
     budget = _execute(
         "compute_budgetary_impact",
