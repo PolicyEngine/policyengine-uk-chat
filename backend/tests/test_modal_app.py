@@ -1,9 +1,15 @@
 import importlib
+import importlib.util
+import os
 from pathlib import Path
+import re
 import sys
 from types import SimpleNamespace
 
 from engine.constants import UK_CHAT_DATASET
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 class FakeApp:
@@ -50,7 +56,9 @@ def identity_decorator(**_kwargs):
 
 def test_modal_deployment_definition_imports_without_remote_calls(monkeypatch):
     monkeypatch.setenv("POLICYENGINE_UK_CHAT_MODAL_APP_NAME", "peukchat-test")
-    monkeypatch.setenv("POLICYENGINE_UK_CHAT_MODAL_SECRET_NAME", "peukchat-test-secrets")
+    monkeypatch.setenv(
+        "POLICYENGINE_UK_CHAT_MODAL_SECRET_NAME", "peukchat-test-secrets"
+    )
     fake_modal = SimpleNamespace(
         App=FakeApp,
         Image=FakeImage,
@@ -79,11 +87,10 @@ def test_modal_deployment_definition_imports_without_remote_calls(monkeypatch):
 
 
 def test_dataset_reference_is_not_deployment_configuration():
-    repo_root = Path(__file__).resolve().parents[2]
-    workflow = (repo_root / ".github/workflows/deploy.yml").read_text()
-    modal_app = (repo_root / "modal_app.py").read_text()
-    env_example = (repo_root / ".env.example").read_text()
-    compose = (repo_root / "docker-compose.yml").read_text()
+    workflow = (REPO_ROOT / ".github/workflows/deploy.yml").read_text()
+    modal_app = (REPO_ROOT / "modal_app.py").read_text()
+    env_example = (REPO_ROOT / ".env.example").read_text()
+    compose = (REPO_ROOT / "docker-compose.yml").read_text()
 
     for content in (workflow, modal_app, env_example, compose):
         assert "POLICYENGINE_UK_DEFAULT_DATASET" not in content
@@ -91,17 +98,20 @@ def test_dataset_reference_is_not_deployment_configuration():
 
 
 def test_local_docker_exposes_enhanced_frs_credentials():
-    repo_root = Path(__file__).resolve().parents[2]
-    env_example = (repo_root / ".env.example").read_text()
-    compose = (repo_root / "docker-compose.yml").read_text()
+    env_example = (REPO_ROOT / ".env.example").read_text()
+    compose = (REPO_ROOT / "docker-compose.yml").read_text()
 
     assert "HUGGING_FACE_TOKEN=your_token_here" in env_example
     assert "HUGGING_FACE_TOKEN=${HUGGING_FACE_TOKEN}" in compose
 
 
 def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
-    repo_root = Path(__file__).resolve().parents[2]
-    workflow = (repo_root / ".github/workflows/pr-beta-deploy.yml").read_text()
+    workflow = (REPO_ROOT / ".github/workflows/pr-beta-deploy.yml").read_text()
+    sync_script = (REPO_ROOT / ".github/scripts/sync-modal-secret.sh").read_text()
+    deploy_script = (REPO_ROOT / ".github/scripts/deploy-modal-preview.sh").read_text()
+    smoke_script = (
+        REPO_ROOT / ".github/scripts/smoke-test-modal-backend.sh"
+    ).read_text()
 
     assert (
         "MODAL_PREVIEW_APP_NAME: pe-uk-chat-${{ github.event.pull_request.number }}"
@@ -109,29 +119,78 @@ def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
     )
     assert (
         "MODAL_PREVIEW_SECRET_NAME: "
-        "pe-uk-chat-${{ github.event.pull_request.number }}-secrets"
-        in workflow
+        "pe-uk-chat-${{ github.event.pull_request.number }}-secrets" in workflow
     )
     assert "peukchat-$branch_slug" not in workflow
     assert (
-        'modal.Function.from_name(os.environ["MODAL_APP_NAME"], "web")'
-        in workflow
+        'modal.Function.from_name(os.environ["MODAL_APP_NAME"], "web")' in deploy_script
     )
+    assert "BACKEND_URL: ${{ steps.modal_deploy.outputs.modal_url }}" in workflow
+    assert workflow.count("HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}") == 1
+    assert sync_script.count('HUGGING_FACE_TOKEN="$HUGGING_FACE_TOKEN"') == 1
+    assert "HOSTNAMES: ${{ steps.names.outputs.frontend_url }}" in workflow
     assert (
-        'backend_url="${{ steps.modal_deploy.outputs.modal_url }}"'
-        in workflow
+        "PUBLIC_BASE_URL: ${{ steps.names.outputs.frontend_url }}/uk/chat" in workflow
     )
-    assert workflow.count(
-        "HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}"
-    ) == 1
-    assert workflow.count('HUGGING_FACE_TOKEN="$HUGGING_FACE_TOKEN"') == 1
-    assert "FRONTEND_URL: ${{ steps.names.outputs.frontend_url }}" in workflow
-    assert 'HOSTNAMES="$FRONTEND_URL"' in workflow
-    assert 'PUBLIC_BASE_URL="$FRONTEND_URL/uk/chat"' in workflow
-    assert '-X OPTIONS "$backend_url/chat/message"' in workflow
-    assert 'Access-Control-Request-Method: POST' in workflow
-    assert workflow.index('modal app stop "$MODAL_APP_NAME"') < workflow.index(
-        'modal secret create "$MODAL_SECRET_NAME"'
+    assert 'HOSTNAMES="$HOSTNAMES"' in sync_script
+    assert 'PUBLIC_BASE_URL="$PUBLIC_BASE_URL"' in sync_script
+    assert '-X OPTIONS "$backend_url/chat/message"' in smoke_script
+    assert "Access-Control-Request-Method: POST" in smoke_script
+    assert workflow.index(".github/scripts/stop-modal-app.sh") < workflow.index(
+        ".github/scripts/sync-modal-secret.sh"
     )
     assert "Update Modal secret with preview frontend URL" not in workflow
     assert "Refresh backend preview with preview frontend URL" not in workflow
+
+
+def test_workflows_delegate_multiline_shell_to_repository_scripts():
+    workflow_paths = sorted((REPO_ROOT / ".github/workflows").glob("*.y*ml"))
+
+    assert workflow_paths
+    for workflow_path in workflow_paths:
+        workflow = workflow_path.read_text()
+        assert re.search(r"^\s+run:\s*[|>]", workflow, re.MULTILINE) is None, (
+            f"{workflow_path.name} contains inline multiline shell"
+        )
+        for script_name in re.findall(
+            r"\.github/scripts/[A-Za-z0-9_.-]+",
+            workflow,
+        ):
+            script_path = REPO_ROOT / script_name
+            assert script_path.is_file(), (
+                f"{workflow_path.name} references missing {script_name}"
+            )
+            assert os.access(script_path, os.X_OK), f"{script_name} must be executable"
+
+
+def test_deploy_workflows_reuse_modal_secret_and_smoke_test_scripts():
+    production = (REPO_ROOT / ".github/workflows/deploy.yml").read_text()
+    preview = (REPO_ROOT / ".github/workflows/pr-beta-deploy.yml").read_text()
+
+    for workflow in (production, preview):
+        assert "run: .github/scripts/sync-modal-secret.sh" in workflow
+        assert "run: .github/scripts/smoke-test-modal-backend.sh" in workflow
+
+
+def test_preview_frontend_url_script_writes_github_outputs(tmp_path, monkeypatch):
+    script_path = REPO_ROOT / ".github/scripts/preview_frontend_url.py"
+    spec = importlib.util.spec_from_file_location(
+        "preview_frontend_url",
+        script_path,
+    )
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    output_path = tmp_path / "github-output"
+    monkeypatch.setenv("BRANCH_NAME", "Agent/Explicit__Decile Income Concepts")
+    monkeypatch.setenv("GITHUB_OUTPUT", str(output_path))
+
+    module.main()
+
+    assert module.slugify_branch("Agent/Explicit__Decile Income Concepts") == (
+        "agent-explicit-decile-income-concepts"
+    )
+    assert output_path.read_text().splitlines() == [
+        "branch_slug=agent-explicit-decile-income-concepts",
+        "frontend_url=https://policyengine-uk-chat-git-"
+        "agent-explicit-decile-income-concepts-policy-engine.vercel.app",
+    ]
