@@ -282,6 +282,7 @@ export default function ChatPage() {
     else document.documentElement.removeAttribute("data-theme");
   };
   const bottomRef = useRef<HTMLDivElement>(null);
+  const transcriptRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const sessionId = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
@@ -383,13 +384,13 @@ export default function ChatPage() {
     }
   }, [user, authLoading]);
 
-  // The transcript scrolls with the document (the messages div itself is not
-  // scrollable), so auto-scroll targets a bottom sentinel. Only follow when the
-  // user is already near the bottom — never fight someone reading earlier
-  // messages mid-stream.
+  // Keep the composer anchored while the transcript scrolls independently.
+  // Only follow new content when the user is already near the bottom — never
+  // fight someone reading earlier messages mid-stream.
   const isNearBottom = () => {
-    if (typeof window === "undefined" || typeof document === "undefined") return true;
-    return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 200;
+    const transcript = transcriptRef.current;
+    if (!transcript) return true;
+    return transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 200;
   };
 
   useEffect(() => {
@@ -1493,7 +1494,7 @@ export default function ChatPage() {
   const isEmbed = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("embed");
 
   return (
-    <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div style={{ height: "100dvh", overflow: "hidden", background: "var(--bg)", color: "var(--text)", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <style>{`
         [data-tip],[data-tip-left],[data-tip-right]{position:relative}
         [data-tip]::after,[data-tip-left]::after,[data-tip-right]::after{
@@ -1523,7 +1524,7 @@ export default function ChatPage() {
         @keyframes tip-fade{from{opacity:0}to{opacity:1}}
       `}</style>
       {/* Body */}
-      <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", minHeight: "100dvh" }}>
+      <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", height: "100dvh", overflow: "hidden" }}>
         {!isEmbed && !sidebarOpen && (
           /* Rail */
           <div data-pe-sidebar style={{ width: "60px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 0", position: "sticky", top: 0, height: "100dvh", boxSizing: "border-box" }}>
@@ -1650,8 +1651,19 @@ export default function ChatPage() {
         )}
 
         {/* Chat area */}
-        <div data-pe-chat style={{ flex: 1, padding: "0 24px", paddingTop: "16px", paddingBottom: "24px", minWidth: 0, minHeight: hasMessages ? "auto" : "calc(100vh - 120px)", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center", alignItems: "stretch" }}>
+        <div data-pe-chat style={{ flex: 1, padding: "16px 24px max(24px, env(safe-area-inset-bottom))", minWidth: 0, minHeight: 0, height: "100dvh", boxSizing: "border-box", overflow: "hidden", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center", alignItems: "stretch" }}>
+          {!hasMessages && (
+            <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", textAlign: "center", marginBottom: "20px" }}>
+              <h1 style={{ fontSize: "30px", fontWeight: 500, color: "var(--text)", margin: 0, letterSpacing: "-0.01em" }}>What&apos;s on your mind today?</h1>
+            </div>
+          )}
+
           {hasMessages && (
+            <div
+              ref={transcriptRef}
+              data-pe-transcript
+              style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", scrollbarGutter: "stable" }}
+            >
             <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", marginBottom: "8px", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px" }}>
               <button
                 onClick={() => { setReportError(null); setReportOpen(true); }}
@@ -1672,15 +1684,7 @@ export default function ChatPage() {
                 Download .md
               </button>
             </div>
-          )}
 
-          {!hasMessages && (
-            <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", textAlign: "center", marginBottom: "20px" }}>
-              <h1 style={{ fontSize: "30px", fontWeight: 500, color: "var(--text)", margin: 0, letterSpacing: "-0.01em" }}>What&apos;s on your mind today?</h1>
-            </div>
-          )}
-
-          {hasMessages && (
             <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", marginBottom: "20px" }}>
               {messages.map((msg, idx) => (
                 <div key={idx} style={{ marginBottom: "8px" }}>
@@ -1790,10 +1794,11 @@ export default function ChatPage() {
               )}
               <div ref={bottomRef} aria-hidden="true" />
             </div>
+            </div>
           )}
 
           {/* Input */}
-          <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", position: "relative" }}>
+          <div data-pe-composer style={{ width: "100%", maxWidth: "760px", margin: hasMessages ? "12px auto 0" : "0 auto", position: "relative", flexShrink: 0 }}>
             {!hasMessages && (
               <div aria-hidden="true" style={{ position: "absolute", inset: "-40px -60px", background: "radial-gradient(ellipse at center, var(--accent-15), transparent 70%)", filter: "blur(20px)", pointerEvents: "none", zIndex: 0 }} />
             )}
@@ -1943,7 +1948,7 @@ export default function ChatPage() {
                   position: "absolute",
                   left: 0,
                   right: 0,
-                  top: "calc(100% + 6px)",
+                  bottom: "calc(100% + 6px)",
                   zIndex: 5,
                   background: "var(--surface)",
                   border: "1px solid var(--border)",
