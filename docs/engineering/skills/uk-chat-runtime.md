@@ -12,7 +12,8 @@ The backend is organized by topic — one package per concern:
   `model_selection.py`, `schemas.py`, `titles.py`,
   `suggestions.py`, and `routes.py` (the `/chat` router).
 - `backend/gateway/` owns the opening-turn pre-pass: `runtime.py` (the
-  forced-tool classifier) and `policy.py` (the deterministic criticality + gate).
+  forced-tool classifier), `catalogue.py` (the server-side PolicyEngine
+  catalogue resolver), and `policy.py` (the deterministic criticality + gate).
 - `backend/prompts/` owns all product prompt text: `system.py` (the compute
   system prompt), `gateway.py` (gateway + lightweight prompts), `meta.py` (title
   + suggestion prompts). Keep prompts modular and declarative there.
@@ -142,6 +143,25 @@ official policyengine.py filter arguments for conditional weighted aggregates.
 The gateway's non-`ready` (lightweight) outcomes must remain structurally
 enforced by omitting tools from the model request, not only by prompting the
 model not to call tools.
+
+## First-turn Catalogue Confirmation
+
+On an opening turn, the gateway classifier emits a bounded set of concise
+parameter/reform-target and variable search terms. `gateway.catalogue` resolves
+them against the installed `policyengine.py` UK model before the route is
+chosen. This is an internal server lookup, not another model-facing tool.
+
+A match confirms only that the model exposes a candidate concept. It must not
+silently resolve ambiguity: existing `needs_plan` and `partial` outcomes remain
+lightweight, where the model can ask the necessary follow-up question. A match
+does prevent an `irrelevant` or `out_of_scope` classifier result from falsely
+refusing an otherwise modelled request. If no candidate resolves, use the
+lightweight path to ask which supported measure or variable the user means; do
+not call it unmodelled. If catalogue metadata cannot be loaded, fail open to
+the normal compute route.
+
+Pass paths and variable names only as internal compute context. The lightweight
+writer may receive human-readable candidate labels, but not internal paths.
 
 Tool choice is model-mediated unless the route layer deliberately forces a
 specific tool. Prompt and schema guidance improve selection consistency, but
