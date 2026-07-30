@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip, IconDots } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -289,7 +289,9 @@ export default function ChatPage() {
   };
   const bottomRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
+  const composerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const [composerHeight, setComposerHeight] = useState(0);
   const sessionId = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const draftRestoredRef = useRef(false);
@@ -390,19 +392,39 @@ export default function ChatPage() {
     }
   }, [user, authLoading]);
 
-  // Keep the composer anchored while the transcript scrolls independently.
-  // Only follow new content when the user is already near the bottom — never
-  // fight someone reading earlier messages mid-stream.
+  // The conversation scrolls with the document while only the rounded composer
+  // floats above it. Only follow new content when the user is already near the
+  // bottom — never fight someone reading earlier messages mid-stream.
   const isNearBottom = () => {
-    const transcript = transcriptRef.current;
-    if (!transcript) return true;
-    return transcript.scrollHeight - transcript.scrollTop - transcript.clientHeight < 200;
+    if (typeof window === "undefined" || typeof document === "undefined") return true;
+    return window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 200;
   };
 
   useEffect(() => {
     if (!isNearBottom()) return;
     bottomRef.current?.scrollIntoView({ block: "end" });
   }, [messages]);
+
+  // Reserve exactly enough document space for the floating composer so the
+  // final answer can always scroll clear of it, including attachments and
+  // multi-line drafts.
+  useEffect(() => {
+    if (!hasMessages || !composerRef.current) {
+      setComposerHeight(0);
+      return;
+    }
+    const composer = composerRef.current;
+    const updateHeight = () => setComposerHeight(composer.offsetHeight);
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(composer);
+    return () => observer.disconnect();
+  }, [hasMessages]);
+
+  useEffect(() => {
+    if (!composerHeight || !isNearBottom()) return;
+    bottomRef.current?.scrollIntoView({ block: "end" });
+  }, [composerHeight]);
 
   // iOS Safari does not honor `interactive-widget=resizes-content`; it uses the
   // visual-viewport API instead. When the soft keyboard slides up, the visual
@@ -471,6 +493,43 @@ export default function ChatPage() {
   };
 
   const [copiedShareId, setCopiedShareId] = useState<number | null>(null);
+  const [conversationMenu, setConversationMenu] = useState<{ id: number; top: number; left: number } | null>(null);
+
+  const toggleConversationMenu = (e: React.MouseEvent<HTMLButtonElement>, id: number) => {
+    e.stopPropagation();
+    if (conversationMenu?.id === id) {
+      setConversationMenu(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    const menuWidth = 184;
+    const menuHeight = 104;
+    const opensUpward = rect.bottom + 6 + menuHeight > window.innerHeight - 12;
+    setConversationMenu({
+      id,
+      top: opensUpward ? rect.top - menuHeight - 6 : rect.bottom + 6,
+      left: Math.max(8, rect.right - menuWidth),
+    });
+  };
+
+  useEffect(() => {
+    if (!conversationMenu) return;
+    const closeOnOutsideClick = (event: MouseEvent) => {
+      const target = event.target as HTMLElement;
+      if (!target.closest("[data-pe-conversation-menu], [data-pe-conversation-menu-trigger]")) {
+        setConversationMenu(null);
+      }
+    };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setConversationMenu(null);
+    };
+    document.addEventListener("click", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("click", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [conversationMenu]);
 
   const shareConversation = async (e: React.MouseEvent, id: number) => {
     e.stopPropagation();
@@ -1504,9 +1563,10 @@ export default function ChatPage() {
   };
 
   const isEmbed = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("embed");
+  const sidebarOffset = isEmbed ? 0 : sidebarOpen ? 260 : 60;
 
   return (
-    <div style={{ height: "100dvh", overflow: "hidden", background: "var(--bg)", color: "var(--text)", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <style>{`
         [data-tip],[data-tip-left],[data-tip-right]{position:relative}
         [data-tip]::after,[data-tip-left]::after,[data-tip-right]::after{
@@ -1534,9 +1594,15 @@ export default function ChatPage() {
         [data-tip-left]:hover::after{content:attr(data-tip-left)}
         [data-tip-right]:hover::after{content:attr(data-tip-right)}
         @keyframes tip-fade{from{opacity:0}to{opacity:1}}
+        @media (max-width:640px){
+          [data-pe-composer][data-fixed="true"]{
+            left:50% !important;
+            width:calc(100% - 24px) !important;
+          }
+        }
       `}</style>
       {/* Body */}
-      <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", height: "100dvh", overflow: "hidden" }}>
+      <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", minHeight: "100dvh" }}>
         {!isEmbed && !sidebarOpen && (
           /* Rail */
           <div data-pe-sidebar style={{ width: "60px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 0", position: "sticky", top: 0, height: "100dvh", boxSizing: "border-box" }}>
@@ -1595,7 +1661,7 @@ export default function ChatPage() {
             >
               <IconPlus size={16} /> New chat
             </button>
-            <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingTop: "8px" }}>
+            <div onScroll={() => setConversationMenu(null)} style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingTop: "8px" }}>
               <div style={{ fontSize: "11px", color: "var(--muted)", letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600, marginBottom: "6px", paddingLeft: "10px" }}>Chats</div>
               {!user ? (
                 <div style={{ fontSize: "13px", color: "var(--muted)", padding: "8px 10px", lineHeight: 1.5 }}>
@@ -1616,18 +1682,19 @@ export default function ChatPage() {
                       <div style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
                         <div style={{ fontSize: "14px", color: "var(--text)", lineHeight: 1.4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{conv.title}</div>
                       </div>
-                      <div style={{ display: "flex", gap: "2px", flexShrink: 0, opacity: 0.6 }}>
-                        <button onClick={(e) => shareConversation(e, conv.id)} data-tip-left={copiedShareId === conv.id ? "Share link copied" : "Share"} aria-label={copiedShareId === conv.id ? "Share link copied" : "Share"} style={{ background: "none", border: "none", color: copiedShareId === conv.id ? "var(--accent)" : "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "4px" }}
-                          onMouseEnter={(e) => { if (copiedShareId !== conv.id) (e.currentTarget as HTMLElement).style.color = "var(--text)"; }}
-                          onMouseLeave={(e) => { if (copiedShareId !== conv.id) (e.currentTarget as HTMLElement).style.color = "var(--muted)"; }}
-                        >
-                          <IconShare size={12} />
-                        </button>
-                        <button onClick={(e) => deleteConversation(e, conv.id)} data-tip-left="Delete" aria-label="Delete" style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "4px" }}
-                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#ef4444"; }}
+                      <div style={{ display: "flex", flexShrink: 0 }}>
+                        <button
+                          type="button"
+                          onClick={(e) => toggleConversationMenu(e, conv.id)}
+                          data-pe-conversation-menu-trigger
+                          aria-label={`More options for ${conv.title}`}
+                          aria-haspopup="menu"
+                          aria-expanded={conversationMenu?.id === conv.id}
+                          style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "6px" }}
+                          onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--text)"; }}
                           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--muted)"; }}
                         >
-                          <IconTrash size={12} />
+                          <IconDots size={16} />
                         </button>
                       </div>
                     </div>
@@ -1664,8 +1731,52 @@ export default function ChatPage() {
           </div>
         )}
 
+        {conversationMenu && (
+          <div
+            data-pe-conversation-menu
+            role="menu"
+            aria-label="Chat actions"
+            style={{
+              position: "fixed",
+              top: `${conversationMenu.top}px`,
+              left: `${conversationMenu.left}px`,
+              width: "184px",
+              zIndex: 100,
+              padding: "6px",
+              border: "1px solid var(--border)",
+              borderRadius: "16px",
+              background: "var(--surface)",
+              boxShadow: "0 10px 28px rgba(0,0,0,0.14)",
+              boxSizing: "border-box",
+            }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(e) => shareConversation(e, conversationMenu.id)}
+              style={{ width: "100%", display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", color: copiedShareId === conversationMenu.id ? "var(--accent)" : "var(--text)", cursor: "pointer", fontFamily: "inherit", fontSize: "14px", textAlign: "left" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            >
+              <IconShare size={18} />
+              {copiedShareId === conversationMenu.id ? "Share link copied" : "Share"}
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              onClick={(e) => { deleteConversation(e, conversationMenu.id); setConversationMenu(null); }}
+              style={{ width: "100%", display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontSize: "14px", textAlign: "left" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
+            >
+              <IconTrash size={18} />
+              Delete
+            </button>
+          </div>
+        )}
+
         {/* Chat area */}
-        <div data-pe-chat style={{ flex: 1, padding: "16px 24px max(24px, env(safe-area-inset-bottom))", minWidth: 0, minHeight: 0, height: "100dvh", boxSizing: "border-box", overflow: "hidden", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center", alignItems: "stretch" }}>
+        <div data-pe-chat style={{ flex: 1, padding: "16px 24px max(24px, env(safe-area-inset-bottom))", minWidth: 0, minHeight: "100dvh", boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center", alignItems: "stretch" }}>
           {!hasMessages && (
             <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", textAlign: "center", marginBottom: "20px" }}>
               <h1 style={{ fontSize: "30px", fontWeight: 500, color: "var(--text)", margin: 0, letterSpacing: "-0.01em" }}>What&apos;s on your mind today?</h1>
@@ -1676,9 +1787,9 @@ export default function ChatPage() {
             <div
               ref={transcriptRef}
               data-pe-transcript
-              style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", scrollbarGutter: "stable" }}
+              style={{ width: "100%" }}
             >
-            <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", marginBottom: "20px" }}>
+            <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", marginBottom: "20px", paddingBottom: `${composerHeight + 36}px`, boxSizing: "border-box" }}>
               {messages.map((msg, idx) => (
                 <div key={idx} style={{ marginBottom: "8px" }}>
                   {msg.role === "user" ? (
@@ -1819,7 +1930,22 @@ export default function ChatPage() {
           )}
 
           {/* Input */}
-          <div data-pe-composer style={{ width: "100%", maxWidth: "760px", margin: hasMessages ? "12px auto 0" : "0 auto", position: "relative", flexShrink: 0 }}>
+          <div
+            ref={composerRef}
+            data-pe-composer
+            data-fixed={hasMessages ? "true" : "false"}
+            style={{
+              width: hasMessages ? "calc(100% - 48px)" : "100%",
+              maxWidth: "760px",
+              margin: hasMessages ? 0 : "0 auto",
+              position: hasMessages ? "fixed" : "relative",
+              left: hasMessages ? `calc(${sidebarOffset}px + (100% - ${sidebarOffset}px) / 2)` : undefined,
+              bottom: hasMessages ? "max(24px, env(safe-area-inset-bottom))" : undefined,
+              transform: hasMessages ? "translateX(-50%)" : undefined,
+              zIndex: hasMessages ? 50 : undefined,
+              flexShrink: 0,
+            }}
+          >
             {!hasMessages && (
               <div aria-hidden="true" style={{ position: "absolute", inset: "-40px -60px", background: "radial-gradient(ellipse at center, var(--accent-15), transparent 70%)", filter: "blur(20px)", pointerEvents: "none", zIndex: 0 }} />
             )}
