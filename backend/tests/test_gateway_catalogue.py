@@ -71,6 +71,48 @@ def test_resolver_searches_live_parameter_and_variable_catalogues():
     variable_search.assert_called_once_with("capital gains tax", limit=5)
 
 
+def test_plan_schema_requires_bounded_catalogue_queries():
+    from gateway.runtime import _EMIT_PLAN_TOOL
+
+    schema = _EMIT_PLAN_TOOL["input_schema"]
+    queries = schema["properties"]["catalogue_queries"]
+
+    assert "catalogue_queries" in schema["required"]
+    assert queries["maxItems"] == 4
+    assert queries["items"]["required"] == ["kind", "query"]
+    assert queries["items"]["properties"]["kind"]["enum"] == [
+        "reform_target",
+        "variable",
+    ]
+
+
+def test_resolver_normalises_duplicate_blank_and_excess_queries():
+    queries = [
+        CatalogueQuery("reform_target", " Capital gains tax "),
+        CatalogueQuery("reform_target", "capital gains tax"),
+        CatalogueQuery("variable", ""),
+        CatalogueQuery("variable", "net income"),
+        CatalogueQuery("variable", "income tax"),
+        CatalogueQuery("variable", "universal credit"),
+        CatalogueQuery("variable", "child benefit"),
+    ]
+    with (
+        patch("gateway.catalogue.uk_model_version", return_value=object()),
+        patch("gateway.catalogue.search_reform_targets", return_value=[] ) as reform_search,
+        patch("gateway.catalogue.search_variables", return_value={"variables": []}) as variable_search,
+    ):
+        evidence = resolve_catalogue_queries(queries)
+
+    assert evidence.unresolved_queries == (
+        CatalogueQuery("reform_target", "Capital gains tax"),
+        CatalogueQuery("variable", "net income"),
+        CatalogueQuery("variable", "income tax"),
+        CatalogueQuery("variable", "universal credit"),
+    )
+    assert reform_search.call_count == 1
+    assert variable_search.call_count == 3
+
+
 def test_matching_catalogue_evidence_prevents_a_false_refusal():
     verdict = GatewayVerdict(outcome="out_of_scope", route="lightweight")
 
