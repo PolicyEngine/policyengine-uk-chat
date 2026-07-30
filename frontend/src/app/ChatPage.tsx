@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip, IconDots } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip, IconDots, IconSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -248,6 +248,9 @@ export default function ChatPage() {
   const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
   const [copiedMessageIdx, setCopiedMessageIdx] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [chatSearchOpen, setChatSearchOpen] = useState(false);
+  const [chatSearchQuery, setChatSearchQuery] = useState("");
+  const chatSearchRef = useRef<HTMLInputElement>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const conversationCache = useRef<Map<number, ConversationDetail>>(new Map());
@@ -1564,6 +1567,15 @@ export default function ChatPage() {
 
   const isEmbed = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("embed");
   const sidebarOffset = isEmbed ? 0 : sidebarOpen ? 260 : 60;
+  const filteredConversations = chatSearchQuery.trim()
+    ? conversations.filter((conversation) => conversation.title.toLowerCase().includes(chatSearchQuery.trim().toLowerCase()))
+    : conversations;
+
+  const openChatSearch = () => {
+    setSidebarOpen(true);
+    setChatSearchOpen(true);
+    requestAnimationFrame(() => chatSearchRef.current?.focus());
+  };
 
   return (
     <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", fontFamily: "system-ui, -apple-system, sans-serif" }}>
@@ -1610,7 +1622,7 @@ export default function ChatPage() {
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
             >
-              <span role="img" aria-label="PolicyEngine" style={{ display: "inline-block", width: "24px", height: "24px", background: "var(--text)", WebkitMaskImage: `url(${APP_BASE_PATH}/favicon.svg)`, maskImage: `url(${APP_BASE_PATH}/favicon.svg)`, WebkitMaskRepeat: "no-repeat", maskRepeat: "no-repeat", WebkitMaskSize: "contain", maskSize: "contain", WebkitMaskPosition: "center", maskPosition: "center" }} />
+              <IconLayoutSidebarLeftExpand size={22} />
             </button>
             <button onClick={startNewChat} data-tip-right="New chat" aria-label="New chat" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginTop: "4px" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
@@ -1623,6 +1635,12 @@ export default function ChatPage() {
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
             >
               <IconMessage size={20} />
+            </button>
+            <button onClick={openChatSearch} data-tip-right="Search chats" aria-label="Search chats" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)" }}
+              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
+              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+            >
+              <IconSearch size={20} />
             </button>
             <div style={{ flex: 1 }} />
             <button onClick={toggleTheme} data-tip-right={theme === "light" ? "Switch to dark" : "Switch to light"} aria-label={theme === "light" ? "Switch to dark" : "Switch to light"} style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginBottom: "6px" }}
@@ -1648,11 +1666,11 @@ export default function ChatPage() {
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", padding: "4px 4px 4px 10px", gap: "8px" }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`${APP_BASE_PATH}/policyengine-logo.svg`} alt="PolicyEngine" style={{ display: "block", width: "128px", height: "auto" }} />
-              <button onClick={() => setSidebarOpen(false)} data-tip="Collapse sidebar" aria-label="Collapse sidebar" style={{ background: "transparent", border: "none", borderRadius: "8px", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "8px" }}
+              <button onClick={() => setSidebarOpen(false)} data-tip="Close sidebar" aria-label="Close sidebar" style={{ background: "transparent", border: "none", borderRadius: "8px", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "8px" }}
                 onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
                 onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
               >
-                <IconX size={16} />
+                <IconLayoutSidebarLeftCollapse size={20} />
               </button>
             </div>
             <button onClick={startNewChat} style={{ width: "100%", fontSize: "14px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", fontWeight: 500, justifyContent: "flex-start" }}
@@ -1661,6 +1679,42 @@ export default function ChatPage() {
             >
               <IconPlus size={16} /> New chat
             </button>
+            <button
+              type="button"
+              onClick={() => {
+                setChatSearchOpen((open) => !open);
+                requestAnimationFrame(() => chatSearchRef.current?.focus());
+              }}
+              aria-expanded={chatSearchOpen}
+              aria-controls="chat-search"
+              style={{ width: "100%", fontSize: "14px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: chatSearchOpen ? "var(--surface-hover)" : "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", fontWeight: 500, justifyContent: "flex-start" }}
+              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
+              onMouseLeave={(e) => { if (!chatSearchOpen) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+            >
+              <IconSearch size={16} /> Search chats
+            </button>
+            {chatSearchOpen && (
+              <div id="chat-search" style={{ padding: "4px 8px 6px" }}>
+                <div style={{ position: "relative" }}>
+                  <IconSearch size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--muted)", pointerEvents: "none" }} />
+                  <input
+                    ref={chatSearchRef}
+                    type="search"
+                    value={chatSearchQuery}
+                    onChange={(event) => setChatSearchQuery(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Escape") {
+                        setChatSearchOpen(false);
+                        setChatSearchQuery("");
+                      }
+                    }}
+                    placeholder="Search chats"
+                    aria-label="Search chats"
+                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: "9px", background: "var(--surface)", color: "var(--text)", padding: "8px 10px 8px 32px", fontFamily: "inherit", fontSize: "13px", outline: "none" }}
+                  />
+                </div>
+              </div>
+            )}
             <div onScroll={() => setConversationMenu(null)} style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingTop: "8px" }}>
               <div style={{ fontSize: "11px", color: "var(--muted)", letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600, marginBottom: "6px", paddingLeft: "10px" }}>Chats</div>
               {!user ? (
@@ -1670,9 +1724,11 @@ export default function ChatPage() {
                 </div>
               ) : conversations.length === 0 ? (
                 <div style={{ fontSize: "13px", color: "var(--muted)", fontStyle: "italic", padding: "8px 10px" }}>No previous chats</div>
+              ) : filteredConversations.length === 0 ? (
+                <div style={{ fontSize: "13px", color: "var(--muted)", fontStyle: "italic", padding: "8px 10px" }}>No matching chats</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
-                  {conversations.map((conv) => {
+                  {filteredConversations.map((conv) => {
                     const isActive = activeConversationId === conv.id;
                     return (
                     <div key={conv.id} onClick={() => loadConversation(conv)} style={{ padding: "8px 10px", cursor: "pointer", background: isActive ? "var(--surface-hover)" : "transparent", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}
