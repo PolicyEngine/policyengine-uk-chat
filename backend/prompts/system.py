@@ -52,6 +52,10 @@ DISCOVERY AND VALIDATION:
   whether they are default society outputs.
 - `search_parameters` and `get_parameter` report parameters.
 - `list_reform_targets` reports commonly supported reform paths.
+- On an opening compute turn, `MODEL CATALOGUE EVIDENCE` is a server-generated
+  current policyengine.py discovery result. Treat matching paths and variables
+  as candidates, not a resolution of user intent; ask a concise clarification
+  before computing if the user's requested measure remains ambiguous.
 - `list_household_input_variables` reports variables suitable for synthetic
   household input.
 - `list_society_output_variables` reports variables automatically materialized

@@ -15,10 +15,11 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import List, Optional
 
 from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_sync_client
+from gateway.catalogue import CatalogueEvidence, CatalogueQuery, resolve_catalogue_queries
 from gateway.policy import OUTPUT_VOCAB, SlotFact, gate
 from prompts import (
     DEFAULT_SCOPE_DESCRIPTOR,
@@ -65,6 +66,7 @@ class GatewayVerdict:
     slots: List[SlotFact] = field(default_factory=list)
     gating_slots: List[str] = field(default_factory=list)
     unmodellable_outputs: List[str] = field(default_factory=list)
+    catalogue_evidence: CatalogueEvidence | None = None
 
 
 def _fail_safe() -> GatewayVerdict:
@@ -103,14 +105,74 @@ _EMIT_PLAN_TOOL = {
                 },
             },
             "unmodellable_outputs": {"type": "array", "items": {"type": "string"}},
+            "catalogue_queries": {
+                "type": "array",
+                "maxItems": 4,
+                "description": (
+                    "Short policyengine.py catalogue searches for named reform "
+                    "measures or variable concepts. Use an empty list when no "
+                    "catalogue concept is named."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "kind": {"type": "string", "enum": ["reform_target", "variable"]},
+                        "query": {"type": "string"},
+                    },
+                    "required": ["kind", "query"],
+                },
+            },
             "rationale": {"type": "string"},
         },
-        "required": ["in_domain", "tool", "slots"],
+        "required": ["in_domain", "tool", "slots", "catalogue_queries"],
     },
 }
 
 
-def _verdict_from_plan(plan: dict, prompt: str) -> GatewayVerdict:
+def _catalogue_queries_from_plan(plan: dict) -> tuple[CatalogueQuery, ...]:
+    queries: list[CatalogueQuery] = []
+    for item in plan.get("catalogue_queries") or []:
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("kind")
+        query = item.get("query")
+        if kind not in ("reform_target", "variable") or not isinstance(query, str):
+            continue
+        queries.append(CatalogueQuery(kind, query))
+    return tuple(queries)
+
+
+def apply_catalogue_evidence(
+    verdict: GatewayVerdict,
+    evidence: CatalogueEvidence,
+) -> GatewayVerdict:
+    """Combine deterministic catalogue evidence with the model-grounded plan.
+
+    Evidence confirms only modelability. It cannot turn an under-specified or
+    partial request into an executable one, so those outcomes are preserved.
+    """
+
+    verdict = replace(verdict, catalogue_evidence=evidence)
+    if not evidence.available:
+        return replace(verdict, outcome="ready", route="compute")
+    if evidence.unresolved_queries:
+        gating_slots = list(dict.fromkeys([*verdict.gating_slots, "model_catalogue"]))
+        return replace(
+            verdict,
+            outcome="needs_plan",
+            route="lightweight",
+            gating_slots=gating_slots,
+        )
+    if evidence.matches and verdict.outcome in ("irrelevant", "out_of_scope"):
+        return replace(verdict, outcome="ready", route="compute")
+    return verdict
+
+
+def _verdict_from_plan(
+    plan: dict,
+    prompt: str,
+    catalogue_evidence: CatalogueEvidence,
+) -> GatewayVerdict:
     """Build a server-gated verdict from the model's grounded plan. The model's
     own outcome is never trusted — the outcome is recomputed by gate()."""
     in_domain = bool(plan.get("in_domain", True))
@@ -131,7 +193,7 @@ def _verdict_from_plan(plan: dict, prompt: str) -> GatewayVerdict:
 
     unmodellable = [str(x) for x in (plan.get("unmodellable_outputs") or []) if x]
     result = gate(in_domain, tool, slots, unmodellable, prompt)
-    return GatewayVerdict(
+    verdict = GatewayVerdict(
         outcome=result.outcome,
         route="compute" if result.outcome == "ready" else "lightweight",
         tool=tool,
@@ -139,6 +201,7 @@ def _verdict_from_plan(plan: dict, prompt: str) -> GatewayVerdict:
         gating_slots=result.gating_slots,
         unmodellable_outputs=unmodellable,
     )
+    return apply_catalogue_evidence(verdict, catalogue_evidence)
 
 
 def run_gateway(last_user_message: str) -> GatewayVerdict:
@@ -171,7 +234,8 @@ def run_gateway(last_user_message: str) -> GatewayVerdict:
         # degenerate response can never masquerade as an out_of_scope refusal.
         if not plan or "tool" not in plan:
             return _fail_safe()
-        return _verdict_from_plan(plan, last_user_message)
+        catalogue_evidence = resolve_catalogue_queries(_catalogue_queries_from_plan(plan))
+        return _verdict_from_plan(plan, last_user_message, catalogue_evidence)
     except Exception as e:  # noqa: BLE001 — any failure falls back to full compute
         logger.warning(f"[GATEWAY] failed; defaulting to ready/compute: {e}")
         return _fail_safe()
@@ -196,21 +260,50 @@ def gateway_writer_directive(verdict: GatewayVerdict) -> str:
         parts.append("Cannot model: " + ", ".join(verdict.unmodellable_outputs) + ".")
     if verdict.outcome == "needs_plan" and verdict.gating_slots:
         parts.append("Under-specified points to clarify: " + ", ".join(verdict.gating_slots) + ".")
+    evidence = verdict.catalogue_evidence
+    if evidence and evidence.unresolved_queries:
+        queries = ", ".join(query.query for query in evidence.unresolved_queries)
+        parts.append(
+            "The current model catalogue did not resolve: "
+            + queries
+            + ". Ask what supported policy measure or variable the user means; "
+            "do not say that it is unmodelled."
+        )
+    elif evidence and evidence.matches and verdict.outcome == "needs_plan":
+        labels = ", ".join(dict.fromkeys(match.label for match in evidence.matches))
+        parts.append(
+            "Relevant model catalogue candidates (use labels, not internal paths): "
+            + labels
+            + "."
+        )
     return "\n\n".join(parts)
 
 
 def serialise_plan_for_system(verdict: GatewayVerdict) -> str:
     """Compact plan text injected into the compute system blocks for `ready`, so
     the heavy model starts from the resolved tool + grounded args."""
-    if verdict.tool is None:
-        return ""
     grounded = [
         f"{s.name}={s.value}"
         for s in verdict.slots
         if s.value and s.source in ("prompt", "default")
     ]
-    lines = [f"GATEWAY PLAN (pre-resolved by a routing pass): tool={verdict.tool}."]
+    lines = []
+    if verdict.tool is not None:
+        lines.append(f"GATEWAY PLAN (pre-resolved by a routing pass): tool={verdict.tool}.")
     if grounded:
         lines.append("Resolved inputs: " + "; ".join(grounded) + ".")
+    evidence = verdict.catalogue_evidence
+    if evidence and evidence.matches:
+        lines.append("MODEL CATALOGUE EVIDENCE (verified current policyengine.py candidates):")
+        lines.extend(
+            f"- {match.kind}: {match.label} (`{match.identifier}`)"
+            for match in evidence.matches
+        )
+        lines.append(
+            "Treat these as discovery candidates, not a resolution of user intent. "
+            "Use them internally and ask a concise clarification where needed."
+        )
+    if not lines:
+        return ""
     lines.append("Treat this as a starting point and verify it against the user's message.")
     return "\n".join(lines)
