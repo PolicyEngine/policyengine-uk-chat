@@ -44,7 +44,7 @@ interface ConversationSummary {
 }
 
 interface ConversationDetail extends ConversationSummary {
-  messages: Array<{ role: string; content: string; events?: StreamEvent[] }>;
+  messages: Array<{ role: string; content: string; events?: StreamEvent[]; attachment?: MessageAttachment }>;
 }
 
 interface ReportConversationResponse {
@@ -116,6 +116,7 @@ type StreamEvent = { type: "text"; content: string } | { type: "tool"; data: Too
 interface Message {
   role: "user" | "assistant";
   content: string;
+  attachment?: MessageAttachment;
   events?: StreamEvent[];
   isComplete?: boolean;
   cost_gbp?: number;
@@ -125,6 +126,11 @@ interface Message {
   stopped?: boolean;
   /** Optional 2–3 follow-up question suggestions generated after the turn. */
   suggestions?: string[];
+}
+
+interface MessageAttachment {
+  name: string;
+  mediaType: string;
 }
 
 interface BalanceSummary {
@@ -438,10 +444,11 @@ export default function ChatPage() {
       if (streamGeneration.current !== generation) return;
       if (!data?.messages?.length) { console.error("No messages in conversation", data); return; }
       const loaded: Message[] = data.messages.map((m) => {
-        const raw = m as { role: string; content: string; events?: StreamEvent[]; stop_reason?: string; stopped?: boolean; cost_gbp?: number; suggestions?: string[] };
+        const raw = m as { role: string; content: string; events?: StreamEvent[]; attachment?: MessageAttachment; stop_reason?: string; stopped?: boolean; cost_gbp?: number; suggestions?: string[] };
         return {
           role: raw.role as "user" | "assistant",
           content: raw.content || "",
+          attachment: raw.attachment,
           isComplete: true,
           events: raw.events,
           stop_reason: raw.stop_reason,
@@ -526,6 +533,7 @@ export default function ChatPage() {
 
     const apiMessages = msgs.map((m) => {
       const base: Record<string, unknown> = { role: m.role, content: m.content };
+      if (m.attachment) base.attachment = m.attachment;
       if (m.role === "assistant") {
         if (m.isComplete && m.events?.length) base.events = m.events;
         if (m.cost_gbp !== undefined) base.cost_gbp = m.cost_gbp;
@@ -603,13 +611,17 @@ export default function ChatPage() {
     const isStale = () => streamGeneration.current !== generation;
     // If the user attached an image but didn't type anything, give the model
     // a minimal nudge so the request still has a coherent user turn.
-    const displayContent = input.trim() || (attachedImage ? `[Attached image: ${attachedImage.name}]` : "");
-    const userMessage: Message = { role: "user", content: displayContent };
+    const sendingImage = attachedImage;
+    const displayContent = input.trim() || (sendingImage ? `[Attached image: ${sendingImage.name}]` : "");
+    const userMessage: Message = {
+      role: "user",
+      content: displayContent,
+      attachment: sendingImage ? { name: sendingImage.name, mediaType: sendingImage.mediaType } : undefined,
+    };
     const allMessages = [...messages, userMessage];
     setMessages((prev) => [...prev, userMessage]);
     if (messages.length === 0 && user) setSidebarOpen(true);
     // Snapshot the attachment for this send, then clear it from the input.
-    const sendingImage = attachedImage;
     setInput("");
     setAttachedImage(null);
     setAttachError(null);
@@ -1567,13 +1579,9 @@ export default function ChatPage() {
         {/* Sidebar */}
         {!isEmbed && sidebarOpen && (
           <div data-pe-sidebar style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: 0, height: "100dvh", alignSelf: "flex-start", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", gap: "4px" }}>
-              <button onClick={startNewChat} style={{ flex: 1, fontSize: "14px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", fontWeight: 500, justifyContent: "flex-start" }}
-                onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
-                onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
-              >
-                <IconPlus size={16} /> New chat
-              </button>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", padding: "4px 4px 4px 10px", gap: "8px" }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={`${APP_BASE_PATH}/policyengine-logo.svg`} alt="PolicyEngine" style={{ display: "block", width: "128px", height: "auto" }} />
               <button onClick={() => setSidebarOpen(false)} data-tip="Collapse sidebar" aria-label="Collapse sidebar" style={{ background: "transparent", border: "none", borderRadius: "8px", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "8px" }}
                 onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
                 onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
@@ -1581,6 +1589,12 @@ export default function ChatPage() {
                 <IconX size={16} />
               </button>
             </div>
+            <button onClick={startNewChat} style={{ width: "100%", fontSize: "14px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", fontWeight: 500, justifyContent: "flex-start" }}
+              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
+              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+            >
+              <IconPlus size={16} /> New chat
+            </button>
             <div style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingTop: "8px" }}>
               <div style={{ fontSize: "11px", color: "var(--muted)", letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600, marginBottom: "6px", paddingLeft: "10px" }}>Chats</div>
               {!user ? (
@@ -1603,13 +1617,13 @@ export default function ChatPage() {
                         <div style={{ fontSize: "14px", color: "var(--text)", lineHeight: 1.4, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{conv.title}</div>
                       </div>
                       <div style={{ display: "flex", gap: "2px", flexShrink: 0, opacity: 0.6 }}>
-                        <button onClick={(e) => shareConversation(e, conv.id)} data-tip={copiedShareId === conv.id ? "Link copied" : "Share"} aria-label="Share" style={{ background: "none", border: "none", color: copiedShareId === conv.id ? "var(--accent)" : "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "4px" }}
+                        <button onClick={(e) => shareConversation(e, conv.id)} data-tip-left={copiedShareId === conv.id ? "Share link copied" : "Share"} aria-label={copiedShareId === conv.id ? "Share link copied" : "Share"} style={{ background: "none", border: "none", color: copiedShareId === conv.id ? "var(--accent)" : "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "4px" }}
                           onMouseEnter={(e) => { if (copiedShareId !== conv.id) (e.currentTarget as HTMLElement).style.color = "var(--text)"; }}
                           onMouseLeave={(e) => { if (copiedShareId !== conv.id) (e.currentTarget as HTMLElement).style.color = "var(--muted)"; }}
                         >
                           <IconShare size={12} />
                         </button>
-                        <button onClick={(e) => deleteConversation(e, conv.id)} data-tip="Delete" aria-label="Delete" style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "4px" }}
+                        <button onClick={(e) => deleteConversation(e, conv.id)} data-tip-left="Delete" aria-label="Delete" style={{ background: "none", border: "none", color: "var(--muted)", cursor: "pointer", display: "flex", padding: "4px", borderRadius: "4px" }}
                           onMouseEnter={(e) => { (e.currentTarget as HTMLElement).style.color = "#ef4444"; }}
                           onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.color = "var(--muted)"; }}
                         >
@@ -1664,33 +1678,20 @@ export default function ChatPage() {
               data-pe-transcript
               style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", overscrollBehavior: "contain", scrollbarGutter: "stable" }}
             >
-            <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", marginBottom: "8px", display: "flex", alignItems: "center", justifyContent: "flex-end", gap: "12px" }}>
-              <button
-                onClick={() => { setReportError(null); setReportOpen(true); }}
-                disabled={isStreaming}
-                style={{ fontSize: "12px", color: isStreaming ? "var(--faint)" : "var(--muted)", background: "none", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", padding: "0", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "5px" }}
-                data-tip="Report this thread"
-              >
-                <IconBug size={12} />
-                Report issue
-              </button>
-              <button
-                onClick={downloadConversation}
-                disabled={isStreaming}
-                style={{ fontSize: "12px", color: isStreaming ? "var(--faint)" : "var(--muted)", background: "none", border: "none", cursor: isStreaming ? "not-allowed" : "pointer", padding: "0", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "5px" }}
-                data-tip="Download this conversation as Markdown"
-              >
-                <IconDownload size={12} />
-                Download .md
-              </button>
-            </div>
-
             <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", marginBottom: "20px" }}>
               {messages.map((msg, idx) => (
                 <div key={idx} style={{ marginBottom: "8px" }}>
                   {msg.role === "user" ? (
                     <div style={{ display: "flex", justifyContent: "flex-end", padding: "10px 0" }}>
-                      <div style={{ background: "var(--user-bubble)", color: "var(--text)", padding: "10px 16px", borderRadius: "22px", maxWidth: "75%", whiteSpace: "pre-wrap", fontSize: "15px", lineHeight: 1.55 }}>{msg.content}</div>
+                      <div style={{ background: "var(--user-bubble)", color: "var(--text)", padding: "10px 16px", borderRadius: "22px", maxWidth: "75%", whiteSpace: "pre-wrap", fontSize: "15px", lineHeight: 1.55 }}>
+                        {msg.attachment && (
+                          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: msg.content.startsWith("[Attached image:") ? 0 : "6px", color: "var(--text-2)", fontSize: "12px", lineHeight: 1.3 }}>
+                            <IconPaperclip size={14} style={{ flexShrink: 0 }} />
+                            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{msg.attachment.name}</span>
+                          </div>
+                        )}
+                        {!msg.attachment || !msg.content.startsWith("[Attached image:") ? msg.content : null}
+                      </div>
                     </div>
                   ) : (
                     <div style={{ padding: "10px 0 18px" }}>
@@ -1710,6 +1711,26 @@ export default function ChatPage() {
                             >
                               <IconCopy size={12} /> {copiedMessageIdx === idx ? "Copied" : "Copy"}
                             </button>
+                          )}
+                          {msg.isComplete && idx === messages.length - 1 && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => { setReportError(null); setReportOpen(true); }}
+                                data-tip="Report this thread"
+                                style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+                              >
+                                <IconBug size={12} /> Report issue
+                              </button>
+                              <button
+                                type="button"
+                                onClick={downloadConversation}
+                                data-tip="Download this conversation as Markdown"
+                                style={{ display: "inline-flex", alignItems: "center", gap: "4px", fontSize: "11px", color: "var(--muted)", background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "inherit" }}
+                              >
+                                <IconDownload size={12} /> Download .md
+                              </button>
+                            </>
                           )}
                           {msg.cost_gbp !== undefined && (
                             <span style={{ fontSize: "11px", color: "var(--faint)", fontVariantNumeric: "tabular-nums" }}>

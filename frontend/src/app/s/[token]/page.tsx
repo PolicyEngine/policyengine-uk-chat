@@ -9,12 +9,14 @@ import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Chart, extractChartSpecs } from "@/components/charts";
 import { THEME } from "@/components/theme";
 import { APP_BASE_PATH, getBackendEndpoint } from "@/utils/backend";
+import { IconPaperclip } from "@tabler/icons-react";
 
 interface SharedConversation {
   title: string;
   messages: Array<{
     role: "user" | "assistant";
     content: string;
+    attachment?: { name: string; mediaType: string };
     events?: Array<
       | { type: "text"; content: string }
       | { type: "tool"; data: { tool_name: string } }
@@ -179,7 +181,15 @@ table .highlight-mark { animation: none; background: none; padding: 0; margin: 0
             {msg.role === "user" ? (
               <div style={{ display: "flex", gap: "14px", padding: "14px 0", borderBottom: `1px solid ${THEME.border}` }}>
                 <div style={{ fontFamily: "'JetBrains Mono', monospace", fontSize: "12px", fontWeight: 500, color: "#fff", background: THEME.primary, width: "24px", height: "24px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>&gt;</div>
-                <div style={{ color: THEME.text, fontSize: "15px", lineHeight: 1.6, whiteSpace: "pre-wrap", fontWeight: 500, letterSpacing: "-0.01em" }}>{msg.content}</div>
+                <div style={{ minWidth: 0, color: THEME.text, fontSize: "15px", lineHeight: 1.6, whiteSpace: "pre-wrap", fontWeight: 500, letterSpacing: "-0.01em" }}>
+                  {msg.attachment && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: msg.content.startsWith("[Attached image:") ? 0 : "6px", color: THEME.text3, fontSize: "12px", fontWeight: 400 }}>
+                      <IconPaperclip size={14} style={{ flexShrink: 0 }} />
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{msg.attachment.name}</span>
+                    </div>
+                  )}
+                  {!msg.attachment || !msg.content.startsWith("[Attached image:") ? msg.content : null}
+                </div>
               </div>
             ) : (
               <div style={{ padding: "18px 0 14px" }}>
