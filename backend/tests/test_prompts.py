@@ -131,6 +131,8 @@ def test_gateway_prompt_renders_caller_supplied_default_year():
     )
     assert f"year {DEFAULT_SIMULATION_YEAR}" in rendered
     assert "{default_year}" not in rendered
+    assert "not an exhaustive list" in rendered
+    assert "catalogue_queries" in rendered
 
 
 def test_secondary_model_prompts_use_neutral_wording():

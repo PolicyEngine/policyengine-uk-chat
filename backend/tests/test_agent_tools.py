@@ -71,6 +71,13 @@ def test_simulation_schema_uses_fixed_dataset():
     ).parameters
 
 
+@requires_policyengine_py
+def test_reform_target_discovery_finds_capital_gains_tax():
+    targets = agent_tools.list_reform_targets(query="capital gains tax")["targets"]
+
+    assert any(target["path"] == "gov.hmrc.cgt.basic_rate" for target in targets)
+
+
 def test_decile_tool_exposes_three_state_concept():
     tool = _tool("compute_decile_impacts")
     properties = tool["input_schema"]["properties"]

@@ -126,3 +126,11 @@ cases:
     prompt: Show the distributional impact by decile of raising the personal allowance to £15,000.
     expected_outcome: ready
     expected_tool: run_society_simulation
+
+  - id: gw_ready_cgt_income_deciles
+    suite: gateway
+    description: A supported CGT reform must not be refused because it is omitted from the prose scope summary.
+    requirements: [live_model, policyengine_py]
+    prompt: Raise the lowest capital gains tax rate from 18% to 20% and show the impact by income decile.
+    expected_outcome: ready
+    expected_tool: run_society_simulation
