@@ -12,6 +12,7 @@ from unittest.mock import patch
 from gateway.policy import (
     TOOL_SLOT_REQUIREMENT,
     SlotFact,
+    complete_slots,
     criticality,
     gate,
     is_inferable,
@@ -132,6 +133,58 @@ class TestGate:
         assert gate(False, None, [], []).outcome == "irrelevant"
 
 
+class TestSlotCompletion:
+    def test_adds_every_missing_tool_schema_slot_and_output(self):
+        completed = complete_slots("run_society_simulation", [])
+
+        assert {
+            slot.name
+            for slot in completed
+            if slot.kind == "tool_input"
+        } == {
+            name
+            for (tool, name) in TOOL_SLOT_REQUIREMENT
+            if tool == "run_society_simulation"
+        }
+        assert all(slot.source == "assumed" for slot in completed)
+        assert any(slot.kind == "output" and slot.name == "output" for slot in completed)
+
+    def test_keeps_model_grounded_slots(self):
+        completed = complete_slots(
+            "run_society_simulation",
+            [
+                sf("reform", "prompt", value="Raise the basic rate to 21%"),
+                sf("output", "prompt", kind="output", value="budgetary_impact"),
+            ],
+        )
+
+        reform = next(slot for slot in completed if slot.name == "reform")
+        output = next(slot for slot in completed if slot.kind == "output")
+        assert reform.source == "prompt"
+        assert output.source == "prompt"
+
+    def test_missing_material_slots_gate_instead_of_reaching_compute(self):
+        completed = complete_slots("run_society_simulation", [])
+
+        result = gate(True, "run_society_simulation", completed, [])
+
+        assert result.outcome == "needs_plan"
+        assert set(result.gating_slots) == {"reform", "output"}
+
+    def test_missing_inferable_household_slots_do_not_gate(self):
+        completed = complete_slots(
+            "run_household_simulation",
+            [
+                sf("people", "prompt", value="one adult aged 30"),
+                sf("output", "prompt", kind="output", value="net_income"),
+            ],
+        )
+
+        result = gate(True, "run_household_simulation", completed, [])
+
+        assert result.outcome == "ready"
+
+
 def _stub_client(plan):
     block = SimpleNamespace(type="tool_use", name="emit_plan", input=plan)
     resp = SimpleNamespace(content=[block])
@@ -224,8 +277,26 @@ class TestRunGateway:
         }
         with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             v = gateway.run_gateway("do a reform")
-        # garbage source → assumed → reform (high) gates → needs_plan
-        assert v.outcome == "needs_plan" and v.gating_slots == ["reform"]
+        # garbage source → assumed → reform (high) gates. The omitted output
+        # is also material, so server-side completion marks it assumed too.
+        assert v.outcome == "needs_plan"
+        assert set(v.gating_slots) == {"reform", "output"}
+
+    def test_omitted_material_slots_are_treated_as_assumed(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [],
+            "unmodellable_outputs": [],
+            "catalogue_queries": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            v = gateway.run_gateway("Model a tax reform")
+
+        assert v.outcome == "needs_plan"
+        assert set(v.gating_slots) == {"reform", "output"}
 
 
 class TestGatewaySystemPrompt:
