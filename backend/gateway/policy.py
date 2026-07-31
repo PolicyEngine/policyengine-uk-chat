@@ -9,10 +9,11 @@ plan into one of five outcomes. Keeping this out of the model (and out of
 ``prompts/``/``chat/``) makes the gate auditable and unit-testable
 offline, and lets the eval grader import it without dragging in the runtime.
 
-Gate rule: a slot *gates* (forces a clarifying question) iff its ``source`` is
-``assumed`` AND its criticality is high/medium AND it is not model-inferable.
-``needs_plan`` iff any slot gates; otherwise ``ready`` (once admissibility —
-irrelevant / out_of_scope / partial — is decided).
+Before gating, the server completes the selected tool's schema slots that the
+model omitted as ``assumed``. A slot *gates* (forces a clarifying question) iff
+its ``source`` is ``assumed`` AND its criticality is high/medium AND it is not
+model-inferable. ``needs_plan`` iff any slot gates; otherwise ``ready`` (once
+admissibility — irrelevant / out_of_scope / partial — is decided).
 """
 
 from __future__ import annotations
@@ -92,6 +93,29 @@ INFERABLE: set = {
     ("generate_chart", "y_fields"),
     ("generate_chart", "data"),  # comes from an upstream tool, not the user
 }
+
+
+def complete_slots(tool: Optional[str], slots: List[SlotFact]) -> List[SlotFact]:
+    """Return a complete gateway slot state for a selected tool.
+
+    The gateway model can ground any subset of the plan. Missing schema slots
+    must still reach ``gate()`` as ``assumed`` rather than being silently
+    treated as known. ``output`` is a synthetic, user-requested deliverable
+    slot, so it is added when the model did not name one.
+    """
+
+    completed = list(slots)
+    present_tool_inputs = {
+        slot.name for slot in slots if slot.kind == "tool_input"
+    }
+    if tool is not None:
+        for candidate_tool, name in TOOL_SLOT_REQUIREMENT:
+            if candidate_tool == tool and name not in present_tool_inputs:
+                completed.append(SlotFact(name=name, source="assumed"))
+
+    if tool is not None and not any(slot.kind == "output" for slot in slots):
+        completed.append(SlotFact(name="output", source="assumed", kind="output"))
+    return completed
 
 # Closed vocabulary for the synthetic "output" (deliverable) slot. The single
 # source of truth for the output labels: the gateway runtime injects these into

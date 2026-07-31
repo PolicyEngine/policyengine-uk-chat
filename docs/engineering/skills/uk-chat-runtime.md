@@ -140,6 +140,12 @@ official policyengine.py filter arguments for conditional weighted aggregates.
   selection, derivative calculation, chart JSON construction,
   result truncation/summarisation, billing calculation, and database writes.
 
+Before applying gateway criticality, the server completes every schema slot
+omitted from a selected tool plan as `assumed`, and adds the synthetic requested
+`output` slot when it is absent. Thus a classifier omission cannot be mistaken
+for grounded user intent. Safe defaults and model-inferable slots may still
+proceed without a follow-up; assumed high- or medium-criticality slots cannot.
+
 The gateway's non-`ready` (lightweight) outcomes must remain structurally
 enforced by omitting tools from the model request, not only by prompting the
 model not to call tools.
