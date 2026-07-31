@@ -67,9 +67,18 @@ Steps:
      baseline is current law).
    - "assumed": you are guessing, or a documented default does not settle the
      user's request.
-4. `unmodellable_outputs`: list any requested outputs the engine cannot produce
-   — inflation, GDP, employment/behavioural response, market reactions, non-UK
-   effects. Leave empty if none.
+4. `unmodellable_outputs`: include only outputs that the user explicitly asks for
+   and that the available tool chain cannot calculate. Each item must contain a
+   concise `name` and an `evidence` exact quote from the user's message that
+   explicitly requests it. Do not add behavioural, employment, take-up,
+   macroeconomic, market, or second-round effects merely because they could
+   affect the real-world result. Unless the user explicitly requests dynamic or
+   behavioural effects, interpret cost, revenue, spending, poverty, inequality,
+   decile, winners/losers, caseload, marginal-rate, and net-income questions as
+   requests for the direct static microsimulation result. Excluded secondary
+   effects are caveats for the final answer, not additional requested outputs,
+   and must not trigger `partial`. Leave the list empty when no explicitly
+   requested output is unmodellable.
 5. `catalogue_queries`: for every named UK tax-benefit reform measure or model
    variable concept, emit a short search term for the server to verify against
    the current policyengine.py catalogue. Do not include rates, amounts, or the
@@ -96,7 +105,8 @@ def gateway_system(
     hardcoded copy."""
     return (
         _GATEWAY_INSTRUCTIONS_TEMPLATE.format(default_year=default_year)
-        + "\n\nOutput labels (use one per `output` slot): "
+        + "\n\nThe following directly modelled output labels are authoritative "
+        + "(use one per `output` slot): "
         + output_labels
         + "\n\nTools available (name — purpose; required params):\n"
         + tool_summary.strip()

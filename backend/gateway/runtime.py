@@ -47,6 +47,7 @@ logger = logging.getLogger(__name__)
 
 GATEWAY_MODEL = os.environ.get("POLICYENGINE_CHAT_GATEWAY_MODEL", DEFAULT_FAST_MODEL)
 GATEWAY_MAX_TOKENS = int(os.environ.get("POLICYENGINE_CHAT_GATEWAY_MAX_TOKENS", "1024"))
+MAX_UNMODELLABLE_OUTPUTS = 4
 
 _TOOL_NAMES = [t["name"] for t in TOOL_DEFINITIONS]
 
@@ -116,7 +117,34 @@ _EMIT_PLAN_TOOL = {
                     "required": ["name", "kind", "source"],
                 },
             },
-            "unmodellable_outputs": {"type": "array", "items": {"type": "string"}},
+            "unmodellable_outputs": {
+                "type": "array",
+                "maxItems": MAX_UNMODELLABLE_OUTPUTS,
+                "description": (
+                    "Outputs explicitly requested by the user that the tool chain "
+                    "cannot calculate. Every item must cite an exact quote from "
+                    "the user's message that requests that output."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "maxLength": 100,
+                            "description": "Concise name of the unmodellable output.",
+                        },
+                        "evidence": {
+                            "type": "string",
+                            "maxLength": 300,
+                            "description": (
+                                "A short exact quote from the user's message that "
+                                "explicitly requests this output."
+                            ),
+                        },
+                    },
+                    "required": ["name", "evidence"],
+                },
+            },
             "catalogue_queries": {
                 "type": "array",
                 "maxItems": MAX_CATALOGUE_QUERIES,
@@ -152,6 +180,51 @@ def _catalogue_queries_from_plan(plan: dict) -> tuple[CatalogueQuery, ...]:
             continue
         queries.append(CatalogueQuery(kind, query))
     return tuple(queries)
+
+
+def _normalise_evidence_text(value: str) -> str:
+    """Normalise case and whitespace while preserving phrase boundaries."""
+
+    return " ".join(value.casefold().split())
+
+
+def _unmodellable_outputs_from_plan(plan: dict, prompt: str) -> list[str]:
+    """Accept only limitations backed by an exact phrase from the user.
+
+    The classifier can explain capability boundaries, but it cannot promote a
+    merely possible behavioural or macroeconomic caveat into a requested output.
+    Requiring quoted prompt evidence keeps that distinction deterministic.
+    """
+
+    prompt_text = _normalise_evidence_text(prompt)
+    outputs: list[str] = []
+    seen: set[str] = set()
+    raw_outputs = plan.get("unmodellable_outputs")
+    if not isinstance(raw_outputs, list):
+        return outputs
+
+    for item in raw_outputs:
+        if not isinstance(item, dict):
+            continue
+        name = item.get("name")
+        evidence = item.get("evidence")
+        if not isinstance(name, str) or not isinstance(evidence, str):
+            continue
+        name = name.strip()
+        evidence_text = _normalise_evidence_text(evidence)
+        key = name.casefold()
+        if (
+            not name
+            or not evidence_text
+            or evidence_text not in prompt_text
+            or key in seen
+        ):
+            continue
+        seen.add(key)
+        outputs.append(name)
+        if len(outputs) == MAX_UNMODELLABLE_OUTPUTS:
+            break
+    return outputs
 
 
 def apply_catalogue_evidence(
@@ -217,7 +290,7 @@ def _verdict_from_plan(
 
     slots = normalise_slot_grounding(tool, slots)
     slots = complete_slots(tool, slots)
-    unmodellable = [str(x) for x in (plan.get("unmodellable_outputs") or []) if x]
+    unmodellable = _unmodellable_outputs_from_plan(plan, prompt)
     result = gate(in_domain, tool, slots, unmodellable, prompt)
     verdict = GatewayVerdict(
         outcome=result.outcome,

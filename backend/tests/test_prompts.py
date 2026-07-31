@@ -133,6 +133,11 @@ def test_gateway_prompt_renders_caller_supplied_default_year():
     assert "{default_year}" not in rendered
     assert "not an exhaustive list" in rendered
     assert "catalogue_queries" in rendered
+    assert "only outputs that the user explicitly asks for" in rendered
+    assert "Do not add behavioural" in rendered
+    assert "caveats for the final answer" in rendered
+    assert "label_a, label_b" in rendered
+    assert "authoritative" in rendered
 
 
 def test_secondary_model_prompts_use_neutral_wording():

@@ -91,6 +91,22 @@ cases:
     expected_outcome: ready
     expected_tool: run_society_simulation
 
+  - id: gw_ready_basic_rate_revenue_without_dynamic_rider
+    suite: gateway
+    description: An unqualified revenue request means the direct static result, not an inferred behavioural forecast.
+    requirements: [live_model]
+    prompt: What would be the annual revenue from raising the basic income tax rate by one percentage point?
+    expected_outcome: ready
+    expected_tool: run_society_simulation
+
+  - id: gw_ready_uc_poverty_without_dynamic_rider
+    suite: gateway
+    description: Poverty metrics are directly modelled unless the user explicitly requests behavioural or macroeconomic effects.
+    requirements: [live_model]
+    prompt: How would increasing Universal Credit's standard allowance by 5% affect poverty?
+    expected_outcome: ready
+    expected_tool: run_society_simulation
+
   - id: gw_ready_household_full
     suite: gateway
     description: A fully-specified household calculation needs no clarification.

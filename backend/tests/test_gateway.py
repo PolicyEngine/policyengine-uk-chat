@@ -211,6 +211,86 @@ class TestRunGateway:
         assert v.outcome == "ready" and v.route == "compute"
         assert v.tool == "run_society_simulation"
 
+    def test_ignores_unmodellable_output_without_prompt_evidence(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "value": "Raise the basic rate by one percentage point",
+                    "source": "prompt",
+                },
+                {
+                    "name": "output",
+                    "kind": "output",
+                    "value": "tax_revenue",
+                    "source": "prompt",
+                },
+            ],
+            "unmodellable_outputs": [
+                {
+                    "name": "behavioural response",
+                    "evidence": "behavioural response",
+                }
+            ],
+            "catalogue_queries": [],
+        }
+        prompt = (
+            "What would be the annual revenue from raising the basic income tax "
+            "rate by one percentage point?"
+        )
+
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(prompt)
+
+        assert verdict.outcome == "ready"
+        assert verdict.route == "compute"
+        assert verdict.unmodellable_outputs == []
+
+    def test_preserves_explicit_evidence_for_an_unmodellable_output(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "value": "Raise the basic rate by one percentage point",
+                    "source": "prompt",
+                },
+                {
+                    "name": "output",
+                    "kind": "output",
+                    "value": "tax_revenue",
+                    "source": "prompt",
+                },
+            ],
+            "unmodellable_outputs": [
+                {
+                    "name": "behavioural response",
+                    "evidence": "including behavioural responses",
+                }
+            ],
+            "catalogue_queries": [],
+        }
+        prompt = (
+            "What would be the annual revenue from raising the basic income tax "
+            "rate by one percentage point, including behavioural responses?"
+        )
+
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(prompt)
+
+        assert verdict.outcome == "partial"
+        assert verdict.route == "lightweight"
+        assert verdict.unmodellable_outputs == ["behavioural response"]
+
     def test_parses_needs_plan(self):
         from gateway import runtime as gateway
         plan = {
@@ -377,6 +457,20 @@ class TestGatewaySystemPrompt:
 
         assert f"year {DEFAULT_SIMULATION_YEAR}" in gateway.GATEWAY_SYSTEM
         assert "{default_year}" not in gateway.GATEWAY_SYSTEM
+
+    def test_unmodellable_output_schema_requires_prompt_evidence(self):
+        from gateway import runtime as gateway
+
+        unmodellable = gateway._EMIT_PLAN_TOOL["input_schema"]["properties"][
+            "unmodellable_outputs"
+        ]
+
+        assert unmodellable["items"]["type"] == "object"
+        assert unmodellable["items"]["required"] == ["name", "evidence"]
+        assert (
+            "exact quote"
+            in unmodellable["items"]["properties"]["evidence"]["description"]
+        )
 
 
 class TestWriterDirective:

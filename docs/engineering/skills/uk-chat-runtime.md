@@ -150,6 +150,16 @@ output must name a supported output concept; otherwise the server treats it as
 `assumed`. A valueless `default` is accepted only for a schema default or the
 documented current-law society baseline.
 
+The gateway treats the supported output vocabulary as authoritative for direct,
+static microsimulation. Unqualified requests for cost, revenue, spending,
+poverty, inequality, decile effects, winners and losers, caseload, marginal
+rates, or net income therefore proceed as modelled outputs; behavioural and
+macroeconomic exclusions are result caveats, not implicit user requests. An
+unmodellable output can trigger `partial` only when the classifier supplies its
+name plus an exact quote from the user that explicitly requests it. The server
+normalises case and whitespace, rejects evidence absent from the prompt,
+deduplicates accepted limitations, and caps them at four.
+
 The gateway's non-`ready` (lightweight) outcomes must remain structurally
 enforced by omitting tools from the model request, not only by prompting the
 model not to call tools.
