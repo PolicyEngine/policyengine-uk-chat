@@ -64,6 +64,7 @@ jobs:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}
           POLICYENGINE_UK_DATA_TOKEN: ${{ secrets.POLICYENGINE_UK_DATA_TOKEN }}
           HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
           DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}

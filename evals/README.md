@@ -47,6 +47,29 @@ Set `RUN_DATA_EVALS=1` to include cases that require local microdata.
 Cases marked `requirements: [live_model]` are skipped offline and run only
 through `make eval-ai-live`.
 
+```bash
+EVAL_BACKEND_URL=https://your-backend.example \
+EVAL_RUN_TOKEN=... \
+make eval-ai-deployed-uk-population
+```
+
+Runs the 20 population cases through the same deployed UK Chat model and tool
+loop used by `/chat/message`. Each trial is a separate request to the
+token-protected `/eval/chat/message` route, has a 600-second timeout, and is
+graded from the complete tool trace returned by the backend. The runner uses
+four concurrent requests by default and does not retry failed requests.
+
+Use `python -m eval.run_deployed --case-id CASE_ID` to run one case. The token
+is read only from `EVAL_RUN_TOKEN`; it is never accepted as a command-line
+argument or written to reports. GitHub's `Run deployed UK population evals`
+workflow provides the same runner manually and uploads reports even when a case
+fails.
+
+The backend must have a matching `UK_CHAT_EVAL_TOKEN`. Production and preview
+deployments receive it from the repository's `UK_CHAT_EVAL_TOKEN` secret. The
+endpoint returns 503 when that server secret is not configured and 401 for a
+missing or invalid request token.
+
 ## Suites
 
 - `tool_contract`: deterministic tool behavior through `execute_tool`.

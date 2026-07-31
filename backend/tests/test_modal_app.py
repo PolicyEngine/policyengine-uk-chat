@@ -128,6 +128,8 @@ def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
     assert "BACKEND_URL: ${{ steps.modal_deploy.outputs.modal_url }}" in workflow
     assert workflow.count("HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}") == 1
     assert sync_script.count('HUGGING_FACE_TOKEN="$HUGGING_FACE_TOKEN"') == 1
+    assert workflow.count("UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}") == 1
+    assert sync_script.count('UK_CHAT_EVAL_TOKEN="$UK_CHAT_EVAL_TOKEN"') == 1
     assert "HOSTNAMES: ${{ steps.names.outputs.frontend_url }}" in workflow
     assert (
         "PUBLIC_BASE_URL: ${{ steps.names.outputs.frontend_url }}/uk/chat" in workflow
@@ -188,6 +190,26 @@ def test_deploy_workflows_reuse_modal_secret_and_smoke_test_scripts():
     for workflow in (production, preview):
         assert "run: .github/scripts/sync-modal-secret.sh" in workflow
         assert "run: .github/scripts/smoke-test-modal-backend.sh" in workflow
+        assert workflow.count(
+            "UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}"
+        ) == 1
+
+
+def test_manual_deployed_eval_workflow_is_token_safe_and_uploads_reports():
+    workflow = (
+        REPO_ROOT / ".github/workflows/eval-uk-population.yml"
+    ).read_text()
+    runner = (REPO_ROOT / ".github/scripts/run-deployed-evals.sh").read_text()
+
+    assert "workflow_dispatch:" in workflow
+    assert "timeout-minutes: 180" in workflow
+    assert "EVAL_RUN_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}" in workflow
+    assert "run: .github/scripts/run-deployed-evals.sh" in workflow
+    assert "if: always()" in workflow
+    assert "evals/reports" in workflow
+    assert "--trial-timeout-seconds" in runner
+    assert "--concurrency" in runner
+    assert "--token" not in runner
 
 
 def test_preview_frontend_url_script_writes_github_outputs(tmp_path, monkeypatch):

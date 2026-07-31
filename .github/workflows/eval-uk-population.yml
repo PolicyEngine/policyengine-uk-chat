@@ -1,0 +1,62 @@
+name: Run deployed UK population evals
+
+on:
+  workflow_dispatch:
+    inputs:
+      backend_url:
+        description: Deployed UK Chat backend URL
+        required: true
+        default: https://policyengine--policyengine-uk-chat-web.modal.run
+        type: string
+      concurrency:
+        description: Maximum simultaneous trial requests
+        required: true
+        default: "4"
+        type: choice
+        options:
+          - "1"
+          - "2"
+          - "4"
+          - "8"
+      case_id:
+        description: Optional single case ID; leave empty to run all 20
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate:
+    name: Deployed UK population evals
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+
+      - name: Install evaluation dependencies
+        run: .github/scripts/install-backend-dependencies.sh
+
+      - name: Run deployed evaluations
+        env:
+          EVAL_BACKEND_URL: ${{ inputs.backend_url }}
+          EVAL_RUN_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}
+          EVAL_CONCURRENCY: ${{ inputs.concurrency }}
+          EVAL_CASE_ID: ${{ inputs.case_id }}
+          EVAL_TRIAL_TIMEOUT_SECONDS: "600"
+        run: .github/scripts/run-deployed-evals.sh
+
+      - name: Upload evaluation reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: uk-population-eval-reports
+          path: evals/reports
+          if-no-files-found: warn
