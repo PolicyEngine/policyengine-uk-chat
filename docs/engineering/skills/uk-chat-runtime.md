@@ -167,8 +167,11 @@ lightweight, where the model can ask the necessary follow-up question. A match
 does prevent an `irrelevant` or `out_of_scope` classifier result from falsely
 refusing an otherwise modelled request. If no candidate resolves, use the
 lightweight path to ask which supported measure or variable the user means; do
-not call it unmodelled. If catalogue metadata cannot be loaded, fail open to
-the normal compute route.
+not call it unmodelled. For a `partial` request with an unresolved candidate,
+state the unmodellable limitation and ask the catalogue clarification before
+offering a computation. If catalogue metadata cannot be loaded, fail open to
+compute only from `irrelevant` or `out_of_scope`; preserve an existing
+`needs_plan` or `partial` outcome.
 
 Pass paths and variable names only as internal compute context. The lightweight
 writer may receive human-readable candidate labels, but not internal paths.

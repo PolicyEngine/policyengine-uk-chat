@@ -127,6 +127,14 @@ part you CAN compute and the part you cannot (named below), then ask whether
 they'd like you to run the modellable part. Do not run anything yet.
 """.strip()
 
+GATEWAY_PARTIAL_CATALOGUE_DIRECTIVE = """
+Part of the user's question is modellable and part is not. Briefly state the
+part you CAN compute and the part you cannot (named below). A named policy
+measure or variable also needs clarification: ask what supported measure or
+variable the user means before offering to run the modellable part. Do not run
+anything yet.
+""".strip()
+
 GATEWAY_NEEDS_PLAN_DIRECTIVE = """
 The question is in scope but under-specified on the points listed below. Ask 1-3
 concise clarifying questions targeting exactly those points, as a numbered list,

@@ -37,6 +37,7 @@ from prompts import (
     GATEWAY_IRRELEVANT_DIRECTIVE,
     GATEWAY_NEEDS_PLAN_DIRECTIVE,
     GATEWAY_OUT_OF_SCOPE_DIRECTIVE,
+    GATEWAY_PARTIAL_CATALOGUE_DIRECTIVE,
     GATEWAY_PARTIAL_DIRECTIVE,
     gateway_system,
 )
@@ -165,9 +166,13 @@ def apply_catalogue_evidence(
 
     verdict = replace(verdict, catalogue_evidence=evidence)
     if not evidence.available:
-        return replace(verdict, outcome="ready", route="compute")
+        if verdict.outcome in ("irrelevant", "out_of_scope"):
+            return replace(verdict, outcome="ready", route="compute")
+        return verdict
     if evidence.unresolved_queries:
         gating_slots = list(dict.fromkeys([*verdict.gating_slots, "model_catalogue"]))
+        if verdict.outcome in ("needs_plan", "partial"):
+            return replace(verdict, gating_slots=gating_slots)
         return replace(
             verdict,
             outcome="needs_plan",
@@ -273,7 +278,11 @@ _WRITER_DIRECTIVES = {
 def gateway_writer_directive(verdict: GatewayVerdict) -> str:
     """Per-outcome directive plus concrete facts, appended to the lightweight
     system for the single no-tool reply turn on a non-`ready` outcome."""
-    directive = _WRITER_DIRECTIVES.get(verdict.outcome)
+    evidence = verdict.catalogue_evidence
+    if verdict.outcome == "partial" and evidence and evidence.unresolved_queries:
+        directive = GATEWAY_PARTIAL_CATALOGUE_DIRECTIVE
+    else:
+        directive = _WRITER_DIRECTIVES.get(verdict.outcome)
     if directive is None:
         return ""
     parts = [directive]
@@ -281,7 +290,6 @@ def gateway_writer_directive(verdict: GatewayVerdict) -> str:
         parts.append("Cannot model: " + ", ".join(verdict.unmodellable_outputs) + ".")
     if verdict.outcome == "needs_plan" and verdict.gating_slots:
         parts.append("Under-specified points to clarify: " + ", ".join(verdict.gating_slots) + ".")
-    evidence = verdict.catalogue_evidence
     if evidence and evidence.unresolved_queries:
         queries = ", ".join(query.query for query in evidence.unresolved_queries)
         parts.append(
