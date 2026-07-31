@@ -28,6 +28,11 @@ from eval.schemas import (
     TrajectoryCase,
 )
 from eval.sync_policyengine_uk import render_generated_cases
+from eval.tool_loop_grading import (
+    aggregate_tool_loop_trials,
+    expectation_with_trace_numbers,
+    numbers_from_value,
+)
 from tools.definitions import TOOL_DEFINITIONS
 
 
@@ -232,6 +237,66 @@ def test_tool_loop_cases_can_declare_live_trial_thresholds():
 
     assert case.trials == 3
     assert case.pass_threshold == 0.66
+
+
+def test_grounded_numbers_include_tool_inputs_outputs_and_display_scales():
+    expectation = TextExpectation(grounded_numbers=True, allowed_numbers=[2026])
+    tool_calls = [
+        ModelToolCall(
+            name="run_society_simulation",
+            input={"year": 2026, "reform": {"basic_rate": 0.19}},
+        )
+    ]
+    grounded = expectation_with_trace_numbers(
+        expectation,
+        tool_calls=tool_calls,
+        tool_outputs=[{"budgetary_impact": -1_000_000_000}],
+    )
+
+    assert grade_text(
+        "In 2026, a 19% rate has an annual impact of -£1bn.",
+        grounded,
+    ) == []
+
+
+def test_number_collection_excludes_booleans_and_adds_percentage_variants():
+    values = numbers_from_value(
+        {"enabled": True, "rate": 0.2, "count": 5, "nested": [False, 2_000]}
+    )
+
+    assert 1.0 not in values
+    assert 0.2 in values
+    assert 20.0 in values
+    assert 5.0 in values
+    assert 2_000.0 in values
+    assert 2.0 in values
+
+
+def test_shared_trial_aggregation_applies_declared_threshold():
+    case = ToolLoopCase(
+        id="threshold_case",
+        description="Threshold aggregation",
+        prompt="Calculate",
+        trials=3,
+        pass_threshold=0.66,
+    )
+    trial_results = [
+        CaseResult(id=case.id, suite=case.suite, status="passed", score=1.0),
+        CaseResult(id=case.id, suite=case.suite, status="passed", score=1.0),
+        CaseResult(
+            id=case.id,
+            suite=case.suite,
+            status="failed",
+            score=0.0,
+            errors=["failed trial"],
+        ),
+    ]
+
+    result = aggregate_tool_loop_trials(case, trial_results)
+
+    assert result.status == "passed"
+    assert result.score == pytest.approx(2 / 3)
+    assert result.details["passed_trials"] == 2
 
 
 def test_live_tool_loop_trials_score_against_threshold(tmp_path, monkeypatch):
