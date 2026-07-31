@@ -168,6 +168,28 @@ def test_unresolved_catalogue_query_asks_for_clarification():
     assert "not say that it is unmodelled" in directive
 
 
+def test_unresolved_catalogue_query_preserves_partial_limitation():
+    query = CatalogueQuery("reform_target", "made up levy")
+    verdict = GatewayVerdict(
+        outcome="partial",
+        route="lightweight",
+        unmodellable_outputs=["GDP"],
+    )
+
+    resolved = apply_catalogue_evidence(
+        verdict,
+        _evidence(unresolved_queries=(query,)),
+    )
+
+    assert resolved.outcome == "partial"
+    assert resolved.route == "lightweight"
+    assert "model_catalogue" in resolved.gating_slots
+    directive = gateway_writer_directive(resolved)
+    assert "Cannot model: GDP." in directive
+    assert "made up levy" in directive
+    assert "before offering to run the modellable part" in directive
+
+
 def test_unavailable_catalogue_fails_open_to_compute():
     verdict = GatewayVerdict(outcome="out_of_scope", route="lightweight")
 
@@ -175,6 +197,33 @@ def test_unavailable_catalogue_fails_open_to_compute():
 
     assert resolved.outcome == "ready"
     assert resolved.route == "compute"
+
+
+def test_unavailable_catalogue_preserves_existing_partial_outcome():
+    verdict = GatewayVerdict(
+        outcome="partial",
+        route="lightweight",
+        unmodellable_outputs=["inflation"],
+    )
+
+    resolved = apply_catalogue_evidence(verdict, _evidence(available=False))
+
+    assert resolved.outcome == "partial"
+    assert resolved.route == "lightweight"
+
+
+def test_unavailable_catalogue_preserves_existing_needs_plan_outcome():
+    verdict = GatewayVerdict(
+        outcome="needs_plan",
+        route="lightweight",
+        gating_slots=["reform"],
+    )
+
+    resolved = apply_catalogue_evidence(verdict, _evidence(available=False))
+
+    assert resolved.outcome == "needs_plan"
+    assert resolved.route == "lightweight"
+    assert resolved.gating_slots == ["reform"]
 
 
 def test_compute_context_gets_paths_but_lightweight_context_gets_labels_only():
