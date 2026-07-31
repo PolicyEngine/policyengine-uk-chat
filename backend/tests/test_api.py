@@ -606,6 +606,7 @@ class TestChatRouteWithMockedAnthropic:
 
     def test_chat_route_logs_client_disconnect(self, monkeypatch):
         import chat.orchestrator as chatbot
+        from chat.public_service import start_public_chat
         from chat.schemas import ChatRequest
 
         class DisconnectingRequest:
@@ -620,8 +621,7 @@ class TestChatRouteWithMockedAnthropic:
         monkeypatch.setattr(EVENT_LOGGER, "info", event_records.append)
 
         async def consume_stream():
-            response = chatbot.stream_chat(
-                DisconnectingRequest(),
+            stream = await start_public_chat(
                 ChatRequest(
                     messages=[
                         {
@@ -631,11 +631,9 @@ class TestChatRouteWithMockedAnthropic:
                     ],
                     session_id="disconnect-session",
                 ),
+                is_cancelled=DisconnectingRequest().is_disconnected,
             )
-            chunks = []
-            async for chunk in response.body_iterator:
-                chunks.append(chunk)
-            return chunks
+            return [chunk async for chunk in stream]
 
         assert asyncio.run(consume_stream()) == []
 
@@ -662,6 +660,7 @@ class TestChatRouteWithMockedAnthropic:
 
     def test_chat_route_logs_error_on_chat_turn(self, monkeypatch):
         import chat.orchestrator as chatbot
+        from chat.public_service import start_public_chat
         from chat.schemas import ChatRequest
 
         class ConnectedRequest:
@@ -683,8 +682,7 @@ class TestChatRouteWithMockedAnthropic:
         monkeypatch.setattr(OPERATION_LOGGER, "error", operation_records.append)
 
         async def consume_stream():
-            response = chatbot.stream_chat(
-                ConnectedRequest(),
+            stream = await start_public_chat(
                 ChatRequest(
                     messages=[
                         {
@@ -694,14 +692,9 @@ class TestChatRouteWithMockedAnthropic:
                     ],
                     session_id="error-session",
                 ),
+                is_cancelled=ConnectedRequest().is_disconnected,
             )
-            chunks = []
-            async for chunk in response.body_iterator:
-                chunks.append(chunk)
-            return "".join(
-                chunk.decode() if isinstance(chunk, bytes) else chunk
-                for chunk in chunks
-            )
+            return "".join([chunk async for chunk in stream])
 
         events = parse_sse(asyncio.run(consume_stream()))
 
