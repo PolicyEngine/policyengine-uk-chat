@@ -19,8 +19,19 @@ from dataclasses import dataclass, field, replace
 from typing import List, Optional
 
 from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_sync_client
-from gateway.catalogue import CatalogueEvidence, CatalogueQuery, resolve_catalogue_queries
-from gateway.policy import OUTPUT_VOCAB, SlotFact, complete_slots, gate
+from gateway.catalogue import (
+    MAX_CATALOGUE_QUERIES,
+    CatalogueEvidence,
+    CatalogueQuery,
+    resolve_catalogue_queries,
+)
+from gateway.policy import (
+    OUTPUT_VOCAB,
+    SlotFact,
+    complete_slots,
+    gate,
+    normalise_slot_grounding,
+)
 from prompts import (
     DEFAULT_SCOPE_DESCRIPTOR,
     GATEWAY_IRRELEVANT_DIRECTIVE,
@@ -107,7 +118,7 @@ _EMIT_PLAN_TOOL = {
             "unmodellable_outputs": {"type": "array", "items": {"type": "string"}},
             "catalogue_queries": {
                 "type": "array",
-                "maxItems": 4,
+                "maxItems": MAX_CATALOGUE_QUERIES,
                 "description": (
                     "Short policyengine.py catalogue searches for named reform "
                     "measures or variable concepts. Use an empty list when no "
@@ -189,8 +200,17 @@ def _verdict_from_plan(
         kind = s.get("kind", "tool_input")
         if kind not in ("tool_input", "output"):
             kind = "tool_input"
-        slots.append(SlotFact(name=str(s["name"]), source=source, kind=kind, value=s.get("value")))
+        value = s.get("value")
+        slots.append(
+            SlotFact(
+                name=str(s["name"]),
+                source=source,
+                kind=kind,
+                value=value if isinstance(value, str) else None,
+            )
+        )
 
+    slots = normalise_slot_grounding(tool, slots)
     slots = complete_slots(tool, slots)
     unmodellable = [str(x) for x in (plan.get("unmodellable_outputs") or []) if x]
     result = gate(in_domain, tool, slots, unmodellable, prompt)

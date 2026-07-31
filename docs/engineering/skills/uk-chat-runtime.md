@@ -145,6 +145,10 @@ omitted from a selected tool plan as `assumed`, and adds the synthetic requested
 `output` slot when it is absent. Thus a classifier omission cannot be mistaken
 for grounded user intent. Safe defaults and model-inferable slots may still
 proceed without a follow-up; assumed high- or medium-criticality slots cannot.
+An asserted `prompt` slot must also contain a non-empty value, and an asserted
+output must name a supported output concept; otherwise the server treats it as
+`assumed`. A valueless `default` is accepted only for a schema default or the
+documented current-law society baseline.
 
 The gateway's non-`ready` (lightweight) outcomes must remain structurally
 enforced by omitting tools from the model request, not only by prompting the

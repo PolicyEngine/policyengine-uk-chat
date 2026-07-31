@@ -18,7 +18,7 @@ admissibility — irrelevant / out_of_scope / partial — is decided).
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import List, Literal, Optional
 
 from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
@@ -136,6 +136,42 @@ OUTPUT_VOCAB = (
     "parameter_lookup",
     "reform_validity",
 )
+
+# Most safe defaults are expressed directly in a tool schema. Current law is
+# also the documented baseline for a society simulation, even though a missing
+# reform is represented by ``None`` rather than a JSON-schema ``default``.
+_EXPLICIT_SAFE_DEFAULTS = {
+    ("run_society_simulation", "reform"),
+}
+
+
+def normalise_slot_grounding(
+    tool: Optional[str],
+    slots: List[SlotFact],
+) -> List[SlotFact]:
+    """Reject empty or unsupported claims that a slot is already grounded."""
+
+    normalised: list[SlotFact] = []
+    for slot in slots:
+        value = slot.value.strip() if isinstance(slot.value, str) else None
+        if slot.kind == "output":
+            output = value or slot.name
+            if slot.source == "prompt" and output in OUTPUT_VOCAB:
+                normalised.append(replace(slot, value=output))
+            else:
+                normalised.append(replace(slot, source="assumed", value=None))
+            continue
+
+        key = (tool, slot.name)
+        has_schema_default = TOOL_SLOT_REQUIREMENT.get(key) == "defaulted"
+        can_default = has_schema_default or key in _EXPLICIT_SAFE_DEFAULTS
+        if slot.source == "prompt" and not value:
+            normalised.append(replace(slot, source="assumed", value=None))
+        elif slot.source == "default" and not can_default:
+            normalised.append(replace(slot, source="assumed", value=None))
+        else:
+            normalised.append(replace(slot, value=value))
+    return normalised
 
 
 # ---------------------------------------------------------------------------
