@@ -179,3 +179,30 @@ class EvalReport(StrictModel):
     @property
     def skipped(self) -> int:
         return sum(1 for result in self.results if result.status == "skipped")
+
+
+class EvalUsage(StrictModel):
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+
+
+class EvalToolTrace(StrictModel):
+    tool_id: str
+    name: str
+    input: Dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pending", "success", "error"] = "pending"
+    output: Any = None
+
+
+class EvalChatResponse(StrictModel):
+    status: Literal["completed", "failed"]
+    content: str = ""
+    session_id: str
+    model: Optional[str] = None
+    route: str = "compute"
+    outcome: Optional[str] = None
+    stop_reason: Optional[str] = None
+    usage: EvalUsage = Field(default_factory=EvalUsage)
+    tool_trace: List[EvalToolTrace] = Field(default_factory=list)

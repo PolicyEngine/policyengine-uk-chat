@@ -14,6 +14,7 @@ from slowapi.errors import RateLimitExceeded
 import billing
 import chat
 import conversations
+from eval.routes import router as eval_router
 from api.errors import NaNSafeJSONResponse, rate_limit_handler
 from api.rate_limit import limiter
 from observability.fastapi import init_observability
@@ -65,6 +66,7 @@ app.add_middleware(
 app.include_router(billing.router)
 app.include_router(chat.router)
 app.include_router(conversations.router)
+app.include_router(eval_router)
 
 init_observability(app, service_role="api")
 
