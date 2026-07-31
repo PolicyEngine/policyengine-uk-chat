@@ -1,0 +1,277 @@
+common: &common
+  suite: tool_loop
+  tags: [uk_population_microsimulation, manual_live]
+  requirements: [live_model, policyengine_py, data]
+  trials: 3
+  pass_threshold: 0.66
+  max_iterations: 6
+  forbidden_tools: [run_household_simulation]
+
+neutral_forbidden: &neutral_forbidden
+  - good
+  - bad
+  - fair
+  - unfair
+  - regressive
+  - progressive
+  - generous
+  - punitive
+
+budget_tools: &budget_tools
+  - name: run_society_simulation
+  - name: compute_budgetary_impact
+
+poverty_tools: &poverty_tools
+  - name: run_society_simulation
+  - name: compute_poverty_metrics
+
+decile_tools: &decile_tools
+  - name: run_society_simulation
+  - name: compute_decile_impacts
+
+winners_tools: &winners_tools
+  - name: run_society_simulation
+  - name: compute_winners_losers
+
+common_allowed_numbers: &common_allowed_numbers [2026, 2024, 25]
+
+cases:
+  - <<: *common
+    id: uk_population_personal_allowance_500_cost
+    description: Annual cost of increasing the personal allowance by £500.
+    prompt: What would be the annual cost of increasing the personal allowance by £500?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 500]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_basic_rate_plus_1pp_revenue
+    description: Annual revenue from raising the basic income tax rate by one percentage point.
+    prompt: What would be the annual revenue from raising the basic income tax rate by one percentage point?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 1]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_basic_rate_minus_1pp_cost
+    description: Annual cost of reducing the basic income tax rate by one percentage point.
+    prompt: What would be the annual cost of reducing the basic income tax rate by one percentage point?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 1]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_higher_rate_threshold_minus_2000_revenue
+    description: Annual revenue from lowering the higher-rate income tax threshold by £2,000.
+    prompt: What would be the annual revenue from lowering the higher-rate income tax threshold by £2,000?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 2000]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_higher_rate_threshold_plus_2000_cost
+    description: Annual cost of raising the higher-rate income tax threshold by £2,000.
+    prompt: What would be the annual cost of raising the higher-rate income tax threshold by £2,000?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 2000]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_employee_ni_plus_1pp_revenue
+    description: Annual revenue from increasing all employee National Insurance rates by one percentage point.
+    prompt: What would be the annual revenue from increasing all employee National Insurance rates by one percentage point?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 1]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_employee_ni_minus_1pp_cost
+    description: Annual cost of reducing all employee National Insurance rates by one percentage point.
+    prompt: What would be the annual cost of reducing all employee National Insurance rates by one percentage point?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 1]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_uc_standard_allowance_5pct_cost
+    description: Annual cost of increasing Universal Credit's standard allowance by 5%.
+    prompt: What would be the annual cost of increasing Universal Credit's standard allowance by 5%?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 5]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_uc_standard_allowance_5pct_poverty
+    description: Poverty impact of increasing Universal Credit's standard allowance by 5%.
+    prompt: How would increasing Universal Credit's standard allowance by 5% affect poverty?
+    expected_tools: *poverty_tools
+    expect:
+      required: ["2026", FRS, poverty]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 5]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_uc_child_element_10pw_cost
+    description: Annual cost of increasing Universal Credit's child element by £10 per week.
+    prompt: What would be the annual cost of increasing Universal Credit's child element by £10 per week?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 10]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_uc_child_element_10pw_child_poverty
+    description: Child poverty impact of increasing Universal Credit's child element by £10 per week.
+    prompt: How would increasing Universal Credit's child element by £10 per week affect child poverty?
+    expected_tools: *poverty_tools
+    expect:
+      required: ["2026", FRS, poverty, child]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 10]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_uc_work_allowance_500_cost
+    description: Annual cost of increasing the Universal Credit work allowance by £500 per year.
+    prompt: What would be the annual cost of increasing the Universal Credit work allowance by £500 per year?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 500]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_uc_work_allowance_500_households
+    description: Household gains from increasing the Universal Credit work allowance by £500 per year.
+    prompt: How many households would gain from increasing the Universal Credit work allowance by £500 per year?
+    expected_tools: *winners_tools
+    expect:
+      required: ["2026", FRS, households, gain]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 500, 5]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_uc_taper_minus_2pp_cost
+    description: Annual cost of reducing the Universal Credit taper rate by two percentage points.
+    prompt: What would be the annual cost of reducing the Universal Credit taper rate by two percentage points?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 2]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_uc_taper_minus_2pp_deciles
+    description: Decile impacts from reducing the Universal Credit taper rate by two percentage points.
+    prompt: How would reducing the Universal Credit taper rate by two percentage points affect household incomes by decile?
+    expected_tools: *decile_tools
+    expect:
+      required: ["2026", FRS, decile, household]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 2]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_child_benefit_5pw_cost
+    description: Annual cost of increasing Child Benefit by £5 per week for every child.
+    prompt: What would be the annual cost of increasing Child Benefit by £5 per week for every child?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 5]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_child_benefit_5pw_households
+    description: Household gains from increasing Child Benefit by £5 per week.
+    prompt: How many households would gain from increasing Child Benefit by £5 per week?
+    expected_tools: *winners_tools
+    expect:
+      required: ["2026", FRS, households, gain]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 5]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_state_pension_2pct_cost
+    description: Annual cost of increasing the State Pension by 2%.
+    prompt: What would be the annual cost of increasing the State Pension by 2%?
+    expected_tools: *budget_tools
+    expect:
+      required: ["2026", FRS, annual, £]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 2]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_personal_allowance_500_deciles
+    description: Decile impacts from increasing the personal allowance by £500.
+    prompt: How would increasing the personal allowance by £500 affect household incomes by decile?
+    expected_tools: *decile_tools
+    expect:
+      required: ["2026", FRS, decile, household]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 500]
+      number_tolerance: 0.1
+
+  - <<: *common
+    id: uk_population_basic_rate_plus_1pp_people
+    description: People gaining or losing from raising the basic income tax rate by one percentage point.
+    prompt: How many people would gain or lose from raising the basic income tax rate by one percentage point?
+    expected_tools: *winners_tools
+    expect:
+      required: ["2026", FRS, people, gain, lose]
+      forbidden: *neutral_forbidden
+      grounded_numbers: true
+      allowed_numbers: [2026, 2024, 25, 1, 5]
+      number_tolerance: 0.1

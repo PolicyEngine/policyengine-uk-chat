@@ -34,6 +34,15 @@ ANTHROPIC_API_KEY=... make eval-ai-live
 Runs the same cases against the configured live provider. Reports are written to
 `evals/reports/`, which is ignored by git.
 
+```bash
+ANTHROPIC_API_KEY=... make eval-ai-live-uk-population
+```
+
+Runs the manual, data-backed UK population microsimulation tool-loop cases.
+These cases execute the live model against local `policyengine.py` UK
+microdata-backed simulations, run three trials per case, and pass only if the
+configured pass-rate threshold is met.
+
 Set `RUN_DATA_EVALS=1` to include cases that require local microdata.
 Cases marked `requirements: [live_model]` are skipped offline and run only
 through `make eval-ai-live`.

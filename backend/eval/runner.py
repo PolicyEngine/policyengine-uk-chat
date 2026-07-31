@@ -24,6 +24,7 @@ from eval.schemas import (
     EvalReport,
     GatewayCase,
     ModelTurn,
+    TextExpectation,
     ToolContractCase,
     ToolLoopCase,
     TrajectoryCase,
@@ -233,10 +234,57 @@ def _tool_use_id(case: ToolLoopCase, iteration: int, index: int, call_id: str) -
     return call_id or f"{case.id}-{iteration}-{index}"
 
 
+def _numeric_grounding_variants(value: float) -> List[float]:
+    variants = [value]
+    magnitude = abs(value)
+    if 0 < magnitude <= 1:
+        variants.append(value * 100)
+    if magnitude >= 1_000:
+        variants.append(value / 1_000)
+    if magnitude >= 1_000_000:
+        variants.append(value / 1_000_000)
+    if magnitude >= 1_000_000_000:
+        variants.append(value / 1_000_000_000)
+    return variants
+
+
+def _numbers_from_tool_output(value: Any) -> List[float]:
+    if isinstance(value, bool):
+        return []
+    if isinstance(value, int | float):
+        return _numeric_grounding_variants(float(value))
+    if isinstance(value, dict):
+        numbers: List[float] = []
+        for item in value.values():
+            numbers.extend(_numbers_from_tool_output(item))
+        return numbers
+    if isinstance(value, list):
+        numbers = []
+        for item in value:
+            numbers.extend(_numbers_from_tool_output(item))
+        return numbers
+    return []
+
+
+def _expectation_with_tool_output_numbers(
+    expectation: TextExpectation,
+    tool_outputs: List[Dict[str, Any]],
+) -> TextExpectation:
+    if not expectation.grounded_numbers:
+        return expectation
+
+    allowed_numbers = list(expectation.allowed_numbers)
+    for output in tool_outputs:
+        allowed_numbers.extend(_numbers_from_tool_output(output))
+
+    return expectation.model_copy(update={"allowed_numbers": allowed_numbers})
+
+
 def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
     messages: List[Dict[str, Any]] = _messages_for_case(case)
     tool_context = new_tool_context(turn_id=case.id)
     tool_calls = []
+    tool_outputs: List[Dict[str, Any]] = []
     final_text = ""
     errors: List[str] = []
 
@@ -272,7 +320,17 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
                     "input": call.input,
                 }
             )
-            output = execute_tool(call.name, call.input, context=tool_context)
+            try:
+                output = execute_tool(call.name, call.input, context=tool_context)
+            except Exception as exc:
+                return _result(
+                    case,
+                    "failed",
+                    0.0,
+                    [f"{call.name}: {type(exc).__name__}: {exc}"],
+                    {"text": final_text, "tool_calls": [call.model_dump() for call in tool_calls]},
+                )
+            tool_outputs.append(output)
             tool_results.append(
                 {
                     "type": "tool_result",
@@ -287,13 +345,59 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
         errors.append("max iterations reached before final answer")
 
     errors.extend(grade_tool_calls(tool_calls, case.expected_tools, case.forbidden_tools))
-    errors.extend(grade_text(final_text, case.expect))
+    text_expectation = _expectation_with_tool_output_numbers(case.expect, tool_outputs)
+    errors.extend(grade_text(final_text, text_expectation))
     return _result(
         case,
         "failed" if errors else "passed",
         0.0 if errors else 1.0,
         errors,
-        {"text": final_text, "tool_calls": [call.model_dump() for call in tool_calls]},
+        {
+            "text": final_text,
+            "tool_calls": [call.model_dump() for call in tool_calls],
+            "tool_outputs": tool_outputs,
+        },
+    )
+
+
+def _run_tool_loop_trials(case: ToolLoopCase, client: ModelClient) -> CaseResult:
+    trial_results = [_run_tool_loop(case, client) for _ in range(case.trials)]
+    passed_trials = sum(1 for result in trial_results if result.status == "passed")
+    failed_trials = case.trials - passed_trials
+    score = passed_trials / case.trials
+    errors: List[str] = []
+
+    if score < case.pass_threshold:
+        errors.append(
+            f"pass rate {score:.2f} below threshold {case.pass_threshold:.2f} "
+            f"({passed_trials}/{case.trials} trials passed)"
+        )
+
+    for index, result in enumerate(trial_results, start=1):
+        if result.errors:
+            errors.extend(f"trial {index}: {error}" for error in result.errors)
+
+    return _result(
+        case,
+        "passed" if score >= case.pass_threshold else "failed",
+        score,
+        errors,
+        {
+            "trials_run": case.trials,
+            "passed_trials": passed_trials,
+            "failed_trials": failed_trials,
+            "pass_threshold": case.pass_threshold,
+            "trials": [
+                {
+                    "trial": index,
+                    "status": result.status,
+                    "score": result.score,
+                    "errors": result.errors,
+                    "details": result.details,
+                }
+                for index, result in enumerate(trial_results, start=1)
+            ],
+        },
     )
 
 
@@ -390,7 +494,10 @@ def run_eval(
         elif isinstance(case, AnswerCase):
             results.append(_run_answer(case, client))
         elif isinstance(case, ToolLoopCase):
-            results.append(_run_tool_loop(case, client))
+            if case.trials > 1:
+                results.append(_run_tool_loop_trials(case, client))
+            else:
+                results.append(_run_tool_loop(case, client))
         elif isinstance(case, GatewayCase):
             results.append(_run_gateway(case))
 

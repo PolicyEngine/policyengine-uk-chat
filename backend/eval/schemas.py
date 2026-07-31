@@ -123,6 +123,8 @@ class ToolLoopCase(CaseBase):
     forbidden_tools: List[str] = Field(default_factory=list)
     expect: TextExpectation = Field(default_factory=TextExpectation)
     max_iterations: int = Field(default=4, ge=1, le=8)
+    trials: int = Field(default=1, ge=1, le=10)
+    pass_threshold: float = Field(default=1.0, ge=0.0, le=1.0)
     offline_responses: List[ModelTurn] = Field(default_factory=list)
 
 

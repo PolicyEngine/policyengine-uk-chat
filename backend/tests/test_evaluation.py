@@ -151,7 +151,10 @@ def test_offline_eval_runs_tool_loop_cases_without_reports():
         mode="offline",
         write_reports=False,
     )
-    expected_cases = len(load_case_file(REPO_ROOT / "evals" / "cases" / "tool_loop" / "core.yaml"))
+    expected_cases = sum(
+        len(load_case_file(path))
+        for path in (REPO_ROOT / "evals" / "cases" / "tool_loop").glob("*.yaml")
+    )
 
     assert report.failed == 0
     assert report.passed + report.skipped == expected_cases
@@ -177,7 +180,6 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
                         "expect": {
                             "required": ["done", "£42"],
                             "grounded_numbers": True,
-                            "allowed_numbers": [42],
                         },
                         "offline_responses": [
                             {
@@ -215,6 +217,103 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
     assert report.failed == 0
     assert report.passed == 1
     assert calls == [("run_household_simulation", {"year": 2025})]
+
+
+def test_tool_loop_cases_can_declare_live_trial_thresholds():
+    case = ToolLoopCase(
+        id="live_population_case",
+        description="Live population evals run multiple trials.",
+        prompt="What would this reform cost?",
+        requirements=["live_model", "policyengine_py", "data"],
+        expected_tools=[ToolCallExpectation(name="run_society_simulation")],
+        trials=3,
+        pass_threshold=0.66,
+    )
+
+    assert case.trials == 3
+    assert case.pass_threshold == 0.66
+
+
+def test_live_tool_loop_trials_score_against_threshold(tmp_path, monkeypatch):
+    case_file = tmp_path / "tool_loop_live.yaml"
+    case_file.write_text(
+        yaml.safe_dump(
+            {
+                "cases": [
+                    {
+                        "id": "live_loop_case",
+                        "suite": "tool_loop",
+                        "description": "Live trials aggregate to a pass rate.",
+                        "prompt": "Calculate, then answer.",
+                        "trials": 3,
+                        "pass_threshold": 0.66,
+                        "expected_tools": [
+                            {
+                                "name": "run_household_simulation",
+                                "input_contains": {"year": 2026},
+                            }
+                        ],
+                        "expect": {"required": ["completed"]},
+                    }
+                ]
+            },
+            sort_keys=False,
+        )
+    )
+    fake_client = runner.FakeModelClient(
+        {
+            "live_loop_case": [
+                ModelTurn(tool_calls=[ModelToolCall(name="run_household_simulation", input={"year": 2026})]),
+                ModelTurn(text="completed"),
+                ModelTurn(tool_calls=[ModelToolCall(name="run_household_simulation", input={"year": 2026})]),
+                ModelTurn(text="completed"),
+                ModelTurn(tool_calls=[ModelToolCall(name="run_household_simulation", input={"year": 2026})]),
+                ModelTurn(text="missing required text"),
+            ]
+        }
+    )
+    calls = []
+
+    monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
+    monkeypatch.setattr(runner, "AnthropicModelClient", lambda model=None: fake_client)
+    monkeypatch.setattr(
+        runner,
+        "execute_tool",
+        lambda tool_name, tool_input, context=None: calls.append((tool_name, tool_input)) or {"status": "success"},
+    )
+
+    report = runner.run_eval(
+        suites=["tool_loop"],
+        mode="live",
+        provider="anthropic",
+        write_reports=False,
+    )
+
+    assert report.failed == 0
+    assert report.passed == 1
+    result = report.results[0]
+    assert result.score == pytest.approx(2 / 3)
+    assert result.details["passed_trials"] == 2
+    assert result.details["failed_trials"] == 1
+    assert len(result.details["trials"]) == 3
+    assert calls == [
+        ("run_household_simulation", {"year": 2026}),
+        ("run_household_simulation", {"year": 2026}),
+        ("run_household_simulation", {"year": 2026}),
+    ]
+
+
+def test_issue_229_live_population_cases_are_manual_live_tool_loops():
+    cases = load_case_file(REPO_ROOT / "evals" / "cases" / "tool_loop" / "uk_population_live.yaml")
+
+    assert len(cases) == 20
+    assert all(isinstance(case, ToolLoopCase) for case in cases)
+    assert all("live_model" in case.requirements for case in cases)
+    assert all("policyengine_py" in case.requirements for case in cases)
+    assert all("data" in case.requirements for case in cases)
+    assert all(case.trials >= 3 for case in cases)
+    assert all(case.pass_threshold >= 0.66 for case in cases)
+    assert all(any(tool.name == "run_society_simulation" for tool in case.expected_tools) for case in cases)
 
 
 def test_charts_mode_trajectory_adds_directive_and_keeps_tools():
