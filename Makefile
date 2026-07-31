@@ -68,5 +68,5 @@ eval-ai-live: check-policyengine-uk-evals
 eval-ai-live-uk-population: check-policyengine-uk-evals
 	RUN_DATA_EVALS=1 PYTHONPATH=backend python -m eval.run --suite tool_loop --mode live --provider anthropic
 
-eval-ai-deployed-uk-population: check-policyengine-uk-evals
+eval-ai-deployed-uk-population:
 	PYTHONPATH=backend python -m eval.run_deployed --case-file evals/cases/tool_loop/uk_population_live.yaml

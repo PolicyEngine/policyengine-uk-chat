@@ -1,11 +1,15 @@
 import asyncio
 import json
+from pathlib import Path
 
 import httpx
 import pytest
 import yaml
 
 from eval.schemas import EvalChatResponse, EvalToolTrace
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def completed_response(content="Completed annual result £100."):
@@ -198,3 +202,10 @@ def test_deployed_report_schema_accepts_deployed_mode():
     )
 
     assert report.mode == "deployed"
+
+
+def test_deployed_make_target_does_not_require_local_generated_cases():
+    makefile = (REPO_ROOT / "Makefile").read_text()
+
+    assert "eval-ai-deployed-uk-population: check-policyengine-uk-evals" not in makefile
+    assert "eval-ai-deployed-uk-population:\n" in makefile
