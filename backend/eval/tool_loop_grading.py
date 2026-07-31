@@ -12,16 +12,18 @@ from eval.schemas import (
 
 
 def numeric_grounding_variants(value: float) -> list[float]:
-    variants = [value]
-    magnitude = abs(value)
-    if 0 < magnitude <= 1:
-        variants.append(value * 100)
-    if magnitude >= 1_000:
-        variants.append(value / 1_000)
-    if magnitude >= 1_000_000:
-        variants.append(value / 1_000_000)
-    if magnitude >= 1_000_000_000:
-        variants.append(value / 1_000_000_000)
+    variants: list[float] = []
+    for signed_value in {value, abs(value)}:
+        magnitude = abs(signed_value)
+        variants.append(signed_value)
+        if 0 < magnitude <= 1:
+            variants.append(signed_value * 100)
+        if magnitude >= 1_000:
+            variants.append(signed_value / 1_000)
+        if magnitude >= 1_000_000:
+            variants.append(signed_value / 1_000_000)
+        if magnitude >= 1_000_000_000:
+            variants.append(signed_value / 1_000_000_000)
     return variants
 
 

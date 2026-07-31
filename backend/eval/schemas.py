@@ -159,7 +159,7 @@ class CaseResult(StrictModel):
 
 
 class EvalReport(StrictModel):
-    mode: Literal["offline", "live"]
+    mode: Literal["offline", "live", "deployed"]
     suites: List[str]
     provider: str
     model: Optional[str] = None
