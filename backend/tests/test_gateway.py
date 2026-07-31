@@ -298,6 +298,73 @@ class TestRunGateway:
         assert v.outcome == "needs_plan"
         assert set(v.gating_slots) == {"reform", "output"}
 
+    def test_empty_prompt_values_are_treated_as_assumed(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {"name": "reform", "kind": "tool_input", "source": "prompt"},
+                {"name": "output", "kind": "output", "source": "prompt"},
+            ],
+            "unmodellable_outputs": [],
+            "catalogue_queries": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            v = gateway.run_gateway("Model a tax reform")
+
+        assert v.outcome == "needs_plan"
+        assert set(v.gating_slots) == {"reform", "output"}
+
+    def test_named_output_slot_is_grounded_without_a_duplicate_value(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                    "value": "Raise the basic rate to 21%",
+                },
+                {"name": "decile_impact", "kind": "output", "source": "prompt"},
+            ],
+            "unmodellable_outputs": [],
+            "catalogue_queries": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            v = gateway.run_gateway("Show the decile impact of raising the basic rate to 21%")
+
+        output = next(slot for slot in v.slots if slot.kind == "output")
+        assert v.outcome == "ready"
+        assert output.value == "decile_impact"
+
+    def test_documented_current_law_baseline_can_be_defaulted(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {"name": "reform", "kind": "tool_input", "source": "default"},
+                {
+                    "name": "output",
+                    "kind": "output",
+                    "source": "prompt",
+                    "value": "budgetary_impact",
+                },
+            ],
+            "unmodellable_outputs": [],
+            "catalogue_queries": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            v = gateway.run_gateway("What is current child benefit spending?")
+
+        assert v.outcome == "ready"
+
 
 class TestGatewaySystemPrompt:
     def test_rendered_prompt_contains_default_simulation_year(self):

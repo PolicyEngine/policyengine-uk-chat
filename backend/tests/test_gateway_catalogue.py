@@ -7,6 +7,7 @@ from gateway.catalogue import (
     CatalogueEvidence,
     CatalogueMatch,
     CatalogueQuery,
+    MAX_CATALOGUE_QUERIES,
     resolve_catalogue_queries,
 )
 from gateway.runtime import (
@@ -78,7 +79,7 @@ def test_plan_schema_requires_bounded_catalogue_queries():
     queries = schema["properties"]["catalogue_queries"]
 
     assert "catalogue_queries" in schema["required"]
-    assert queries["maxItems"] == 4
+    assert queries["maxItems"] == MAX_CATALOGUE_QUERIES
     assert queries["items"]["required"] == ["kind", "query"]
     assert queries["items"]["properties"]["kind"]["enum"] == [
         "reform_target",
