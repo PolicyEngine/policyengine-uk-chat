@@ -239,7 +239,7 @@ def apply_catalogue_evidence(
 
     verdict = replace(verdict, catalogue_evidence=evidence)
     if not evidence.available:
-        if verdict.outcome in ("irrelevant", "out_of_scope"):
+        if verdict.outcome == "out_of_scope":
             return replace(verdict, outcome="ready", route="compute")
         return verdict
     if evidence.unresolved_queries:

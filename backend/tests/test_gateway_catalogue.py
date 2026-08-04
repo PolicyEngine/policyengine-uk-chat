@@ -199,6 +199,15 @@ def test_unavailable_catalogue_fails_open_to_compute():
     assert resolved.route == "compute"
 
 
+def test_unavailable_catalogue_preserves_irrelevant_outcome():
+    verdict = GatewayVerdict(outcome="irrelevant", route="lightweight")
+
+    resolved = apply_catalogue_evidence(verdict, _evidence(available=False))
+
+    assert resolved.outcome == "irrelevant"
+    assert resolved.route == "lightweight"
+
+
 def test_unavailable_catalogue_preserves_existing_partial_outcome():
     verdict = GatewayVerdict(
         outcome="partial",
