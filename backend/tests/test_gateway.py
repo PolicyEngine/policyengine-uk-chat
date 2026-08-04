@@ -472,6 +472,62 @@ class TestGatewaySystemPrompt:
             in unmodellable["items"]["properties"]["evidence"]["description"]
         )
 
+    def test_domain_and_capability_schema_require_grounded_decisions(self):
+        from gateway import runtime as gateway
+
+        schema = gateway._EMIT_PLAN_TOOL["input_schema"]
+
+        assert "domain" in schema["required"]
+        assert "capability" in schema["required"]
+        assert schema["properties"]["domain"]["required"] == ["status"]
+        assert schema["properties"]["capability"]["required"] == ["status"]
+        assert "exact quote" in schema["properties"]["domain"]["description"]
+        assert "exact quote" in schema["properties"]["capability"]["description"]
+
+
+class TestGatewayDecisionEvidence:
+    def test_accepts_exactly_quoted_negative_decisions(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "domain": {"status": "explicit_non_uk", "evidence": "US federal"},
+            "capability": {
+                "status": "catalogue_uncertain",
+                "evidence": "federal income tax",
+            },
+            "tool": "none",
+            "slots": [],
+            "catalogue_queries": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway("How would US federal income tax change?")
+
+        assert verdict.domain.status == "explicit_non_uk"
+        assert verdict.domain.evidence == "US federal"
+        assert verdict.capability.status == "catalogue_uncertain"
+        assert verdict.capability.evidence == "federal income tax"
+
+    def test_rejects_invented_negative_decision_evidence(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "domain": {"status": "unrelated", "evidence": "write Python"},
+            "capability": {
+                "status": "explicitly_unmodellable",
+                "evidence": "employment effects",
+            },
+            "tool": "none",
+            "slots": [],
+            "catalogue_queries": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway("What is the cost of increasing UC?")
+
+        assert verdict.domain.status == "uk_or_unspecified"
+        assert verdict.domain.evidence is None
+        assert verdict.capability.status == "supported"
+        assert verdict.capability.evidence is None
+
 
 class TestWriterDirective:
     def test_needs_plan_lists_slots(self):

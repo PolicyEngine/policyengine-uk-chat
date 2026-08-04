@@ -26,6 +26,8 @@ from gateway.catalogue import (
     resolve_catalogue_queries,
 )
 from gateway.policy import (
+    CapabilityDecision,
+    DomainDecision,
     OUTPUT_VOCAB,
     SlotFact,
     complete_slots,
@@ -80,6 +82,8 @@ class GatewayVerdict:
     gating_slots: List[str] = field(default_factory=list)
     unmodellable_outputs: List[str] = field(default_factory=list)
     catalogue_evidence: CatalogueEvidence | None = None
+    domain: DomainDecision = field(default_factory=DomainDecision)
+    capability: CapabilityDecision = field(default_factory=CapabilityDecision)
 
 
 def _fail_safe() -> GatewayVerdict:
@@ -95,9 +99,59 @@ _EMIT_PLAN_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "in_domain": {
-                "type": "boolean",
-                "description": "Is the message about UK tax or benefit policy at all?",
+            "domain": {
+                "type": "object",
+                "description": (
+                    "Whether the request is UK tax-benefit work, explicitly "
+                    "non-UK, or unrelated. Negative decisions require an exact "
+                    "quote from the user's message."
+                ),
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "uk_or_unspecified",
+                            "explicit_non_uk",
+                            "unrelated",
+                        ],
+                    },
+                    "evidence": {
+                        "type": "string",
+                        "maxLength": 300,
+                        "description": (
+                            "An exact quote supporting explicit_non_uk or "
+                            "unrelated; omit for uk_or_unspecified."
+                        ),
+                    },
+                },
+                "required": ["status"],
+            },
+            "capability": {
+                "type": "object",
+                "description": (
+                    "Whether the requested work is supported, needs catalogue "
+                    "confirmation, or explicitly asks only for an unmodellable "
+                    "effect. Non-supported decisions require an exact quote."
+                ),
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "enum": [
+                            "supported",
+                            "catalogue_uncertain",
+                            "explicitly_unmodellable",
+                        ],
+                    },
+                    "evidence": {
+                        "type": "string",
+                        "maxLength": 300,
+                        "description": (
+                            "An exact quote supporting catalogue_uncertain or "
+                            "explicitly_unmodellable; omit for supported."
+                        ),
+                    },
+                },
+                "required": ["status"],
             },
             "tool": {
                 "type": "string",
@@ -164,7 +218,13 @@ _EMIT_PLAN_TOOL = {
             },
             "rationale": {"type": "string"},
         },
-        "required": ["in_domain", "tool", "slots", "catalogue_queries"],
+        "required": [
+            "domain",
+            "capability",
+            "tool",
+            "slots",
+            "catalogue_queries",
+        ],
     },
 }
 
@@ -186,6 +246,48 @@ def _normalise_evidence_text(value: str) -> str:
     """Normalise case and whitespace while preserving phrase boundaries."""
 
     return " ".join(value.casefold().split())
+
+
+def _validated_quote(value: object, prompt: str) -> str | None:
+    """Return a prompt-grounded quote, or ``None`` for invented evidence."""
+
+    if not isinstance(value, str):
+        return None
+    quote = value.strip()
+    quote_text = _normalise_evidence_text(quote)
+    if not quote_text or quote_text not in _normalise_evidence_text(prompt):
+        return None
+    return quote
+
+
+def _domain_from_plan(plan: dict, prompt: str) -> DomainDecision:
+    raw = plan.get("domain")
+    if not isinstance(raw, dict):
+        return DomainDecision()
+    status = raw.get("status")
+    if status == "uk_or_unspecified":
+        return DomainDecision()
+    if status not in ("explicit_non_uk", "unrelated"):
+        return DomainDecision()
+    evidence = _validated_quote(raw.get("evidence"), prompt)
+    if evidence is None:
+        return DomainDecision()
+    return DomainDecision(status=status, evidence=evidence)
+
+
+def _capability_from_plan(plan: dict, prompt: str) -> CapabilityDecision:
+    raw = plan.get("capability")
+    if not isinstance(raw, dict):
+        return CapabilityDecision()
+    status = raw.get("status")
+    if status == "supported":
+        return CapabilityDecision()
+    if status not in ("catalogue_uncertain", "explicitly_unmodellable"):
+        return CapabilityDecision()
+    evidence = _validated_quote(raw.get("evidence"), prompt)
+    if evidence is None:
+        return CapabilityDecision()
+    return CapabilityDecision(status=status, evidence=evidence)
 
 
 def _unmodellable_outputs_from_plan(plan: dict, prompt: str) -> list[str]:
@@ -264,6 +366,8 @@ def _verdict_from_plan(
 ) -> GatewayVerdict:
     """Build a server-gated verdict from the model's grounded plan. The model's
     own outcome is never trusted — the outcome is recomputed by gate()."""
+    domain = _domain_from_plan(plan, prompt)
+    capability = _capability_from_plan(plan, prompt)
     in_domain = bool(plan.get("in_domain", True))
     raw_tool = plan.get("tool")
     tool = raw_tool if raw_tool in _TOOL_NAMES else None
@@ -299,6 +403,8 @@ def _verdict_from_plan(
         slots=slots,
         gating_slots=result.gating_slots,
         unmodellable_outputs=unmodellable,
+        domain=domain,
+        capability=capability,
     )
     return apply_catalogue_evidence(verdict, catalogue_evidence)
 

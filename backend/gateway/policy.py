@@ -30,6 +30,28 @@ from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
 _DEFAULT_YEAR = str(DEFAULT_SIMULATION_YEAR)
 
 Criticality = Literal["high", "medium", "low"]
+DomainStatus = Literal["uk_or_unspecified", "explicit_non_uk", "unrelated"]
+CapabilityStatus = Literal[
+    "supported",
+    "catalogue_uncertain",
+    "explicitly_unmodellable",
+]
+
+
+@dataclass(frozen=True)
+class DomainDecision:
+    """Validated domain classification from the user's original wording."""
+
+    status: DomainStatus = "uk_or_unspecified"
+    evidence: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class CapabilityDecision:
+    """Validated statement about why the gateway could not select a tool."""
+
+    status: CapabilityStatus = "supported"
+    evidence: Optional[str] = None
 
 
 @dataclass(frozen=True)
