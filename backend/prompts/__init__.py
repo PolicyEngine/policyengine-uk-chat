@@ -11,6 +11,7 @@ For model-neutral engineering guidance around this runtime pathway, see
 
 from prompts.gateway import (
     DEFAULT_SCOPE_DESCRIPTOR,
+    GATEWAY_CATALOGUE_RECOVERY_DIRECTIVE,
     GATEWAY_IRRELEVANT_DIRECTIVE,
     GATEWAY_NEEDS_PLAN_DIRECTIVE,
     GATEWAY_OUT_OF_SCOPE_DIRECTIVE,
@@ -28,6 +29,7 @@ __all__ = [
     "DEFAULT_SCOPE_DESCRIPTOR",
     "lightweight_system",
     "gateway_system",
+    "GATEWAY_CATALOGUE_RECOVERY_DIRECTIVE",
     "GATEWAY_IRRELEVANT_DIRECTIVE",
     "GATEWAY_OUT_OF_SCOPE_DIRECTIVE",
     "GATEWAY_PARTIAL_DIRECTIVE",

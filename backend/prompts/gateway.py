@@ -127,6 +127,28 @@ def gateway_system(
     )
 
 
+# Appended only for the single recovery pass after the server has found
+# authoritative catalogue candidates for a grounded user phrase. The runtime
+# supplies the candidates below this directive; keeping the behavioural
+# instructions here leaves model-facing policy in the prompts package.
+GATEWAY_CATALOGUE_RECOVERY_DIRECTIVE = """
+The server found authoritative current-model catalogue candidates for the
+user's grounded policy phrase. Rebuild the execution plan once using those
+candidates and the original user message.
+
+- Catalogue candidates prove that related model capability exists; they do not
+  prove which candidate or reform the user intended.
+- Select the best-fitting tool and ground its slots only from the original user
+  message, documented defaults, and the candidate metadata below.
+- If a load-bearing choice remains ambiguous, mark that slot `assumed` so the
+  server asks a clarification instead of guessing.
+- Preserve `explicit_non_uk`, `unrelated`, or `explicitly_unmodellable` only
+  when the original message contains exact quoted evidence for that decision.
+- The catalogue lookup is already complete. Emit an empty `catalogue_queries`
+  list and do not request another lookup.
+""".strip()
+
+
 # Per-outcome writer directives. Appended to the lightweight system for the
 # single no-tool turn that actually replies to the user on a non-`ready`
 # outcome. The concrete slot names / unmodellable outputs are appended at

@@ -160,28 +160,51 @@ name plus an exact quote from the user that explicitly requests it. The server
 normalises case and whitespace, rejects evidence absent from the prompt,
 deduplicates accepted limitations, and caps them at four.
 
+Domain and capability are separate structured decisions. Jurisdiction defaults
+to `uk_or_unspecified`; `explicit_non_uk` and `unrelated` are accepted only with
+an exact quote from the original message. Capability defaults to `supported`;
+`catalogue_uncertain` and `explicitly_unmodellable` likewise require an exact
+quote. A missing tool without validated unmodellable evidence is uncertainty
+(`needs_plan`), not proof that the request is unsupported. This makes refusal a
+positive-evidence decision rather than the consequence of classifier doubt.
+
 The gateway's non-`ready` (lightweight) outcomes must remain structurally
 enforced by omitting tools from the model request, not only by prompting the
 model not to call tools.
 
 ## First-turn Catalogue Confirmation
 
-On an opening turn, the gateway classifier emits a bounded set of concise
-parameter/reform-target and variable search terms. `gateway.catalogue` resolves
-them against the installed `policyengine.py` UK model before the route is
-chosen. This is an internal server lookup, not another model-facing tool.
+On an opening turn, the gateway classifier may emit a bounded set of concise
+parameter/reform-target and variable search terms. Every query must be contained
+in an exact quote from the original message; invented queries are discarded.
+The prompt also forbids removing a foreign jurisdiction from the evidence.
+`gateway.catalogue` resolves accepted queries against the installed
+`policyengine.py` UK model. This is an internal server lookup, not another
+model-facing tool.
 
-A match confirms only that the model exposes a candidate concept. It must not
-silently resolve ambiguity: existing `needs_plan` and `partial` outcomes remain
-lightweight, where the model can ask the necessary follow-up question. A match
-does prevent an `irrelevant` or `out_of_scope` classifier result from falsely
-refusing an otherwise modelled request. If no candidate resolves, use the
-lightweight path to ask which supported measure or variable the user means; do
-not call it unmodelled. For a `partial` request with an unresolved candidate,
-state the unmodellable limitation and ask the catalogue clarification before
-offering a computation. If catalogue metadata cannot be loaded, fail open to
-compute only from `irrelevant` or `out_of_scope`; preserve an existing
-`needs_plan` or `partial` outcome.
+Catalogue results are ranked by evidence quality. Exact identifiers, aliases,
+labels, and sufficiently specific phrase matches are authoritative; fuzzy or
+description-only matches are retained only as suggestions. They never
+authorise recovery or override a domain decision. An `irrelevant` decision is
+terminal regardless of matches, unresolved queries, or catalogue availability.
+
+An authoritative match confirms only that the model exposes a candidate
+concept. When the first plan is UK/unspecified, explicitly
+`catalogue_uncertain`, and lacks a tool, the runtime permits exactly one second
+gateway call with the server-verified candidates. That call must rebuild the
+tool and grounded slots from the original message. The deterministic gate then
+applies normally: grounded work proceeds, while an ambiguous load-bearing slot
+still asks a follow-up. If the one recovery pass remains inconclusive without
+validated exclusion evidence, fail open to the full compute route. There is no
+catalogue/replan loop.
+
+If no authoritative candidate resolves, use the lightweight path to ask which
+supported measure or variable the user means; do not call it unmodelled. For a
+`partial` request with an unresolved candidate, state the unmodellable
+limitation and ask the catalogue clarification before offering a computation.
+If catalogue metadata cannot be loaded, preserve `irrelevant`, `partial`, and
+ordinary slot-driven `needs_plan` outcomes. Fail open only from an
+`out_of_scope` result or a missing-tool `catalogue_uncertain` result.
 
 Pass paths and variable names only as internal compute context. The lightweight
 writer may receive human-readable candidate labels, but not internal paths.

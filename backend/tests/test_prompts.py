@@ -5,6 +5,7 @@ import pytest
 from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
 from engine.constants import HOUSEHOLD_COUNTRY_IDS, UK_CHAT_DATASET
 from prompts import (
+    GATEWAY_CATALOGUE_RECOVERY_DIRECTIVE,
     SYSTEM_PROMPT,
     SUGGESTION_SYSTEM,
     TITLE_SYSTEM,
@@ -138,6 +139,15 @@ def test_gateway_prompt_renders_caller_supplied_default_year():
     assert "caveats for the final answer" in rendered
     assert "label_a, label_b" in rendered
     assert "authoritative" in rendered
+
+
+def test_gateway_catalogue_recovery_prompt_preserves_server_gate_boundaries():
+    directive = " ".join(GATEWAY_CATALOGUE_RECOVERY_DIRECTIVE.split())
+
+    assert "do not prove which candidate" in directive
+    assert "load-bearing choice remains ambiguous" in directive
+    assert "exact quoted evidence" in directive
+    assert "empty `catalogue_queries`" in directive
 
 
 def test_secondary_model_prompts_use_neutral_wording():

@@ -14,6 +14,13 @@ cases:
     prompt: Write me a Python function that does quicksort.
     expected_outcome: irrelevant
 
+  - id: gw_irrelevant_us_federal_income_tax
+    suite: gateway
+    description: A foreign tax request remains off-domain even when its wording resembles a UK catalogue concept.
+    requirements: [live_model]
+    prompt: How would increasing the US federal income tax rate affect revenue?
+    expected_outcome: irrelevant
+
   # ---- out_of_scope: on-topic but no modelled lever ----
   - id: gw_oos_pure_macro
     suite: gateway
@@ -81,6 +88,13 @@ cases:
     prompt: Model a wealth tax.
     expected_outcome: needs_plan
     expected_tool: run_society_simulation
+
+  - id: gw_needsplan_ambiguous_named_levy
+    suite: gateway
+    description: A plausible named levy still needs its reform and requested output clarified when the prompt does not define them.
+    requirements: [live_model]
+    prompt: Model the new support levy.
+    expected_outcome: needs_plan
 
   # ---- ready: fully specified, admissible ----
   - id: gw_ready_basic_rate_cost

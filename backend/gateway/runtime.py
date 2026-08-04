@@ -1,11 +1,12 @@
 """Gateway runtime: turn a user message into a grounded execution plan.
 
 One cheap forced-tool call asks a fast model to fill an execution plan (which
-tool, which slots, each tagged with a grounding `source`). The deterministic
-`gate()` in `gateway.policy` then maps that plan to one of five outcomes. Only
-`ready` runs the full compute loop; the other four reply on the lean lightweight
-path. Fail-safe to `ready`/compute on any error, matching the chat's existing
-"when in doubt, load the full background" bias.
+tool, which slots, each tagged with a grounding `source`). A second call is
+allowed only when authoritative catalogue evidence can help recover a missing
+tool. The deterministic `gate()` in `gateway.policy` maps each plan to one of
+five outcomes. Only `ready` runs the full compute loop; the other four reply on
+the lean lightweight path. Fail-safe to `ready`/compute on any error, matching
+the chat's existing "when in doubt, load the full background" bias.
 
 Self-contained (builds its own sync client + system prompt) so the eval harness
 can import and call `run_gateway` directly, mirroring the old `_route_scope`.
@@ -36,6 +37,7 @@ from gateway.policy import (
 )
 from prompts import (
     DEFAULT_SCOPE_DESCRIPTOR,
+    GATEWAY_CATALOGUE_RECOVERY_DIRECTIVE,
     GATEWAY_IRRELEVANT_DIRECTIVE,
     GATEWAY_NEEDS_PLAN_DIRECTIVE,
     GATEWAY_OUT_OF_SCOPE_DIRECTIVE,
@@ -166,7 +168,10 @@ _EMIT_PLAN_TOOL = {
                         "name": {"type": "string"},
                         "kind": {"type": "string", "enum": ["tool_input", "output"]},
                         "value": {"type": "string"},
-                        "source": {"type": "string", "enum": ["prompt", "default", "assumed"]},
+                        "source": {
+                            "type": "string",
+                            "enum": ["prompt", "default", "assumed"],
+                        },
                     },
                     "required": ["name", "kind", "source"],
                 },
@@ -211,7 +216,10 @@ _EMIT_PLAN_TOOL = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "kind": {"type": "string", "enum": ["reform_target", "variable"]},
+                        "kind": {
+                            "type": "string",
+                            "enum": ["reform_target", "variable"],
+                        },
                         "query": {"type": "string"},
                         "evidence": {
                             "type": "string",
@@ -257,8 +265,7 @@ def _catalogue_queries_from_plan(
         if (
             not query
             or evidence is None
-            or _normalise_evidence_text(query)
-            not in _normalise_evidence_text(evidence)
+            or _normalise_evidence_text(query) not in _normalise_evidence_text(evidence)
         ):
             continue
         queries.append(CatalogueQuery(kind, query, evidence))
@@ -366,8 +373,19 @@ def apply_catalogue_evidence(
     if verdict.outcome == "irrelevant":
         return verdict
     if not evidence.available:
-        if verdict.outcome == "out_of_scope":
-            return replace(verdict, outcome="ready", route="compute")
+        catalogue_uncertainty = (
+            verdict.outcome == "needs_plan"
+            and verdict.tool is None
+            and verdict.gating_slots == ["tool"]
+            and verdict.capability.status == "catalogue_uncertain"
+        )
+        if verdict.outcome == "out_of_scope" or catalogue_uncertainty:
+            return replace(
+                verdict,
+                outcome="ready",
+                route="compute",
+                gating_slots=[],
+            )
         return verdict
     if evidence.unresolved_queries:
         gating_slots = list(dict.fromkeys([*verdict.gating_slots, "model_catalogue"]))
@@ -379,15 +397,6 @@ def apply_catalogue_evidence(
             route="lightweight",
             gating_slots=gating_slots,
         )
-    catalogue_can_supply_missing_tool = (
-        verdict.outcome == "needs_plan"
-        and verdict.tool is None
-        and verdict.gating_slots == ["tool"]
-    )
-    if evidence.authoritative_matches and (
-        verdict.outcome == "out_of_scope" or catalogue_can_supply_missing_tool
-    ):
-        return replace(verdict, outcome="ready", route="compute")
     return verdict
 
 
@@ -433,9 +442,7 @@ def _verdict_from_plan(
         slots,
         unmodellable,
         prompt,
-        explicitly_unmodellable=(
-            capability.status == "explicitly_unmodellable"
-        ),
+        explicitly_unmodellable=(capability.status == "explicitly_unmodellable"),
     )
     verdict = GatewayVerdict(
         outcome=result.outcome,
@@ -450,8 +457,77 @@ def _verdict_from_plan(
     return apply_catalogue_evidence(verdict, catalogue_evidence)
 
 
+def _request_plan(client, last_user_message: str, system: str) -> dict | None:
+    """Request and extract one forced execution plan from the gateway model."""
+
+    response = client.messages.create(
+        model=GATEWAY_MODEL,
+        max_tokens=GATEWAY_MAX_TOKENS,
+        temperature=DEFAULT_TEMPERATURE,
+        system=system,
+        tools=[_EMIT_PLAN_TOOL],
+        tool_choice={"type": "tool", "name": "emit_plan"},
+        messages=[{"role": "user", "content": last_user_message[:4000]}],
+    )
+    for block in response.content or []:
+        if (
+            getattr(block, "type", None) == "tool_use"
+            and getattr(block, "name", None) == "emit_plan"
+        ):
+            return block.input if isinstance(block.input, dict) else {}
+    return None
+
+
+def _catalogue_recovery_system(evidence: CatalogueEvidence) -> str:
+    candidates = "\n".join(
+        f"- {match.kind}: {match.label} (`{match.identifier}`; {match.match_type})"
+        for match in evidence.authoritative_matches
+    )
+    return (
+        GATEWAY_SYSTEM
+        + "\n\n"
+        + GATEWAY_CATALOGUE_RECOVERY_DIRECTIVE
+        + "\n\nSERVER-VERIFIED CATALOGUE CANDIDATES:\n"
+        + candidates
+    )
+
+
+def _can_recover_with_catalogue(verdict: GatewayVerdict) -> bool:
+    """True only for a grounded UK capability uncertainty with strong evidence."""
+
+    evidence = verdict.catalogue_evidence
+    return bool(
+        verdict.domain.status == "uk_or_unspecified"
+        and verdict.capability.status == "catalogue_uncertain"
+        and verdict.tool is None
+        and not verdict.unmodellable_outputs
+        and evidence
+        and evidence.available
+        and evidence.authoritative_matches
+        and not evidence.unresolved_queries
+    )
+
+
+def _fail_open_after_recovery(verdict: GatewayVerdict) -> GatewayVerdict:
+    """Do not turn one inconclusive recovery pass into a false refusal."""
+
+    if (
+        verdict.domain.status == "uk_or_unspecified"
+        and verdict.tool is None
+        and verdict.capability.status != "explicitly_unmodellable"
+        and not verdict.unmodellable_outputs
+    ):
+        return replace(
+            verdict,
+            outcome="ready",
+            route="compute",
+            gating_slots=[],
+        )
+    return verdict
+
+
 def run_gateway(last_user_message: str) -> GatewayVerdict:
-    """One cheap forced-tool call → grounded plan → server-gated verdict.
+    """Ground a plan, optionally recover once, then return the server gate.
 
     Fail-safe to ready/compute on empty input, any API error, a missing plan
     block, or an unparseable plan.
@@ -460,30 +536,34 @@ def run_gateway(last_user_message: str) -> GatewayVerdict:
         return _fail_safe()
     try:
         client = get_sync_client()
-        response = client.messages.create(
-            model=GATEWAY_MODEL,
-            max_tokens=GATEWAY_MAX_TOKENS,
-            temperature=DEFAULT_TEMPERATURE,
-            system=GATEWAY_SYSTEM,
-            tools=[_EMIT_PLAN_TOOL],
-            tool_choice={"type": "tool", "name": "emit_plan"},
-            messages=[{"role": "user", "content": last_user_message[:4000]}],
-        )
-        plan = None
-        for block in response.content or []:
-            if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "emit_plan":
-                plan = block.input if isinstance(block.input, dict) else {}
-                break
+        plan = _request_plan(client, last_user_message, GATEWAY_SYSTEM)
         # No plan block, an empty plan, or one missing the routing decision is a
         # parse failure — fall back to compute. A real refusal (`tool: "none"`,
-        # `in_domain: false`) is a well-formed plan and is NOT caught here, so a
+        # grounded negative domain/capability) is a well-formed plan and is NOT
+        # caught here, so a
         # degenerate response can never masquerade as an out_of_scope refusal.
         if not plan or "tool" not in plan:
             return _fail_safe()
         catalogue_evidence = resolve_catalogue_queries(
             _catalogue_queries_from_plan(plan, last_user_message)
         )
-        return _verdict_from_plan(plan, last_user_message, catalogue_evidence)
+        verdict = _verdict_from_plan(plan, last_user_message, catalogue_evidence)
+        if not _can_recover_with_catalogue(verdict):
+            return verdict
+
+        recovery_plan = _request_plan(
+            client,
+            last_user_message,
+            _catalogue_recovery_system(catalogue_evidence),
+        )
+        if not recovery_plan or "tool" not in recovery_plan:
+            return replace(verdict, outcome="ready", route="compute", gating_slots=[])
+        recovered = _verdict_from_plan(
+            recovery_plan,
+            last_user_message,
+            catalogue_evidence,
+        )
+        return _fail_open_after_recovery(recovered)
     except Exception as e:  # noqa: BLE001 — any failure falls back to full compute
         logger.warning(f"[GATEWAY] failed; defaulting to ready/compute: {e}")
         return _fail_safe()
@@ -511,7 +591,11 @@ def gateway_writer_directive(verdict: GatewayVerdict) -> str:
     if verdict.outcome == "partial" and verdict.unmodellable_outputs:
         parts.append("Cannot model: " + ", ".join(verdict.unmodellable_outputs) + ".")
     if verdict.outcome == "needs_plan" and verdict.gating_slots:
-        parts.append("Under-specified points to clarify: " + ", ".join(verdict.gating_slots) + ".")
+        parts.append(
+            "Under-specified points to clarify: "
+            + ", ".join(verdict.gating_slots)
+            + "."
+        )
     if evidence and evidence.unresolved_queries:
         queries = ", ".join(query.query for query in evidence.unresolved_queries)
         parts.append(
@@ -540,12 +624,16 @@ def serialise_plan_for_system(verdict: GatewayVerdict) -> str:
     ]
     lines = []
     if verdict.tool is not None:
-        lines.append(f"GATEWAY PLAN (pre-resolved by a routing pass): tool={verdict.tool}.")
+        lines.append(
+            f"GATEWAY PLAN (pre-resolved by a routing pass): tool={verdict.tool}."
+        )
     if grounded:
         lines.append("Resolved inputs: " + "; ".join(grounded) + ".")
     evidence = verdict.catalogue_evidence
     if evidence and evidence.authoritative_matches:
-        lines.append("MODEL CATALOGUE EVIDENCE (verified current policyengine.py candidates):")
+        lines.append(
+            "MODEL CATALOGUE EVIDENCE (verified current policyengine.py candidates):"
+        )
         lines.extend(
             f"- {match.kind}: {match.label} (`{match.identifier}`)"
             for match in evidence.authoritative_matches
@@ -556,5 +644,7 @@ def serialise_plan_for_system(verdict: GatewayVerdict) -> str:
         )
     if not lines:
         return ""
-    lines.append("Treat this as a starting point and verify it against the user's message.")
+    lines.append(
+        "Treat this as a starting point and verify it against the user's message."
+    )
     return "\n".join(lines)
