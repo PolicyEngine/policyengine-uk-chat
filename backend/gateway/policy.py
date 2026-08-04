@@ -263,6 +263,8 @@ def gate(
     slots: List[SlotFact],
     unmodellable_outputs: List[str],
     prompt: str = "",
+    *,
+    explicitly_unmodellable: bool = False,
 ) -> GateResult:
     """Deterministically map a grounded plan to one of the five outcomes.
 
@@ -274,10 +276,12 @@ def gate(
     if not in_domain:
         return GateResult("irrelevant")
 
-    has_modellable = tool is not None
-    if not has_modellable:
-        # In domain but nothing the engine can compute for this ask.
-        return GateResult("out_of_scope")
+    if tool is None:
+        if unmodellable_outputs or explicitly_unmodellable:
+            # A refusal needs positive, prompt-grounded capability evidence.
+            return GateResult("out_of_scope")
+        # Failure to choose a tool is uncertainty, not proof of incapability.
+        return GateResult("needs_plan", ["tool"])
     if unmodellable_outputs:
         # Some of the ask is modellable, some isn't → confirm-first partial.
         # Deliberately takes precedence over needs_plan: resolve scope first;

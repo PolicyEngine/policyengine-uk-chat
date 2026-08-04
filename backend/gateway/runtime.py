@@ -340,6 +340,8 @@ def apply_catalogue_evidence(
     """
 
     verdict = replace(verdict, catalogue_evidence=evidence)
+    if verdict.outcome == "irrelevant":
+        return verdict
     if not evidence.available:
         if verdict.outcome == "out_of_scope":
             return replace(verdict, outcome="ready", route="compute")
@@ -354,7 +356,14 @@ def apply_catalogue_evidence(
             route="lightweight",
             gating_slots=gating_slots,
         )
-    if evidence.matches and verdict.outcome in ("irrelevant", "out_of_scope"):
+    catalogue_can_supply_missing_tool = (
+        verdict.outcome == "needs_plan"
+        and verdict.tool is None
+        and verdict.gating_slots == ["tool"]
+    )
+    if evidence.matches and (
+        verdict.outcome == "out_of_scope" or catalogue_can_supply_missing_tool
+    ):
         return replace(verdict, outcome="ready", route="compute")
     return verdict
 
@@ -368,7 +377,7 @@ def _verdict_from_plan(
     own outcome is never trusted — the outcome is recomputed by gate()."""
     domain = _domain_from_plan(plan, prompt)
     capability = _capability_from_plan(plan, prompt)
-    in_domain = bool(plan.get("in_domain", True))
+    in_domain = domain.status == "uk_or_unspecified"
     raw_tool = plan.get("tool")
     tool = raw_tool if raw_tool in _TOOL_NAMES else None
 
@@ -395,7 +404,16 @@ def _verdict_from_plan(
     slots = normalise_slot_grounding(tool, slots)
     slots = complete_slots(tool, slots)
     unmodellable = _unmodellable_outputs_from_plan(plan, prompt)
-    result = gate(in_domain, tool, slots, unmodellable, prompt)
+    result = gate(
+        in_domain,
+        tool,
+        slots,
+        unmodellable,
+        prompt,
+        explicitly_unmodellable=(
+            capability.status == "explicitly_unmodellable"
+        ),
+    )
     verdict = GatewayVerdict(
         outcome=result.outcome,
         route="compute" if result.outcome == "ready" else "lightweight",

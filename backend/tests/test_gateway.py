@@ -125,9 +125,24 @@ class TestGate:
         # With an unmodellable output also present, partial takes precedence.
         assert gate(True, "run_society_simulation", slots, ["inflation"]).outcome == "partial"
 
-    def test_out_of_scope_no_tool_in_domain(self):
-        assert gate(True, None, [], []).outcome == "out_of_scope"
+    def test_missing_tool_without_refusal_evidence_needs_plan(self):
+        result = gate(True, None, [], [])
+
+        assert result.outcome == "needs_plan"
+        assert result.gating_slots == ["tool"]
+
+    def test_out_of_scope_requires_positive_unmodellable_evidence(self):
         assert gate(True, None, [], ["inflation"]).outcome == "out_of_scope"
+        assert (
+            gate(
+                True,
+                None,
+                [],
+                [],
+                explicitly_unmodellable=True,
+            ).outcome
+            == "out_of_scope"
+        )
 
     def test_irrelevant_not_in_domain(self):
         assert gate(False, None, [], []).outcome == "irrelevant"
@@ -308,7 +323,19 @@ class TestRunGateway:
 
     def test_unknown_tool_becomes_none(self):
         from gateway import runtime as gateway
-        plan = {"in_domain": True, "tool": "none", "slots": [], "unmodellable_outputs": ["inflation"]}
+        plan = {
+            "domain": {"status": "uk_or_unspecified"},
+            "capability": {
+                "status": "explicitly_unmodellable",
+                "evidence": "inflation",
+            },
+            "tool": "none",
+            "slots": [],
+            "unmodellable_outputs": [
+                {"name": "inflation", "evidence": "inflation"}
+            ],
+            "catalogue_queries": [],
+        }
         with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             v = gateway.run_gateway("what will inflation be?")
         assert v.tool is None and v.outcome == "out_of_scope"
@@ -506,6 +533,7 @@ class TestGatewayDecisionEvidence:
         assert verdict.domain.evidence == "US federal"
         assert verdict.capability.status == "catalogue_uncertain"
         assert verdict.capability.evidence == "federal income tax"
+        assert verdict.outcome == "irrelevant"
 
     def test_rejects_invented_negative_decision_evidence(self):
         from gateway import runtime as gateway
@@ -527,6 +555,8 @@ class TestGatewayDecisionEvidence:
         assert verdict.domain.evidence is None
         assert verdict.capability.status == "supported"
         assert verdict.capability.evidence is None
+        assert verdict.outcome == "needs_plan"
+        assert verdict.gating_slots == ["tool"]
 
 
 class TestWriterDirective:

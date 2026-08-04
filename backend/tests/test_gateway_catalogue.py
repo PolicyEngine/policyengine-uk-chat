@@ -124,6 +124,28 @@ def test_matching_catalogue_evidence_prevents_a_false_refusal():
     assert resolved.catalogue_evidence.matches == (_match(),)
 
 
+def test_matching_catalogue_evidence_cannot_override_irrelevant():
+    verdict = GatewayVerdict(outcome="irrelevant", route="lightweight")
+
+    resolved = apply_catalogue_evidence(verdict, _evidence(_match()))
+
+    assert resolved.outcome == "irrelevant"
+    assert resolved.route == "lightweight"
+
+
+def test_unresolved_catalogue_evidence_cannot_override_irrelevant():
+    query = CatalogueQuery("reform_target", "made up levy")
+    verdict = GatewayVerdict(outcome="irrelevant", route="lightweight")
+
+    resolved = apply_catalogue_evidence(
+        verdict,
+        _evidence(unresolved_queries=(query,)),
+    )
+
+    assert resolved.outcome == "irrelevant"
+    assert resolved.route == "lightweight"
+
+
 def test_matching_catalogue_evidence_preserves_other_ambiguity():
     verdict = GatewayVerdict(
         outcome="needs_plan",
