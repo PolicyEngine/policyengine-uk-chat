@@ -80,7 +80,7 @@ def test_plan_schema_requires_bounded_catalogue_queries():
 
     assert "catalogue_queries" in schema["required"]
     assert queries["maxItems"] == MAX_CATALOGUE_QUERIES
-    assert queries["items"]["required"] == ["kind", "query"]
+    assert queries["items"]["required"] == ["kind", "query", "evidence"]
     assert queries["items"]["properties"]["kind"]["enum"] == [
         "reform_target",
         "variable",
@@ -282,12 +282,20 @@ def test_gateway_wiring_uses_matching_evidence_before_refusing():
     from gateway import runtime as gateway
 
     plan = {
-        "in_domain": True,
+        "domain": {"status": "uk_or_unspecified"},
+        "capability": {
+            "status": "catalogue_uncertain",
+            "evidence": "capital gains tax",
+        },
         "tool": "none",
         "slots": [],
         "unmodellable_outputs": [],
         "catalogue_queries": [
-            {"kind": "reform_target", "query": "capital gains tax"}
+            {
+                "kind": "reform_target",
+                "query": "capital gains tax",
+                "evidence": "capital gains tax",
+            }
         ],
     }
     block = SimpleNamespace(type="tool_use", name="emit_plan", input=plan)
@@ -304,6 +312,64 @@ def test_gateway_wiring_uses_matching_evidence_before_refusing():
 
     assert verdict.outcome == "ready"
     assert verdict.route == "compute"
+
+
+def test_gateway_drops_catalogue_queries_without_prompt_grounding():
+    from gateway import runtime as gateway
+
+    prompt = "How would US federal income tax change?"
+    plan = {
+        "domain": {"status": "explicit_non_uk", "evidence": "US federal"},
+        "capability": {
+            "status": "catalogue_uncertain",
+            "evidence": "federal income tax",
+        },
+        "tool": "none",
+        "slots": [],
+        "catalogue_queries": [
+            {
+                "kind": "reform_target",
+                "query": "income tax",
+                "evidence": "federal income tax",
+            },
+            {
+                "kind": "variable",
+                "query": "universal credit",
+                "evidence": "universal credit",
+            },
+            {
+                "kind": "variable",
+                "query": "capital gains tax",
+                "evidence": "US federal income tax",
+            },
+        ],
+    }
+    block = SimpleNamespace(type="tool_use", name="emit_plan", input=plan)
+    client = SimpleNamespace(
+        messages=SimpleNamespace(
+            create=lambda **_kwargs: SimpleNamespace(content=[block])
+        )
+    )
+
+    with (
+        patch.object(gateway, "get_sync_client", lambda: client),
+        patch.object(
+            gateway,
+            "resolve_catalogue_queries",
+            return_value=_evidence(),
+        ) as resolver,
+    ):
+        gateway.run_gateway(prompt)
+
+    resolver.assert_called_once_with(
+        (
+            CatalogueQuery(
+                "reform_target",
+                "income tax",
+                "federal income tax",
+            ),
+        )
+    )
 
 
 def test_resolver_marks_a_catalogue_failure_unavailable():

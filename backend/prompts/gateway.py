@@ -89,8 +89,11 @@ Steps:
    requested output is unmodellable.
 6. `catalogue_queries`: for every named UK tax-benefit reform measure or model
    variable concept, emit a short search term for the server to verify against
-   the current policyengine.py catalogue. Do not include rates, amounts, or the
-   whole user message. Use an empty list only when no such concept is named.
+   the current policyengine.py catalogue, plus an `evidence` exact quote from
+   the user's message containing that search term. Do not include rates,
+   amounts, or the whole user message. Never silently remove a foreign
+   jurisdiction from the quoted evidence. Use an empty list only when no such
+   concept is named.
    The scope summary below is not an exhaustive list: never choose `tool="none"`
    merely because a named policy is absent from it.
 

@@ -21,6 +21,7 @@ class CatalogueQuery:
 
     kind: CatalogueKind
     query: str
+    evidence: str | None = None
 
 
 @dataclass(frozen=True)
@@ -62,7 +63,7 @@ def _normalise_queries(queries: Sequence[CatalogueQuery]) -> tuple[CatalogueQuer
         if key in seen:
             continue
         seen.add(key)
-        normalised.append(CatalogueQuery(item.kind, query))
+        normalised.append(CatalogueQuery(item.kind, query, item.evidence))
         if len(normalised) == MAX_CATALOGUE_QUERIES:
             break
     return tuple(normalised)

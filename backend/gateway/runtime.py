@@ -204,16 +204,25 @@ _EMIT_PLAN_TOOL = {
                 "maxItems": MAX_CATALOGUE_QUERIES,
                 "description": (
                     "Short policyengine.py catalogue searches for named reform "
-                    "measures or variable concepts. Use an empty list when no "
-                    "catalogue concept is named."
+                    "measures or variable concepts. Every query must cite an "
+                    "exact quote from the user's message containing the query. "
+                    "Use an empty list when no catalogue concept is named."
                 ),
                 "items": {
                     "type": "object",
                     "properties": {
                         "kind": {"type": "string", "enum": ["reform_target", "variable"]},
                         "query": {"type": "string"},
+                        "evidence": {
+                            "type": "string",
+                            "maxLength": 300,
+                            "description": (
+                                "An exact quote from the user's message that "
+                                "contains this catalogue search term."
+                            ),
+                        },
                     },
-                    "required": ["kind", "query"],
+                    "required": ["kind", "query", "evidence"],
                 },
             },
             "rationale": {"type": "string"},
@@ -229,7 +238,12 @@ _EMIT_PLAN_TOOL = {
 }
 
 
-def _catalogue_queries_from_plan(plan: dict) -> tuple[CatalogueQuery, ...]:
+def _catalogue_queries_from_plan(
+    plan: dict,
+    prompt: str,
+) -> tuple[CatalogueQuery, ...]:
+    """Accept only catalogue searches grounded in an exact user quote."""
+
     queries: list[CatalogueQuery] = []
     for item in plan.get("catalogue_queries") or []:
         if not isinstance(item, dict):
@@ -238,7 +252,16 @@ def _catalogue_queries_from_plan(plan: dict) -> tuple[CatalogueQuery, ...]:
         query = item.get("query")
         if kind not in ("reform_target", "variable") or not isinstance(query, str):
             continue
-        queries.append(CatalogueQuery(kind, query))
+        query = query.strip()
+        evidence = _validated_quote(item.get("evidence"), prompt)
+        if (
+            not query
+            or evidence is None
+            or _normalise_evidence_text(query)
+            not in _normalise_evidence_text(evidence)
+        ):
+            continue
+        queries.append(CatalogueQuery(kind, query, evidence))
     return tuple(queries)
 
 
@@ -457,7 +480,9 @@ def run_gateway(last_user_message: str) -> GatewayVerdict:
         # degenerate response can never masquerade as an out_of_scope refusal.
         if not plan or "tool" not in plan:
             return _fail_safe()
-        catalogue_evidence = resolve_catalogue_queries(_catalogue_queries_from_plan(plan))
+        catalogue_evidence = resolve_catalogue_queries(
+            _catalogue_queries_from_plan(plan, last_user_message)
+        )
         return _verdict_from_plan(plan, last_user_message, catalogue_evidence)
     except Exception as e:  # noqa: BLE001 — any failure falls back to full compute
         logger.warning(f"[GATEWAY] failed; defaulting to ready/compute: {e}")
