@@ -4,10 +4,12 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from gateway.catalogue import (
+    CANDIDATE_LIMIT,
     CatalogueEvidence,
     CatalogueMatch,
     CatalogueQuery,
     MAX_CATALOGUE_QUERIES,
+    _classify_match,
     resolve_catalogue_queries,
 )
 from gateway.runtime import (
@@ -68,8 +70,87 @@ def test_resolver_searches_live_parameter_and_variable_catalogues():
         "capital_gains_tax",
     }
     assert not evidence.unresolved_queries
-    reform_search.assert_called_once_with("capital gains tax", limit=5)
-    variable_search.assert_called_once_with("capital gains tax", limit=5)
+    reform_search.assert_called_once_with(
+        "capital gains tax", limit=CANDIDATE_LIMIT
+    )
+    variable_search.assert_called_once_with(
+        "capital gains tax", limit=CANDIDATE_LIMIT
+    )
+
+
+def test_match_quality_separates_authority_from_suggestions():
+    assert _classify_match(
+        "gov.hmrc.cgt.basic_rate",
+        identifier="gov.hmrc.cgt.basic_rate",
+        label="Capital gains tax basic rate",
+    ) == ("exact_identifier", 1.0)
+    assert _classify_match(
+        "lowest CGT rate",
+        identifier="gov.hmrc.cgt.basic_rate",
+        label="Capital gains tax basic rate",
+        aliases=("lowest CGT rate",),
+    ) == ("exact_alias", 1.0)
+    assert _classify_match(
+        "capital gains tax",
+        identifier="gov.hmrc.cgt.basic_rate",
+        label="Capital gains tax basic rate",
+    ) == ("strong_phrase", 0.9)
+    match_type, score = _classify_match(
+        "US federal income tax",
+        identifier="gov.hmrc.income_tax.rates.uk",
+        label="UK income tax rates",
+    )
+    assert match_type == "fuzzy_suggestion"
+    assert 0 < score < 0.9
+
+
+def test_fuzzy_only_catalogue_results_remain_unresolved_suggestions():
+    query = CatalogueQuery(
+        "reform_target",
+        "US federal income tax",
+        "US federal income tax",
+    )
+    with (
+        patch("gateway.catalogue.uk_model_version", return_value=object()),
+        patch(
+            "gateway.catalogue.search_reform_targets",
+            return_value=[
+                {
+                    "path": "gov.hmrc.income_tax.rates.uk",
+                    "label": "UK income tax rates",
+                    "aliases": [],
+                }
+            ],
+        ),
+    ):
+        evidence = resolve_catalogue_queries([query])
+
+    assert evidence.authoritative_matches == ()
+    assert len(evidence.suggestions) == 1
+    assert evidence.suggestions[0].match_type == "fuzzy_suggestion"
+    assert evidence.unresolved_queries == (query,)
+
+
+def test_fuzzy_suggestion_cannot_promote_a_missing_tool_to_compute():
+    suggestion = CatalogueMatch(
+        kind="reform_target",
+        query="US federal income tax",
+        identifier="gov.hmrc.income_tax.rates.uk",
+        label="UK income tax rates",
+        match_type="fuzzy_suggestion",
+        score=0.7,
+    )
+    verdict = GatewayVerdict(
+        outcome="needs_plan",
+        route="lightweight",
+        tool=None,
+        gating_slots=["tool"],
+    )
+
+    resolved = apply_catalogue_evidence(verdict, _evidence(suggestion))
+
+    assert resolved.outcome == "needs_plan"
+    assert resolved.route == "lightweight"
 
 
 def test_plan_schema_requires_bounded_catalogue_queries():

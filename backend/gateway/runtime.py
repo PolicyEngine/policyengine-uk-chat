@@ -384,7 +384,7 @@ def apply_catalogue_evidence(
         and verdict.tool is None
         and verdict.gating_slots == ["tool"]
     )
-    if evidence.matches and (
+    if evidence.authoritative_matches and (
         verdict.outcome == "out_of_scope" or catalogue_can_supply_missing_tool
     ):
         return replace(verdict, outcome="ready", route="compute")
@@ -544,11 +544,11 @@ def serialise_plan_for_system(verdict: GatewayVerdict) -> str:
     if grounded:
         lines.append("Resolved inputs: " + "; ".join(grounded) + ".")
     evidence = verdict.catalogue_evidence
-    if evidence and evidence.matches:
+    if evidence and evidence.authoritative_matches:
         lines.append("MODEL CATALOGUE EVIDENCE (verified current policyengine.py candidates):")
         lines.extend(
             f"- {match.kind}: {match.label} (`{match.identifier}`)"
-            for match in evidence.matches
+            for match in evidence.authoritative_matches
         )
         lines.append(
             "Treat these as discovery candidates, not a resolution of user intent. "
