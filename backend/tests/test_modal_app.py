@@ -143,6 +143,24 @@ def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
     assert "Refresh backend preview with preview frontend URL" not in workflow
 
 
+def test_preview_frontend_and_modal_share_pr_number_contract():
+    workflow = (REPO_ROOT / ".github/workflows/pr-beta-deploy.yml").read_text()
+    frontend_backend_url = (
+        REPO_ROOT / "frontend/src/app/api/proxy/backend-url.ts"
+    ).read_text()
+
+    assert (
+        "MODAL_PREVIEW_APP_NAME: pe-uk-chat-${{ github.event.pull_request.number }}"
+        in workflow
+    )
+    assert "VERCEL_GIT_PULL_REQUEST_ID" in frontend_backend_url
+    assert "VERCEL_GIT_COMMIT_REF" not in frontend_backend_url
+    assert (
+        "https://policyengine--pe-uk-chat-${pullRequestNumber}-web.modal.run"
+        in frontend_backend_url
+    )
+
+
 def test_workflows_delegate_multiline_shell_to_repository_scripts():
     workflow_paths = sorted((REPO_ROOT / ".github/workflows").glob("*.y*ml"))
 

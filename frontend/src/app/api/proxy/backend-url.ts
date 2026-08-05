@@ -1,24 +1,20 @@
 const LOCAL_BACKEND_URL = "http://localhost:8080";
-
-function slugifyBranchName(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .replace(/-{2,}/g, "-");
-}
+const PULL_REQUEST_NUMBER = /^[1-9]\d*$/;
 
 export function resolveBackendUrl(
   env: NodeJS.ProcessEnv = process.env,
 ): string {
   if (env.VERCEL_ENV === "preview") {
-    if (!env.VERCEL_GIT_COMMIT_REF) {
+    // The GitHub preview workflow names each Modal app pe-uk-chat-<PR>.
+    // Vercel exposes the same PR number at runtime, so branch renames and
+    // Modal's hostname-length limit cannot make the two deployments diverge.
+    const pullRequestNumber = env.VERCEL_GIT_PULL_REQUEST_ID?.trim();
+    if (!pullRequestNumber || !PULL_REQUEST_NUMBER.test(pullRequestNumber)) {
       throw new Error(
-        "VERCEL_GIT_COMMIT_REF is required for preview backend routing.",
+        "A valid VERCEL_GIT_PULL_REQUEST_ID is required for preview backend routing.",
       );
     }
-    const branchSlug = slugifyBranchName(env.VERCEL_GIT_COMMIT_REF);
-    return `https://policyengine--peukchat-${branchSlug}-web.modal.run`;
+    return `https://policyengine--pe-uk-chat-${pullRequestNumber}-web.modal.run`;
   }
 
   const configuredUrl = env.POLICYENGINE_UK_CHAT_BACKEND_URL?.trim();
