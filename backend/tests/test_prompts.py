@@ -55,7 +55,12 @@ def test_main_prompt_describes_household_country_ids():
 
 
 def test_main_prompt_describes_py_lifecycle_tools():
-    assert f"default simulation year is {DEFAULT_SIMULATION_YEAR}" in SYSTEM_PROMPT
+    normalized_prompt = " ".join(SYSTEM_PROMPT.split())
+    assert (
+        f"use the current calendar year ({DEFAULT_SIMULATION_YEAR})"
+        in normalized_prompt
+    )
+    assert "Preserve any year the user explicitly provides." in normalized_prompt
     assert UK_CHAT_DATASET.name in SYSTEM_PROMPT
     for name in (
         "list_entities",
