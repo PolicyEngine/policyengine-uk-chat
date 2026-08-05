@@ -6,7 +6,6 @@ from typing import Any
 import httpx
 from pydantic import ValidationError
 
-from chat.schemas import ChatRequest
 from eval.schemas import EvalChatResponse
 
 
@@ -43,16 +42,20 @@ class DeployedEvalClient:
         session_id: str,
         charts_mode: bool = False,
     ) -> EvalChatResponse:
-        request = ChatRequest(
-            messages=list(messages),
-            session_id=session_id,
-            charts_mode=charts_mode,
-        )
+        # Keep the remote client independent from the deployed application's
+        # route package. The server owns request validation; importing
+        # ``chat.schemas`` here also executes ``chat.__init__`` and pulls the
+        # entire FastAPI stack into the lightweight Modal eval worker.
+        request_payload = {
+            "messages": list(messages),
+            "session_id": session_id,
+            "charts_mode": charts_mode,
+        }
         try:
             response = await self._client().post(
                 f"{self.backend_url}/eval/chat/message",
                 headers={"X-Eval-Token": self.token},
-                json=request.model_dump(exclude_none=True),
+                json=request_payload,
                 timeout=self.timeout_seconds,
             )
         except httpx.TimeoutException as exc:
