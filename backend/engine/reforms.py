@@ -41,6 +41,12 @@ COMMON_REFORM_TARGETS = {
         "VAT standard rate",
         "standard VAT rate",
     ),
+    "gov.hmrc.cgt.basic_rate": (
+        "capital gains tax",
+        "CGT",
+        "capital gains basic rate",
+        "lowest capital gains tax rate",
+    ),
     "gov.dwp.universal_credit.standard_allowance.amount.SINGLE_OLD": (
         "universal credit standard allowance",
         "UC standard allowance single over 25",

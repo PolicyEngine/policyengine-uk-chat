@@ -9,15 +9,16 @@ plan into one of five outcomes. Keeping this out of the model (and out of
 ``prompts/``/``chat/``) makes the gate auditable and unit-testable
 offline, and lets the eval grader import it without dragging in the runtime.
 
-Gate rule: a slot *gates* (forces a clarifying question) iff its ``source`` is
-``assumed`` AND its criticality is high/medium AND it is not model-inferable.
-``needs_plan`` iff any slot gates; otherwise ``ready`` (once admissibility —
-irrelevant / out_of_scope / partial — is decided).
+Before gating, the server completes the selected tool's schema slots that the
+model omitted as ``assumed``. A slot *gates* (forces a clarifying question) iff
+its ``source`` is ``assumed`` AND its criticality is high/medium AND it is not
+model-inferable. ``needs_plan`` iff any slot gates; otherwise ``ready`` (once
+admissibility — irrelevant / out_of_scope / partial — is decided).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import List, Literal, Optional
 
 from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
@@ -29,6 +30,28 @@ from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
 _DEFAULT_YEAR = str(DEFAULT_SIMULATION_YEAR)
 
 Criticality = Literal["high", "medium", "low"]
+DomainStatus = Literal["uk_or_unspecified", "explicit_non_uk", "unrelated"]
+CapabilityStatus = Literal[
+    "supported",
+    "catalogue_uncertain",
+    "explicitly_unmodellable",
+]
+
+
+@dataclass(frozen=True)
+class DomainDecision:
+    """Validated domain classification from the user's original wording."""
+
+    status: DomainStatus = "uk_or_unspecified"
+    evidence: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class CapabilityDecision:
+    """Validated statement about why the gateway could not select a tool."""
+
+    status: CapabilityStatus = "supported"
+    evidence: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -93,6 +116,29 @@ INFERABLE: set = {
     ("generate_chart", "data"),  # comes from an upstream tool, not the user
 }
 
+
+def complete_slots(tool: Optional[str], slots: List[SlotFact]) -> List[SlotFact]:
+    """Return a complete gateway slot state for a selected tool.
+
+    The gateway model can ground any subset of the plan. Missing schema slots
+    must still reach ``gate()`` as ``assumed`` rather than being silently
+    treated as known. ``output`` is a synthetic, user-requested deliverable
+    slot, so it is added when the model did not name one.
+    """
+
+    completed = list(slots)
+    present_tool_inputs = {
+        slot.name for slot in slots if slot.kind == "tool_input"
+    }
+    if tool is not None:
+        for candidate_tool, name in TOOL_SLOT_REQUIREMENT:
+            if candidate_tool == tool and name not in present_tool_inputs:
+                completed.append(SlotFact(name=name, source="assumed"))
+
+    if tool is not None and not any(slot.kind == "output" for slot in slots):
+        completed.append(SlotFact(name="output", source="assumed", kind="output"))
+    return completed
+
 # Closed vocabulary for the synthetic "output" (deliverable) slot. The single
 # source of truth for the output labels: the gateway runtime injects these into
 # the classifier prompt (via gateway_system) so the model and this module can't
@@ -112,6 +158,42 @@ OUTPUT_VOCAB = (
     "parameter_lookup",
     "reform_validity",
 )
+
+# Most safe defaults are expressed directly in a tool schema. Current law is
+# also the documented baseline for a society simulation, even though a missing
+# reform is represented by ``None`` rather than a JSON-schema ``default``.
+_EXPLICIT_SAFE_DEFAULTS = {
+    ("run_society_simulation", "reform"),
+}
+
+
+def normalise_slot_grounding(
+    tool: Optional[str],
+    slots: List[SlotFact],
+) -> List[SlotFact]:
+    """Reject empty or unsupported claims that a slot is already grounded."""
+
+    normalised: list[SlotFact] = []
+    for slot in slots:
+        value = slot.value.strip() if isinstance(slot.value, str) else None
+        if slot.kind == "output":
+            output = value or slot.name
+            if slot.source == "prompt" and output in OUTPUT_VOCAB:
+                normalised.append(replace(slot, value=output))
+            else:
+                normalised.append(replace(slot, source="assumed", value=None))
+            continue
+
+        key = (tool, slot.name)
+        has_schema_default = TOOL_SLOT_REQUIREMENT.get(key) == "defaulted"
+        can_default = has_schema_default or key in _EXPLICIT_SAFE_DEFAULTS
+        if slot.source == "prompt" and not value:
+            normalised.append(replace(slot, source="assumed", value=None))
+        elif slot.source == "default" and not can_default:
+            normalised.append(replace(slot, source="assumed", value=None))
+        else:
+            normalised.append(replace(slot, value=value))
+    return normalised
 
 
 # ---------------------------------------------------------------------------
@@ -181,6 +263,8 @@ def gate(
     slots: List[SlotFact],
     unmodellable_outputs: List[str],
     prompt: str = "",
+    *,
+    explicitly_unmodellable: bool = False,
 ) -> GateResult:
     """Deterministically map a grounded plan to one of the five outcomes.
 
@@ -192,10 +276,12 @@ def gate(
     if not in_domain:
         return GateResult("irrelevant")
 
-    has_modellable = tool is not None
-    if not has_modellable:
-        # In domain but nothing the engine can compute for this ask.
-        return GateResult("out_of_scope")
+    if tool is None:
+        if unmodellable_outputs or explicitly_unmodellable:
+            # A refusal needs positive, prompt-grounded capability evidence.
+            return GateResult("out_of_scope")
+        # Failure to choose a tool is uncertainty, not proof of incapability.
+        return GateResult("needs_plan", ["tool"])
     if unmodellable_outputs:
         # Some of the ask is modellable, some isn't → confirm-first partial.
         # Deliberately takes precedence over needs_plan: resolve scope first;

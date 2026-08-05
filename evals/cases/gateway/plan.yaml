@@ -14,6 +14,13 @@ cases:
     prompt: Write me a Python function that does quicksort.
     expected_outcome: irrelevant
 
+  - id: gw_irrelevant_us_federal_income_tax
+    suite: gateway
+    description: A foreign tax request remains off-domain even when its wording resembles a UK catalogue concept.
+    requirements: [live_model]
+    prompt: How would increasing the US federal income tax rate affect revenue?
+    expected_outcome: irrelevant
+
   # ---- out_of_scope: on-topic but no modelled lever ----
   - id: gw_oos_pure_macro
     suite: gateway
@@ -82,12 +89,35 @@ cases:
     expected_outcome: needs_plan
     expected_tool: run_society_simulation
 
+  - id: gw_needsplan_ambiguous_named_levy
+    suite: gateway
+    description: A plausible named levy still needs its reform and requested output clarified when the prompt does not define them.
+    requirements: [live_model]
+    prompt: Model the new support levy.
+    expected_outcome: needs_plan
+
   # ---- ready: fully specified, admissible ----
   - id: gw_ready_basic_rate_cost
     suite: gateway
     description: A budgetary-cost question about a fully-specified reform.
     requirements: [live_model]
     prompt: What is the budgetary cost of raising the basic rate of income tax to 21%?
+    expected_outcome: ready
+    expected_tool: run_society_simulation
+
+  - id: gw_ready_basic_rate_revenue_without_dynamic_rider
+    suite: gateway
+    description: An unqualified revenue request means the direct static result, not an inferred behavioural forecast.
+    requirements: [live_model]
+    prompt: What would be the annual revenue from raising the basic income tax rate by one percentage point?
+    expected_outcome: ready
+    expected_tool: run_society_simulation
+
+  - id: gw_ready_uc_poverty_without_dynamic_rider
+    suite: gateway
+    description: Poverty metrics are directly modelled unless the user explicitly requests behavioural or macroeconomic effects.
+    requirements: [live_model]
+    prompt: How would increasing Universal Credit's standard allowance by 5% affect poverty?
     expected_outcome: ready
     expected_tool: run_society_simulation
 
@@ -124,5 +154,13 @@ cases:
     description: A fully-specified distributional ask needs no clarification.
     requirements: [live_model]
     prompt: Show the distributional impact by decile of raising the personal allowance to £15,000.
+    expected_outcome: ready
+    expected_tool: run_society_simulation
+
+  - id: gw_ready_cgt_income_deciles
+    suite: gateway
+    description: A supported CGT reform must not be refused because it is omitted from the prose scope summary.
+    requirements: [live_model, policyengine_py]
+    prompt: Raise the lowest capital gains tax rate from 18% to 20% and show the impact by income decile.
     expected_outcome: ready
     expected_tool: run_society_simulation

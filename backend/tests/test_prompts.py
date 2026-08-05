@@ -5,6 +5,7 @@ import pytest
 from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
 from engine.constants import HOUSEHOLD_COUNTRY_IDS, UK_CHAT_DATASET
 from prompts import (
+    GATEWAY_CATALOGUE_RECOVERY_DIRECTIVE,
     SYSTEM_PROMPT,
     SUGGESTION_SYSTEM,
     TITLE_SYSTEM,
@@ -54,7 +55,12 @@ def test_main_prompt_describes_household_country_ids():
 
 
 def test_main_prompt_describes_py_lifecycle_tools():
-    assert f"default simulation year is {DEFAULT_SIMULATION_YEAR}" in SYSTEM_PROMPT
+    normalized_prompt = " ".join(SYSTEM_PROMPT.split())
+    assert (
+        f"use the current calendar year ({DEFAULT_SIMULATION_YEAR})"
+        in normalized_prompt
+    )
+    assert "Preserve any year the user explicitly provides." in normalized_prompt
     assert UK_CHAT_DATASET.name in SYSTEM_PROMPT
     for name in (
         "list_entities",
@@ -131,6 +137,22 @@ def test_gateway_prompt_renders_caller_supplied_default_year():
     )
     assert f"year {DEFAULT_SIMULATION_YEAR}" in rendered
     assert "{default_year}" not in rendered
+    assert "not an exhaustive list" in rendered
+    assert "catalogue_queries" in rendered
+    assert "only outputs that the user explicitly asks for" in rendered
+    assert "Do not add behavioural" in rendered
+    assert "caveats for the final answer" in rendered
+    assert "label_a, label_b" in rendered
+    assert "authoritative" in rendered
+
+
+def test_gateway_catalogue_recovery_prompt_preserves_server_gate_boundaries():
+    directive = " ".join(GATEWAY_CATALOGUE_RECOVERY_DIRECTIVE.split())
+
+    assert "do not prove which candidate" in directive
+    assert "load-bearing choice remains ambiguous" in directive
+    assert "exact quoted evidence" in directive
+    assert "empty `catalogue_queries`" in directive
 
 
 def test_secondary_model_prompts_use_neutral_wording():

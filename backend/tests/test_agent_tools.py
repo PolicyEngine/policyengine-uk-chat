@@ -1,9 +1,11 @@
 """Tests for the model-facing UK policy tool lifecycle."""
 
+from datetime import date
 import inspect
 from pathlib import Path
 
 import tools.dispatch as agent_tools
+import tools.definitions as tool_definitions
 from conftest import requires_policyengine_py
 from engine import households as household_engine
 from engine import simulations as simulation_engine
@@ -54,14 +56,14 @@ def test_tool_inventory_matches_py_lifecycle():
     assert "list_datasets" not in names
 
 
-def test_simulation_schema_uses_fixed_dataset():
-    assert DEFAULT_SIMULATION_YEAR == 2026
+def test_simulation_schema_uses_current_year_and_fixed_dataset():
+    assert DEFAULT_SIMULATION_YEAR == date.today().year
     assert UK_CHAT_DATASET.name == "enhanced_frs_2024_25"
     assert UK_CHAT_DATASET.label == "Enhanced FRS 2024-25"
     assert UK_CHAT_DATASET.uri.startswith("hf://")
     assert "@" in UK_CHAT_DATASET.uri
     society_schema = _tool("run_society_simulation")["input_schema"]
-    assert society_schema["properties"]["year"]["default"] == 2026
+    assert society_schema["properties"]["year"]["default"] == DEFAULT_SIMULATION_YEAR
     assert "dataset" not in society_schema["properties"]
     assert "dataset" not in inspect.signature(
         agent_tools.run_society_simulation
@@ -69,6 +71,24 @@ def test_simulation_schema_uses_fixed_dataset():
     assert "dataset" not in inspect.signature(
         simulation_engine.build_society_simulation
     ).parameters
+
+
+def test_current_simulation_year_tracks_the_calendar(monkeypatch):
+    class FutureDate(date):
+        @classmethod
+        def today(cls):
+            return cls(2031, 2, 3)
+
+    monkeypatch.setattr(tool_definitions, "date", FutureDate)
+
+    assert tool_definitions.current_simulation_year() == 2031
+
+
+@requires_policyengine_py
+def test_reform_target_discovery_finds_capital_gains_tax():
+    targets = agent_tools.list_reform_targets(query="capital gains tax")["targets"]
+
+    assert any(target["path"] == "gov.hmrc.cgt.basic_rate" for target in targets)
 
 
 def test_decile_tool_exposes_three_state_concept():
@@ -273,7 +293,9 @@ def test_society_simulation_result_handle_feeds_derivative_and_chart_tools(monke
     assert chart["spec"]["data"][-1]["value"] == 750_000_000
 
 
-def test_society_simulation_passes_extra_variables(monkeypatch):
+def test_society_simulation_defaults_the_year_and_preserves_explicit_years(
+    monkeypatch,
+):
     captured = {}
 
     def fake_build(**kwargs):
@@ -300,6 +322,15 @@ def test_society_simulation_passes_extra_variables(monkeypatch):
 
     assert result["status"] == "success"
     assert captured["extra_variables"] == {"household": ["rent"]}
+    assert captured["year"] == DEFAULT_SIMULATION_YEAR
+
+    result = agent_tools.run_society_simulation(
+        year=2024,
+        _context=new_tool_context("test-session"),
+    )
+
+    assert result["status"] == "success"
+    assert captured["year"] == 2024
 
 
 def test_society_simulation_normalizes_unset_reform_values(monkeypatch):

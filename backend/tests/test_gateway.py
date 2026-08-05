@@ -12,6 +12,7 @@ from unittest.mock import patch
 from gateway.policy import (
     TOOL_SLOT_REQUIREMENT,
     SlotFact,
+    complete_slots,
     criticality,
     gate,
     is_inferable,
@@ -124,12 +125,79 @@ class TestGate:
         # With an unmodellable output also present, partial takes precedence.
         assert gate(True, "run_society_simulation", slots, ["inflation"]).outcome == "partial"
 
-    def test_out_of_scope_no_tool_in_domain(self):
-        assert gate(True, None, [], []).outcome == "out_of_scope"
+    def test_missing_tool_without_refusal_evidence_needs_plan(self):
+        result = gate(True, None, [], [])
+
+        assert result.outcome == "needs_plan"
+        assert result.gating_slots == ["tool"]
+
+    def test_out_of_scope_requires_positive_unmodellable_evidence(self):
         assert gate(True, None, [], ["inflation"]).outcome == "out_of_scope"
+        assert (
+            gate(
+                True,
+                None,
+                [],
+                [],
+                explicitly_unmodellable=True,
+            ).outcome
+            == "out_of_scope"
+        )
 
     def test_irrelevant_not_in_domain(self):
         assert gate(False, None, [], []).outcome == "irrelevant"
+
+
+class TestSlotCompletion:
+    def test_adds_every_missing_tool_schema_slot_and_output(self):
+        completed = complete_slots("run_society_simulation", [])
+
+        assert {
+            slot.name
+            for slot in completed
+            if slot.kind == "tool_input"
+        } == {
+            name
+            for (tool, name) in TOOL_SLOT_REQUIREMENT
+            if tool == "run_society_simulation"
+        }
+        assert all(slot.source == "assumed" for slot in completed)
+        assert any(slot.kind == "output" and slot.name == "output" for slot in completed)
+
+    def test_keeps_model_grounded_slots(self):
+        completed = complete_slots(
+            "run_society_simulation",
+            [
+                sf("reform", "prompt", value="Raise the basic rate to 21%"),
+                sf("output", "prompt", kind="output", value="budgetary_impact"),
+            ],
+        )
+
+        reform = next(slot for slot in completed if slot.name == "reform")
+        output = next(slot for slot in completed if slot.kind == "output")
+        assert reform.source == "prompt"
+        assert output.source == "prompt"
+
+    def test_missing_material_slots_gate_instead_of_reaching_compute(self):
+        completed = complete_slots("run_society_simulation", [])
+
+        result = gate(True, "run_society_simulation", completed, [])
+
+        assert result.outcome == "needs_plan"
+        assert set(result.gating_slots) == {"reform", "output"}
+
+    def test_missing_inferable_household_slots_do_not_gate(self):
+        completed = complete_slots(
+            "run_household_simulation",
+            [
+                sf("people", "prompt", value="one adult aged 30"),
+                sf("output", "prompt", kind="output", value="net_income"),
+            ],
+        )
+
+        result = gate(True, "run_household_simulation", completed, [])
+
+        assert result.outcome == "ready"
 
 
 def _stub_client(plan):
@@ -158,6 +226,86 @@ class TestRunGateway:
         assert v.outcome == "ready" and v.route == "compute"
         assert v.tool == "run_society_simulation"
 
+    def test_ignores_unmodellable_output_without_prompt_evidence(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "value": "Raise the basic rate by one percentage point",
+                    "source": "prompt",
+                },
+                {
+                    "name": "output",
+                    "kind": "output",
+                    "value": "tax_revenue",
+                    "source": "prompt",
+                },
+            ],
+            "unmodellable_outputs": [
+                {
+                    "name": "behavioural response",
+                    "evidence": "behavioural response",
+                }
+            ],
+            "catalogue_queries": [],
+        }
+        prompt = (
+            "What would be the annual revenue from raising the basic income tax "
+            "rate by one percentage point?"
+        )
+
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(prompt)
+
+        assert verdict.outcome == "ready"
+        assert verdict.route == "compute"
+        assert verdict.unmodellable_outputs == []
+
+    def test_preserves_explicit_evidence_for_an_unmodellable_output(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "value": "Raise the basic rate by one percentage point",
+                    "source": "prompt",
+                },
+                {
+                    "name": "output",
+                    "kind": "output",
+                    "value": "tax_revenue",
+                    "source": "prompt",
+                },
+            ],
+            "unmodellable_outputs": [
+                {
+                    "name": "behavioural response",
+                    "evidence": "including behavioural responses",
+                }
+            ],
+            "catalogue_queries": [],
+        }
+        prompt = (
+            "What would be the annual revenue from raising the basic income tax "
+            "rate by one percentage point, including behavioural responses?"
+        )
+
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(prompt)
+
+        assert verdict.outcome == "partial"
+        assert verdict.route == "lightweight"
+        assert verdict.unmodellable_outputs == ["behavioural response"]
+
     def test_parses_needs_plan(self):
         from gateway import runtime as gateway
         plan = {
@@ -175,7 +323,19 @@ class TestRunGateway:
 
     def test_unknown_tool_becomes_none(self):
         from gateway import runtime as gateway
-        plan = {"in_domain": True, "tool": "none", "slots": [], "unmodellable_outputs": ["inflation"]}
+        plan = {
+            "domain": {"status": "uk_or_unspecified"},
+            "capability": {
+                "status": "explicitly_unmodellable",
+                "evidence": "inflation",
+            },
+            "tool": "none",
+            "slots": [],
+            "unmodellable_outputs": [
+                {"name": "inflation", "evidence": "inflation"}
+            ],
+            "catalogue_queries": [],
+        }
         with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             v = gateway.run_gateway("what will inflation be?")
         assert v.tool is None and v.outcome == "out_of_scope"
@@ -224,8 +384,93 @@ class TestRunGateway:
         }
         with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
             v = gateway.run_gateway("do a reform")
-        # garbage source → assumed → reform (high) gates → needs_plan
-        assert v.outcome == "needs_plan" and v.gating_slots == ["reform"]
+        # garbage source → assumed → reform (high) gates. The omitted output
+        # is also material, so server-side completion marks it assumed too.
+        assert v.outcome == "needs_plan"
+        assert set(v.gating_slots) == {"reform", "output"}
+
+    def test_omitted_material_slots_are_treated_as_assumed(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [],
+            "unmodellable_outputs": [],
+            "catalogue_queries": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            v = gateway.run_gateway("Model a tax reform")
+
+        assert v.outcome == "needs_plan"
+        assert set(v.gating_slots) == {"reform", "output"}
+
+    def test_empty_prompt_values_are_treated_as_assumed(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {"name": "reform", "kind": "tool_input", "source": "prompt"},
+                {"name": "output", "kind": "output", "source": "prompt"},
+            ],
+            "unmodellable_outputs": [],
+            "catalogue_queries": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            v = gateway.run_gateway("Model a tax reform")
+
+        assert v.outcome == "needs_plan"
+        assert set(v.gating_slots) == {"reform", "output"}
+
+    def test_named_output_slot_is_grounded_without_a_duplicate_value(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "reform",
+                    "kind": "tool_input",
+                    "source": "prompt",
+                    "value": "Raise the basic rate to 21%",
+                },
+                {"name": "decile_impact", "kind": "output", "source": "prompt"},
+            ],
+            "unmodellable_outputs": [],
+            "catalogue_queries": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            v = gateway.run_gateway("Show the decile impact of raising the basic rate to 21%")
+
+        output = next(slot for slot in v.slots if slot.kind == "output")
+        assert v.outcome == "ready"
+        assert output.value == "decile_impact"
+
+    def test_documented_current_law_baseline_can_be_defaulted(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "in_domain": True,
+            "tool": "run_society_simulation",
+            "slots": [
+                {"name": "reform", "kind": "tool_input", "source": "default"},
+                {
+                    "name": "output",
+                    "kind": "output",
+                    "source": "prompt",
+                    "value": "budgetary_impact",
+                },
+            ],
+            "unmodellable_outputs": [],
+            "catalogue_queries": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            v = gateway.run_gateway("What is current child benefit spending?")
+
+        assert v.outcome == "ready"
 
 
 class TestGatewaySystemPrompt:
@@ -239,6 +484,79 @@ class TestGatewaySystemPrompt:
 
         assert f"year {DEFAULT_SIMULATION_YEAR}" in gateway.GATEWAY_SYSTEM
         assert "{default_year}" not in gateway.GATEWAY_SYSTEM
+
+    def test_unmodellable_output_schema_requires_prompt_evidence(self):
+        from gateway import runtime as gateway
+
+        unmodellable = gateway._EMIT_PLAN_TOOL["input_schema"]["properties"][
+            "unmodellable_outputs"
+        ]
+
+        assert unmodellable["items"]["type"] == "object"
+        assert unmodellable["items"]["required"] == ["name", "evidence"]
+        assert (
+            "exact quote"
+            in unmodellable["items"]["properties"]["evidence"]["description"]
+        )
+
+    def test_domain_and_capability_schema_require_grounded_decisions(self):
+        from gateway import runtime as gateway
+
+        schema = gateway._EMIT_PLAN_TOOL["input_schema"]
+
+        assert "domain" in schema["required"]
+        assert "capability" in schema["required"]
+        assert schema["properties"]["domain"]["required"] == ["status"]
+        assert schema["properties"]["capability"]["required"] == ["status"]
+        assert "exact quote" in schema["properties"]["domain"]["description"]
+        assert "exact quote" in schema["properties"]["capability"]["description"]
+
+
+class TestGatewayDecisionEvidence:
+    def test_accepts_exactly_quoted_negative_decisions(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "domain": {"status": "explicit_non_uk", "evidence": "US federal"},
+            "capability": {
+                "status": "catalogue_uncertain",
+                "evidence": "federal income tax",
+            },
+            "tool": "none",
+            "slots": [],
+            "catalogue_queries": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway("How would US federal income tax change?")
+
+        assert verdict.domain.status == "explicit_non_uk"
+        assert verdict.domain.evidence == "US federal"
+        assert verdict.capability.status == "catalogue_uncertain"
+        assert verdict.capability.evidence == "federal income tax"
+        assert verdict.outcome == "irrelevant"
+
+    def test_rejects_invented_negative_decision_evidence(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "domain": {"status": "unrelated", "evidence": "write Python"},
+            "capability": {
+                "status": "explicitly_unmodellable",
+                "evidence": "employment effects",
+            },
+            "tool": "none",
+            "slots": [],
+            "catalogue_queries": [],
+        }
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway("What is the cost of increasing UC?")
+
+        assert verdict.domain.status == "uk_or_unspecified"
+        assert verdict.domain.evidence is None
+        assert verdict.capability.status == "supported"
+        assert verdict.capability.evidence is None
+        assert verdict.outcome == "needs_plan"
+        assert verdict.gating_slots == ["tool"]
 
 
 class TestWriterDirective:

@@ -12,7 +12,8 @@ The backend is organized by topic — one package per concern:
   `model_selection.py`, `schemas.py`, `titles.py`,
   `suggestions.py`, and `routes.py` (the `/chat` router).
 - `backend/gateway/` owns the opening-turn pre-pass: `runtime.py` (the
-  forced-tool classifier) and `policy.py` (the deterministic criticality + gate).
+  forced-tool classifier), `catalogue.py` (the server-side PolicyEngine
+  catalogue resolver), and `policy.py` (the deterministic criticality + gate).
 - `backend/prompts/` owns all product prompt text: `system.py` (the compute
   system prompt), `gateway.py` (gateway + lightweight prompts), `meta.py` (title
   + suggestion prompts). Keep prompts modular and declarative there.
@@ -139,9 +140,74 @@ official policyengine.py filter arguments for conditional weighted aggregates.
   selection, derivative calculation, chart JSON construction,
   result truncation/summarisation, billing calculation, and database writes.
 
+Before applying gateway criticality, the server completes every schema slot
+omitted from a selected tool plan as `assumed`, and adds the synthetic requested
+`output` slot when it is absent. Thus a classifier omission cannot be mistaken
+for grounded user intent. Safe defaults and model-inferable slots may still
+proceed without a follow-up; assumed high- or medium-criticality slots cannot.
+An asserted `prompt` slot must also contain a non-empty value, and an asserted
+output must name a supported output concept; otherwise the server treats it as
+`assumed`. A valueless `default` is accepted only for a schema default or the
+documented current-law society baseline.
+
+The gateway treats the supported output vocabulary as authoritative for direct,
+static microsimulation. Unqualified requests for cost, revenue, spending,
+poverty, inequality, decile effects, winners and losers, caseload, marginal
+rates, or net income therefore proceed as modelled outputs; behavioural and
+macroeconomic exclusions are result caveats, not implicit user requests. An
+unmodellable output can trigger `partial` only when the classifier supplies its
+name plus an exact quote from the user that explicitly requests it. The server
+normalises case and whitespace, rejects evidence absent from the prompt,
+deduplicates accepted limitations, and caps them at four.
+
+Domain and capability are separate structured decisions. Jurisdiction defaults
+to `uk_or_unspecified`; `explicit_non_uk` and `unrelated` are accepted only with
+an exact quote from the original message. Capability defaults to `supported`;
+`catalogue_uncertain` and `explicitly_unmodellable` likewise require an exact
+quote. A missing tool without validated unmodellable evidence is uncertainty
+(`needs_plan`), not proof that the request is unsupported. This makes refusal a
+positive-evidence decision rather than the consequence of classifier doubt.
+
 The gateway's non-`ready` (lightweight) outcomes must remain structurally
 enforced by omitting tools from the model request, not only by prompting the
 model not to call tools.
+
+## First-turn Catalogue Confirmation
+
+On an opening turn, the gateway classifier may emit a bounded set of concise
+parameter/reform-target and variable search terms. Every query must be contained
+in an exact quote from the original message; invented queries are discarded.
+The prompt also forbids removing a foreign jurisdiction from the evidence.
+`gateway.catalogue` resolves accepted queries against the installed
+`policyengine.py` UK model. This is an internal server lookup, not another
+model-facing tool.
+
+Catalogue results are ranked by evidence quality. Exact identifiers, aliases,
+labels, and sufficiently specific phrase matches are authoritative; fuzzy or
+description-only matches are retained only as suggestions. They never
+authorise recovery or override a domain decision. An `irrelevant` decision is
+terminal regardless of matches, unresolved queries, or catalogue availability.
+
+An authoritative match confirms only that the model exposes a candidate
+concept. When the first plan is UK/unspecified, explicitly
+`catalogue_uncertain`, and lacks a tool, the runtime permits exactly one second
+gateway call with the server-verified candidates. That call must rebuild the
+tool and grounded slots from the original message. The deterministic gate then
+applies normally: grounded work proceeds, while an ambiguous load-bearing slot
+still asks a follow-up. If the one recovery pass remains inconclusive without
+validated exclusion evidence, fail open to the full compute route. There is no
+catalogue/replan loop.
+
+If no authoritative candidate resolves, use the lightweight path to ask which
+supported measure or variable the user means; do not call it unmodelled. For a
+`partial` request with an unresolved candidate, state the unmodellable
+limitation and ask the catalogue clarification before offering a computation.
+If catalogue metadata cannot be loaded, preserve `irrelevant`, `partial`, and
+ordinary slot-driven `needs_plan` outcomes. Fail open only from an
+`out_of_scope` result or a missing-tool `catalogue_uncertain` result.
+
+Pass paths and variable names only as internal compute context. The lightweight
+writer may receive human-readable candidate labels, but not internal paths.
 
 Tool choice is model-mediated unless the route layer deliberately forces a
 specific tool. Prompt and schema guidance improve selection consistency, but

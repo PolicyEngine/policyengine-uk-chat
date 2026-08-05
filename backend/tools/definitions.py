@@ -1,5 +1,7 @@
 """Model-facing tool definitions for the UK chat runtime."""
 
+from datetime import date
+
 from engine.constants import HOUSEHOLD_COUNTRY_IDS
 from engine.decile_concepts import (
     DECILE_CONCEPT_VALUES,
@@ -7,7 +9,12 @@ from engine.decile_concepts import (
 )
 
 
-DEFAULT_SIMULATION_YEAR = 2026
+def current_simulation_year() -> int:
+    """Return the calendar year used when a user does not specify one."""
+    return date.today().year
+
+
+DEFAULT_SIMULATION_YEAR = current_simulation_year()
 
 YEAR_SCHEMA = {"type": "integer", "default": DEFAULT_SIMULATION_YEAR}
 
