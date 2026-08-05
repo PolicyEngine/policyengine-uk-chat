@@ -26,6 +26,13 @@ The backend is organized by topic — one package per concern:
 - `backend/engine/` owns the deterministic PolicyEngine compute helpers
   (policyengine.py runtime loading, catalog discovery, households, official
   derivative adapters, reforms, simulations, and serialization).
+- `backend/engine/country.py` owns the country profile seam. One deployment
+  serves one country, resolved once from `CHAT_COUNTRY` (default `uk`).
+  Country-specific engine bindings — the policyengine.py country module, the
+  fixed society dataset, and household geography identifiers — must flow from
+  `active_country_profile()` rather than being hardcoded, so a second
+  deployment of the same codebase can serve another country without touching
+  the UK pathway.
 - `backend/config/` owns model-call configuration (model ids, temperatures, the
   Anthropic client factories, and environment settings).
 - `backend/api/` owns the HTTP surface (`main.py` app + router mounting,
