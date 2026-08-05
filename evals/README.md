@@ -70,6 +70,31 @@ deployments receive it from the repository's `UK_CHAT_EVAL_TOKEN` secret. The
 endpoint returns 503 when that server secret is not configured and 401 for a
 missing or invalid request token.
 
+### Detached Modal batch
+
+`modal_eval_app.py` submits one Modal function input per population case. All
+20 inputs are submitted together with `spawn_map`; Modal may reuse any idle
+worker container and may scale the worker pool to at most 25 containers. Each
+case runs its three trials concurrently inside its worker. Run it detached so
+the batch survives a terminal disconnect:
+
+```bash
+POLICYENGINE_UK_CHAT_EVAL_MODAL_APP_NAME=pe-uk-chat-evals-231 \
+POLICYENGINE_UK_CHAT_EVAL_MODAL_SECRET_NAME=pe-uk-chat-231-secrets \
+modal run --detach modal_eval_app.py \
+  --backend-url https://policyengine--pe-uk-chat-231-web.modal.run
+```
+
+Each worker writes a distinct JSON report under the printed run ID in the
+`policyengine-uk-chat-eval-reports` Modal Volume. After all 20 files exist,
+download that run and combine it into the normal JSON and Markdown reports:
+
+```bash
+modal volume get policyengine-uk-chat-eval-reports RUN_ID /tmp/RUN_ID
+PYTHONPATH=backend python -m eval.collect_modal \
+  --case-report-dir /tmp/RUN_ID
+```
+
 ## Suites
 
 - `tool_contract`: deterministic tool behavior through `execute_tool`.

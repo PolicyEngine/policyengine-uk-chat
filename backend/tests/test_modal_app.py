@@ -15,8 +15,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 class FakeApp:
     def __init__(self, name):
         self.name = name
+        self.function_options = {}
 
-    def function(self, **_kwargs):
+    def function(self, **kwargs):
+        def decorate(function):
+            self.function_options[function.__name__] = kwargs
+            return function
+
+        return decorate
+
+    def local_entrypoint(self, **_kwargs):
         return lambda function: function
 
 
@@ -40,6 +48,9 @@ class FakeImage:
     def pip_install_from_requirements(self, *args):
         return self._step("pip_install_from_requirements", *args)
 
+    def pip_install(self, *args):
+        return self._step("pip_install", *args)
+
     def add_local_dir(self, *args, **kwargs):
         return self._step("add_local_dir", *args, **kwargs)
 
@@ -48,6 +59,12 @@ class FakeSecret:
     @classmethod
     def from_name(cls, name):
         return SimpleNamespace(name=name)
+
+
+class FakeVolume:
+    @classmethod
+    def from_name(cls, name, **kwargs):
+        return SimpleNamespace(name=name, options=kwargs)
 
 
 def identity_decorator(**_kwargs):
@@ -84,6 +101,48 @@ def test_modal_deployment_definition_imports_without_remote_calls(monkeypatch):
         ]
     finally:
         sys.modules.pop("modal_app", None)
+
+
+def test_modal_eval_app_fans_out_twenty_cases_with_a_25_container_cap(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "POLICYENGINE_UK_CHAT_EVAL_MODAL_APP_NAME",
+        "pe-uk-chat-evals-test",
+    )
+    monkeypatch.setenv(
+        "POLICYENGINE_UK_CHAT_EVAL_MODAL_SECRET_NAME",
+        "pe-uk-chat-test-secrets",
+    )
+    fake_modal = SimpleNamespace(
+        App=FakeApp,
+        Image=FakeImage,
+        Secret=FakeSecret,
+        Volume=FakeVolume,
+    )
+    monkeypatch.setitem(sys.modules, "modal", fake_modal)
+    sys.modules.pop("modal_eval_app", None)
+
+    try:
+        modal_eval_app = importlib.import_module("modal_eval_app")
+
+        options = modal_eval_app.app.function_options["evaluate_case"]
+        assert modal_eval_app.APP_NAME == "pe-uk-chat-evals-test"
+        assert modal_eval_app.SECRET_NAME == "pe-uk-chat-test-secrets"
+        assert options["max_containers"] == 25
+        assert options["timeout"] == 1_800
+        assert options["volumes"] == {
+            modal_eval_app.REPORT_MOUNT: modal_eval_app.report_volume
+        }
+        assert modal_eval_app.report_volume.options == {
+            "create_if_missing": True,
+            "version": 2,
+        }
+        source = (REPO_ROOT / "modal_eval_app.py").read_text()
+        assert "evaluate_case.spawn_map(" in source
+        assert "concurrency=3" in source
+    finally:
+        sys.modules.pop("modal_eval_app", None)
 
 
 def test_dataset_reference_is_not_deployment_configuration():
