@@ -76,6 +76,13 @@ def test_generic_cost_of_living_is_not_executable_output(prompt):
         ("Uprate both disability premiums by 4%.", "uprate", "disability premiums", "4%", "both"),
         ("Replace the UC taper with a 50% rate.", "replace", "UC taper", "a 50% rate", "unspecified"),
         ("Double Universal Credit.", "multiply", "Universal Credit", "2x", "unspecified"),
+        (
+            "Raise the lowest capital gains tax rate from 18% to 20%.",
+            "set",
+            "lowest capital gains tax rate",
+            "20%",
+            "unspecified",
+        ),
     ],
 )
 def test_reform_extraction(prompt, action, policy, amount, scope):
@@ -111,6 +118,16 @@ def test_upsert_output_replaces_assumed_but_not_explicit_prompt_output():
         SlotFact("output", "prompt", kind="output", value="poverty_impact")
     ]
     assert upsert_output_slot(explicit, inferred) == explicit
+
+
+def test_prompt_year_overrides_a_classifier_default():
+    from gateway.intent import upsert_prompt_year
+
+    slots = [SlotFact("year", "default", value="2026")]
+
+    assert upsert_prompt_year("get_parameter", slots, "Show the value in 2025") == [
+        SlotFact("year", "prompt", value="2025")
+    ]
 
 
 def test_all_population_prompts_have_output_and_reform_intent():

@@ -16,9 +16,10 @@ can import and call `run_gateway` directly, mirroring the old `_route_scope`.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
-import json
+import re
 from dataclasses import dataclass, field, replace
 from typing import List, Optional
 
@@ -41,6 +42,7 @@ from gateway.intent import (
     output_from_prompt,
     reform_intent_from_prompt,
     upsert_output_slot,
+    upsert_prompt_year,
 )
 from gateway.execution import GatewayExecutionPlan, build_execution_plan
 from gateway.policy import (
@@ -69,6 +71,17 @@ logger = logging.getLogger(__name__)
 GATEWAY_MODEL = os.environ.get("POLICYENGINE_CHAT_GATEWAY_MODEL", DEFAULT_FAST_MODEL)
 GATEWAY_MAX_TOKENS = int(os.environ.get("POLICYENGINE_CHAT_GATEWAY_MAX_TOKENS", "1024"))
 MAX_UNMODELLABLE_OUTPUTS = 4
+
+# A refusal or partial result requires evidence of an effect the direct static
+# microsimulation contract genuinely does not estimate. Exact quotation alone
+# is insufficient: otherwise a classifier can turn ordinary uncertainty such
+# as "compare these reforms" into a false capability refusal.
+_UNMODELLABLE_EFFECT_RE = re.compile(
+    r"\b(?:inflation|gdp|gross domestic product|macroeconomic|economic growth|"
+    r"behaviou?ral(?: responses?| effects?)?|employment effects?|jobs? effects?|"
+    r"labou?r supply|market reactions?|general equilibrium)\b",
+    re.I,
+)
 
 _TOOL_NAMES = [t["name"] for t in TOOL_DEFINITIONS]
 
@@ -343,6 +356,10 @@ def _capability_from_plan(plan: dict, prompt: str) -> CapabilityDecision:
     evidence = _validated_quote(raw.get("evidence"), prompt)
     if evidence is None:
         return CapabilityDecision()
+    if status == "explicitly_unmodellable" and not _UNMODELLABLE_EFFECT_RE.search(
+        evidence
+    ):
+        return CapabilityDecision()
     return CapabilityDecision(status=status, evidence=evidence)
 
 
@@ -375,6 +392,7 @@ def _unmodellable_outputs_from_plan(plan: dict, prompt: str) -> list[str]:
             not name
             or not evidence_text
             or evidence_text not in prompt_text
+            or not _UNMODELLABLE_EFFECT_RE.search(evidence)
             or key in seen
         ):
             continue
@@ -460,6 +478,7 @@ def _verdict_from_plan(
     if output_intent is not None:
         slots = upsert_output_slot(slots, output_intent)
     reform_intent = reform_intent_from_prompt(prompt)
+    slots = upsert_prompt_year(tool, slots, prompt)
     slots = normalise_slot_grounding(tool, slots)
     slots = complete_slots(tool, slots)
     unmodellable = _unmodellable_outputs_from_plan(plan, prompt)

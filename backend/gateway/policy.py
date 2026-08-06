@@ -149,7 +149,10 @@ _CRITICALITY_OVERRIDES: dict = {
 INFERABLE: set = {
     ("run_household_simulation", "benunit"),
     ("run_household_simulation", "household"),
+    ("run_household_simulation", "benefit_entitlement"),
+    ("get_parameter", "path"),
     ("generate_chart", "chart_kind"),
+    ("generate_chart", "chart_output"),
     ("generate_chart", "title"),
     ("generate_chart", "x_field"),
     ("generate_chart", "y_fields"),

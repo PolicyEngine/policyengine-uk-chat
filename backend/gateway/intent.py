@@ -6,7 +6,7 @@ import re
 from dataclasses import dataclass, replace
 from typing import Literal
 
-from gateway.policy import SlotFact
+from gateway.policy import SlotFact, TOOL_SLOT_REQUIREMENT
 
 OutputKind = Literal[
     "budgetary_impact",
@@ -135,6 +135,13 @@ _AMOUNT_ACTION = re.compile(
     rf"(?P<amount>{_AMOUNT}){_SCOPE_TAIL}",
     re.I,
 )
+_FROM_TO_ACTION = re.compile(
+    rf"\b(?P<verb>increas(?:e|es|ed|ing)|rais(?:e|es|ed|ing)|"
+    rf"reduc(?:e|es|ed|ing)|lower(?:s|ed|ing)?|cut(?:s|ting)?)\s+"
+    rf"{_POLICY}\s+from\s+{_AMOUNT}\s+to\s+(?P<amount>{_AMOUNT})"
+    rf"{_SCOPE_TAIL}",
+    re.I,
+)
 _SET_ACTION = re.compile(
     rf"\bset(?:s|ting)?\s+{_POLICY}\s+to\s+(?P<amount>{_AMOUNT}){_SCOPE_TAIL}",
     re.I,
@@ -218,6 +225,22 @@ def reform_intent_from_prompt(prompt: str) -> ReformIntent | None:
                 match.group(0),
             )
 
+    # A fully specified "from X to Y" proposal gives a final value. Treat it
+    # as a set operation so assessment does not compare the destination with a
+    # possibly different current catalogue value and reject the stated
+    # direction (for example a historical 18% -> 20% change).
+    match = _FROM_TO_ACTION.search(prompt)
+    if match:
+        policy = _clean_policy(match.group("policy"))
+        if policy:
+            return ReformIntent(
+                policy,
+                "set",
+                match.group("amount").strip(),
+                _scope(match.group(0)),
+                match.group(0),
+            )
+
     match = _AMOUNT_ACTION.search(prompt)
     if match:
         policy = _clean_policy(match.group("policy"))
@@ -267,4 +290,32 @@ def upsert_output_slot(slots: list[SlotFact], intent: OutputIntent) -> list[Slot
         return list(slots)
     updated = list(slots)
     updated[output_index] = replace(grounded)
+    return updated
+
+
+def upsert_prompt_year(
+    tool: str | None,
+    slots: list[SlotFact],
+    prompt: str,
+) -> list[SlotFact]:
+    """Preserve one explicit prompt year for tools whose schema accepts it."""
+
+    if tool is None or (tool, "year") not in TOOL_SLOT_REQUIREMENT:
+        return list(slots)
+    years = list(dict.fromkeys(re.findall(r"\b(?:19|20)\d{2}\b", prompt)))
+    if len(years) != 1:
+        return list(slots)
+    grounded = SlotFact(name="year", source="prompt", value=years[0])
+    year_index = next(
+        (
+            index
+            for index, slot in enumerate(slots)
+            if slot.kind == "tool_input" and slot.name == "year"
+        ),
+        None,
+    )
+    if year_index is None:
+        return [*slots, grounded]
+    updated = list(slots)
+    updated[year_index] = grounded
     return updated

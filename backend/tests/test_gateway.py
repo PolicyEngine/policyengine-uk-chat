@@ -276,6 +276,35 @@ class TestSlotCompletion:
 
         assert result.outcome == "ready"
 
+    @pytest.mark.parametrize(
+        ("tool", "output_name", "other_slots"),
+        [
+            (
+                "run_household_simulation",
+                "benefit_entitlement",
+                [sf("people", "prompt", value="one adult aged 30")],
+            ),
+            ("generate_chart", "chart_output", []),
+        ],
+    )
+    def test_obvious_tool_outputs_are_inferable(self, tool, output_name, other_slots):
+        slots = [
+            *other_slots,
+            sf(output_name, "assumed", kind="output"),
+        ]
+
+        result = gate(True, tool, slots, [])
+
+        assert result.outcome == "ready"
+
+    def test_parameter_path_is_discovered_in_compute_not_asked_of_user(self):
+        slots = [
+            sf("path", "assumed", value="basic rate threshold"),
+            sf("parameter_lookup", "prompt", kind="output"),
+        ]
+
+        assert gate(True, "get_parameter", slots, []).outcome == "ready"
+
     def test_missing_defaults_and_runtime_handoffs_have_server_ownership(self):
         completed = complete_slots("compute_decile_impacts", [])
 
@@ -711,6 +740,36 @@ class TestGatewayDecisionEvidence:
         assert verdict.capability.evidence is None
         assert verdict.outcome == "needs_plan"
         assert verdict.gating_slots == ["tool"]
+
+    def test_rejects_arbitrary_quoted_phrases_as_unmodellable_effects(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "domain": {"status": "uk_or_unspecified"},
+            "capability": {
+                "status": "explicitly_unmodellable",
+                "evidence": "Compare the two reforms",
+            },
+            "tool": "none",
+            "slots": [],
+            "unmodellable_outputs": [
+                {
+                    "name": "reform comparison",
+                    "evidence": "Compare the two reforms",
+                }
+            ],
+            "catalogue_queries": [],
+        }
+
+        verdict = gateway._verdict_from_plan(
+            plan,
+            "Compare the two reforms.",
+            gateway.CatalogueEvidence(available=True),
+        )
+
+        assert verdict.capability.status == "supported"
+        assert verdict.unmodellable_outputs == []
+        assert verdict.outcome == "needs_plan"
 
 
 class TestWriterDirective:
