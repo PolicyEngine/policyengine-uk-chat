@@ -30,6 +30,17 @@ from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
 _DEFAULT_YEAR = str(DEFAULT_SIMULATION_YEAR)
 
 Criticality = Literal["high", "medium", "low"]
+SlotSource = Literal["prompt", "default", "assumed", "runtime"]
+GatingReasonCode = Literal[
+    "missing_tool",
+    "missing_reform",
+    "missing_output",
+    "missing_household_composition",
+    "catalogue_choice",
+    "catalogue_no_match",
+    "confirm_reform",
+    "internal_slot",
+]
 DomainStatus = Literal["uk_or_unspecified", "explicit_non_uk", "unrelated"]
 CapabilityStatus = Literal[
     "supported",
@@ -59,15 +70,27 @@ class SlotFact:
     """One slot of the execution plan, as grounded by the gateway model."""
 
     name: str
-    source: str  # "prompt" | "default" | "assumed"
+    source: SlotSource
     kind: str = "tool_input"  # "tool_input" | "output"
     value: Optional[str] = None
 
 
 @dataclass(frozen=True)
+class GatingReason:
+    code: GatingReasonCode
+    slot: str
+    options: tuple[str, ...] = ()
+    evidence: str | None = None
+
+
+@dataclass(frozen=True)
 class GateResult:
     outcome: str
-    gating_slots: List[str] = field(default_factory=list)
+    gating_reasons: List[GatingReason] = field(default_factory=list)
+
+    @property
+    def gating_slots(self) -> List[str]:
+        return [reason.slot for reason in self.gating_reasons]
 
 
 # ---------------------------------------------------------------------------
@@ -75,8 +98,9 @@ class GateResult:
 # schemas. Each (tool, slot) is classified required / defaulted / optional.
 # ---------------------------------------------------------------------------
 
-def _build_slot_requirements() -> dict:
+def _build_slot_inventory() -> tuple[dict, dict]:
     requirements: dict = {}
+    defaults: dict = {}
     for tool in TOOL_DEFINITIONS:
         name = tool["name"]
         schema = tool.get("input_schema", {})
@@ -87,12 +111,28 @@ def _build_slot_requirements() -> dict:
                 requirements[(name, slot)] = "required"
             elif isinstance(spec, dict) and "default" in spec:
                 requirements[(name, slot)] = "defaulted"
+                defaults[(name, slot)] = spec["default"]
             else:
                 requirements[(name, slot)] = "optional"
-    return requirements
+    return requirements, defaults
 
 
-TOOL_SLOT_REQUIREMENT = _build_slot_requirements()
+TOOL_SLOT_REQUIREMENT, TOOL_SLOT_DEFAULTS = _build_slot_inventory()
+
+_SOCIETY_DERIVATIVE_TOOLS = {
+    "compute_budgetary_impact",
+    "compute_program_breakdown",
+    "compute_decile_impacts",
+    "compute_winners_losers",
+    "compute_poverty_metrics",
+    "compute_inequality_metrics",
+    "aggregate_result",
+}
+
+RUNTIME_PROVIDED_SLOTS = {
+    *((tool, "simulation_id") for tool in _SOCIETY_DERIVATIVE_TOOLS),
+    ("generate_chart", "result_id"),
+}
 
 # Curated overrides where the schema's required/default flags don't match the
 # real importance. Kept tiny and commented to limit drift.
@@ -117,6 +157,15 @@ INFERABLE: set = {
 }
 
 
+def _missing_slot_fact(tool: str, name: str) -> SlotFact:
+    key = (tool, name)
+    if key in RUNTIME_PROVIDED_SLOTS:
+        return SlotFact(name=name, source="runtime")
+    if key in TOOL_SLOT_DEFAULTS:
+        return SlotFact(name=name, source="default", value=str(TOOL_SLOT_DEFAULTS[key]))
+    return SlotFact(name=name, source="assumed")
+
+
 def complete_slots(tool: Optional[str], slots: List[SlotFact]) -> List[SlotFact]:
     """Return a complete gateway slot state for a selected tool.
 
@@ -133,7 +182,7 @@ def complete_slots(tool: Optional[str], slots: List[SlotFact]) -> List[SlotFact]
     if tool is not None:
         for candidate_tool, name in TOOL_SLOT_REQUIREMENT:
             if candidate_tool == tool and name not in present_tool_inputs:
-                completed.append(SlotFact(name=name, source="assumed"))
+                completed.append(_missing_slot_fact(tool, name))
 
     if tool is not None and not any(slot.kind == "output" for slot in slots):
         completed.append(SlotFact(name="output", source="assumed", kind="output"))
@@ -185,6 +234,18 @@ def normalise_slot_grounding(
             continue
 
         key = (tool, slot.name)
+        if key in RUNTIME_PROVIDED_SLOTS:
+            normalised.append(replace(slot, source="runtime", value=None))
+            continue
+        if key in TOOL_SLOT_DEFAULTS and slot.source != "prompt":
+            normalised.append(
+                replace(
+                    slot,
+                    source="default",
+                    value=str(TOOL_SLOT_DEFAULTS[key]),
+                )
+            )
+            continue
         has_schema_default = TOOL_SLOT_REQUIREMENT.get(key) == "defaulted"
         can_default = has_schema_default or key in _EXPLICIT_SAFE_DEFAULTS
         if slot.source == "prompt" and not value:
@@ -257,6 +318,16 @@ def slot_gates(tool: Optional[str], slot: SlotFact, prompt: str = "") -> bool:
     return criticality(tool, slot, prompt) in ("high", "medium")
 
 
+def _gating_reason(slot: SlotFact) -> GatingReason:
+    if slot.kind == "output":
+        return GatingReason(code="missing_output", slot=slot.name)
+    if slot.name == "reform":
+        return GatingReason(code="missing_reform", slot=slot.name)
+    if slot.name in {"people", "benunit", "household"}:
+        return GatingReason(code="missing_household_composition", slot=slot.name)
+    return GatingReason(code="internal_slot", slot=slot.name)
+
+
 def gate(
     in_domain: bool,
     tool: Optional[str],
@@ -281,7 +352,10 @@ def gate(
             # A refusal needs positive, prompt-grounded capability evidence.
             return GateResult("out_of_scope")
         # Failure to choose a tool is uncertainty, not proof of incapability.
-        return GateResult("needs_plan", ["tool"])
+        return GateResult(
+            "needs_plan",
+            [GatingReason(code="missing_tool", slot="tool")],
+        )
     if unmodellable_outputs:
         # Some of the ask is modellable, some isn't → confirm-first partial.
         # Deliberately takes precedence over needs_plan: resolve scope first;
@@ -289,7 +363,7 @@ def gate(
         # proceeds. Both are lightweight, so neither wrongly refuses.
         return GateResult("partial")
 
-    gating = [s.name for s in slots if slot_gates(tool, s, prompt)]
+    gating = [_gating_reason(s) for s in slots if slot_gates(tool, s, prompt)]
     if gating:
         return GateResult("needs_plan", gating)
     return GateResult("ready")

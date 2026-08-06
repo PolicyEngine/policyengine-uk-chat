@@ -29,6 +29,7 @@ from gateway.catalogue import (
 from gateway.policy import (
     CapabilityDecision,
     DomainDecision,
+    GatingReason,
     OUTPUT_VOCAB,
     SlotFact,
     complete_slots,
@@ -81,11 +82,15 @@ class GatewayVerdict:
     route: str  # "compute" if outcome == "ready" else "lightweight"
     tool: Optional[str] = None
     slots: List[SlotFact] = field(default_factory=list)
-    gating_slots: List[str] = field(default_factory=list)
+    gating_reasons: List[GatingReason] = field(default_factory=list)
     unmodellable_outputs: List[str] = field(default_factory=list)
     catalogue_evidence: CatalogueEvidence | None = None
     domain: DomainDecision = field(default_factory=DomainDecision)
     capability: CapabilityDecision = field(default_factory=CapabilityDecision)
+
+    @property
+    def gating_slots(self) -> List[str]:
+        return [reason.slot for reason in self.gating_reasons]
 
 
 def _fail_safe() -> GatewayVerdict:
@@ -384,18 +389,26 @@ def apply_catalogue_evidence(
                 verdict,
                 outcome="ready",
                 route="compute",
-                gating_slots=[],
+                gating_reasons=[],
             )
         return verdict
     if evidence.unresolved_queries:
-        gating_slots = list(dict.fromkeys([*verdict.gating_slots, "model_catalogue"]))
+        reasons = list(verdict.gating_reasons)
+        if "model_catalogue" not in verdict.gating_slots:
+            reasons.append(
+                GatingReason(
+                    code="catalogue_no_match",
+                    slot="model_catalogue",
+                    evidence=", ".join(query.query for query in evidence.unresolved_queries),
+                )
+            )
         if verdict.outcome in ("needs_plan", "partial"):
-            return replace(verdict, gating_slots=gating_slots)
+            return replace(verdict, gating_reasons=reasons)
         return replace(
             verdict,
             outcome="needs_plan",
             route="lightweight",
-            gating_slots=gating_slots,
+            gating_reasons=reasons,
         )
     return verdict
 
@@ -449,7 +462,7 @@ def _verdict_from_plan(
         route="compute" if result.outcome == "ready" else "lightweight",
         tool=tool,
         slots=slots,
-        gating_slots=result.gating_slots,
+        gating_reasons=result.gating_reasons,
         unmodellable_outputs=unmodellable,
         domain=domain,
         capability=capability,
@@ -521,7 +534,7 @@ def _fail_open_after_recovery(verdict: GatewayVerdict) -> GatewayVerdict:
             verdict,
             outcome="ready",
             route="compute",
-            gating_slots=[],
+            gating_reasons=[],
         )
     return verdict
 
@@ -557,7 +570,7 @@ def run_gateway(last_user_message: str) -> GatewayVerdict:
             _catalogue_recovery_system(catalogue_evidence),
         )
         if not recovery_plan or "tool" not in recovery_plan:
-            return replace(verdict, outcome="ready", route="compute", gating_slots=[])
+            return replace(verdict, outcome="ready", route="compute", gating_reasons=[])
         recovered = _verdict_from_plan(
             recovery_plan,
             last_user_message,

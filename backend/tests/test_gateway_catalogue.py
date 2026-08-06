@@ -12,7 +12,7 @@ from gateway.catalogue import (
     _classify_match,
     resolve_catalogue_queries,
 )
-from gateway.policy import CapabilityDecision
+from gateway.policy import CapabilityDecision, GatingReason
 from gateway.runtime import (
     GatewayVerdict,
     apply_catalogue_evidence,
@@ -170,7 +170,7 @@ def test_fuzzy_suggestion_cannot_promote_a_missing_tool_to_compute():
         outcome="needs_plan",
         route="lightweight",
         tool=None,
-        gating_slots=["tool"],
+        gating_reasons=[GatingReason("missing_tool", "tool")],
     )
 
     resolved = apply_catalogue_evidence(verdict, _evidence(suggestion))
@@ -261,7 +261,7 @@ def test_matching_catalogue_evidence_preserves_other_ambiguity():
     verdict = GatewayVerdict(
         outcome="needs_plan",
         route="lightweight",
-        gating_slots=["reform"],
+        gating_reasons=[GatingReason("missing_reform", "reform")],
     )
 
     resolved = apply_catalogue_evidence(verdict, _evidence(_match()))
@@ -358,7 +358,7 @@ def test_unavailable_catalogue_preserves_existing_needs_plan_outcome():
     verdict = GatewayVerdict(
         outcome="needs_plan",
         route="lightweight",
-        gating_slots=["reform"],
+        gating_reasons=[GatingReason("missing_reform", "reform")],
     )
 
     resolved = apply_catalogue_evidence(verdict, _evidence(available=False))
@@ -373,7 +373,7 @@ def test_unavailable_catalogue_fails_open_from_catalogue_uncertainty():
         outcome="needs_plan",
         route="lightweight",
         tool=None,
-        gating_slots=["tool"],
+        gating_reasons=[GatingReason("missing_tool", "tool")],
         capability=CapabilityDecision(
             status="catalogue_uncertain",
             evidence="capital gains tax",

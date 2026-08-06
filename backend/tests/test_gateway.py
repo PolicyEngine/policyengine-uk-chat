@@ -10,13 +10,18 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from gateway.policy import (
+    RUNTIME_PROVIDED_SLOTS,
+    TOOL_SLOT_DEFAULTS,
     TOOL_SLOT_REQUIREMENT,
+    GatingReason,
     SlotFact,
     complete_slots,
     criticality,
     gate,
     is_inferable,
+    normalise_slot_grounding,
 )
+from tools.definitions import DEFAULT_SIMULATION_YEAR
 
 
 def sf(name, source, kind="tool_input", value=None):
@@ -36,6 +41,23 @@ class TestSlotInventory:
         assert TOOL_SLOT_REQUIREMENT[("run_household_simulation", "year")] == "defaulted"
         assert TOOL_SLOT_REQUIREMENT[("get_parameter", "year")] == "defaulted"
         assert ("run_society_simulation", "dataset") not in TOOL_SLOT_REQUIREMENT
+
+    def test_concrete_schema_defaults_are_recorded(self):
+        assert TOOL_SLOT_DEFAULTS[("run_society_simulation", "year")] == DEFAULT_SIMULATION_YEAR
+        assert TOOL_SLOT_DEFAULTS[("compute_decile_impacts", "decile_concept")]
+
+    def test_runtime_handoffs_are_recorded(self):
+        derivative_tools = {
+            "compute_budgetary_impact",
+            "compute_program_breakdown",
+            "compute_decile_impacts",
+            "compute_winners_losers",
+            "compute_poverty_metrics",
+            "compute_inequality_metrics",
+            "aggregate_result",
+        }
+        assert all((tool, "simulation_id") in RUNTIME_PROVIDED_SLOTS for tool in derivative_tools)
+        assert ("generate_chart", "result_id") in RUNTIME_PROVIDED_SLOTS
 
     def test_optional_undefaulted_slots_detected(self):
         assert TOOL_SLOT_REQUIREMENT[("run_household_simulation", "reform")] == "optional"
@@ -131,6 +153,35 @@ class TestGate:
         assert result.outcome == "needs_plan"
         assert result.gating_slots == ["tool"]
 
+    def test_gating_slots_are_derived_from_structured_reasons(self):
+        result = gate(
+            True,
+            "run_society_simulation",
+            [sf("reform", "assumed"), sf("output", "assumed", kind="output")],
+            [],
+        )
+
+        assert result.gating_reasons == [
+            GatingReason(code="missing_reform", slot="reform"),
+            GatingReason(code="missing_output", slot="output"),
+        ]
+        assert result.gating_slots == ["reform", "output"]
+
+    def test_runtime_and_default_slots_never_gate(self):
+        result = gate(
+            True,
+            "compute_decile_impacts",
+            [
+                sf("simulation_id", "runtime"),
+                sf("decile_concept", "default", value="household_net_income"),
+                sf("output", "prompt", kind="output", value="decile_impact"),
+            ],
+            [],
+        )
+
+        assert result.outcome == "ready"
+        assert result.gating_reasons == []
+
     def test_out_of_scope_requires_positive_unmodellable_evidence(self):
         assert gate(True, None, [], ["inflation"]).outcome == "out_of_scope"
         assert (
@@ -161,7 +212,12 @@ class TestSlotCompletion:
             for (tool, name) in TOOL_SLOT_REQUIREMENT
             if tool == "run_society_simulation"
         }
-        assert all(slot.source == "assumed" for slot in completed)
+        assert next(slot for slot in completed if slot.name == "year").source == "default"
+        assert all(
+            slot.source == "assumed"
+            for slot in completed
+            if slot.name != "year"
+        )
         assert any(slot.kind == "output" and slot.name == "output" for slot in completed)
 
     def test_keeps_model_grounded_slots(self):
@@ -198,6 +254,38 @@ class TestSlotCompletion:
         result = gate(True, "run_household_simulation", completed, [])
 
         assert result.outcome == "ready"
+
+    def test_missing_defaults_and_runtime_handoffs_have_server_ownership(self):
+        completed = complete_slots("compute_decile_impacts", [])
+
+        by_name = {slot.name: slot for slot in completed}
+        assert by_name["simulation_id"].source == "runtime"
+        assert by_name["simulation_id"].value is None
+        assert by_name["decile_concept"].source == "default"
+        assert by_name["decile_concept"].value == "household_net_income"
+
+    def test_missing_year_has_concrete_server_default(self):
+        completed = complete_slots("run_society_simulation", [])
+
+        year = next(slot for slot in completed if slot.name == "year")
+        assert year.source == "default"
+        assert year.value == str(DEFAULT_SIMULATION_YEAR)
+
+    def test_server_runtime_ownership_overrides_classifier_claims(self):
+        for source in ("prompt", "default", "assumed"):
+            normalised = normalise_slot_grounding(
+                "compute_budgetary_impact",
+                [sf("simulation_id", source, value="made-up-id")],
+            )
+            assert normalised == [sf("simulation_id", "runtime")]
+
+    def test_explicit_prompt_year_wins_over_server_default(self):
+        normalised = normalise_slot_grounding(
+            "run_society_simulation",
+            [sf("year", "prompt", value="2025")],
+        )
+
+        assert normalised == [sf("year", "prompt", value="2025")]
 
 
 def _stub_client(plan):
@@ -562,7 +650,14 @@ class TestGatewayDecisionEvidence:
 class TestWriterDirective:
     def test_needs_plan_lists_slots(self):
         from gateway import runtime as gateway
-        v = gateway.GatewayVerdict(outcome="needs_plan", route="lightweight", gating_slots=["reform", "output"])
+        v = gateway.GatewayVerdict(
+            outcome="needs_plan",
+            route="lightweight",
+            gating_reasons=[
+                gateway.GatingReason("missing_reform", "reform"),
+                gateway.GatingReason("missing_output", "output"),
+            ],
+        )
         d = gateway.gateway_writer_directive(v)
         assert "reform" in d and "output" in d
 

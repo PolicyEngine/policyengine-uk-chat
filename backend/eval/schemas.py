@@ -130,7 +130,7 @@ class ToolLoopCase(CaseBase):
 
 class SlotExpectation(StrictModel):
     slot: str
-    source: Optional[Literal["prompt", "default", "assumed"]] = None
+    source: Optional[Literal["prompt", "default", "assumed", "runtime"]] = None
     gates: Optional[bool] = None  # whether this slot should trigger a question
 
 
