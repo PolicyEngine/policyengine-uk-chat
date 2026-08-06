@@ -285,6 +285,7 @@ class TestSlotCompletion:
                 [sf("people", "prompt", value="one adult aged 30")],
             ),
             ("generate_chart", "chart_output", []),
+            ("generate_chart", "output", []),
         ],
     )
     def test_obvious_tool_outputs_are_inferable(self, tool, output_name, other_slots):

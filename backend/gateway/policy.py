@@ -153,6 +153,7 @@ INFERABLE: set = {
     ("get_parameter", "path"),
     ("generate_chart", "chart_kind"),
     ("generate_chart", "chart_output"),
+    ("generate_chart", "output"),
     ("generate_chart", "title"),
     ("generate_chart", "x_field"),
     ("generate_chart", "y_fields"),
