@@ -374,6 +374,36 @@ class TestRunGateway:
         output = next(slot for slot in verdict.slots if slot.kind == "output")
         assert output.value == "budgetary_impact"
 
+    def test_deterministic_output_repairs_invalid_prompt_grounding(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "domain_status": "uk_or_unspecified",
+            "capability_status": "supported",
+            "tool": "run_society_simulation",
+            "slots": [
+                {
+                    "name": "budgetary_impact",
+                    "kind": "output",
+                    "source": "prompt",
+                    "value": "annual cost",
+                }
+            ],
+            "unmodellable_outputs": [],
+            "catalogue_queries": [],
+        }
+
+        verdict = gateway._verdict_from_plan(
+            plan,
+            "What is the annual cost of increasing the personal allowance by £500?",
+            gateway.CatalogueEvidence(available=True),
+        )
+
+        output = next(slot for slot in verdict.slots if slot.kind == "output")
+        assert output.source == "prompt"
+        assert output.value == "budgetary_impact"
+        assert verdict.outcome == "ready"
+
     def test_explicit_plural_reform_scope_survives_gateway_normalisation(self):
         from gateway import runtime as gateway
 

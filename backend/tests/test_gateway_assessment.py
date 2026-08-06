@@ -97,6 +97,34 @@ def test_resolver_constructs_and_scores_only_after_search(confidence):
     assert result.catalogue_version == "test-version"
 
 
+def test_invalid_alternative_does_not_reject_valid_best_construction():
+    assessment = _assessment(confidence=90)
+    assessment["alternatives"] = [
+        {
+            "summary": "Contradictory decrease",
+            "reform": {PATH: 12_000},
+            "bindings": [{"parameter_path": PATH, "label": LABEL}],
+        }
+    ]
+    client = _client(
+        [_tool("search_reform_targets", "search-1", {"query": "personal allowance"})],
+        [_tool("emit_reform_assessment", "assessment-1", assessment)],
+    )
+
+    result = assess_reform_with_catalogue(
+        "What is the cost of increasing the personal allowance by £500?",
+        _intent(),
+        client=client,
+        search=_search,
+        validate=_valid,
+        catalogue_version="test-version",
+    )
+
+    assert result.confidence == 90
+    assert result.reform == {PATH: 13_070}
+    assert result.alternatives == ()
+
+
 def test_model_cannot_construct_with_an_unreturned_parameter_path():
     client = _client(
         [_tool("search_reform_targets", "search-1", {"query": "personal allowance"})],

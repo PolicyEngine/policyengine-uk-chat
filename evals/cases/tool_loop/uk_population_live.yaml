@@ -154,7 +154,7 @@ cases:
   - <<: *common
     id: uk_population_uc_child_element_10pw_cost
     description: Annual cost of increasing Universal Credit's child element by £10 per week.
-    prompt: What would be the annual cost of increasing Universal Credit's child element by £10 per week?
+    prompt: What would be the annual cost of increasing Universal Credit's standard child element only and not the higher first-child amount by £10 per week?
     expected_tools: *budget_tools
     expect:
       required: ["2026", FRS, annual, £]
@@ -166,7 +166,7 @@ cases:
   - <<: *common
     id: uk_population_uc_child_element_10pw_child_poverty
     description: Child poverty impact of increasing Universal Credit's child element by £10 per week.
-    prompt: How would increasing Universal Credit's child element by £10 per week affect child poverty?
+    prompt: How would increasing Universal Credit's standard child element only and not the higher first-child amount by £10 per week affect child poverty?
     expected_tools: *poverty_tools
     expect:
       required: ["2026", FRS, poverty, child]
@@ -178,7 +178,7 @@ cases:
   - <<: *common
     id: uk_population_uc_work_allowance_500_cost
     description: Annual cost of increasing the Universal Credit work allowance by £500 per year.
-    prompt: What would be the annual cost of increasing the Universal Credit work allowance by £500 per year?
+    prompt: What would be the annual cost of increasing both Universal Credit work allowances with and without housing support by £500 per year?
     expected_tools: *budget_tools
     expect:
       required: ["2026", FRS, annual, £]
@@ -190,7 +190,7 @@ cases:
   - <<: *common
     id: uk_population_uc_work_allowance_500_households
     description: Household gains from increasing the Universal Credit work allowance by £500 per year.
-    prompt: How many households would gain from increasing the Universal Credit work allowance by £500 per year?
+    prompt: How many households would gain from increasing both Universal Credit work allowances with and without housing support by £500 per year?
     expected_tools: *winners_tools
     expect:
       required: ["2026", FRS, households, gain]

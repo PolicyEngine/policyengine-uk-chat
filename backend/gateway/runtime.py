@@ -519,6 +519,11 @@ def _verdict_from_plan(
         slots = upsert_output_slot(slots, output_intent)
     slots = upsert_prompt_year(tool, slots, prompt)
     slots = normalise_slot_grounding(tool, slots)
+    if output_intent is not None:
+        # Classifier values such as "annual cost" can initially claim prompt
+        # grounding but fail the closed output vocabulary during normalization.
+        # Reapply the deterministic prompt intent to that now-assumed slot.
+        slots = upsert_output_slot(slots, output_intent)
     slots = complete_slots(tool, slots)
     unmodellable = _unmodellable_outputs_from_plan(plan, prompt)
     if effect_match is not None and not unmodellable:

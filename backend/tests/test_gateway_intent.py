@@ -138,3 +138,17 @@ def test_all_population_prompts_have_output_and_reform_intent():
     for case in cases:
         assert output_from_prompt(case.prompt) is not None, case.id
         assert reform_intent_from_prompt(case.prompt) is not None, case.id
+
+
+def test_population_parameter_families_state_variant_scope():
+    path = Path(__file__).parents[2] / "evals/cases/tool_loop/uk_population_live.yaml"
+    cases = {case.id: case for case in load_case_file(path)}
+
+    for suffix in ("cost", "child_poverty"):
+        prompt = cases[f"uk_population_uc_child_element_10pw_{suffix}"].prompt
+        assert "standard child element only" in prompt
+        assert "higher first-child amount" in prompt
+    for suffix in ("cost", "households"):
+        prompt = cases[f"uk_population_uc_work_allowance_500_{suffix}"].prompt
+        assert "both Universal Credit work allowances" in prompt
+        assert "with and without housing support" in prompt

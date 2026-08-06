@@ -303,13 +303,19 @@ def _parse_assessment(
         raise ReformAssessmentError("assessment alternatives must be a list")
     for alternative in raw_alternatives[:3]:
         if not isinstance(alternative, dict):
-            raise ReformAssessmentError("assessment alternative must be an object")
-        alt_reform, alt_bindings, alt_summary = _validated_construction(
-            alternative,
-            candidates=candidates,
-            intent=intent,
-            validate=validate,
-        )
+            continue
+        try:
+            alt_reform, alt_bindings, alt_summary = _validated_construction(
+                alternative,
+                candidates=candidates,
+                intent=intent,
+                validate=validate,
+            )
+        except ReformAssessmentError:
+            # Alternatives are optional clarification aids, never executable
+            # authority. A malformed or directionally contradictory suggestion
+            # must not discard an otherwise valid best construction.
+            continue
         alternatives.append(ReformAlternative(alt_summary, alt_bindings, alt_reform))
     return ReformAssessment(
         reform=reform,
