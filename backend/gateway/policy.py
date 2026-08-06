@@ -317,6 +317,8 @@ def slot_gates(tool: Optional[str], slot: SlotFact, prompt: str = "") -> bool:
     """True if this slot should force a clarifying question."""
     if slot.source != "assumed":
         return False
+    if tool == "generate_chart" and slot.kind == "output":
+        return False
     if is_inferable(tool, slot.name):
         return False
     return criticality(tool, slot, prompt) in ("high", "medium")

@@ -286,6 +286,7 @@ class TestSlotCompletion:
             ),
             ("generate_chart", "chart_output", []),
             ("generate_chart", "output", []),
+            ("generate_chart", "tax_schedule_chart", []),
         ],
     )
     def test_obvious_tool_outputs_are_inferable(self, tool, output_name, other_slots):
