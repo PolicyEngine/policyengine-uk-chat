@@ -4,9 +4,11 @@ One cheap forced-tool call asks a fast model to fill an execution plan (which
 tool, which slots, each tagged with a grounding `source`). A second call is
 allowed only when authoritative catalogue evidence can help recover a missing
 tool. The deterministic `gate()` in `gateway.policy` maps each plan to one of
-five outcomes. Only `ready` runs the full compute loop; the other four reply on
-the lean lightweight path. Fail-safe to `ready`/compute on any error, matching
-the chat's existing "when in doubt, load the full background" bias.
+five outcomes. Only `ready` runs the full compute loop; `needs_plan` is rendered
+deterministically and the other non-ready outcomes use the lean writer path.
+Classifier transport/parse errors retain the existing `ready`/compute fallback,
+but catalogue or reform-assessment failures are terminal so unverified reform
+JSON can never reach simulation.
 
 Self-contained (builds its own sync client + system prompt) so the eval harness
 can import and call `run_gateway` directly, mirroring the old `_route_scope`.
@@ -535,24 +537,6 @@ def _can_recover_with_catalogue(verdict: GatewayVerdict) -> bool:
     )
 
 
-def _fail_open_after_recovery(verdict: GatewayVerdict) -> GatewayVerdict:
-    """Do not turn one inconclusive recovery pass into a false refusal."""
-
-    if (
-        verdict.domain.status == "uk_or_unspecified"
-        and verdict.tool is None
-        and verdict.capability.status != "explicitly_unmodellable"
-        and not verdict.unmodellable_outputs
-    ):
-        return replace(
-            verdict,
-            outcome="ready",
-            route="compute",
-            gating_reasons=[],
-        )
-    return verdict
-
-
 _SOCIETY_REFORM_TOOLS = {
     "run_society_simulation",
     "compute_budgetary_impact",
@@ -642,8 +626,9 @@ def _assess_ready_reform(
 def run_gateway(last_user_message: str) -> GatewayVerdict:
     """Ground a plan, optionally recover once, then return the server gate.
 
-    Fail-safe to ready/compute on empty input, any API error, a missing plan
-    block, or an unparseable plan.
+    Fail-safe to ready/compute on empty input, classifier API errors, a missing
+    plan block, or an unparseable plan. Catalogue and exact-reform assessment
+    failures propagate as terminal errors.
     """
     if not last_user_message or not last_user_message.strip():
         return _fail_safe()
@@ -671,20 +656,13 @@ def run_gateway(last_user_message: str) -> GatewayVerdict:
             _catalogue_recovery_system(catalogue_evidence),
         )
         if not recovery_plan or "tool" not in recovery_plan:
-            recovered = replace(
-                verdict,
-                outcome="ready",
-                route="compute",
-                gating_reasons=[],
-            )
-            return _assess_ready_reform(recovered, last_user_message, client)
+            return verdict
         recovered = _verdict_from_plan(
             recovery_plan,
             last_user_message,
             catalogue_evidence,
         )
         recovered = replace(recovered, catalogue_recovery_used=True)
-        recovered = _fail_open_after_recovery(recovered)
         return _assess_ready_reform(recovered, last_user_message, client)
     except (GatewayCatalogueUnavailable, ReformAssessmentError):
         raise

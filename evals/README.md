@@ -56,8 +56,13 @@ make eval-ai-deployed-uk-population
 Runs the 20 population cases through the same deployed UK Chat model and tool
 loop used by `/chat/message`. Each trial is a separate request to the
 token-protected `/eval/chat/message` route, has a 600-second timeout, and is
-graded from the complete tool trace returned by the backend. The runner uses
-four concurrent requests by default and does not retry failed requests.
+graded first from the internal gateway trace and then from the complete tool
+trace and answer returned by the backend. The population cases require
+`compute/ready`, the current simulation-year default, reform confidence of at
+least 80, and at least one validated parameter binding. This keeps routing and
+reform-resolution failures separate from simulation, derivative-tool, and
+answer failures. The runner uses four concurrent requests by default and does
+not retry failed requests.
 
 Use `python -m eval.run_deployed --case-id CASE_ID` to run one case. The token
 is read only from `EVAL_RUN_TOKEN`; it is never accepted as a command-line

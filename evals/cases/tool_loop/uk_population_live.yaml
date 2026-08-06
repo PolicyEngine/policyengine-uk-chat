@@ -6,6 +6,13 @@ common: &common
   pass_threshold: 0.66
   max_iterations: 6
   forbidden_tools: [run_household_simulation]
+  gateway_expect:
+    route: compute
+    outcome: ready
+    defaults_contains:
+      year: 2026
+    min_reform_confidence: 80
+    require_parameter_binding: true
 
 neutral_forbidden: &neutral_forbidden
   - good

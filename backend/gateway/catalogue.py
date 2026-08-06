@@ -182,7 +182,8 @@ def resolve_catalogue_queries(queries: Sequence[CatalogueQuery]) -> CatalogueEvi
 
     try:
         # Check availability once before calling helpers that search the same
-        # cached model. An unavailable catalogue must fail open at the gateway.
+        # cached model. Availability remains explicit so routing evidence is
+        # never confused with a successful lookup that returned no matches.
         uk_model_version()
         matches: list[CatalogueMatch] = []
         unresolved: list[CatalogueQuery] = []

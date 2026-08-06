@@ -33,7 +33,9 @@ from eval.tool_loop_grading import (
     expectation_with_trace_numbers,
     numbers_from_value,
 )
-from tools.definitions import TOOL_DEFINITIONS
+from gateway.execution import analysis_tool_for_output
+from gateway.intent import output_from_prompt
+from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -45,6 +47,27 @@ def test_loads_yaml_cases_with_typed_schemas():
     assert cases
     assert {case.suite for case in cases} == {"trajectory"}
     assert cases[0].expected_tools[0].name == "run_household_simulation"
+
+
+def test_population_cases_declare_gateway_expectations_and_derivative_targets():
+    cases = load_case_file(
+        REPO_ROOT / "evals" / "cases" / "tool_loop" / "uk_population_live.yaml"
+    )
+
+    assert len(cases) == 20
+    for case in cases:
+        assert case.gateway_expect.route == "compute"
+        assert case.gateway_expect.outcome == "ready"
+        assert case.gateway_expect.defaults_contains == {"year": 2026}
+        assert case.gateway_expect.defaults_contains["year"] == DEFAULT_SIMULATION_YEAR
+        assert case.gateway_expect.min_reform_confidence == 80
+        assert case.gateway_expect.require_parameter_binding is True
+        output = output_from_prompt(case.prompt)
+        assert output is not None
+        assert (
+            analysis_tool_for_output("run_society_simulation", output.value)
+            == case.expected_tools[-1].name
+        )
 
 
 def test_grade_output_supports_partial_paths_and_numeric_tolerance():

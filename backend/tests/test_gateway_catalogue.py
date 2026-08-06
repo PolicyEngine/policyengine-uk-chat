@@ -707,7 +707,7 @@ def test_catalogue_recovery_can_confirm_a_grounded_non_uk_refusal():
     assert len(client.calls) == 2
 
 
-def test_inconclusive_catalogue_recovery_fails_open_after_one_retry():
+def test_inconclusive_catalogue_recovery_remains_needs_plan_after_one_retry():
     from gateway import runtime as gateway
 
     initial_plan = {
@@ -743,10 +743,11 @@ def test_inconclusive_catalogue_recovery_fails_open_after_one_retry():
             "Raise the lowest capital gains tax rate from 18% to 20%."
         )
 
-    assert verdict.outcome == "ready"
-    assert verdict.route == "compute"
+    assert verdict.outcome == "needs_plan"
+    assert verdict.route == "lightweight"
     assert verdict.tool is None
-    assert verdict.gating_slots == []
+    assert verdict.gating_slots == ["tool"]
+    assert verdict.catalogue_recovery_used is True
     assert len(client.calls) == 2
 
 

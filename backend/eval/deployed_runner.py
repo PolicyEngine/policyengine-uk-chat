@@ -61,7 +61,57 @@ def _failed_trial(
     )
 
 
+def grade_gateway_expectation(
+    case: ToolLoopCase,
+    response: EvalChatResponse,
+) -> list[str]:
+    """Grade routing and reform authorization before tool/answer quality."""
+
+    expectation = case.gateway_expect
+    if expectation is None:
+        return []
+    errors: list[str] = []
+    if response.route != expectation.route:
+        errors.append(
+            f"gateway route was {response.route!r}, expected {expectation.route!r}"
+        )
+    if response.outcome != expectation.outcome:
+        errors.append(
+            f"gateway outcome was {response.outcome!r}, expected {expectation.outcome!r}"
+        )
+    trace = response.gateway_trace
+    if trace is None:
+        errors.append("gateway trace was missing")
+        return errors
+    for name, expected in expectation.defaults_contains.items():
+        if name not in trace.defaults_applied:
+            errors.append(
+                f"gateway default {name!r} was missing; expected {expected!r}"
+            )
+        elif trace.defaults_applied[name] != expected:
+            errors.append(
+                f"gateway default {name!r} was {trace.defaults_applied[name]!r}, "
+                f"expected {expected!r}"
+            )
+    minimum = expectation.min_reform_confidence
+    if minimum is not None:
+        if trace.reform_confidence is None:
+            errors.append(
+                "gateway reform confidence was missing; "
+                f"expected at least {minimum}"
+            )
+        elif trace.reform_confidence < minimum:
+            errors.append(
+                f"gateway reform confidence was {trace.reform_confidence}, "
+                f"expected at least {minimum}"
+            )
+    if expectation.require_parameter_binding and not trace.parameter_bindings:
+        errors.append("gateway produced no validated parameter binding")
+    return errors
+
+
 def _grade_response(case: ToolLoopCase, response: EvalChatResponse) -> CaseResult:
+    gateway_errors = grade_gateway_expectation(case, response)
     response_details = {
         "session_id": response.session_id,
         "model": response.model,
@@ -76,7 +126,7 @@ def _grade_response(case: ToolLoopCase, response: EvalChatResponse) -> CaseResul
         ),
     }
     if response.status != "completed":
-        return _failed_trial(
+        failed = _failed_trial(
             case,
             f"deployed chat failed with stop_reason={response.stop_reason!r}",
             details={
@@ -84,6 +134,9 @@ def _grade_response(case: ToolLoopCase, response: EvalChatResponse) -> CaseResul
                 "text": response.content,
                 "tool_trace": [trace.model_dump() for trace in response.tool_trace],
             },
+        )
+        return failed.model_copy(
+            update={"errors": [*failed.errors, *gateway_errors]}
         )
 
     tool_calls = [
@@ -95,6 +148,7 @@ def _grade_response(case: ToolLoopCase, response: EvalChatResponse) -> CaseResul
         text=response.content,
         tool_calls=tool_calls,
         tool_outputs=[trace.output for trace in response.tool_trace],
+        errors=gateway_errors,
     )
     return result.model_copy(
         update={"details": {**result.details, "deployed": response_details}}

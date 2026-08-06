@@ -114,6 +114,20 @@ class AnswerCase(CaseBase):
     offline_response: Optional[ModelTurn] = None
 
 
+class GatewayTraceExpectation(StrictModel):
+    route: Literal["compute", "lightweight"]
+    outcome: Literal[
+        "irrelevant",
+        "out_of_scope",
+        "partial",
+        "needs_plan",
+        "ready",
+    ]
+    defaults_contains: Dict[str, Any] = Field(default_factory=dict)
+    min_reform_confidence: Optional[int] = Field(default=None, ge=0, le=100)
+    require_parameter_binding: bool = False
+
+
 class ToolLoopCase(CaseBase):
     suite: Literal["tool_loop"] = "tool_loop"
     prompt: str
@@ -126,6 +140,7 @@ class ToolLoopCase(CaseBase):
     trials: int = Field(default=1, ge=1, le=10)
     pass_threshold: float = Field(default=1.0, ge=0.0, le=1.0)
     offline_responses: List[ModelTurn] = Field(default_factory=list)
+    gateway_expect: Optional[GatewayTraceExpectation] = None
 
 
 class SlotExpectation(StrictModel):
