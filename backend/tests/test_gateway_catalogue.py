@@ -3,6 +3,8 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from gateway.catalogue import (
     CANDIDATE_LIMIT,
     CatalogueEvidence,
@@ -13,12 +15,32 @@ from gateway.catalogue import (
     resolve_catalogue_queries,
 )
 from gateway.policy import CapabilityDecision, GatingReason
+from gateway.intent import ReformIntent
 from gateway.runtime import (
     GatewayVerdict,
     apply_catalogue_evidence,
     gateway_writer_directive,
     serialise_plan_for_system,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_model_reform_assessment(monkeypatch):
+    from gateway import runtime
+
+    monkeypatch.setattr(
+        runtime,
+        "assess_reform_with_catalogue",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            reform={"test.parameter": 1},
+            summary="Test reform",
+            confidence=100,
+            parameter_bindings=(),
+            alternatives=(),
+            search_queries=("test",),
+            catalogue_version="test",
+        ),
+    )
 
 
 def _match(kind="reform_target", query="capital gains tax"):
@@ -323,13 +345,13 @@ def test_unresolved_catalogue_query_preserves_partial_limitation():
     assert "before offering to run the modellable part" in directive
 
 
-def test_unavailable_catalogue_fails_open_to_compute():
+def test_unavailable_catalogue_does_not_promote_out_of_scope_to_compute():
     verdict = GatewayVerdict(outcome="out_of_scope", route="lightweight")
 
     resolved = apply_catalogue_evidence(verdict, _evidence(available=False))
 
-    assert resolved.outcome == "ready"
-    assert resolved.route == "compute"
+    assert resolved.outcome == "out_of_scope"
+    assert resolved.route == "lightweight"
 
 
 def test_unavailable_catalogue_preserves_irrelevant_outcome():
@@ -368,7 +390,7 @@ def test_unavailable_catalogue_preserves_existing_needs_plan_outcome():
     assert resolved.gating_slots == ["reform"]
 
 
-def test_unavailable_catalogue_fails_open_from_catalogue_uncertainty():
+def test_unavailable_catalogue_does_not_promote_uncertainty_to_compute():
     verdict = GatewayVerdict(
         outcome="needs_plan",
         route="lightweight",
@@ -382,9 +404,33 @@ def test_unavailable_catalogue_fails_open_from_catalogue_uncertainty():
 
     resolved = apply_catalogue_evidence(verdict, _evidence(available=False))
 
+    assert resolved.outcome == "needs_plan"
+    assert resolved.route == "lightweight"
+    assert resolved.gating_slots == ["tool"]
+
+
+def test_unresolved_classifier_query_defers_to_model_reform_assessment():
+    query = CatalogueQuery("reform_target", "personal allowance")
+    verdict = GatewayVerdict(
+        outcome="ready",
+        route="compute",
+        tool="run_society_simulation",
+        reform_intent=ReformIntent(
+            policy_phrase="personal allowance",
+            action="increase",
+            amount="£500",
+            scope="unspecified",
+            evidence="increasing the personal allowance by £500",
+        ),
+    )
+
+    resolved = apply_catalogue_evidence(
+        verdict,
+        _evidence(unresolved_queries=(query,)),
+    )
+
     assert resolved.outcome == "ready"
-    assert resolved.route == "compute"
-    assert resolved.gating_slots == []
+    assert resolved.gating_reasons == []
 
 
 def test_compute_context_gets_paths_but_lightweight_context_gets_labels_only():
@@ -463,6 +509,7 @@ def test_gateway_wiring_uses_matching_evidence_before_refusing():
     assert verdict.outcome == "ready"
     assert verdict.route == "compute"
     assert verdict.tool == "run_society_simulation"
+    assert verdict.catalogue_recovery_used is True
     assert len(client.calls) == 2
     assert "SERVER-VERIFIED CATALOGUE CANDIDATES" in client.calls[1]["system"]
     assert "Capital gains tax basic rate" in client.calls[1]["system"]

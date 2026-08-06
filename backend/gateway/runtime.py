@@ -20,6 +20,13 @@ from dataclasses import dataclass, field, replace
 from typing import List, Optional
 
 from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_sync_client
+from gateway.assessment import (
+    AUTO_EXECUTE_REFORM_CONFIDENCE,
+    GatewayCatalogueUnavailable,
+    ReformAssessment,
+    ReformAssessmentError,
+    assess_reform_with_catalogue,
+)
 from gateway.catalogue import (
     MAX_CATALOGUE_QUERIES,
     CatalogueEvidence,
@@ -94,6 +101,8 @@ class GatewayVerdict:
     domain: DomainDecision = field(default_factory=DomainDecision)
     capability: CapabilityDecision = field(default_factory=CapabilityDecision)
     reform_intent: ReformIntent | None = None
+    reform_assessment: ReformAssessment | None = None
+    catalogue_recovery_used: bool = False
 
     @property
     def gating_slots(self) -> List[str]:
@@ -385,21 +394,10 @@ def apply_catalogue_evidence(
     if verdict.outcome == "irrelevant":
         return verdict
     if not evidence.available:
-        catalogue_uncertainty = (
-            verdict.outcome == "needs_plan"
-            and verdict.tool is None
-            and verdict.gating_slots == ["tool"]
-            and verdict.capability.status == "catalogue_uncertain"
-        )
-        if verdict.outcome == "out_of_scope" or catalogue_uncertainty:
-            return replace(
-                verdict,
-                outcome="ready",
-                route="compute",
-                gating_reasons=[],
-            )
         return verdict
     if evidence.unresolved_queries:
+        if verdict.reform_intent is not None:
+            return verdict
         reasons = list(verdict.gating_reasons)
         if "model_catalogue" not in verdict.gating_slots:
             reasons.append(
@@ -552,6 +550,68 @@ def _fail_open_after_recovery(verdict: GatewayVerdict) -> GatewayVerdict:
     return verdict
 
 
+_SOCIETY_REFORM_TOOLS = {
+    "run_society_simulation",
+    "compute_budgetary_impact",
+    "compute_program_breakdown",
+    "compute_decile_impacts",
+    "compute_winners_losers",
+    "compute_poverty_metrics",
+    "compute_inequality_metrics",
+    "aggregate_result",
+}
+
+
+def _assess_ready_reform(
+    verdict: GatewayVerdict,
+    prompt: str,
+    client: object,
+) -> GatewayVerdict:
+    if (
+        verdict.outcome != "ready"
+        or verdict.tool not in _SOCIETY_REFORM_TOOLS
+        or verdict.reform_intent is None
+    ):
+        return verdict
+    assessment = assess_reform_with_catalogue(
+        prompt,
+        verdict.reform_intent,
+        client=client,
+    )
+    verdict = replace(verdict, reform_assessment=assessment)
+    if assessment.reform is None:
+        return replace(
+            verdict,
+            outcome="needs_plan",
+            route="lightweight",
+            gating_reasons=[
+                GatingReason(
+                    code="catalogue_no_match",
+                    slot="reform",
+                    evidence=verdict.reform_intent.evidence,
+                )
+            ],
+        )
+    if assessment.confidence < AUTO_EXECUTE_REFORM_CONFIDENCE:
+        return replace(
+            verdict,
+            outcome="needs_plan",
+            route="lightweight",
+            gating_reasons=[
+                GatingReason(
+                    code="confirm_reform",
+                    slot="reform",
+                    options=tuple(
+                        alternative.summary
+                        for alternative in assessment.alternatives
+                    ),
+                    evidence=assessment.summary,
+                )
+            ],
+        )
+    return verdict
+
+
 def run_gateway(last_user_message: str) -> GatewayVerdict:
     """Ground a plan, optionally recover once, then return the server gate.
 
@@ -575,21 +635,32 @@ def run_gateway(last_user_message: str) -> GatewayVerdict:
         )
         verdict = _verdict_from_plan(plan, last_user_message, catalogue_evidence)
         if not _can_recover_with_catalogue(verdict):
-            return verdict
+            return _assess_ready_reform(verdict, last_user_message, client)
 
+        verdict = replace(verdict, catalogue_recovery_used=True)
         recovery_plan = _request_plan(
             client,
             last_user_message,
             _catalogue_recovery_system(catalogue_evidence),
         )
         if not recovery_plan or "tool" not in recovery_plan:
-            return replace(verdict, outcome="ready", route="compute", gating_reasons=[])
+            recovered = replace(
+                verdict,
+                outcome="ready",
+                route="compute",
+                gating_reasons=[],
+            )
+            return _assess_ready_reform(recovered, last_user_message, client)
         recovered = _verdict_from_plan(
             recovery_plan,
             last_user_message,
             catalogue_evidence,
         )
-        return _fail_open_after_recovery(recovered)
+        recovered = replace(recovered, catalogue_recovery_used=True)
+        recovered = _fail_open_after_recovery(recovered)
+        return _assess_ready_reform(recovered, last_user_message, client)
+    except (GatewayCatalogueUnavailable, ReformAssessmentError):
+        raise
     except Exception as e:  # noqa: BLE001 — any failure falls back to full compute
         logger.warning(f"[GATEWAY] failed; defaulting to ready/compute: {e}")
         return _fail_safe()

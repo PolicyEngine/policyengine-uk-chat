@@ -9,6 +9,8 @@ suite, not here.
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from gateway.policy import (
     RUNTIME_PROVIDED_SLOTS,
     TOOL_SLOT_DEFAULTS,
@@ -22,6 +24,25 @@ from gateway.policy import (
     normalise_slot_grounding,
 )
 from tools.definitions import DEFAULT_SIMULATION_YEAR
+
+
+@pytest.fixture(autouse=True)
+def _stub_model_reform_assessment(monkeypatch):
+    from gateway import runtime
+
+    monkeypatch.setattr(
+        runtime,
+        "assess_reform_with_catalogue",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            reform={"test.parameter": 1},
+            summary="Test reform",
+            confidence=100,
+            parameter_bindings=(),
+            alternatives=(),
+            search_queries=("test",),
+            catalogue_version="test",
+        ),
+    )
 
 
 def sf(name, source, kind="tool_input", value=None):
