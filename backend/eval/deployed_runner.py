@@ -69,6 +69,11 @@ def _grade_response(case: ToolLoopCase, response: EvalChatResponse) -> CaseResul
         "outcome": response.outcome,
         "stop_reason": response.stop_reason,
         "usage": response.usage.model_dump(),
+        "gateway_trace": (
+            response.gateway_trace.model_dump()
+            if response.gateway_trace is not None
+            else None
+        ),
     }
     if response.status != "completed":
         return _failed_trial(

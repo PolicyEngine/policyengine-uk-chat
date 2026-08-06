@@ -196,6 +196,49 @@ class EvalToolTrace(StrictModel):
     output: Any = None
 
 
+class EvalGatewaySlot(StrictModel):
+    name: str
+    kind: str
+    source: str
+    value: Optional[str] = None
+
+
+class EvalGatewayReason(StrictModel):
+    code: str
+    slot: str
+    options: List[str] = Field(default_factory=list)
+    evidence: Optional[str] = None
+
+
+class EvalGatewayBinding(StrictModel):
+    parameter_path: str
+    label: str
+    catalogue_evidence: str
+
+
+class EvalGatewayAlternative(StrictModel):
+    summary: str
+    parameter_bindings: List[EvalGatewayBinding] = Field(default_factory=list)
+    reform: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EvalGatewayTrace(StrictModel):
+    selected_tool: Optional[str] = None
+    target_tool: Optional[str] = None
+    slots: List[EvalGatewaySlot] = Field(default_factory=list)
+    gating_reasons: List[EvalGatewayReason] = Field(default_factory=list)
+    defaults_applied: Dict[str, Any] = Field(default_factory=dict)
+    reform_confidence: Optional[int] = Field(default=None, ge=0, le=100)
+    reform_summary: Optional[str] = None
+    reform_search_queries: List[str] = Field(default_factory=list)
+    catalogue_version: Optional[str] = None
+    resolver_model: Optional[str] = None
+    parameter_bindings: List[EvalGatewayBinding] = Field(default_factory=list)
+    alternatives: List[EvalGatewayAlternative] = Field(default_factory=list)
+    catalogue_recovery_used: bool = False
+    proposal_resumed: bool = False
+
+
 class EvalChatResponse(StrictModel):
     status: Literal["completed", "failed"]
     content: str = ""
@@ -206,3 +249,4 @@ class EvalChatResponse(StrictModel):
     stop_reason: Optional[str] = None
     usage: EvalUsage = Field(default_factory=EvalUsage)
     tool_trace: List[EvalToolTrace] = Field(default_factory=list)
+    gateway_trace: Optional[EvalGatewayTrace] = None

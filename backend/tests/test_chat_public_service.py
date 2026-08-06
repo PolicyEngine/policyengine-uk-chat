@@ -13,6 +13,7 @@ from chat.events import (
     TurnCompleted,
 )
 from chat.schemas import ChatRequest
+from gateway.trace import GatewayTrace, GatewayTraceSlot
 
 
 async def connected():
@@ -43,6 +44,19 @@ def test_public_service_projects_events_and_records_usage_once(monkeypatch):
             outcome="ready",
             stop_reason="end_turn",
             usage=ChatUsage(input_tokens=12, output_tokens=3),
+            gateway_trace=GatewayTrace(
+                selected_tool="run_society_simulation",
+                slots=(
+                    GatewayTraceSlot(
+                        name="reform",
+                        kind="tool_input",
+                        source="prompt",
+                        value="private evidence",
+                    ),
+                ),
+                defaults_applied={"year": 2026},
+                catalogue_recovery_used=True,
+            ),
         )
         yield SuggestionsGenerated(["What next?"])
 
@@ -82,6 +96,10 @@ def test_public_service_projects_events_and_records_usage_once(monkeypatch):
     assert done["usage"]["input_tokens"] == 12
     assert done["cost_gbp"] == 0.01
     assert done["balance"] == 9.99
+    assert "gateway_trace" not in done
+    assert "slots" not in done
+    assert "defaults_applied" not in done
+    assert "catalogue_recovery_used" not in done
     assert len(usage_calls) == 1
 
 

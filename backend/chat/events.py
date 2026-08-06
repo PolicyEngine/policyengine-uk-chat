@@ -3,6 +3,8 @@
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal, TypeAlias
 
+from gateway.trace import GatewayTrace
+
 
 CancellationProbe: TypeAlias = Callable[[], Awaitable[bool]]
 
@@ -67,6 +69,7 @@ class TurnCompleted:
     outcome: str | None
     stop_reason: str | None
     usage: ChatUsage
+    gateway_trace: GatewayTrace | None = None
     type: Literal["done"] = field(default="done", init=False)
 
 
@@ -83,6 +86,7 @@ class TurnFailed:
     stop_reason: str
     usage: ChatUsage
     billable: bool = False
+    gateway_trace: GatewayTrace | None = None
     type: Literal["error"] = field(default="error", init=False)
 
 
@@ -92,6 +96,7 @@ class TurnCancelled:
     model: str | None
     route: str
     usage: ChatUsage
+    gateway_trace: GatewayTrace | None = None
     type: Literal["cancelled"] = field(default="cancelled", init=False)
 
 

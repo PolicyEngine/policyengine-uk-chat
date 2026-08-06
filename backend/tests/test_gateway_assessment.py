@@ -180,6 +180,43 @@ def test_catalogue_failure_is_not_converted_to_a_ready_assessment():
         )
 
 
+def test_runtime_assessment_failure_carries_the_completed_classifier_verdict():
+    from gateway import runtime
+
+    plan = {
+        "domain": {"status": "uk_or_unspecified"},
+        "capability": {"status": "supported"},
+        "tool": "run_society_simulation",
+        "slots": [],
+        "unmodellable_outputs": [],
+        "catalogue_queries": [],
+    }
+    emit = SimpleNamespace(type="tool_use", name="emit_plan", input=plan)
+    client = SimpleNamespace(
+        messages=SimpleNamespace(
+            create=lambda **_kwargs: SimpleNamespace(content=[emit])
+        )
+    )
+
+    with (
+        patch.object(runtime, "get_sync_client", return_value=client),
+        patch.object(
+            runtime,
+            "assess_reform_with_catalogue",
+            side_effect=GatewayCatalogueUnavailable("catalogue offline"),
+        ),
+        pytest.raises(GatewayCatalogueUnavailable) as error,
+    ):
+        runtime.run_gateway(
+            "What is the cost of increasing the personal allowance by £500?"
+        )
+
+    verdict = error.value.gateway_verdict
+    assert verdict.tool == "run_society_simulation"
+    assert verdict.outcome == "ready"
+    assert verdict.reform_intent.policy_phrase == "personal allowance"
+
+
 def test_empty_construction_becomes_a_no_match_assessment():
     client = _client(
         [_tool("search_reform_targets", "search-1", {"query": "unknown policy"})],

@@ -210,6 +210,7 @@ def test_needs_plan_is_rendered_without_async_writer_model(monkeypatch):
     assert done.route == "lightweight"
     assert done.outcome == "needs_plan"
     assert done.stop_reason == "gateway_clarification"
+    assert done.gateway_trace.gating_reasons[0].code == "missing_output"
 
 
 def test_cancellation_before_deterministic_clarification_emits_cancelled(monkeypatch):
@@ -243,6 +244,7 @@ def test_cancellation_before_deterministic_clarification_emits_cancelled(monkeyp
 
     assert len(events) == 1
     assert isinstance(events[0], TurnCancelled)
+    assert events[0].gateway_trace.gating_reasons[0].code == "missing_output"
 
 
 def test_unrenderable_gateway_reason_fails_open_to_compute(monkeypatch):

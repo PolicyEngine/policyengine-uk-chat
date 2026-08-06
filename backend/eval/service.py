@@ -1,5 +1,6 @@
 """Structured evaluation adapter over the shared UK Chat turn engine."""
 
+from dataclasses import asdict
 from typing import Any
 
 from pydantic import TypeAdapter
@@ -15,7 +16,7 @@ from chat.events import (
 from chat.orchestrator import run_chat_turn
 from chat.schemas import ChatRequest
 from chat.turn_input import prepare_turn_input
-from eval.schemas import EvalChatResponse, EvalToolTrace, EvalUsage
+from eval.schemas import EvalChatResponse, EvalGatewayTrace, EvalToolTrace, EvalUsage
 
 
 _ANY_ADAPTER = TypeAdapter(Any)
@@ -27,6 +28,12 @@ def _usage(value) -> EvalUsage:
 
 def _json_safe(value: Any) -> Any:
     return _ANY_ADAPTER.dump_python(value, mode="json")
+
+
+def _gateway_trace(value) -> EvalGatewayTrace | None:
+    if value is None:
+        return None
+    return EvalGatewayTrace.model_validate(_json_safe(asdict(value)))
 
 
 async def run_eval_chat(
@@ -77,6 +84,7 @@ async def run_eval_chat(
                     stop_reason=event.stop_reason,
                     usage=_usage(event.usage),
                     tool_trace=trace,
+                    gateway_trace=_gateway_trace(event.gateway_trace),
                 )
             elif isinstance(event, TurnFailed):
                 return EvalChatResponse(
@@ -86,6 +94,7 @@ async def run_eval_chat(
                     stop_reason=event.stop_reason,
                     usage=_usage(event.usage),
                     tool_trace=trace,
+                    gateway_trace=_gateway_trace(event.gateway_trace),
                 )
             elif isinstance(event, TurnCancelled):
                 return EvalChatResponse(
@@ -96,6 +105,7 @@ async def run_eval_chat(
                     stop_reason="client_disconnected",
                     usage=_usage(event.usage),
                     tool_trace=trace,
+                    gateway_trace=_gateway_trace(event.gateway_trace),
                 )
     finally:
         await stream.aclose()

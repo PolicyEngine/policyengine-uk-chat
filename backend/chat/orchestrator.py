@@ -32,6 +32,7 @@ from gateway.proposals import (
     resume_gateway_proposal,
     strip_proposal_markers_from_conversation,
 )
+from gateway.trace import gateway_trace_from_verdict
 from observability.segments import SegmentName
 from tools.context import new_tool_context
 from tools.dispatch import execute_tool
@@ -212,6 +213,7 @@ async def run_chat_turn(
             model=model,
             route=route,
             usage=usage(),
+            gateway_trace=gateway_trace_from_verdict(verdict),
         )
 
     @asynccontextmanager
@@ -267,11 +269,18 @@ async def run_chat_turn(
                         "I couldn’t verify the earlier reform proposal. Please "
                         "restate the policy change you want me to model."
                     )
+                except Exception as exc:
+                    verdict = getattr(exc, "gateway_verdict", None)
+                    raise
             else:
-                async with asegment(SegmentName.GATEWAY_CLASSIFY):
-                    verdict = await loop.run_in_executor(
-                        None, run_gateway, last_user_text(conversation)
-                    )
+                try:
+                    async with asegment(SegmentName.GATEWAY_CLASSIFY):
+                        verdict = await loop.run_in_executor(
+                            None, run_gateway, last_user_text(conversation)
+                        )
+                except Exception as exc:
+                    verdict = getattr(exc, "gateway_verdict", None)
+                    raise
 
             if verdict is not None:
                 route = verdict.route
@@ -327,6 +336,7 @@ async def run_chat_turn(
                     outcome="needs_plan",
                     stop_reason=terminal_stop_reason,
                     usage=usage(),
+                    gateway_trace=gateway_trace_from_verdict(verdict),
                 )
                 return
 
@@ -523,6 +533,7 @@ async def run_chat_turn(
                             outcome=verdict.outcome if verdict else None,
                             stop_reason=terminal_stop_reason,
                             usage=usage(),
+                            gateway_trace=gateway_trace_from_verdict(verdict),
                         )
                         if route == "compute" and last_stop_reason in (
                             "end_turn",
@@ -573,6 +584,7 @@ async def run_chat_turn(
                                 stop_reason=terminal_stop_reason,
                                 usage=usage(),
                                 billable=True,
+                                gateway_trace=gateway_trace_from_verdict(verdict),
                             )
                             return
 
@@ -689,6 +701,7 @@ async def run_chat_turn(
                     outcome=verdict.outcome if verdict else None,
                     stop_reason=terminal_stop_reason,
                     usage=usage(),
+                    gateway_trace=gateway_trace_from_verdict(verdict),
                 )
 
         if captured_exception is not None:
@@ -701,6 +714,7 @@ async def run_chat_turn(
                 session_id=turn.session_id,
                 stop_reason="error",
                 usage=usage(),
+                gateway_trace=gateway_trace_from_verdict(verdict),
             )
     except Exception as exc:
         import traceback
@@ -713,4 +727,5 @@ async def run_chat_turn(
             session_id=turn.session_id,
             stop_reason="error",
             usage=usage(),
+            gateway_trace=gateway_trace_from_verdict(verdict),
         )

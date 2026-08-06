@@ -587,11 +587,15 @@ def _assess_ready_reform(
                 ),
             )
         return verdict
-    assessment = assess_reform_with_catalogue(
-        prompt,
-        verdict.reform_intent,
-        client=client,
-    )
+    try:
+        assessment = assess_reform_with_catalogue(
+            prompt,
+            verdict.reform_intent,
+            client=client,
+        )
+    except (GatewayCatalogueUnavailable, ReformAssessmentError) as exc:
+        exc.gateway_verdict = verdict
+        raise
     verdict = replace(verdict, reform_assessment=assessment)
     if assessment.reform is None:
         return replace(

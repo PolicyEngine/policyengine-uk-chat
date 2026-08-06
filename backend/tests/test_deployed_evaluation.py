@@ -6,7 +6,7 @@ import httpx
 import pytest
 import yaml
 
-from eval.schemas import EvalChatResponse, EvalToolTrace
+from eval.schemas import EvalChatResponse, EvalGatewayTrace, EvalToolTrace
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -21,6 +21,13 @@ def completed_response(content="Completed annual result £100."):
         route="compute",
         outcome="ready",
         stop_reason="end_turn",
+        gateway_trace=EvalGatewayTrace(
+            selected_tool="run_society_simulation",
+            target_tool="compute_budgetary_impact",
+            defaults_applied={"year": 2026},
+            reform_confidence=92,
+            catalogue_recovery_used=False,
+        ),
         tool_trace=[
             EvalToolTrace(
                 tool_id="tool-1",
@@ -202,6 +209,27 @@ def test_deployed_report_schema_accepts_deployed_mode():
     )
 
     assert report.mode == "deployed"
+
+
+def test_deployed_result_details_preserve_gateway_trace():
+    from eval.deployed_runner import _grade_response
+    from eval.schemas import ToolLoopCase
+
+    result = _grade_response(
+        ToolLoopCase(
+            id="trace-case",
+            description="Preserves trace",
+            prompt="Calculate",
+            expected_tools=[{"name": "run_society_simulation"}],
+            expect={"required": ["annual"]},
+        ),
+        completed_response(),
+    )
+
+    trace = result.details["deployed"]["gateway_trace"]
+    assert trace["target_tool"] == "compute_budgetary_impact"
+    assert trace["defaults_applied"] == {"year": 2026}
+    assert trace["reform_confidence"] == 92
 
 
 def test_deployed_make_target_does_not_require_local_generated_cases():
