@@ -104,6 +104,26 @@ def test_explicit_year_wins_over_default():
     assert next(item for item in plan.inputs if item.name == "year").value == "2025"
 
 
+def test_output_kind_selects_derivative_when_classifier_uses_label_as_name():
+    plan = build_execution_plan(
+        "run_society_simulation",
+        [
+            SlotFact(
+                "budgetary_impact",
+                "prompt",
+                kind="output",
+                value="budgetary_impact",
+            )
+        ],
+        _intent(),
+        "What is the annual cost of increasing the personal allowance by £500?",
+        _assessment(),
+    )
+
+    assert plan.target_tool == "compute_budgetary_impact"
+    assert plan.prerequisites == ("run_society_simulation",)
+
+
 def test_serialized_plan_orders_simulation_before_derivative_and_preserves_evidence():
     plan = build_execution_plan(
         "run_society_simulation",

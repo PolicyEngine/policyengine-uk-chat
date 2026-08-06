@@ -82,6 +82,19 @@ def _slot_value(slots: list[SlotFact], name: str, *, kind: str | None = None) ->
     )
 
 
+def _output_value(slots: list[SlotFact]) -> str | None:
+    """Return the canonical output value regardless of classifier slot name."""
+
+    return next(
+        (
+            slot.value
+            for slot in slots
+            if slot.kind == "output" and slot.value is not None
+        ),
+        None,
+    )
+
+
 def build_execution_plan(
     selected_tool: str | None,
     slots: list[SlotFact],
@@ -92,7 +105,7 @@ def build_execution_plan(
     """Build an ordered, exact plan for the compute model to execute."""
 
     del prompt  # reserved for future deterministic convention selection
-    output = _slot_value(slots, "output", kind="output")
+    output = _output_value(slots)
     target = analysis_tool_for_output(selected_tool, output)
     is_society = target in _SOCIETY_TOOLS
     if is_society and reform_intent is not None and (
