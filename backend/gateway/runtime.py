@@ -79,7 +79,13 @@ MAX_UNMODELLABLE_OUTPUTS = 4
 _UNMODELLABLE_EFFECT_RE = re.compile(
     r"\b(?:inflation|gdp|gross domestic product|macroeconomic|economic growth|"
     r"behaviou?ral(?: responses?| effects?)?|employment effects?|jobs? effects?|"
-    r"labou?r supply|market reactions?|general equilibrium)\b",
+    r"labou?r supply|stop working|work less|leave work|market reactions?|"
+    r"general equilibrium)\b",
+    re.I,
+)
+_BEHAVIOURAL_EFFECT_RE = re.compile(
+    r"\b(?:behaviou?ral|employment|jobs?|labou?r supply|stop working|work less|"
+    r"leave work)\b",
     re.I,
 )
 
@@ -333,6 +339,8 @@ def _domain_from_plan(plan: dict, prompt: str) -> DomainDecision:
         return DomainDecision()
     if status not in ("explicit_non_uk", "unrelated"):
         return DomainDecision()
+    if status == "unrelated" and _UNMODELLABLE_EFFECT_RE.search(prompt):
+        return DomainDecision()
     evidence = _validated_quote(raw_evidence, prompt)
     if evidence is None:
         return DomainDecision()
@@ -448,17 +456,41 @@ def _verdict_from_plan(
     own outcome is never trusted — the outcome is recomputed by gate()."""
     domain = _domain_from_plan(plan, prompt)
     capability = _capability_from_plan(plan, prompt)
+    effect_match = _UNMODELLABLE_EFFECT_RE.search(prompt)
+    if capability.status == "supported" and effect_match is not None:
+        capability = CapabilityDecision(
+            status="explicitly_unmodellable",
+            evidence=effect_match.group(0),
+        )
     in_domain = domain.status == "uk_or_unspecified"
+    output_intent = output_from_prompt(prompt)
+    reform_intent = reform_intent_from_prompt(prompt)
     raw_tool = plan.get("tool")
     tool = raw_tool if raw_tool in _TOOL_NAMES else None
+    policy_model_request = re.search(
+        r"\bmodel\b.*\b(?:tax|levy|benefit|allowance|credit|rate|threshold|reform|policy)\b",
+        prompt,
+        re.I,
+    )
     if (
-        tool is None
-        and in_domain
-        and capability.status == "supported"
-        and re.search(
-            r"\bmodel\b.*\b(?:tax|levy|benefit|allowance|credit|rate|threshold|reform|policy)\b",
-            prompt,
-            re.I,
+        in_domain
+        and policy_model_request
+        and (
+            tool in {"list_reform_targets", "search_parameters"}
+            or (
+                tool is None
+                and capability.status != "catalogue_uncertain"
+            )
+        )
+    ):
+        tool = "run_society_simulation"
+    elif (
+        in_domain
+        and tool is None
+        and reform_intent is not None
+        and capability.status != "catalogue_uncertain"
+        and not (
+            output_intent is None and _BEHAVIOURAL_EFFECT_RE.search(prompt)
         )
     ):
         tool = "run_society_simulation"
@@ -483,14 +515,14 @@ def _verdict_from_plan(
             )
         )
 
-    output_intent = output_from_prompt(prompt)
     if output_intent is not None:
         slots = upsert_output_slot(slots, output_intent)
-    reform_intent = reform_intent_from_prompt(prompt)
     slots = upsert_prompt_year(tool, slots, prompt)
     slots = normalise_slot_grounding(tool, slots)
     slots = complete_slots(tool, slots)
     unmodellable = _unmodellable_outputs_from_plan(plan, prompt)
+    if effect_match is not None and not unmodellable:
+        unmodellable.append(effect_match.group(0))
     result = gate(
         in_domain,
         tool,

@@ -742,6 +742,73 @@ class TestGatewayDecisionEvidence:
         assert verdict.outcome == "needs_plan"
         assert set(verdict.gating_slots) == {"reform", "output"}
 
+    @pytest.mark.parametrize(
+        ("prompt", "domain_status", "capability_status", "tool", "outcome"),
+        [
+            (
+                "What will UK inflation be next year?",
+                "unrelated",
+                "explicitly_unmodellable",
+                "none",
+                "out_of_scope",
+            ),
+            (
+                "How many people would stop working if we doubled Universal Credit?",
+                "uk_or_unspecified",
+                "supported",
+                "none",
+                "out_of_scope",
+            ),
+            (
+                "How would raising the income tax personal allowance to £15,000 affect inflation?",
+                "uk_or_unspecified",
+                "explicitly_unmodellable",
+                "none",
+                "partial",
+            ),
+            (
+                "Model a wealth tax.",
+                "uk_or_unspecified",
+                "supported",
+                "list_reform_targets",
+                "needs_plan",
+            ),
+        ],
+    )
+    def test_normalises_live_admissibility_edge_cases(
+        self,
+        prompt,
+        domain_status,
+        capability_status,
+        tool,
+        outcome,
+    ):
+        from gateway import runtime as gateway
+
+        effect = gateway._UNMODELLABLE_EFFECT_RE.search(prompt)
+        plan = {
+            "domain_status": domain_status,
+            "domain_evidence": prompt if domain_status == "unrelated" else None,
+            "capability_status": capability_status,
+            "capability_evidence": effect.group(0) if effect else None,
+            "tool": tool,
+            "slots": [],
+            "unmodellable_outputs": [],
+            "catalogue_queries": [],
+        }
+
+        verdict = gateway._verdict_from_plan(
+            plan,
+            prompt,
+            gateway.CatalogueEvidence(available=True),
+        )
+
+        assert verdict.outcome == outcome
+        if prompt == "Model a wealth tax.":
+            assert verdict.tool == "run_society_simulation"
+        if outcome in {"out_of_scope", "partial"}:
+            assert verdict.unmodellable_outputs
+
     def test_accepts_exactly_quoted_negative_decisions(self):
         from gateway import runtime as gateway
 
