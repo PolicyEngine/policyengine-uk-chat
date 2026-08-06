@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import json
 from dataclasses import dataclass, field, replace
 from typing import List, Optional
 
@@ -39,6 +40,7 @@ from gateway.intent import (
     reform_intent_from_prompt,
     upsert_output_slot,
 )
+from gateway.execution import GatewayExecutionPlan, build_execution_plan
 from gateway.policy import (
     CapabilityDecision,
     DomainDecision,
@@ -103,6 +105,7 @@ class GatewayVerdict:
     reform_intent: ReformIntent | None = None
     reform_assessment: ReformAssessment | None = None
     catalogue_recovery_used: bool = False
+    execution_plan: GatewayExecutionPlan | None = None
 
     @property
     def gating_slots(self) -> List[str]:
@@ -572,6 +575,17 @@ def _assess_ready_reform(
         or verdict.tool not in _SOCIETY_REFORM_TOOLS
         or verdict.reform_intent is None
     ):
+        if verdict.outcome == "ready":
+            return replace(
+                verdict,
+                execution_plan=build_execution_plan(
+                    verdict.tool,
+                    verdict.slots,
+                    verdict.reform_intent,
+                    prompt,
+                    verdict.reform_assessment,
+                ),
+            )
         return verdict
     assessment = assess_reform_with_catalogue(
         prompt,
@@ -609,7 +623,16 @@ def _assess_ready_reform(
                 )
             ],
         )
-    return verdict
+    return replace(
+        verdict,
+        execution_plan=build_execution_plan(
+            verdict.tool,
+            verdict.slots,
+            verdict.reform_intent,
+            prompt,
+            assessment,
+        ),
+    )
 
 
 def run_gateway(last_user_message: str) -> GatewayVerdict:
@@ -714,6 +737,54 @@ def gateway_writer_directive(verdict: GatewayVerdict) -> str:
 def serialise_plan_for_system(verdict: GatewayVerdict) -> str:
     """Compact plan text injected into the compute system blocks for `ready`, so
     the heavy model starts from the resolved tool + grounded args."""
+    execution = verdict.execution_plan
+    if execution is not None:
+        lines = ["GATEWAY EXECUTION PLAN (validated opening-turn contract):"]
+        if execution.prerequisites:
+            ordered = [*execution.prerequisites, execution.target_tool]
+            lines.append("Required tool order: " + " -> ".join(ordered) + ".")
+        elif execution.target_tool:
+            lines.append(f"Requested target analysis: {execution.target_tool}.")
+        if execution.inputs:
+            lines.append(
+                "Resolved inputs: "
+                + "; ".join(
+                    f"{item.name}={item.value} ({item.source})"
+                    for item in execution.inputs
+                )
+                + "."
+            )
+        if verdict.reform_intent is not None:
+            lines.append(
+                "Exact user reform wording: " + verdict.reform_intent.evidence + "."
+            )
+        if execution.approved_reform is not None:
+            lines.append(
+                "Use this exact validated reform JSON without modification: "
+                + json.dumps(execution.approved_reform, sort_keys=True)
+                + "."
+            )
+        if execution.parameter_bindings:
+            lines.append("Validated parameter bindings:")
+            lines.extend(
+                f"- {binding.label}: `{binding.parameter_path}`"
+                for binding in execution.parameter_bindings
+            )
+        if execution.conventions:
+            lines.append(
+                "Product conventions: "
+                + "; ".join(
+                    f"{item.name}={item.value}" for item in execution.conventions
+                )
+                + "."
+            )
+        if "run_society_simulation" in execution.prerequisites:
+            lines.append(
+                "Runtime handoff: pass the result_id returned by "
+                "run_society_simulation as simulation_id to the target derivative."
+            )
+        return "\n".join(lines)
+
     grounded = [
         f"{s.name}={s.value}"
         for s in verdict.slots

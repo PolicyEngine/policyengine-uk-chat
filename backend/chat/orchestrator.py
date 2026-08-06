@@ -242,6 +242,14 @@ async def run_chat_turn(
                         None, run_gateway, last_user_text(conversation)
                     )
                 route = verdict.route
+                if (
+                    verdict.execution_plan is not None
+                    and verdict.execution_plan.approved_reform is not None
+                ):
+                    tool_context.approved_reform = dict(
+                        verdict.execution_plan.approved_reform
+                    )
+                    tool_context.require_approved_reform = True
 
             annotate(gateway_route=route)
             if verdict is not None:
