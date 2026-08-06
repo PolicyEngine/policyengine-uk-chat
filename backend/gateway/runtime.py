@@ -140,59 +140,46 @@ _EMIT_PLAN_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "domain": {
-                "type": "object",
+            "domain_status": {
+                "type": "string",
+                "enum": [
+                    "uk_or_unspecified",
+                    "explicit_non_uk",
+                    "unrelated",
+                ],
                 "description": (
                     "Whether the request is UK tax-benefit work, explicitly "
-                    "non-UK, or unrelated. Negative decisions require an exact "
-                    "quote from the user's message."
+                    "non-UK, or unrelated."
                 ),
-                "properties": {
-                    "status": {
-                        "type": "string",
-                        "enum": [
-                            "uk_or_unspecified",
-                            "explicit_non_uk",
-                            "unrelated",
-                        ],
-                    },
-                    "evidence": {
-                        "type": "string",
-                        "maxLength": 300,
-                        "description": (
-                            "An exact quote supporting explicit_non_uk or "
-                            "unrelated; omit for uk_or_unspecified."
-                        ),
-                    },
-                },
-                "required": ["status"],
             },
-            "capability": {
-                "type": "object",
+            "domain_evidence": {
+                "type": "string",
+                "maxLength": 300,
+                "description": (
+                    "An exact quote supporting explicit_non_uk or unrelated; "
+                    "omit for uk_or_unspecified."
+                ),
+            },
+            "capability_status": {
+                "type": "string",
+                "enum": [
+                    "supported",
+                    "catalogue_uncertain",
+                    "explicitly_unmodellable",
+                ],
                 "description": (
                     "Whether the requested work is supported, needs catalogue "
                     "confirmation, or explicitly asks only for an unmodellable "
-                    "effect. Non-supported decisions require an exact quote."
+                    "effect."
                 ),
-                "properties": {
-                    "status": {
-                        "type": "string",
-                        "enum": [
-                            "supported",
-                            "catalogue_uncertain",
-                            "explicitly_unmodellable",
-                        ],
-                    },
-                    "evidence": {
-                        "type": "string",
-                        "maxLength": 300,
-                        "description": (
-                            "An exact quote supporting catalogue_uncertain or "
-                            "explicitly_unmodellable; omit for supported."
-                        ),
-                    },
-                },
-                "required": ["status"],
+            },
+            "capability_evidence": {
+                "type": "string",
+                "maxLength": 300,
+                "description": (
+                    "An exact quote supporting catalogue_uncertain or "
+                    "explicitly_unmodellable; omit for supported."
+                ),
             },
             "tool": {
                 "type": "string",
@@ -275,8 +262,8 @@ _EMIT_PLAN_TOOL = {
             "rationale": {"type": "string"},
         },
         "required": [
-            "domain",
-            "capability",
+            "domain_status",
+            "capability_status",
             "tool",
             "slots",
             "catalogue_queries",
@@ -296,6 +283,11 @@ def _catalogue_queries_from_plan(
         if not isinstance(item, dict):
             continue
         kind = item.get("kind")
+        selected_tool = plan.get("tool")
+        if selected_tool in {"get_parameter", "list_reform_targets"}:
+            kind = "reform_target"
+        elif selected_tool in {"get_variable", "search_variables"}:
+            kind = "variable"
         query = item.get("query")
         if kind not in ("reform_target", "variable") or not isinstance(query, str):
             continue
@@ -331,14 +323,17 @@ def _validated_quote(value: object, prompt: str) -> str | None:
 
 def _domain_from_plan(plan: dict, prompt: str) -> DomainDecision:
     raw = plan.get("domain")
-    if not isinstance(raw, dict):
-        return DomainDecision()
-    status = raw.get("status")
+    if isinstance(raw, dict):
+        status = raw.get("status")
+        raw_evidence = raw.get("evidence")
+    else:
+        status = plan.get("domain_status")
+        raw_evidence = plan.get("domain_evidence")
     if status == "uk_or_unspecified":
         return DomainDecision()
     if status not in ("explicit_non_uk", "unrelated"):
         return DomainDecision()
-    evidence = _validated_quote(raw.get("evidence"), prompt)
+    evidence = _validated_quote(raw_evidence, prompt)
     if evidence is None:
         return DomainDecision()
     return DomainDecision(status=status, evidence=evidence)
@@ -346,14 +341,17 @@ def _domain_from_plan(plan: dict, prompt: str) -> DomainDecision:
 
 def _capability_from_plan(plan: dict, prompt: str) -> CapabilityDecision:
     raw = plan.get("capability")
-    if not isinstance(raw, dict):
-        return CapabilityDecision()
-    status = raw.get("status")
+    if isinstance(raw, dict):
+        status = raw.get("status")
+        raw_evidence = raw.get("evidence")
+    else:
+        status = plan.get("capability_status")
+        raw_evidence = plan.get("capability_evidence")
     if status == "supported":
         return CapabilityDecision()
     if status not in ("catalogue_uncertain", "explicitly_unmodellable"):
         return CapabilityDecision()
-    evidence = _validated_quote(raw.get("evidence"), prompt)
+    evidence = _validated_quote(raw_evidence, prompt)
     if evidence is None:
         return CapabilityDecision()
     if status == "explicitly_unmodellable" and not _UNMODELLABLE_EFFECT_RE.search(
@@ -453,6 +451,17 @@ def _verdict_from_plan(
     in_domain = domain.status == "uk_or_unspecified"
     raw_tool = plan.get("tool")
     tool = raw_tool if raw_tool in _TOOL_NAMES else None
+    if (
+        tool is None
+        and in_domain
+        and capability.status == "supported"
+        and re.search(
+            r"\bmodel\b.*\b(?:tax|levy|benefit|allowance|credit|rate|threshold|reform|policy)\b",
+            prompt,
+            re.I,
+        )
+    ):
+        tool = "run_society_simulation"
 
     slots: List[SlotFact] = []
     for s in plan.get("slots") or []:

@@ -216,6 +216,33 @@ def test_plan_schema_requires_bounded_catalogue_queries():
     ]
 
 
+def test_parameter_tool_corrects_classifier_variable_query_kind():
+    from gateway.runtime import _catalogue_queries_from_plan
+
+    prompt = "What is the basic rate threshold in 2025?"
+    queries = _catalogue_queries_from_plan(
+        {
+            "tool": "get_parameter",
+            "catalogue_queries": [
+                {
+                    "kind": "variable",
+                    "query": "basic rate threshold",
+                    "evidence": "basic rate threshold",
+                }
+            ],
+        },
+        prompt,
+    )
+
+    assert queries == (
+        CatalogueQuery(
+            "reform_target",
+            "basic rate threshold",
+            "basic rate threshold",
+        ),
+    )
+
+
 def test_resolver_normalises_duplicate_blank_and_excess_queries():
     queries = [
         CatalogueQuery("reform_target", " Capital gains tax "),

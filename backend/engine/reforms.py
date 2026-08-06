@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping
 from difflib import get_close_matches
 from typing import Any, Dict, List, Optional
@@ -52,6 +53,16 @@ COMMON_REFORM_TARGETS = {
         "UC standard allowance single over 25",
     ),
 }
+
+_SEARCH_STOP_WORDS = {"a", "an", "for", "of", "on", "the", "to"}
+
+
+def _search_tokens(value: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", value.casefold())
+        if token not in _SEARCH_STOP_WORDS
+    }
 
 
 class ReformValidationError(ValueError):
@@ -150,8 +161,9 @@ def validate_reform_dict(
 def search_reform_targets(query: str = "", limit: int = 25) -> list[dict[str, Any]]:
     """Search reformable parameter paths by path, label, description, or alias."""
 
-    query_norm = (query or "").strip().lower()
-    rows: list[dict[str, Any]] = []
+    query_norm = " ".join(re.findall(r"[a-z0-9]+", (query or "").casefold()))
+    query_tokens = _search_tokens(query_norm)
+    ranked_rows: list[tuple[int, str, dict[str, Any]]] = []
     try:
         parameters = uk_model_version().parameters_by_name.items()
     except Exception:
@@ -161,19 +173,42 @@ def search_reform_targets(query: str = "", limit: int = 25) -> list[dict[str, An
         label = label or path
         description = getattr(parameter, "description", None) if parameter is not None else None
         aliases = COMMON_REFORM_TARGETS.get(path, ())
-        haystack = " ".join([path, label or "", description or "", *aliases]).lower()
-        if query_norm and query_norm not in haystack:
-            close = get_close_matches(query_norm, [path.lower(), label.lower()], n=1, cutoff=0.65)
-            if not close:
+        fields = [path, label or "", description or "", *aliases]
+        field_texts = [
+            " ".join(re.findall(r"[a-z0-9]+", field.casefold()))
+            for field in fields
+            if field
+        ]
+        field_tokens = [(field, _search_tokens(field)) for field in field_texts]
+        rank = 5
+        if query_norm:
+            if query_norm in field_texts:
+                rank = 0
+            elif any(query_tokens == tokens for _field, tokens in field_tokens):
+                rank = 1
+            elif any(query_norm in field for field in field_texts):
+                rank = 2
+            elif any(
+                query_tokens.issubset(tokens) or tokens.issubset(query_tokens)
+                for _field, tokens in field_tokens
+                if len(tokens) >= 2
+            ):
+                rank = 3
+            elif get_close_matches(query_norm, field_texts, n=1, cutoff=0.65):
+                rank = 4
+            else:
                 continue
-        rows.append(
-            {
-                "path": path,
-                "label": label,
-                "description": description,
-                "aliases": list(aliases),
-            }
+        ranked_rows.append(
+            (
+                rank,
+                path,
+                {
+                    "path": path,
+                    "label": label,
+                    "description": description,
+                    "aliases": list(aliases),
+                },
+            )
         )
-        if len(rows) >= limit:
-            break
-    return rows
+    ranked_rows.sort(key=lambda item: (item[0], item[1]))
+    return [row for _rank, _path, row in ranked_rows[:limit]]

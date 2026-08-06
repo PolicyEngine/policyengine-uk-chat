@@ -687,15 +687,61 @@ class TestGatewaySystemPrompt:
 
         schema = gateway._EMIT_PLAN_TOOL["input_schema"]
 
-        assert "domain" in schema["required"]
-        assert "capability" in schema["required"]
-        assert schema["properties"]["domain"]["required"] == ["status"]
-        assert schema["properties"]["capability"]["required"] == ["status"]
-        assert "exact quote" in schema["properties"]["domain"]["description"]
-        assert "exact quote" in schema["properties"]["capability"]["description"]
+        assert "domain_status" in schema["required"]
+        assert "capability_status" in schema["required"]
+        assert schema["properties"]["domain_status"]["type"] == "string"
+        assert schema["properties"]["capability_status"]["type"] == "string"
+        assert "exact quote" in schema["properties"]["domain_evidence"]["description"]
+        assert "exact quote" in schema["properties"]["capability_evidence"]["description"]
 
 
 class TestGatewayDecisionEvidence:
+    def test_accepts_flat_grounded_decisions(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "domain_status": "explicit_non_uk",
+            "domain_evidence": "US federal",
+            "capability_status": "catalogue_uncertain",
+            "capability_evidence": "federal income tax",
+            "tool": "none",
+            "slots": [],
+            "catalogue_queries": [],
+        }
+
+        verdict = gateway._verdict_from_plan(
+            plan,
+            "How would US federal income tax change?",
+            gateway.CatalogueEvidence(available=True),
+        )
+
+        assert verdict.domain.status == "explicit_non_uk"
+        assert verdict.domain.evidence == "US federal"
+        assert verdict.capability.status == "catalogue_uncertain"
+        assert verdict.capability.evidence == "federal income tax"
+        assert verdict.outcome == "irrelevant"
+
+    def test_modelled_policy_without_details_gets_society_tool_before_gating(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "domain_status": "uk_or_unspecified",
+            "capability_status": "supported",
+            "tool": "none",
+            "slots": [],
+            "catalogue_queries": [],
+        }
+
+        verdict = gateway._verdict_from_plan(
+            plan,
+            "Model a wealth tax.",
+            gateway.CatalogueEvidence(available=True),
+        )
+
+        assert verdict.tool == "run_society_simulation"
+        assert verdict.outcome == "needs_plan"
+        assert set(verdict.gating_slots) == {"reform", "output"}
+
     def test_accepts_exactly_quoted_negative_decisions(self):
         from gateway import runtime as gateway
 
