@@ -307,6 +307,8 @@ def test_matching_catalogue_evidence_preserves_partial_outcome():
 
 
 def test_unresolved_catalogue_query_asks_for_clarification():
+    from gateway.clarifications import render_clarification
+
     query = CatalogueQuery("reform_target", "made up levy")
     verdict = GatewayVerdict(outcome="ready", route="compute")
 
@@ -318,9 +320,9 @@ def test_unresolved_catalogue_query_asks_for_clarification():
     assert resolved.outcome == "needs_plan"
     assert resolved.route == "lightweight"
     assert "model_catalogue" in resolved.gating_slots
-    directive = gateway_writer_directive(resolved)
-    assert "made up levy" in directive
-    assert "not say that it is unmodelled" in directive
+    clarification = render_clarification(resolved)
+    assert "supported PolicyEngine parameter" in clarification
+    assert "made up levy" not in clarification
 
 
 def test_unresolved_catalogue_query_preserves_partial_limitation():
@@ -434,12 +436,21 @@ def test_unresolved_classifier_query_defers_to_model_reform_assessment():
 
 
 def test_compute_context_gets_paths_but_lightweight_context_gets_labels_only():
+    from gateway.clarifications import render_clarification
+
     verdict = GatewayVerdict(
         outcome="needs_plan",
         route="lightweight",
+        gating_reasons=[
+            GatingReason(
+                "catalogue_choice",
+                "reform",
+                options=("Capital gains tax basic rate",),
+            )
+        ],
         catalogue_evidence=_evidence(_match()),
     )
-    lightweight = gateway_writer_directive(verdict)
+    lightweight = render_clarification(verdict)
     assert "Capital gains tax basic rate" in lightweight
     assert "gov.hmrc.cgt.basic_rate" not in lightweight
 

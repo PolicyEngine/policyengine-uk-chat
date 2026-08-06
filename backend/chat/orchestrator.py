@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from functools import partial
 from typing import Any, Dict, List
 
@@ -23,6 +24,14 @@ from policyengine_observability import segment
 
 from config import DEFAULT_FAST_MODEL, DEFAULT_TEMPERATURE, get_async_client
 from gateway import run_gateway, serialise_plan_for_system
+from gateway.clarifications import render_clarification
+from gateway.proposals import (
+    ProposalSigningError,
+    append_proposal_marker,
+    proposal_payload_from_verdict,
+    resume_gateway_proposal,
+    strip_proposal_markers_from_conversation,
+)
 from observability.segments import SegmentName
 from tools.context import new_tool_context
 from tools.dispatch import execute_tool
@@ -233,15 +242,95 @@ async def run_chat_turn(
             session_id=turn.session_id,
         ), capture_turn_errors():
             annotate(session_id=turn.session_id, charts_mode=turn.charts_mode)
-            client = get_async_client()
+            if await is_cancelled():
+                yield cancelled_event()
+                return
 
-            if not is_followup(conversation):
-                loop = asyncio.get_running_loop()
+            loop = asyncio.get_running_loop()
+            proposal_error: str | None = None
+            if is_followup(conversation):
+                try:
+                    verdict = await loop.run_in_executor(
+                        None,
+                        partial(
+                            resume_gateway_proposal,
+                            conversation,
+                            session_id=turn.session_id,
+                        ),
+                    )
+                except ProposalSigningError:
+                    logger.warning(
+                        "[GATEWAY] Session %s supplied an invalid proposal marker",
+                        turn.session_id,
+                    )
+                    proposal_error = (
+                        "I couldn’t verify the earlier reform proposal. Please "
+                        "restate the policy change you want me to model."
+                    )
+            else:
                 async with asegment(SegmentName.GATEWAY_CLASSIFY):
                     verdict = await loop.run_in_executor(
                         None, run_gateway, last_user_text(conversation)
                     )
+
+            if verdict is not None:
                 route = verdict.route
+
+            clarification: str | None = proposal_error
+            if verdict is not None and verdict.outcome == "needs_plan":
+                clarification = render_clarification(verdict)
+                if clarification is None:
+                    logger.warning(
+                        "[GATEWAY] Unrenderable reasons; failing open to compute: %s",
+                        verdict.gating_reasons,
+                    )
+                    unresolved_reform = (
+                        verdict.reform_intent is not None
+                        and verdict.reform_assessment is None
+                    )
+                    verdict = replace(
+                        verdict,
+                        outcome="ready",
+                        route="compute",
+                        gating_reasons=[],
+                    )
+                    route = "compute"
+                    if unresolved_reform:
+                        tool_context.require_approved_reform = True
+                        tool_context.approved_reform = None
+                elif any(
+                    reason.code == "confirm_reform"
+                    for reason in verdict.gating_reasons
+                ):
+                    clarification = append_proposal_marker(
+                        clarification,
+                        proposal_payload_from_verdict(verdict),
+                        session_id=turn.session_id,
+                        source_prompt=last_user_text(conversation),
+                    )
+
+            if clarification is not None:
+                route = "lightweight"
+                if await is_cancelled():
+                    yield cancelled_event()
+                    return
+                mark_ttft_attribute()
+                ttft_recorded = True
+                terminal_stop_reason = "gateway_clarification"
+                annotate_turn(terminal_stop_reason)
+                yield TextChunk(clarification)
+                yield TurnCompleted(
+                    content=clarification,
+                    session_id=turn.session_id,
+                    model=None,
+                    route=route,
+                    outcome="needs_plan",
+                    stop_reason=terminal_stop_reason,
+                    usage=usage(),
+                )
+                return
+
+            if verdict is not None:
                 if (
                     verdict.execution_plan is not None
                     and verdict.execution_plan.approved_reform is not None
@@ -250,6 +339,9 @@ async def run_chat_turn(
                         verdict.execution_plan.approved_reform
                     )
                     tool_context.require_approved_reform = True
+
+            conversation = strip_proposal_markers_from_conversation(conversation)
+            client = get_async_client()
 
             annotate(gateway_route=route)
             if verdict is not None:

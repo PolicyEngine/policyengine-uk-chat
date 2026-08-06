@@ -7,7 +7,18 @@ from gateway.proposals import (
     append_proposal_marker,
     decode_proposal_marker,
     extract_proposal_marker,
+    proposal_payload_from_verdict,
+    resume_gateway_proposal,
+    strip_proposal_markers_from_conversation,
 )
+from gateway.assessment import (
+    ReformAlternative,
+    ReformAssessment,
+    ValidatedParameterBinding,
+)
+from gateway.intent import ReformIntent
+from gateway.policy import GatingReason, SlotFact
+from gateway.runtime import GatewayVerdict
 
 
 KEY = "test-signing-key-that-is-at-least-32-bytes-long"
@@ -115,3 +126,113 @@ def test_signing_key_is_required_and_long_enough():
             source_prompt="prompt",
             signing_key="short",
         )
+
+
+def _low_confidence_verdict():
+    best = ValidatedParameterBinding("path.best", "Best label", "best")
+    other = ValidatedParameterBinding("path.other", "Other label", "other")
+    assessment = ReformAssessment(
+        reform={"path.best": 0.21},
+        summary="Best proposal",
+        confidence=72,
+        parameter_bindings=(best,),
+        alternatives=(
+            ReformAlternative("Other proposal", (other,), {"path.other": 0.22}),
+        ),
+        search_queries=("basic rate",),
+        catalogue_version="test-version",
+    )
+    return GatewayVerdict(
+        outcome="needs_plan",
+        route="lightweight",
+        tool="run_society_simulation",
+        slots=[
+            SlotFact("output", "prompt", kind="output", value="budgetary_impact")
+        ],
+        gating_reasons=[GatingReason("confirm_reform", "reform")],
+        reform_intent=ReformIntent(
+            policy_phrase="basic rate",
+            action="increase",
+            amount="one percentage point",
+            scope="unspecified",
+            evidence="increasing the basic rate by one percentage point",
+        ),
+        reform_assessment=assessment,
+    )
+
+
+def _proposal_conversation(reply="yes"):
+    prompt = "What is the cost of increasing the basic rate by one percentage point?"
+    payload = proposal_payload_from_verdict(_low_confidence_verdict())
+    assistant = append_proposal_marker(
+        "I would model this as increasing “Best label” by one percentage point.",
+        payload,
+        session_id="session-1",
+        source_prompt=prompt,
+        signing_key=KEY,
+    )
+    return [
+        {"role": "user", "content": prompt},
+        {"role": "assistant", "content": assistant},
+        {"role": "user", "content": reply},
+    ]
+
+
+def test_affirmative_followup_reuses_exact_proposal(monkeypatch):
+    import gateway.assessment as assessment
+
+    monkeypatch.setattr(assessment, "current_catalogue_version", lambda: "test-version")
+
+    verdict = resume_gateway_proposal(
+        _proposal_conversation(),
+        session_id="session-1",
+        signing_key=KEY,
+    )
+
+    assert verdict.outcome == "ready"
+    assert verdict.proposal_resumed is True
+    assert verdict.execution_plan.approved_reform == {"path.best": 0.21}
+    assert verdict.reform_assessment.confidence == 72
+
+
+def test_ordinal_followup_reuses_exact_alternative(monkeypatch):
+    import gateway.assessment as assessment
+
+    monkeypatch.setattr(assessment, "current_catalogue_version", lambda: "test-version")
+
+    verdict = resume_gateway_proposal(
+        _proposal_conversation("the first option"),
+        session_id="session-1",
+        signing_key=KEY,
+    )
+
+    assert verdict.execution_plan.approved_reform == {"path.other": 0.22}
+
+
+def test_proposal_markers_are_removed_before_model_calls():
+    conversation = _proposal_conversation("maybe")
+
+    cleaned = strip_proposal_markers_from_conversation(conversation)
+
+    assert "pe-proposal" in conversation[1]["content"]
+    assert "pe-proposal" not in cleaned[1]["content"]
+    assert "Best label" in cleaned[1]["content"]
+
+
+def test_consumed_proposal_is_not_reopened_by_later_followup():
+    conversation = _proposal_conversation("yes")
+    conversation.extend(
+        [
+            {"role": "assistant", "content": "The calculated result."},
+            {"role": "user", "content": "What about poverty?"},
+        ]
+    )
+
+    assert (
+        resume_gateway_proposal(
+            conversation,
+            session_id="session-1",
+            signing_key=KEY,
+        )
+        is None
+    )

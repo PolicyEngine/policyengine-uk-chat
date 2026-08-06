@@ -714,7 +714,7 @@ class TestGatewayDecisionEvidence:
 
 
 class TestWriterDirective:
-    def test_needs_plan_lists_slots(self):
+    def test_needs_plan_has_no_model_writer_directive(self):
         from gateway import runtime as gateway
         v = gateway.GatewayVerdict(
             outcome="needs_plan",
@@ -724,8 +724,7 @@ class TestWriterDirective:
                 gateway.GatingReason("missing_output", "output"),
             ],
         )
-        d = gateway.gateway_writer_directive(v)
-        assert "reform" in d and "output" in d
+        assert gateway.gateway_writer_directive(v) == ""
 
     def test_partial_lists_unmodellable(self):
         from gateway import runtime as gateway

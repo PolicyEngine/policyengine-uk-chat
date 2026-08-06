@@ -33,9 +33,9 @@ generous, or similar.
 def lightweight_system(scope_descriptor: str) -> str:
     """Lean no-computation system prompt, parameterised by the scope descriptor.
 
-    Used as the base for the gateway's non-`ready` outcomes (irrelevant,
-    out_of_scope, partial, needs_plan); a per-outcome directive is appended at
-    request time.
+    Used as the base for model-written non-`ready` outcomes (irrelevant,
+    out_of_scope, partial); a per-outcome directive is appended at request
+    time. `needs_plan` is rendered deterministically without a model call.
     """
     return _LIGHTWEIGHT_INSTRUCTIONS + "\n\n" + scope_descriptor.strip()
 
@@ -177,11 +177,4 @@ part you CAN compute and the part you cannot (named below). A named policy
 measure or variable also needs clarification: ask what supported measure or
 variable the user means before offering to run the modellable part. Do not run
 anything yet.
-""".strip()
-
-GATEWAY_NEEDS_PLAN_DIRECTIVE = """
-The question is in scope but under-specified on the points listed below. Ask 1-3
-concise clarifying questions targeting exactly those points, as a numbered list,
-with no preamble beyond one short lead-in sentence. Do not answer or compute yet
-— you will continue once the user replies.
 """.strip()

@@ -55,7 +55,6 @@ from prompts import (
     DEFAULT_SCOPE_DESCRIPTOR,
     GATEWAY_CATALOGUE_RECOVERY_DIRECTIVE,
     GATEWAY_IRRELEVANT_DIRECTIVE,
-    GATEWAY_NEEDS_PLAN_DIRECTIVE,
     GATEWAY_OUT_OF_SCOPE_DIRECTIVE,
     GATEWAY_PARTIAL_CATALOGUE_DIRECTIVE,
     GATEWAY_PARTIAL_DIRECTIVE,
@@ -106,6 +105,7 @@ class GatewayVerdict:
     reform_assessment: ReformAssessment | None = None
     catalogue_recovery_used: bool = False
     execution_plan: GatewayExecutionPlan | None = None
+    proposal_resumed: bool = False
 
     @property
     def gating_slots(self) -> List[str]:
@@ -693,13 +693,11 @@ _WRITER_DIRECTIVES = {
     "irrelevant": GATEWAY_IRRELEVANT_DIRECTIVE,
     "out_of_scope": GATEWAY_OUT_OF_SCOPE_DIRECTIVE,
     "partial": GATEWAY_PARTIAL_DIRECTIVE,
-    "needs_plan": GATEWAY_NEEDS_PLAN_DIRECTIVE,
 }
 
 
 def gateway_writer_directive(verdict: GatewayVerdict) -> str:
-    """Per-outcome directive plus concrete facts, appended to the lightweight
-    system for the single no-tool reply turn on a non-`ready` outcome."""
+    """Return model-writer instructions for non-clarification outcomes."""
     evidence = verdict.catalogue_evidence
     if verdict.outcome == "partial" and evidence and evidence.unresolved_queries:
         directive = GATEWAY_PARTIAL_CATALOGUE_DIRECTIVE
@@ -710,12 +708,6 @@ def gateway_writer_directive(verdict: GatewayVerdict) -> str:
     parts = [directive]
     if verdict.outcome == "partial" and verdict.unmodellable_outputs:
         parts.append("Cannot model: " + ", ".join(verdict.unmodellable_outputs) + ".")
-    if verdict.outcome == "needs_plan" and verdict.gating_slots:
-        parts.append(
-            "Under-specified points to clarify: "
-            + ", ".join(verdict.gating_slots)
-            + "."
-        )
     if evidence and evidence.unresolved_queries:
         queries = ", ".join(query.query for query in evidence.unresolved_queries)
         parts.append(
@@ -723,13 +715,6 @@ def gateway_writer_directive(verdict: GatewayVerdict) -> str:
             + queries
             + ". Ask what supported policy measure or variable the user means; "
             "do not say that it is unmodelled."
-        )
-    elif evidence and evidence.matches and verdict.outcome == "needs_plan":
-        labels = ", ".join(dict.fromkeys(match.label for match in evidence.matches))
-        parts.append(
-            "Relevant model catalogue candidates (use labels, not internal paths): "
-            + labels
-            + "."
         )
     return "\n\n".join(parts)
 

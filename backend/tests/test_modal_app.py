@@ -248,6 +248,7 @@ def test_deploy_workflows_reuse_modal_secret_and_smoke_test_scripts():
 
     for workflow in (production, preview):
         assert "run: .github/scripts/sync-modal-secret.sh" in workflow
+        assert "GATEWAY_PROPOSAL_SIGNING_KEY" in workflow
         assert "run: .github/scripts/smoke-test-modal-backend.sh" in workflow
         assert workflow.count(
             "UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}"
