@@ -336,6 +336,7 @@ def gate(
     prompt: str = "",
     *,
     explicitly_unmodellable: bool = False,
+    reform_intent: object | None = None,
 ) -> GateResult:
     """Deterministically map a grounded plan to one of the five outcomes.
 
@@ -363,7 +364,12 @@ def gate(
         # proceeds. Both are lightweight, so neither wrongly refuses.
         return GateResult("partial")
 
-    gating = [_gating_reason(s) for s in slots if slot_gates(tool, s, prompt)]
+    gating = [
+        _gating_reason(slot)
+        for slot in slots
+        if slot_gates(tool, slot, prompt)
+        and not (slot.name == "reform" and reform_intent is not None)
+    ]
     if gating:
         return GateResult("needs_plan", gating)
     return GateResult("ready")

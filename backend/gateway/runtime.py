@@ -26,6 +26,12 @@ from gateway.catalogue import (
     CatalogueQuery,
     resolve_catalogue_queries,
 )
+from gateway.intent import (
+    ReformIntent,
+    output_from_prompt,
+    reform_intent_from_prompt,
+    upsert_output_slot,
+)
 from gateway.policy import (
     CapabilityDecision,
     DomainDecision,
@@ -87,6 +93,7 @@ class GatewayVerdict:
     catalogue_evidence: CatalogueEvidence | None = None
     domain: DomainDecision = field(default_factory=DomainDecision)
     capability: CapabilityDecision = field(default_factory=CapabilityDecision)
+    reform_intent: ReformIntent | None = None
 
     @property
     def gating_slots(self) -> List[str]:
@@ -446,6 +453,10 @@ def _verdict_from_plan(
             )
         )
 
+    output_intent = output_from_prompt(prompt)
+    if output_intent is not None:
+        slots = upsert_output_slot(slots, output_intent)
+    reform_intent = reform_intent_from_prompt(prompt)
     slots = normalise_slot_grounding(tool, slots)
     slots = complete_slots(tool, slots)
     unmodellable = _unmodellable_outputs_from_plan(plan, prompt)
@@ -456,6 +467,7 @@ def _verdict_from_plan(
         unmodellable,
         prompt,
         explicitly_unmodellable=(capability.status == "explicitly_unmodellable"),
+        reform_intent=reform_intent,
     )
     verdict = GatewayVerdict(
         outcome=result.outcome,
@@ -466,6 +478,7 @@ def _verdict_from_plan(
         unmodellable_outputs=unmodellable,
         domain=domain,
         capability=capability,
+        reform_intent=reform_intent,
     )
     return apply_catalogue_evidence(verdict, catalogue_evidence)
 

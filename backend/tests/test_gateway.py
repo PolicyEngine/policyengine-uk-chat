@@ -299,6 +299,51 @@ def _raises(*_a, **_k):
 
 
 class TestRunGateway:
+    def test_deterministic_intent_completes_omitted_reform_and_output(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "domain": {"status": "uk_or_unspecified"},
+            "capability": {"status": "supported"},
+            "tool": "run_society_simulation",
+            "slots": [],
+            "unmodellable_outputs": [],
+            "catalogue_queries": [],
+        }
+        prompt = "What is the annual cost of increasing the personal allowance by £500?"
+
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(prompt)
+
+        assert verdict.outcome == "ready"
+        assert verdict.gating_slots == []
+        assert verdict.reform_intent is not None
+        assert verdict.reform_intent.evidence == "increasing the personal allowance by £500"
+        output = next(slot for slot in verdict.slots if slot.kind == "output")
+        assert output.value == "budgetary_impact"
+
+    def test_explicit_plural_reform_scope_survives_gateway_normalisation(self):
+        from gateway import runtime as gateway
+
+        plan = {
+            "domain": {"status": "uk_or_unspecified"},
+            "capability": {"status": "supported"},
+            "tool": "run_society_simulation",
+            "slots": [],
+            "unmodellable_outputs": [],
+            "catalogue_queries": [],
+        }
+        prompt = (
+            "What is the annual revenue from increasing all employee National "
+            "Insurance rates by one percentage point?"
+        )
+
+        with patch.object(gateway, "get_sync_client", lambda: _stub_client(plan)):
+            verdict = gateway.run_gateway(prompt)
+
+        assert verdict.outcome == "ready"
+        assert verdict.reform_intent.scope == "all"
+
     def test_parses_ready(self):
         from gateway import runtime as gateway
         plan = {
