@@ -645,9 +645,10 @@ class TestChatRouteWithMockedAnthropic:
         assert turn_log["stop_reason"] == "client_disconnected"
         assert turn_log["session_id"] == "disconnect-session"
         assert turn_log["iterations"] == 0
-        assert turn_log["timing_counts"]["model.select"] == 1
-        assert turn_log["timing_counts"]["system.build"] == 1
-        assert turn_log["timing_counts"]["tool_schema.build"] == 1
+        assert "gateway.classify" not in turn_log["timing_counts"]
+        assert "model.select" not in turn_log["timing_counts"]
+        assert "system.build" not in turn_log["timing_counts"]
+        assert "tool_schema.build" not in turn_log["timing_counts"]
 
         disconnect_event = next(
             payload
