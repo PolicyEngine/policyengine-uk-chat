@@ -37,6 +37,7 @@ services:
       - DB_USERNAME=${DB_USERNAME:-postgres}
       - DB_PASSWORD=${DB_PASSWORD:-postgres}
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - UK_CHAT_EVAL_TOKEN=${UK_CHAT_EVAL_TOKEN:-}
       - ANTHROPIC_FAST_MODEL=claude-haiku-4-5
       - ANTHROPIC_COMPLEX_MODEL=claude-sonnet-4-6
       - ANTHROPIC_TITLE_MODEL=claude-haiku-4-5

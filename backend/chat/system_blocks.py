@@ -60,9 +60,10 @@ def build_system_blocks(
 
 
 def build_lightweight_system_blocks(verdict) -> List[dict]:
-    """Lean system payload for a non-`ready` gateway outcome: the lightweight
-    prompt with no tools plus the per-outcome writer directive.
-    The model still writes the actual reply to the user's message.
+    """Lean model payload for irrelevant, out-of-scope, or partial turns.
+
+    `needs_plan` turns terminate through the deterministic clarification
+    renderer before this function can be called.
     """
     blocks: List[dict] = [{
         "type": "text",

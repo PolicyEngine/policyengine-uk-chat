@@ -36,6 +36,8 @@ validate-then-calculate flows.
   `requirements: [policyengine_py]`.
 - Mark Anthropic-only baseline cases with `requirements: [live_model]`; these
   must skip in offline mode and run only through `make eval-ai-live`.
+- Use `trials` and `pass_threshold` on live tool-loop cases that need repeated
+  probabilistic checks. Keep the threshold explicit in the case file.
 - Use `messages` on trajectory or tool-loop cases when the expected behavior
   depends on prior conversation turns.
 - Use `charts_mode: true` when the chart-mode directive is part of the behavior
@@ -86,3 +88,11 @@ ANTHROPIC_API_KEY=... make eval-ai-live
 
 Runs the same suite through the live provider and writes reports under
 `evals/reports/`.
+
+```bash
+ANTHROPIC_API_KEY=... make eval-ai-live-uk-population
+```
+
+Runs the manual, data-backed UK population microsimulation tool-loop cases
+against the live provider. These cases are gated by `RUN_DATA_EVALS=1` in the
+Make target and are not part of PR CI.

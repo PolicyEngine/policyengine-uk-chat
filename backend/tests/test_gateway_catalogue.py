@@ -3,6 +3,8 @@
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
+
 from gateway.catalogue import (
     CANDIDATE_LIMIT,
     CatalogueEvidence,
@@ -12,13 +14,33 @@ from gateway.catalogue import (
     _classify_match,
     resolve_catalogue_queries,
 )
-from gateway.policy import CapabilityDecision
+from gateway.policy import CapabilityDecision, GatingReason
+from gateway.intent import ReformIntent
 from gateway.runtime import (
     GatewayVerdict,
     apply_catalogue_evidence,
     gateway_writer_directive,
     serialise_plan_for_system,
 )
+
+
+@pytest.fixture(autouse=True)
+def _stub_model_reform_assessment(monkeypatch):
+    from gateway import runtime
+
+    monkeypatch.setattr(
+        runtime,
+        "assess_reform_with_catalogue",
+        lambda *_args, **_kwargs: SimpleNamespace(
+            reform={"test.parameter": 1},
+            summary="Test reform",
+            confidence=100,
+            parameter_bindings=(),
+            alternatives=(),
+            search_queries=("test",),
+            catalogue_version="test",
+        ),
+    )
 
 
 def _match(kind="reform_target", query="capital gains tax"):
@@ -170,7 +192,7 @@ def test_fuzzy_suggestion_cannot_promote_a_missing_tool_to_compute():
         outcome="needs_plan",
         route="lightweight",
         tool=None,
-        gating_slots=["tool"],
+        gating_reasons=[GatingReason("missing_tool", "tool")],
     )
 
     resolved = apply_catalogue_evidence(verdict, _evidence(suggestion))
@@ -192,6 +214,33 @@ def test_plan_schema_requires_bounded_catalogue_queries():
         "reform_target",
         "variable",
     ]
+
+
+def test_parameter_tool_corrects_classifier_variable_query_kind():
+    from gateway.runtime import _catalogue_queries_from_plan
+
+    prompt = "What is the basic rate threshold in 2025?"
+    queries = _catalogue_queries_from_plan(
+        {
+            "tool": "get_parameter",
+            "catalogue_queries": [
+                {
+                    "kind": "variable",
+                    "query": "basic rate threshold",
+                    "evidence": "basic rate threshold",
+                }
+            ],
+        },
+        prompt,
+    )
+
+    assert queries == (
+        CatalogueQuery(
+            "reform_target",
+            "basic rate threshold",
+            "basic rate threshold",
+        ),
+    )
 
 
 def test_resolver_normalises_duplicate_blank_and_excess_queries():
@@ -261,7 +310,7 @@ def test_matching_catalogue_evidence_preserves_other_ambiguity():
     verdict = GatewayVerdict(
         outcome="needs_plan",
         route="lightweight",
-        gating_slots=["reform"],
+        gating_reasons=[GatingReason("missing_reform", "reform")],
     )
 
     resolved = apply_catalogue_evidence(verdict, _evidence(_match()))
@@ -285,6 +334,8 @@ def test_matching_catalogue_evidence_preserves_partial_outcome():
 
 
 def test_unresolved_catalogue_query_asks_for_clarification():
+    from gateway.clarifications import render_clarification
+
     query = CatalogueQuery("reform_target", "made up levy")
     verdict = GatewayVerdict(outcome="ready", route="compute")
 
@@ -296,9 +347,9 @@ def test_unresolved_catalogue_query_asks_for_clarification():
     assert resolved.outcome == "needs_plan"
     assert resolved.route == "lightweight"
     assert "model_catalogue" in resolved.gating_slots
-    directive = gateway_writer_directive(resolved)
-    assert "made up levy" in directive
-    assert "not say that it is unmodelled" in directive
+    clarification = render_clarification(resolved)
+    assert "supported PolicyEngine parameter" in clarification
+    assert "made up levy" not in clarification
 
 
 def test_unresolved_catalogue_query_preserves_partial_limitation():
@@ -323,13 +374,13 @@ def test_unresolved_catalogue_query_preserves_partial_limitation():
     assert "before offering to run the modellable part" in directive
 
 
-def test_unavailable_catalogue_fails_open_to_compute():
+def test_unavailable_catalogue_does_not_promote_out_of_scope_to_compute():
     verdict = GatewayVerdict(outcome="out_of_scope", route="lightweight")
 
     resolved = apply_catalogue_evidence(verdict, _evidence(available=False))
 
-    assert resolved.outcome == "ready"
-    assert resolved.route == "compute"
+    assert resolved.outcome == "out_of_scope"
+    assert resolved.route == "lightweight"
 
 
 def test_unavailable_catalogue_preserves_irrelevant_outcome():
@@ -358,7 +409,7 @@ def test_unavailable_catalogue_preserves_existing_needs_plan_outcome():
     verdict = GatewayVerdict(
         outcome="needs_plan",
         route="lightweight",
-        gating_slots=["reform"],
+        gating_reasons=[GatingReason("missing_reform", "reform")],
     )
 
     resolved = apply_catalogue_evidence(verdict, _evidence(available=False))
@@ -368,12 +419,12 @@ def test_unavailable_catalogue_preserves_existing_needs_plan_outcome():
     assert resolved.gating_slots == ["reform"]
 
 
-def test_unavailable_catalogue_fails_open_from_catalogue_uncertainty():
+def test_unavailable_catalogue_does_not_promote_uncertainty_to_compute():
     verdict = GatewayVerdict(
         outcome="needs_plan",
         route="lightweight",
         tool=None,
-        gating_slots=["tool"],
+        gating_reasons=[GatingReason("missing_tool", "tool")],
         capability=CapabilityDecision(
             status="catalogue_uncertain",
             evidence="capital gains tax",
@@ -382,18 +433,51 @@ def test_unavailable_catalogue_fails_open_from_catalogue_uncertainty():
 
     resolved = apply_catalogue_evidence(verdict, _evidence(available=False))
 
+    assert resolved.outcome == "needs_plan"
+    assert resolved.route == "lightweight"
+    assert resolved.gating_slots == ["tool"]
+
+
+def test_unresolved_classifier_query_defers_to_model_reform_assessment():
+    query = CatalogueQuery("reform_target", "personal allowance")
+    verdict = GatewayVerdict(
+        outcome="ready",
+        route="compute",
+        tool="run_society_simulation",
+        reform_intent=ReformIntent(
+            policy_phrase="personal allowance",
+            action="increase",
+            amount="£500",
+            scope="unspecified",
+            evidence="increasing the personal allowance by £500",
+        ),
+    )
+
+    resolved = apply_catalogue_evidence(
+        verdict,
+        _evidence(unresolved_queries=(query,)),
+    )
+
     assert resolved.outcome == "ready"
-    assert resolved.route == "compute"
-    assert resolved.gating_slots == []
+    assert resolved.gating_reasons == []
 
 
 def test_compute_context_gets_paths_but_lightweight_context_gets_labels_only():
+    from gateway.clarifications import render_clarification
+
     verdict = GatewayVerdict(
         outcome="needs_plan",
         route="lightweight",
+        gating_reasons=[
+            GatingReason(
+                "catalogue_choice",
+                "reform",
+                options=("Capital gains tax basic rate",),
+            )
+        ],
         catalogue_evidence=_evidence(_match()),
     )
-    lightweight = gateway_writer_directive(verdict)
+    lightweight = render_clarification(verdict)
     assert "Capital gains tax basic rate" in lightweight
     assert "gov.hmrc.cgt.basic_rate" not in lightweight
 
@@ -463,6 +547,7 @@ def test_gateway_wiring_uses_matching_evidence_before_refusing():
     assert verdict.outcome == "ready"
     assert verdict.route == "compute"
     assert verdict.tool == "run_society_simulation"
+    assert verdict.catalogue_recovery_used is True
     assert len(client.calls) == 2
     assert "SERVER-VERIFIED CATALOGUE CANDIDATES" in client.calls[1]["system"]
     assert "Capital gains tax basic rate" in client.calls[1]["system"]
@@ -649,7 +734,7 @@ def test_catalogue_recovery_can_confirm_a_grounded_non_uk_refusal():
     assert len(client.calls) == 2
 
 
-def test_inconclusive_catalogue_recovery_fails_open_after_one_retry():
+def test_inconclusive_catalogue_recovery_remains_needs_plan_after_one_retry():
     from gateway import runtime as gateway
 
     initial_plan = {
@@ -685,10 +770,11 @@ def test_inconclusive_catalogue_recovery_fails_open_after_one_retry():
             "Raise the lowest capital gains tax rate from 18% to 20%."
         )
 
-    assert verdict.outcome == "ready"
-    assert verdict.route == "compute"
+    assert verdict.outcome == "needs_plan"
+    assert verdict.route == "lightweight"
     assert verdict.tool is None
-    assert verdict.gating_slots == []
+    assert verdict.gating_slots == ["tool"]
+    assert verdict.catalogue_recovery_used is True
     assert len(client.calls) == 2
 
 

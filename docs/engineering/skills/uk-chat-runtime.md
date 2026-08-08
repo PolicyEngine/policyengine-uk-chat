@@ -13,7 +13,12 @@ The backend is organized by topic — one package per concern:
   `suggestions.py`, and `routes.py` (the `/chat` router).
 - `backend/gateway/` owns the opening-turn pre-pass: `runtime.py` (the
   forced-tool classifier), `catalogue.py` (the server-side PolicyEngine
-  catalogue resolver), and `policy.py` (the deterministic criticality + gate).
+  catalogue resolver), `intent.py` (bounded wording extraction),
+  `assessment.py` (catalogue-backed exact reform construction), `policy.py`
+  (slot ownership + deterministic gate), `execution.py` (dependency-aware
+  compute contract), `clarifications.py` (fixed question rendering),
+  `proposals.py` (signed stateless confirmation handoff), and `trace.py`
+  (internal/eval decision traces).
 - `backend/prompts/` owns all product prompt text: `system.py` (the compute
   system prompt), `gateway.py` (gateway + lightweight prompts), `meta.py` (title
   + suggestion prompts). Keep prompts modular and declarative there.
@@ -133,22 +138,27 @@ official policyengine.py filter arguments for conditional weighted aggregates.
 
 ## Deterministic And Non-Deterministic Segments
 
-- Non-deterministic: user text interpretation, model planning, tool selection,
-  prose generation, follow-up suggestions, and title generation.
+- Non-deterministic: the opening classifier, catalogue-backed reform
+  construction and confidence assessment, compute-model tool use, prose
+  generation, follow-up suggestions, and title generation.
 - Deterministic: request validation, the gateway gate (criticality + outcome),
-  lightweight-route tool omission, tool dispatch, typed tool execution after
-  selection, derivative calculation, chart JSON construction,
-  result truncation/summarisation, billing calculation, and database writes.
+  bounded output/reform wording extraction, server slot ownership/defaults,
+  execution-plan construction, clarification rendering, proposal signing and
+  verification, lightweight-route tool omission, approved-reform enforcement,
+  tool dispatch, typed tool execution after selection, derivative calculation,
+  chart JSON construction, result truncation/summarisation, billing
+  calculation, and database writes.
 
 Before applying gateway criticality, the server completes every schema slot
-omitted from a selected tool plan as `assumed`, and adds the synthetic requested
-`output` slot when it is absent. Thus a classifier omission cannot be mistaken
-for grounded user intent. Safe defaults and model-inferable slots may still
-proceed without a follow-up; assumed high- or medium-criticality slots cannot.
-An asserted `prompt` slot must also contain a non-empty value, and an asserted
-output must name a supported output concept; otherwise the server treats it as
-`assumed`. A valueless `default` is accepted only for a schema default or the
-documented current-law society baseline.
+omitted from a selected tool plan according to ownership. Concrete schema
+defaults become `default` with their value; derivative `simulation_id` and
+chart `result_id` inputs become `runtime`; only unresolved user-owned choices
+become `assumed`. The synthetic requested `output` slot is added when absent.
+Thus a classifier omission cannot be mistaken for grounded user intent, and a
+runtime handoff cannot trigger a user question. An asserted `prompt` slot must
+contain a non-empty value, and an asserted output must name a supported output
+concept; otherwise the server treats it as `assumed`. Server ownership also
+overrides classifier claims about default and runtime fields.
 
 The gateway treats the supported output vocabulary as authoritative for direct,
 static microsimulation. Unqualified requests for cost, revenue, spending,
@@ -168,9 +178,13 @@ quote. A missing tool without validated unmodellable evidence is uncertainty
 (`needs_plan`), not proof that the request is unsupported. This makes refusal a
 positive-evidence decision rather than the consequence of classifier doubt.
 
-The gateway's non-`ready` (lightweight) outcomes must remain structurally
-enforced by omitting tools from the model request, not only by prompting the
-model not to call tools.
+`needs_plan` is rendered from an allow-list of structured reason codes and
+terminates with no response-model call. Unknown or internal reason codes are
+not turned into generic questions; orchestration logs them and fails open to
+compute, while the society tool guard still refuses an unapproved reform.
+`partial`, `out_of_scope`, and `irrelevant` retain the no-tool lightweight
+writer. The gateway's non-`ready` outcomes remain structurally enforced by
+omitting tools from any model request that occurs.
 
 ## First-turn Catalogue Confirmation
 
@@ -188,26 +202,49 @@ description-only matches are retained only as suggestions. They never
 authorise recovery or override a domain decision. An `irrelevant` decision is
 terminal regardless of matches, unresolved queries, or catalogue availability.
 
-An authoritative match confirms only that the model exposes a candidate
-concept. When the first plan is UK/unspecified, explicitly
+An authoritative classifier-stage match confirms only that the model exposes a
+candidate concept. When the first plan is UK/unspecified, explicitly
 `catalogue_uncertain`, and lacks a tool, the runtime permits exactly one second
 gateway call with the server-verified candidates. That call must rebuild the
 tool and grounded slots from the original message. The deterministic gate then
 applies normally: grounded work proceeds, while an ambiguous load-bearing slot
-still asks a follow-up. If the one recovery pass remains inconclusive without
-validated exclusion evidence, fail open to the full compute route. There is no
-catalogue/replan loop.
+still asks a follow-up. The recovery call repairs routing only; it does not
+approve an executable reform. There is no catalogue/replan loop.
 
-If no authoritative candidate resolves, use the lightweight path to ask which
-supported measure or variable the user means; do not call it unmodelled. For a
-`partial` request with an unresolved candidate, state the unmodellable
-limitation and ask the catalogue clarification before offering a computation.
-If catalogue metadata cannot be loaded, preserve `irrelevant`, `partial`, and
-ordinary slot-driven `needs_plan` outcomes. Fail open only from an
-`out_of_scope` result or a missing-tool `catalogue_uncertain` result.
+Every fully stated society reform then enters the dedicated reform assessor.
+It must search the installed reform-target catalogue before emitting a result,
+uses at most four distinct searches, and may use only paths and labels returned
+by those searches. The server validates that bindings exactly cover the reform
+paths, labels equal catalogue labels, the reform passes PolicyEngine
+validation, and directional values do not contradict the grounded action. A
+construction with confidence 80 or above becomes the exact approved reform in
+the execution plan. Lower confidence becomes `needs_plan` and the deterministic
+question names only human-readable catalogue labels. A successful search with
+no construction asks the user to identify the specific supported policy
+concept. Catalogue unavailability or an invalid/exhausted assessment is a
+terminal technical error: it must never fall through to compute with a guessed
+or unverified reform.
 
-Pass paths and variable names only as internal compute context. The lightweight
-writer may receive human-readable candidate labels, but not internal paths.
+The execution plan maps requested output to its derivative, orders
+`run_society_simulation` before that derivative, includes the current-year
+default and product conventions, and carries the validated reform JSON. The
+tool context rejects a society reform that differs from that approved JSON.
+Internal paths are passed only to the compute context; clarification text uses
+human-readable labels.
+
+Low-confidence proposals resume without a chat database. The deterministic
+clarification includes a non-rendered, HMAC-signed payload in assistant history,
+bound to the session and source-prompt hash and expiring after 24 hours. It is
+signed but not encrypted. A stable `GATEWAY_PROPOSAL_SIGNING_KEY` of at least
+32 bytes is required in every backend instance. An affirmative follow-up or an
+explicit alternative reuses the exact signed construction. Expired proposals
+or catalogue-version changes are reassessed; consumed older markers are not
+reopened. Markers are stripped before any model call.
+
+Eval-only gateway traces record selected and target tools, slot provenance,
+structured reasons, applied defaults, reform confidence/search/bindings,
+catalogue version and resolver model, recovery use, and proposal resumption.
+Public SSE projection must never include this trace.
 
 Tool choice is model-mediated unless the route layer deliberately forces a
 specific tool. Prompt and schema guidance improve selection consistency, but

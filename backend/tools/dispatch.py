@@ -10,7 +10,7 @@ from typing import Any, Dict, List, Optional
 from engine import derivatives, discovery
 from engine.decile_concepts import DEFAULT_DECILE_CONCEPT
 from engine.households import calculate_household, validate_household_dict
-from engine.reforms import validate_reform_dict
+from engine.reforms import normalize_reform_dict, validate_reform_dict
 from engine.serialization import explore_tabular_data, json_safe
 from engine.simulations import (
     SocietySimulationRun,
@@ -216,6 +216,23 @@ def run_society_simulation(
     extra_variables: Optional[Dict[str, List[str]]] = None,
     _context: ToolExecutionContext | None = None,
 ) -> Dict[str, Any]:
+    if _context is not None and _context.require_approved_reform:
+        try:
+            submitted = normalize_reform_dict(reform)
+            approved = normalize_reform_dict(_context.approved_reform)
+        except Exception as exc:
+            return {
+                "error": "Gateway-approved reform mismatch",
+                "detail": str(exc),
+            }
+        if submitted != approved:
+            return {
+                "error": "Gateway-approved reform mismatch",
+                "detail": (
+                    "The submitted society reform did not exactly match the "
+                    "validated gateway construction."
+                ),
+            }
     try:
         payload = build_society_simulation(
             year=year,

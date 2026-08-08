@@ -15,8 +15,16 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 class FakeApp:
     def __init__(self, name):
         self.name = name
+        self.function_options = {}
 
-    def function(self, **_kwargs):
+    def function(self, **kwargs):
+        def decorate(function):
+            self.function_options[function.__name__] = kwargs
+            return function
+
+        return decorate
+
+    def local_entrypoint(self, **_kwargs):
         return lambda function: function
 
 
@@ -40,6 +48,9 @@ class FakeImage:
     def pip_install_from_requirements(self, *args):
         return self._step("pip_install_from_requirements", *args)
 
+    def pip_install(self, *args):
+        return self._step("pip_install", *args)
+
     def add_local_dir(self, *args, **kwargs):
         return self._step("add_local_dir", *args, **kwargs)
 
@@ -48,6 +59,12 @@ class FakeSecret:
     @classmethod
     def from_name(cls, name):
         return SimpleNamespace(name=name)
+
+
+class FakeVolume:
+    @classmethod
+    def from_name(cls, name, **kwargs):
+        return SimpleNamespace(name=name, options=kwargs)
 
 
 def identity_decorator(**_kwargs):
@@ -84,6 +101,48 @@ def test_modal_deployment_definition_imports_without_remote_calls(monkeypatch):
         ]
     finally:
         sys.modules.pop("modal_app", None)
+
+
+def test_modal_eval_app_fans_out_twenty_cases_with_a_25_container_cap(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "POLICYENGINE_UK_CHAT_EVAL_MODAL_APP_NAME",
+        "pe-uk-chat-evals-test",
+    )
+    monkeypatch.setenv(
+        "POLICYENGINE_UK_CHAT_EVAL_MODAL_SECRET_NAME",
+        "pe-uk-chat-test-secrets",
+    )
+    fake_modal = SimpleNamespace(
+        App=FakeApp,
+        Image=FakeImage,
+        Secret=FakeSecret,
+        Volume=FakeVolume,
+    )
+    monkeypatch.setitem(sys.modules, "modal", fake_modal)
+    sys.modules.pop("modal_eval_app", None)
+
+    try:
+        modal_eval_app = importlib.import_module("modal_eval_app")
+
+        options = modal_eval_app.app.function_options["evaluate_case"]
+        assert modal_eval_app.APP_NAME == "pe-uk-chat-evals-test"
+        assert modal_eval_app.SECRET_NAME == "pe-uk-chat-test-secrets"
+        assert options["max_containers"] == 25
+        assert options["timeout"] == 1_800
+        assert options["volumes"] == {
+            modal_eval_app.REPORT_MOUNT: modal_eval_app.report_volume
+        }
+        assert modal_eval_app.report_volume.options == {
+            "create_if_missing": True,
+            "version": 2,
+        }
+        source = (REPO_ROOT / "modal_eval_app.py").read_text()
+        assert "evaluate_case.spawn_map(" in source
+        assert "concurrency=3" in source
+    finally:
+        sys.modules.pop("modal_eval_app", None)
 
 
 def test_dataset_reference_is_not_deployment_configuration():
@@ -128,6 +187,8 @@ def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
     assert "BACKEND_URL: ${{ steps.modal_deploy.outputs.modal_url }}" in workflow
     assert workflow.count("HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}") == 1
     assert sync_script.count('HUGGING_FACE_TOKEN="$HUGGING_FACE_TOKEN"') == 1
+    assert workflow.count("UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}") == 1
+    assert sync_script.count('UK_CHAT_EVAL_TOKEN="$UK_CHAT_EVAL_TOKEN"') == 1
     assert "HOSTNAMES: ${{ steps.names.outputs.frontend_url }}" in workflow
     assert (
         "PUBLIC_BASE_URL: ${{ steps.names.outputs.frontend_url }}/uk/chat" in workflow
@@ -187,7 +248,28 @@ def test_deploy_workflows_reuse_modal_secret_and_smoke_test_scripts():
 
     for workflow in (production, preview):
         assert "run: .github/scripts/sync-modal-secret.sh" in workflow
+        assert "GATEWAY_PROPOSAL_SIGNING_KEY" in workflow
         assert "run: .github/scripts/smoke-test-modal-backend.sh" in workflow
+        assert workflow.count(
+            "UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}"
+        ) == 1
+
+
+def test_manual_deployed_eval_workflow_is_token_safe_and_uploads_reports():
+    workflow = (
+        REPO_ROOT / ".github/workflows/eval-uk-population.yml"
+    ).read_text()
+    runner = (REPO_ROOT / ".github/scripts/run-deployed-evals.sh").read_text()
+
+    assert "workflow_dispatch:" in workflow
+    assert "timeout-minutes: 180" in workflow
+    assert "EVAL_RUN_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}" in workflow
+    assert "run: .github/scripts/run-deployed-evals.sh" in workflow
+    assert "if: always()" in workflow
+    assert "evals/reports" in workflow
+    assert "--trial-timeout-seconds" in runner
+    assert "--concurrency" in runner
+    assert "--token" not in runner
 
 
 def test_preview_frontend_url_script_writes_github_outputs(tmp_path, monkeypatch):

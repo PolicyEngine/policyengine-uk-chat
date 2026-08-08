@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from engine import discovery
+from engine import discovery, reforms
 
 
 class ParameterCore:
@@ -151,3 +151,36 @@ def test_reform_input_and_output_catalogs(monkeypatch):
     outputs = discovery.list_supported_outputs("household")
     assert outputs["status"] == "success"
     assert {row["scope"] for row in outputs["outputs"]} == {"household"}
+
+
+def test_reform_search_matches_alias_tokens_independent_of_word_order(monkeypatch):
+    path = "gov.hmrc.income_tax.rates.uk[0].rate"
+    parameter = SimpleNamespace(
+        label="Basic rate",
+        description="The first UK income tax bracket.",
+    )
+    model = SimpleNamespace(
+        parameters_by_name={
+            "gov.contrib.ubi_center.basic_income.amount.flat": SimpleNamespace(
+                label="Basic income",
+                description="Flat per-person basic income amount.",
+            ),
+            "gov.hmrc.income_tax.rates.property.basic": SimpleNamespace(
+                label="Property basic rate",
+                description="The basic rate of tax on property income.",
+            ),
+            path: parameter,
+        }
+    )
+    monkeypatch.setattr(reforms, "uk_model_version", lambda: model)
+
+    rows = reforms.search_reform_targets("basic rate income tax", limit=1)
+
+    assert rows == [
+        {
+            "path": path,
+            "label": "Basic rate",
+            "description": "The first UK income tax bracket.",
+            "aliases": ["basic rate", "basic income tax rate"],
+        }
+    ]

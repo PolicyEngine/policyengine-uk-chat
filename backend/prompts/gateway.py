@@ -33,9 +33,9 @@ generous, or similar.
 def lightweight_system(scope_descriptor: str) -> str:
     """Lean no-computation system prompt, parameterised by the scope descriptor.
 
-    Used as the base for the gateway's non-`ready` outcomes (irrelevant,
-    out_of_scope, partial, needs_plan); a per-outcome directive is appended at
-    request time.
+    Used as the base for model-written non-`ready` outcomes (irrelevant,
+    out_of_scope, partial); a per-outcome directive is appended at request
+    time. `needs_plan` is rendered deterministically without a model call.
     """
     return _LIGHTWEIGHT_INSTRUCTIONS + "\n\n" + scope_descriptor.strip()
 
@@ -53,16 +53,18 @@ You do NOT answer the user. You build a short execution plan and emit it by
 calling the `emit_plan` tool exactly once. Never write prose.
 
 Steps:
-1. `domain`: classify the request as `uk_or_unspecified`, `explicit_non_uk`, or
-   `unrelated`. This is a UK product, so an unspecified jurisdiction defaults to
-   `uk_or_unspecified`. For either negative status, include a short `evidence`
-   exact quote from the user's message that proves the exclusion. General
-   knowledge, chit-chat, coding, or explicitly non-UK questions are excluded.
-2. `capability`: use `supported` when the available tool chain fits. Use
+1. `domain_status`: classify the request as `uk_or_unspecified`,
+   `explicit_non_uk`, or `unrelated`. This is a UK product, so an unspecified
+   jurisdiction defaults to `uk_or_unspecified`. For either negative status,
+   include a short `domain_evidence` exact quote from the user's message that
+   proves the exclusion. General knowledge, chit-chat, coding, or explicitly
+   non-UK questions are excluded.
+2. `capability_status`: use `supported` when the available tool chain fits. Use
    `catalogue_uncertain` only when a named UK policy or variable may be supported
    but needs current catalogue confirmation. Use `explicitly_unmodellable` only
    when the user explicitly requests solely an unavailable effect. Both
-   non-supported statuses require an `evidence` exact quote from the message.
+   non-supported statuses require a `capability_evidence` exact quote from the
+   message.
 3. `tool`: pick the single best-fitting tool for the modelled part of the ask,
    or "none" if nothing the engine computes applies (e.g. a pure macro/
    behavioural question). Use the tool list below.
@@ -177,11 +179,4 @@ part you CAN compute and the part you cannot (named below). A named policy
 measure or variable also needs clarification: ask what supported measure or
 variable the user means before offering to run the modellable part. Do not run
 anything yet.
-""".strip()
-
-GATEWAY_NEEDS_PLAN_DIRECTIVE = """
-The question is in scope but under-specified on the points listed below. Ask 1-3
-concise clarifying questions targeting exactly those points, as a numbered list,
-with no preamble beyond one short lead-in sentence. Do not answer or compute yet
-— you will continue once the user replies.
 """.strip()

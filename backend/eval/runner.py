@@ -28,6 +28,10 @@ from eval.schemas import (
     ToolLoopCase,
     TrajectoryCase,
 )
+from eval.tool_loop_grading import (
+    aggregate_tool_loop_trials,
+    grade_tool_loop_case,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 EVAL_ROOT = REPO_ROOT / "evals"
@@ -237,6 +241,7 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
     messages: List[Dict[str, Any]] = _messages_for_case(case)
     tool_context = new_tool_context(turn_id=case.id)
     tool_calls = []
+    tool_outputs: List[Dict[str, Any]] = []
     final_text = ""
     errors: List[str] = []
 
@@ -272,7 +277,17 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
                     "input": call.input,
                 }
             )
-            output = execute_tool(call.name, call.input, context=tool_context)
+            try:
+                output = execute_tool(call.name, call.input, context=tool_context)
+            except Exception as exc:
+                return _result(
+                    case,
+                    "failed",
+                    0.0,
+                    [f"{call.name}: {type(exc).__name__}: {exc}"],
+                    {"text": final_text, "tool_calls": [call.model_dump() for call in tool_calls]},
+                )
+            tool_outputs.append(output)
             tool_results.append(
                 {
                     "type": "tool_result",
@@ -286,15 +301,18 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
     else:
         errors.append("max iterations reached before final answer")
 
-    errors.extend(grade_tool_calls(tool_calls, case.expected_tools, case.forbidden_tools))
-    errors.extend(grade_text(final_text, case.expect))
-    return _result(
+    return grade_tool_loop_case(
         case,
-        "failed" if errors else "passed",
-        0.0 if errors else 1.0,
-        errors,
-        {"text": final_text, "tool_calls": [call.model_dump() for call in tool_calls]},
+        text=final_text,
+        tool_calls=tool_calls,
+        tool_outputs=tool_outputs,
+        errors=errors,
     )
+
+
+def _run_tool_loop_trials(case: ToolLoopCase, client: ModelClient) -> CaseResult:
+    trial_results = [_run_tool_loop(case, client) for _ in range(case.trials)]
+    return aggregate_tool_loop_trials(case, trial_results)
 
 
 def _run_gateway(case: GatewayCase) -> CaseResult:
@@ -390,7 +408,10 @@ def run_eval(
         elif isinstance(case, AnswerCase):
             results.append(_run_answer(case, client))
         elif isinstance(case, ToolLoopCase):
-            results.append(_run_tool_loop(case, client))
+            if case.trials > 1:
+                results.append(_run_tool_loop_trials(case, client))
+            else:
+                results.append(_run_tool_loop(case, client))
         elif isinstance(case, GatewayCase):
             results.append(_run_gateway(case))
 

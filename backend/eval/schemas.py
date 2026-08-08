@@ -114,6 +114,20 @@ class AnswerCase(CaseBase):
     offline_response: Optional[ModelTurn] = None
 
 
+class GatewayTraceExpectation(StrictModel):
+    route: Literal["compute", "lightweight"]
+    outcome: Literal[
+        "irrelevant",
+        "out_of_scope",
+        "partial",
+        "needs_plan",
+        "ready",
+    ]
+    defaults_contains: Dict[str, Any] = Field(default_factory=dict)
+    min_reform_confidence: Optional[int] = Field(default=None, ge=0, le=100)
+    require_parameter_binding: bool = False
+
+
 class ToolLoopCase(CaseBase):
     suite: Literal["tool_loop"] = "tool_loop"
     prompt: str
@@ -123,12 +137,15 @@ class ToolLoopCase(CaseBase):
     forbidden_tools: List[str] = Field(default_factory=list)
     expect: TextExpectation = Field(default_factory=TextExpectation)
     max_iterations: int = Field(default=4, ge=1, le=8)
+    trials: int = Field(default=1, ge=1, le=10)
+    pass_threshold: float = Field(default=1.0, ge=0.0, le=1.0)
     offline_responses: List[ModelTurn] = Field(default_factory=list)
+    gateway_expect: Optional[GatewayTraceExpectation] = None
 
 
 class SlotExpectation(StrictModel):
     slot: str
-    source: Optional[Literal["prompt", "default", "assumed"]] = None
+    source: Optional[Literal["prompt", "default", "assumed", "runtime"]] = None
     gates: Optional[bool] = None  # whether this slot should trigger a question
 
 
@@ -157,7 +174,7 @@ class CaseResult(StrictModel):
 
 
 class EvalReport(StrictModel):
-    mode: Literal["offline", "live"]
+    mode: Literal["offline", "live", "deployed"]
     suites: List[str]
     provider: str
     model: Optional[str] = None
@@ -177,3 +194,74 @@ class EvalReport(StrictModel):
     @property
     def skipped(self) -> int:
         return sum(1 for result in self.results if result.status == "skipped")
+
+
+class EvalUsage(StrictModel):
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_creation_input_tokens: int = 0
+    cache_read_input_tokens: int = 0
+
+
+class EvalToolTrace(StrictModel):
+    tool_id: str
+    name: str
+    input: Dict[str, Any] = Field(default_factory=dict)
+    status: Literal["pending", "success", "error"] = "pending"
+    output: Any = None
+
+
+class EvalGatewaySlot(StrictModel):
+    name: str
+    kind: str
+    source: str
+    value: Optional[str] = None
+
+
+class EvalGatewayReason(StrictModel):
+    code: str
+    slot: str
+    options: List[str] = Field(default_factory=list)
+    evidence: Optional[str] = None
+
+
+class EvalGatewayBinding(StrictModel):
+    parameter_path: str
+    label: str
+    catalogue_evidence: str
+
+
+class EvalGatewayAlternative(StrictModel):
+    summary: str
+    parameter_bindings: List[EvalGatewayBinding] = Field(default_factory=list)
+    reform: Dict[str, Any] = Field(default_factory=dict)
+
+
+class EvalGatewayTrace(StrictModel):
+    selected_tool: Optional[str] = None
+    target_tool: Optional[str] = None
+    slots: List[EvalGatewaySlot] = Field(default_factory=list)
+    gating_reasons: List[EvalGatewayReason] = Field(default_factory=list)
+    defaults_applied: Dict[str, Any] = Field(default_factory=dict)
+    reform_confidence: Optional[int] = Field(default=None, ge=0, le=100)
+    reform_summary: Optional[str] = None
+    reform_search_queries: List[str] = Field(default_factory=list)
+    catalogue_version: Optional[str] = None
+    resolver_model: Optional[str] = None
+    parameter_bindings: List[EvalGatewayBinding] = Field(default_factory=list)
+    alternatives: List[EvalGatewayAlternative] = Field(default_factory=list)
+    catalogue_recovery_used: bool = False
+    proposal_resumed: bool = False
+
+
+class EvalChatResponse(StrictModel):
+    status: Literal["completed", "failed"]
+    content: str = ""
+    session_id: str
+    model: Optional[str] = None
+    route: str = "compute"
+    outcome: Optional[str] = None
+    stop_reason: Optional[str] = None
+    usage: EvalUsage = Field(default_factory=EvalUsage)
+    tool_trace: List[EvalToolTrace] = Field(default_factory=list)
+    gateway_trace: Optional[EvalGatewayTrace] = None
