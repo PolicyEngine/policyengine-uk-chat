@@ -133,13 +133,6 @@ interface MessageAttachment {
   mediaType: string;
 }
 
-interface BalanceSummary {
-  balance_gbp: number;
-  free_tier_used_gbp: number;
-  free_tier_remaining_gbp: number;
-  total_available_gbp: number;
-}
-
 // ---- Export helpers ---------------------------------------------------------
 
 const stripChartPlaceholders = (text: string): string =>
@@ -340,26 +333,8 @@ export default function ChatPage() {
   }, [input]);
 
   const [modelVersion, setModelVersion] = useState<string | null>(null);
-  const [balance, setBalance] = useState<BalanceSummary | null>(null);
-  const [topUpLoading, setTopUpLoading] = useState(false);
   const hasMessages = messages.length > 0;
   const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, !hasMessages && !input);
-
-  const fetchBalance = useCallback(async () => {
-    if (!user) return;
-    const data = await apiRequest<BalanceSummary>("GET", "billing/balance", { user_id: user.id });
-    setBalance(data);
-  }, [user]);
-
-  const handleTopUp = async (amount: number = 5) => {
-    if (!user) return;
-    setTopUpLoading(true);
-    try {
-      const { url } = await apiRequest<{ url: string }>("POST", "billing/checkout", undefined, { user_id: user.id, amount_gbp: amount });
-      if (url) window.location.href = url;
-    } catch (e) { console.error("Checkout failed", e); }
-    finally { setTopUpLoading(false); }
-  };
 
   useEffect(() => {
     apiRequest<{ engine: string; engine_version: string; policyengine_uk: string }>("GET", "version")
@@ -367,13 +342,7 @@ export default function ChatPage() {
         setModelVersion(`${v.engine} v${v.engine_version}`),
       )
       .catch(() => {});
-    // Refresh balance after Stripe redirect
-    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("topup") === "success") {
-      window.history.replaceState({}, "", window.location.pathname);
-    }
   }, []);
-
-  useEffect(() => { fetchBalance(); }, [fetchBalance]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -865,8 +834,6 @@ export default function ChatPage() {
                 const finalMsgs = [...allMessages, { role: "assistant" as const, content: currentText, isComplete: true, events: [...events], cost_gbp: msgCost, stop_reason: stopReason }];
                 saveConversation(finalMsgs, data.session_id);
               }
-              if (data.balance) setBalance(data.balance);
-              else fetchBalance();
               setTimeout(() => {
                 if (!isStale() && isNearBottom()) bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
               }, 100);
@@ -1100,7 +1067,6 @@ export default function ChatPage() {
                 stop_reason: stopReason,
                 stopped: false,
               } : m));
-              if (data.balance) setBalance(data.balance); else fetchBalance();
               if (sessionId.current) {
                 // Persist the fresh post-continuation metadata too — otherwise a
                 // reload restores the stale truncation flag and pre-continuation

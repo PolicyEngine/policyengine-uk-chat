@@ -2,6 +2,7 @@
 
 The `billing` package (`backend/billing/`) prices each chat turn by its token
 usage, tracks per-user credit in Supabase, and tops up balances through Stripe.
+Billing is opt-in and currently disabled in production and preview deploys.
 It is split across four modules:
 
 ```{list-table}
@@ -77,6 +78,9 @@ USD per **million** tokens:
 * - Environment variable
   - Default
   - Meaning
+* - `BILLING_ENABLED`
+  - `false`
+  - Enables credit enforcement, usage writes, and billing HTTP endpoints.
 * - `BILLING_MARKUP_RATE`
   - `0.0`
   - Multiplier added on top of the raw cost.
@@ -103,9 +107,10 @@ service-role key (bypassing RLS). The key functions in
 - `record_usage(...)` — writes a row to the `token_usage` table and deducts the
   cost from the free tier first, then from the paid balance.
 
-The chat orchestrator calls these to debit usage as conversations run. The
-per-turn `done` SSE event reports the turn's `cost_gbp` and the remaining
-balance.
+When `BILLING_ENABLED=true`, the chat orchestrator calls these to debit usage as
+conversations run. The per-turn `done` SSE event then reports the turn's
+`cost_gbp` and the remaining balance. With billing disabled, the orchestrator
+does not create a Supabase client, enforce credit, or record usage.
 
 ## Endpoints
 
@@ -127,6 +132,10 @@ All defined in `backend/billing/routes.py` and mounted at the root:
 * - `POST /billing/webhook`
   - Stripe webhook receiver — verifies the signature and credits the account.
 ```
+
+When billing is disabled, every `/billing` endpoint returns `404`. Modal secret
+sync also omits the backend Supabase and Stripe credentials, even if they remain
+stored in GitHub Actions.
 
 ```{note}
 The Stripe keys (`STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`) are optional for

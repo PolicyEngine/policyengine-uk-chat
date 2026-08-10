@@ -7,7 +7,7 @@ locally with Docker.
 
 - Docker and Docker Compose
 - An **Anthropic API key** (the agent calls Claude models)
-- A **Supabase** project (URL + anon/service-role keys) for auth and billing
+- A **Supabase** project (public URL + anon key) when testing frontend auth
 - A `HUGGING_FACE_TOKEN` with access to the private Enhanced FRS dataset for
   economy-wide simulations
 
@@ -31,9 +31,10 @@ Then edit `.env`. The key variables (see `.env.example` and
 | `ANTHROPIC_TITLE_MODEL` | Model used to title conversations (defaults to the fast model) |
 | `DATABASE_URL` | Postgres connection string for conversation history |
 | `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Frontend Supabase auth |
-| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Backend Supabase access (billing/credits) |
+| `BILLING_ENABLED` | Opt-in billing switch (default `false`) |
+| `SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` | Backend billing access; required only when billing is enabled |
 | `HUGGING_FACE_TOKEN` | Access to the private Enhanced FRS dataset |
-| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Billing (optional locally) |
+| `STRIPE_SECRET_KEY` / `STRIPE_WEBHOOK_SECRET` | Required only when billing is enabled |
 
 ## 2. Start the stack
 

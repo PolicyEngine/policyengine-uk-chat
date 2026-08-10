@@ -16,12 +16,19 @@ The web function runs FastAPI with the configured Modal secret, two CPUs, 4 GB
 memory, and a 600-second timeout. `POLICYENGINE_DATA_FOLDER` controls the local
 dataset cache location.
 
+Billing is disabled by default with `BILLING_ENABLED=false`. While disabled,
+the deployment secret sync deliberately omits backend Supabase and Stripe
+credentials from the Modal runtime, even if those credentials remain stored in
+GitHub Actions.
+
 ## Docker
 
 `backend/Dockerfile` installs the same requirements and serves the FastAPI app.
-Set the environment variables documented in `.env.example`, including Anthropic,
-Supabase, billing, and allowed-host settings. Access to a restricted Enhanced
-FRS source must also be available through `HUGGING_FACE_TOKEN`.
+Set the environment variables documented in `.env.example`, including
+Anthropic, frontend Supabase auth, and allowed-host settings. Backend Supabase
+and Stripe credentials are needed only when billing is explicitly enabled.
+Access to a restricted Enhanced FRS source must also be available through
+`HUGGING_FACE_TOKEN`.
 
 ## Version checks
 

@@ -8,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from billing.pricing import calculate_cost_gbp
 from billing import credits
+from billing import config
 from billing import routes
 from billing import stripe_integration
 
@@ -64,6 +65,39 @@ class FakeSupabase:
 
     def execute(self, query):
         return self._execute(query)
+
+
+def test_billing_feature_flag_accepts_literal_true(monkeypatch):
+    monkeypatch.setenv("BILLING_ENABLED", "true")
+
+    assert config.billing_enabled() is True
+
+
+@pytest.mark.parametrize(
+    "value", [None, "", "0", "false", "TRUE", "yes", "on", "unexpected"]
+)
+def test_billing_feature_flag_defaults_to_disabled(monkeypatch, value):
+    if value is None:
+        monkeypatch.delenv("BILLING_ENABLED", raising=False)
+    else:
+        monkeypatch.setenv("BILLING_ENABLED", value)
+
+    assert config.billing_enabled() is False
+
+
+def test_billing_routes_are_hidden_while_disabled(monkeypatch):
+    monkeypatch.setenv("BILLING_ENABLED", "false")
+
+    with pytest.raises(routes.HTTPException) as exc_info:
+        routes.require_billing_enabled()
+
+    assert exc_info.value.status_code == 404
+
+
+def test_billing_routes_are_available_when_enabled(monkeypatch):
+    monkeypatch.setenv("BILLING_ENABLED", "true")
+
+    assert routes.require_billing_enabled() is None
 
 
 def test_haiku_is_cheaper_than_sonnet_for_same_usage():

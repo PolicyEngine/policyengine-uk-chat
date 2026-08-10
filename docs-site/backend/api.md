@@ -82,7 +82,8 @@ Shared conversations are surfaced in the frontend at `/uk/chat/s/[token]`.
 ## Billing — `/billing`
 
 Defined in `backend/billing/routes.py`. Tracks token cost, manages credit, and
-runs Stripe checkout. See [Billing](billing.md) for the cost model.
+runs Stripe checkout. These routes return `404` unless
+`BILLING_ENABLED=true`. See [Billing](billing.md) for the cost model.
 
 ```{list-table}
 :header-rows: 1

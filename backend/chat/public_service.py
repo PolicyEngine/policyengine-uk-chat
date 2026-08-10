@@ -5,6 +5,7 @@ import logging
 from collections.abc import AsyncIterator
 
 import billing
+from billing.config import billing_enabled
 from observability.segments import SegmentName
 from policyengine_observability import segment
 
@@ -47,6 +48,9 @@ def _record_turn_usage(
     model: str | None,
     usage: ChatUsage,
 ) -> dict | None:
+    if not billing_enabled():
+        return None
+
     try:
         with segment(SegmentName.BILLING_RECORD_USAGE):
             return billing.record_usage(
@@ -157,7 +161,7 @@ async def start_public_chat(
 ) -> AsyncIterator[str]:
     """Authorize a public turn and return its lazily consumed SSE stream."""
 
-    if chat_request.user_id:
+    if billing_enabled() and chat_request.user_id:
         try:
             with segment(SegmentName.BILLING_CHECK_BALANCE):
                 has_credit, _ = billing.check_balance(chat_request.user_id)
