@@ -124,3 +124,36 @@ def test_managed_simulation_pair_uses_high_level_simulation(monkeypatch):
 
 def test_no_low_level_microsimulation_factory_remains():
     assert not hasattr(py_runtime, "managed_microsimulation")
+
+
+def test_mirror_hugging_face_token_sets_hf_token(monkeypatch):
+    monkeypatch.setenv("HUGGING_FACE_TOKEN", "hf_secret")
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+
+    py_runtime._mirror_hugging_face_token()
+
+    import os
+
+    assert os.environ["HF_TOKEN"] == "hf_secret"
+
+
+def test_mirror_hugging_face_token_keeps_existing_hf_token(monkeypatch):
+    monkeypatch.setenv("HUGGING_FACE_TOKEN", "hf_secret")
+    monkeypatch.setenv("HF_TOKEN", "hf_existing")
+
+    py_runtime._mirror_hugging_face_token()
+
+    import os
+
+    assert os.environ["HF_TOKEN"] == "hf_existing"
+
+
+def test_mirror_hugging_face_token_noop_without_token(monkeypatch):
+    monkeypatch.delenv("HUGGING_FACE_TOKEN", raising=False)
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+
+    py_runtime._mirror_hugging_face_token()
+
+    import os
+
+    assert "HF_TOKEN" not in os.environ
