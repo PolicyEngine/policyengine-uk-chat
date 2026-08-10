@@ -488,6 +488,44 @@ class TestChatMessage:
 
 
 class TestChatRouteWithMockedAnthropic:
+    def test_disabled_billing_does_not_check_or_record_credit(self, monkeypatch):
+        import chat.orchestrator as chatbot
+
+        async def no_suggestions(*_args, **_kwargs):
+            return []
+
+        def fail_if_called(*_args, **_kwargs):
+            raise AssertionError("disabled billing touched the credit store")
+
+        fake_client = _FakeAnthropicClient(
+            [
+                _FakeAnthropicStream(
+                    chunks=["The application remains available without billing."],
+                    final_content=[],
+                )
+            ]
+        )
+        monkeypatch.setenv("BILLING_ENABLED", "false")
+        monkeypatch.setattr(chatbot, "get_async_client", lambda: fake_client)
+        monkeypatch.setattr(chatbot, "generate_followup_suggestions", no_suggestions)
+        monkeypatch.setattr("billing.check_balance", fail_if_called)
+        monkeypatch.setattr("billing.record_usage", fail_if_called)
+
+        with client.stream(
+            "POST",
+            "/chat/message",
+            json={
+                "messages": [{"role": "user", "content": "Explain income tax."}],
+                "user_id": "user-1",
+            },
+        ) as response:
+            assert response.status_code == 200
+            text = response.read().decode()
+
+        done = next(event for event in parse_sse(text) if event["type"] == "done")
+        assert done["cost_gbp"] is None
+        assert done["balance"] is None
+
     def test_chat_route_executes_tool_loop_and_returns_final_answer(self, monkeypatch):
         import chat.orchestrator as chatbot
 

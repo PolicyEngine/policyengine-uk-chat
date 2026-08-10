@@ -11,7 +11,8 @@ It hosts the chat agent and persists conversations. In production it runs as a
 - The app is constructed as
   `FastAPI(title="Microsim Public Chatbot API", default_response_class=NaNSafeJSONResponse)`.
 - **Three routers** are mounted: `billing` and `conversations` at the root, and
-  `chat` under the `/chat` prefix.
+  `chat` under the `/chat` prefix. The billing router is guarded by the
+  opt-in `BILLING_ENABLED` feature flag and returns `404` while disabled.
 - **CORS** is driven by the comma-separated `HOSTNAMES` environment variable.
   An unset value fails closed and allows no cross-origin requests.
 - **`NaNSafeJSONResponse`** (`api/errors.py`) is the default response class — it

@@ -3,6 +3,7 @@ import importlib.util
 import os
 from pathlib import Path
 import re
+import subprocess
 import sys
 from types import SimpleNamespace
 
@@ -186,15 +187,17 @@ def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
     )
     assert "BACKEND_URL: ${{ steps.modal_deploy.outputs.modal_url }}" in workflow
     assert workflow.count("HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}") == 1
-    assert sync_script.count('HUGGING_FACE_TOKEN="$HUGGING_FACE_TOKEN"') == 1
+    assert sync_script.count('"HUGGING_FACE_TOKEN=$HUGGING_FACE_TOKEN"') == 1
     assert workflow.count("UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}") == 1
-    assert sync_script.count('UK_CHAT_EVAL_TOKEN="$UK_CHAT_EVAL_TOKEN"') == 1
+    assert sync_script.count('"UK_CHAT_EVAL_TOKEN=$UK_CHAT_EVAL_TOKEN"') == 1
+    assert '"BILLING_ENABLED=$billing_enabled"' in sync_script
+    assert 'if [[ "$billing_enabled" == "true" ]]' in sync_script
     assert "HOSTNAMES: ${{ steps.names.outputs.frontend_url }}" in workflow
     assert (
         "PUBLIC_BASE_URL: ${{ steps.names.outputs.frontend_url }}/uk/chat" in workflow
     )
-    assert 'HOSTNAMES="$HOSTNAMES"' in sync_script
-    assert 'PUBLIC_BASE_URL="$PUBLIC_BASE_URL"' in sync_script
+    assert '"HOSTNAMES=$HOSTNAMES"' in sync_script
+    assert '"PUBLIC_BASE_URL=$PUBLIC_BASE_URL"' in sync_script
     assert '-X OPTIONS "$backend_url/chat/message"' in smoke_script
     assert "Access-Control-Request-Method: POST" in smoke_script
     assert workflow.index(".github/scripts/stop-modal-app.sh") < workflow.index(
@@ -202,6 +205,87 @@ def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
     )
     assert "Update Modal secret with preview frontend URL" not in workflow
     assert "Refresh backend preview with preview frontend URL" not in workflow
+
+
+def test_modal_secret_sync_omits_billing_credentials_when_disabled(tmp_path):
+    args_path = tmp_path / "modal-args"
+    fake_modal = tmp_path / "modal"
+    fake_modal.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$@" > "$MODAL_ARGS_FILE"\n'
+    )
+    fake_modal.chmod(0o755)
+
+    environment = {
+        "MODAL_SECRET_NAME": "test-secret",
+        "ANTHROPIC_API_KEY": "anthropic",
+        "GATEWAY_PROPOSAL_SIGNING_KEY": "gateway-signing-key",
+        "UK_CHAT_EVAL_TOKEN": "eval-token",
+        "POLICYENGINE_UK_DATA_TOKEN": "uk-data",
+        "HUGGING_FACE_TOKEN": "hugging-face",
+        "DATABASE_URL": "postgresql://example",
+        "BILLING_ENABLED": "false",
+        "OBSERVABILITY_ENVIRONMENT": "test",
+        "OBSERVABILITY_GOOGLE_CLOUD_PROJECT": "project",
+        "OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER": "provider",
+        "OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL": "service@example.com",
+        "OBSERVABILITY_LOG_DESTINATIONS": "stdout",
+        "HOSTNAMES": "https://chat.example",
+        "PUBLIC_BASE_URL": "https://chat.example/uk/chat",
+        "SUPABASE_URL": "https://must-not-be-copied.example",
+        "SUPABASE_SERVICE_ROLE_KEY": "must-not-be-copied",
+        "STRIPE_SECRET_KEY": "must-not-be-copied",
+        "STRIPE_WEBHOOK_SECRET": "must-not-be-copied",
+        "MODAL_ARGS_FILE": str(args_path),
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(
+        [REPO_ROOT / ".github/scripts/sync-modal-secret.sh"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    args = args_path.read_text().splitlines()
+    assert "BILLING_ENABLED=false" in args
+    assert not any(argument.startswith("SUPABASE_") for argument in args)
+    assert not any(argument.startswith("STRIPE_") for argument in args)
+
+
+def test_modal_secret_sync_requires_credentials_when_billing_is_enabled(
+    tmp_path,
+):
+    environment = {
+        "MODAL_SECRET_NAME": "test-secret",
+        "ANTHROPIC_API_KEY": "anthropic",
+        "GATEWAY_PROPOSAL_SIGNING_KEY": "gateway-signing-key",
+        "UK_CHAT_EVAL_TOKEN": "eval-token",
+        "POLICYENGINE_UK_DATA_TOKEN": "uk-data",
+        "HUGGING_FACE_TOKEN": "hugging-face",
+        "DATABASE_URL": "postgresql://example",
+        "BILLING_ENABLED": "true",
+        "OBSERVABILITY_ENVIRONMENT": "test",
+        "OBSERVABILITY_GOOGLE_CLOUD_PROJECT": "project",
+        "OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER": "provider",
+        "OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL": "service@example.com",
+        "OBSERVABILITY_LOG_DESTINATIONS": "stdout",
+        "HOSTNAMES": "https://chat.example",
+        "PUBLIC_BASE_URL": "https://chat.example/uk/chat",
+    }
+
+    result = subprocess.run(
+        [REPO_ROOT / ".github/scripts/sync-modal-secret.sh"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "SUPABASE_URL is required when billing is enabled" in result.stderr
 
 
 def test_preview_frontend_and_modal_share_pr_number_contract():

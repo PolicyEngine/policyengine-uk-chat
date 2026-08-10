@@ -20,6 +20,11 @@ os.environ.setdefault("RATE_LIMIT_CHAT_PER_MIN", "10000")
 os.environ.setdefault("RATE_LIMIT_CHAT_PER_HOUR", "100000")
 os.environ.setdefault("RATE_LIMIT_CHAT_IP_PER_MIN", "10000")
 
+# Production billing is opt-in and defaults off. The test suite enables it so
+# existing credit-accounting and chat-usage tests continue to exercise the
+# enabled path; individual feature-flag tests override this explicitly.
+os.environ.setdefault("BILLING_ENABLED", "true")
+
 # main.py reads HOSTNAMES at import to build the CORS allowlist, and now fails
 # closed (blocks all origins) when it is unset. Declare an allowed origin here
 # so CORS-preflight tests exercise the real allowlisted path.
