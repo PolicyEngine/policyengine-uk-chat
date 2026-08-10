@@ -61,10 +61,26 @@ def _managed_dataset_folder() -> str:
     return os.environ.get("POLICYENGINE_DATA_FOLDER", "/tmp/policyengine-uk-chat-data")
 
 
+def _mirror_hugging_face_token() -> None:
+    """Expose HUGGING_FACE_TOKEN under HF_TOKEN for huggingface_hub.
+
+    policyengine.py's primary download helper reads HUGGING_FACE_TOKEN, but its
+    fallback for dataset-type repos calls hf_hub_download without an explicit
+    token, so huggingface_hub falls back to its own HF_TOKEN env var. The
+    deployment secret only sets HUGGING_FACE_TOKEN, which made private
+    dataset-repo downloads fail with 401.
+    """
+
+    token = os.environ.get("HUGGING_FACE_TOKEN")
+    if token and not os.environ.get("HF_TOKEN"):
+        os.environ["HF_TOKEN"] = token
+
+
 @lru_cache(maxsize=16)
 def _managed_dataset(reference: str, year: int, data_folder: str):
     """Load one configured policyengine.py dataset/year combination."""
 
+    _mirror_hugging_face_token()
     datasets = _policyengine_module().uk.ensure_datasets(
         datasets=[reference],
         years=[year],
