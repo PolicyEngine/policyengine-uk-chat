@@ -1,11 +1,12 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import text
-from sqlalchemy.exc import IntegrityError
-from sqlmodel import create_engine
 
 from conversations import models
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_get_engine_requires_database_url(monkeypatch):
@@ -16,72 +17,15 @@ def test_get_engine_requires_database_url(monkeypatch):
         models.get_engine()
 
 
-def test_ensure_table_consolidates_legacy_duplicates_and_adds_unique_index(
-    tmp_path, monkeypatch
-):
-    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.sqlite'}")
-    with engine.begin() as connection:
-        connection.execute(
-            text(
-                """
-                CREATE TABLE chat_conversations (
-                    id INTEGER PRIMARY KEY,
-                    session_id TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    messages TEXT NOT NULL,
-                    user_id TEXT,
-                    user_email TEXT,
-                    share_token TEXT,
-                    created_at TIMESTAMP NOT NULL,
-                    updated_at TIMESTAMP NOT NULL
-                )
-                """
-            )
-        )
-        connection.execute(
-            text(
-                """
-                INSERT INTO chat_conversations
-                    (id, session_id, title, messages, share_token, created_at, updated_at)
-                VALUES
-                    (1, 'duplicate-session', 'Old', '[1]', 'shared-token',
-                     '2026-01-01 00:00:00', '2026-01-01 00:00:00'),
-                    (2, 'duplicate-session', 'Newest', '[1, 2]', NULL,
-                     '2026-01-02 00:00:00', '2026-01-02 00:00:00')
-                """
-            )
-        )
+def test_session_unique_migration_never_modifies_conversation_rows():
+    migration = (
+        REPO_ROOT / "supabase/migrations/004_conversation_session_unique.sql"
+    ).read_text()
+    normalized = " ".join(migration.upper().split())
 
-    monkeypatch.setattr(models, "_engine", engine)
-    models.ensure_table()
-
-    with engine.begin() as connection:
-        rows = connection.execute(
-            text(
-                "SELECT id, title, messages, share_token, created_at "
-                "FROM chat_conversations"
-            )
-        ).mappings().all()
-
-        assert len(rows) == 1
-        assert rows[0]["id"] == 2
-        assert rows[0]["title"] == "Newest"
-        assert rows[0]["messages"] == "[1, 2]"
-        assert rows[0]["share_token"] == "shared-token"
-        assert str(rows[0]["created_at"]).startswith("2026-01-01")
-
-        with pytest.raises(IntegrityError):
-            connection.execute(
-                text(
-                    """
-                    INSERT INTO chat_conversations
-                        (session_id, title, messages, created_at, updated_at)
-                    VALUES
-                        ('duplicate-session', 'Again', '[]',
-                         '2026-01-03 00:00:00', '2026-01-03 00:00:00')
-                    """
-                )
-            )
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS" in normalized
+    assert "DELETE FROM" not in normalized
+    assert "UPDATE CHAT_CONVERSATIONS" not in normalized
 
 
 def test_get_engine_creates_and_caches_engine(monkeypatch):
@@ -126,7 +70,7 @@ class FakeConnection:
         self.rollbacks += 1
 
 
-def test_ensure_table_adds_columns_and_index(monkeypatch):
+def test_ensure_table_adds_legacy_columns_and_share_index_only(monkeypatch):
     connection = FakeConnection()
     engine = SimpleNamespace(connect=lambda: connection)
     create_all_calls = []
@@ -140,9 +84,11 @@ def test_ensure_table_adds_columns_and_index(monkeypatch):
     models.ensure_table()
 
     assert create_all_calls == [engine]
-    assert len(connection.statements) == 5
-    assert connection.commits == 5
+    assert len(connection.statements) == 3
+    assert connection.commits == 3
     assert connection.rollbacks == 0
+    assert not any("DELETE FROM" in sql for sql in connection.statements)
+    assert not any("session_id_unique" in sql for sql in connection.statements)
 
 
 def test_ensure_table_rolls_back_existing_columns_and_failed_index(monkeypatch):
@@ -153,8 +99,8 @@ def test_ensure_table_rolls_back_existing_columns_and_failed_index(monkeypatch):
 
     models.ensure_table()
 
-    assert connection.commits == 1
-    assert connection.rollbacks == 4
+    assert connection.commits == 0
+    assert connection.rollbacks == 3
 
 
 def test_ensure_table_logs_outer_failure_without_raising(monkeypatch, caplog):
