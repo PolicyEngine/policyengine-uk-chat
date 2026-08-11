@@ -160,7 +160,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v6
         with:
-          ref: ${{ github.event.pull_request.head.sha }}
+          # Cleanup runs with Modal credentials, so use trusted default-branch
+          # scripts rather than code supplied by the closing PR.
+          ref: ${{ github.event.repository.default_branch }}
 
       - name: Set up Python
         uses: actions/setup-python@v6

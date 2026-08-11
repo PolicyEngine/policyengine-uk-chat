@@ -207,6 +207,119 @@ def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
     assert "Refresh backend preview with preview frontend URL" not in workflow
 
 
+def _run_modal_preview_cleanup(
+    tmp_path,
+    app_list,
+    *,
+    list_exit_code=0,
+    stop_exit_code=0,
+):
+    calls_path = tmp_path / "modal-calls"
+    fake_modal = tmp_path / "modal"
+    fake_modal.write_text(
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >> "$MODAL_CALLS_FILE"\n'
+        'if [[ "$*" == "app list --json" ]]; then\n'
+        '  printf "%s\\n" "$MODAL_APP_LIST_JSON"\n'
+        '  exit "$MODAL_LIST_EXIT_CODE"\n'
+        "fi\n"
+        'if [[ "$1 $2" == "app stop" ]]; then\n'
+        '  exit "$MODAL_STOP_EXIT_CODE"\n'
+        "fi\n"
+        "exit 0\n"
+    )
+    fake_modal.chmod(0o755)
+    environment = {
+        "MODAL_APP_NAME": "pe-uk-chat-123",
+        "MODAL_SECRET_NAME": "pe-uk-chat-123-secrets",
+        "MODAL_APP_LIST_JSON": app_list,
+        "MODAL_CALLS_FILE": str(calls_path),
+        "MODAL_LIST_EXIT_CODE": str(list_exit_code),
+        "MODAL_STOP_EXIT_CODE": str(stop_exit_code),
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+    }
+
+    result = subprocess.run(
+        [REPO_ROOT / ".github/scripts/cleanup-modal-preview.sh"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    calls = calls_path.read_text().splitlines()
+    return result, calls
+
+
+def test_modal_preview_cleanup_stops_app_before_deleting_secret(tmp_path):
+    result, calls = _run_modal_preview_cleanup(
+        tmp_path,
+        '[{"description":"pe-uk-chat-123","state":"deployed"}]',
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls == [
+        "app list --json",
+        "app stop pe-uk-chat-123 --yes",
+        "secret delete pe-uk-chat-123-secrets --yes --allow-missing",
+    ]
+
+
+def test_modal_preview_cleanup_deletes_secret_when_app_is_missing(tmp_path):
+    result, calls = _run_modal_preview_cleanup(tmp_path, "[]")
+
+    assert result.returncode == 0, result.stderr
+    assert calls == [
+        "app list --json",
+        "secret delete pe-uk-chat-123-secrets --yes --allow-missing",
+    ]
+
+
+def test_modal_preview_cleanup_deletes_secret_when_app_is_stopped(tmp_path):
+    result, calls = _run_modal_preview_cleanup(
+        tmp_path,
+        '[{"description":"pe-uk-chat-123","state":"stopped"}]',
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls == [
+        "app list --json",
+        "secret delete pe-uk-chat-123-secrets --yes --allow-missing",
+    ]
+
+
+def test_modal_preview_cleanup_keeps_secret_when_app_stop_fails(tmp_path):
+    result, calls = _run_modal_preview_cleanup(
+        tmp_path,
+        '[{"description":"pe-uk-chat-123","state":"deployed"}]',
+        stop_exit_code=1,
+    )
+
+    assert result.returncode != 0
+    assert calls == [
+        "app list --json",
+        "app stop pe-uk-chat-123 --yes",
+    ]
+
+
+def test_modal_preview_cleanup_keeps_secret_when_app_lookup_fails(tmp_path):
+    result, calls = _run_modal_preview_cleanup(
+        tmp_path,
+        "[]",
+        list_exit_code=1,
+    )
+
+    assert result.returncode != 0
+    assert calls == ["app list --json"]
+
+
+def test_preview_cleanup_uses_trusted_default_branch_scripts():
+    workflow = (REPO_ROOT / ".github/workflows/pr-beta-deploy.yml").read_text()
+    cleanup = workflow.split("  cleanup:", maxsplit=1)[1]
+
+    assert "ref: ${{ github.event.repository.default_branch }}" in cleanup
+    assert "github.event.pull_request.head.sha" not in cleanup
+
+
 def test_modal_secret_sync_omits_billing_credentials_when_disabled(tmp_path):
     args_path = tmp_path / "modal-args"
     fake_modal = tmp_path / "modal"
