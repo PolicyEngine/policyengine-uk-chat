@@ -68,14 +68,21 @@ export default function SiteHeader() {
         <a
           href={`${SITE}/uk`}
           aria-label="PolicyEngine"
-          style={{ display: "block", textDecoration: "none" }}
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            padding: "5px 8px",
+            background: "#FFFFFF",
+            borderRadius: "8px",
+            textDecoration: "none",
+          }}
         >
           <img
-            src={`${APP_BASE_PATH}/policyengine-logo-square.png`}
+            src={`${APP_BASE_PATH}/policyengine-logo.svg`}
             alt=""
-            width={36}
-            height={36}
-            style={{ display: "block", borderRadius: "8px" }}
+            width={120}
+            height={25}
+            style={{ display: "block" }}
           />
         </a>
         <span
