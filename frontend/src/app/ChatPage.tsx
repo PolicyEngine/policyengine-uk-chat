@@ -1647,7 +1647,7 @@ export default function ChatPage() {
               data-tip-right={sidebarOpen ? undefined : "Open sidebar"}
               aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
               aria-expanded={sidebarOpen}
-              style={{ ...sidebarButtonStyle, color: "var(--text)", marginBottom: "4px" }}
+              style={{ ...sidebarButtonStyle, color: "var(--text)" }}
               onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
             >
@@ -1661,7 +1661,7 @@ export default function ChatPage() {
               onClick={startNewChat}
               data-tip-right={sidebarOpen ? undefined : "New chat"}
               aria-label="New chat"
-              style={{ ...sidebarButtonStyle, marginTop: "4px" }}
+              style={sidebarButtonStyle}
               onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
               onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
             >
@@ -1701,6 +1701,8 @@ export default function ChatPage() {
               style={{
                 flex: "1 1 auto",
                 minHeight: 0,
+                display: "flex",
+                flexDirection: "column",
                 overflowY: sidebarOpen ? "auto" : "hidden",
                 paddingTop: "8px",
                 opacity: sidebarOpen ? 1 : 0,
@@ -1750,6 +1752,11 @@ export default function ChatPage() {
                   })}
                 </div>
               )}
+              {modelVersion && (
+                <div style={{ marginTop: "auto", padding: "12px 8px 4px", flexShrink: 0, whiteSpace: "nowrap", textAlign: "center", color: "var(--faint)", fontSize: "11px" }}>
+                  {modelVersion}
+                </div>
+              )}
             </div>
             <div style={{ borderTop: "1px solid var(--border)", paddingTop: "8px", width: "100%" }}>
               <ThemeSelector compact={!sidebarOpen} preference={themePreference} onChange={setThemePreference} />
@@ -1774,25 +1781,6 @@ export default function ChatPage() {
                 </button>
               )}
             </div>
-            {modelVersion && (
-              <div
-                data-pe-sidebar-content
-                aria-hidden={!sidebarOpen}
-                style={{
-                  maxHeight: sidebarOpen ? "28px" : 0,
-                  paddingTop: sidebarOpen ? "8px" : 0,
-                  opacity: sidebarOpen ? 1 : 0,
-                  overflow: "hidden",
-                  whiteSpace: "nowrap",
-                  textAlign: "center",
-                  color: "var(--faint)",
-                  fontSize: "11px",
-                  transition: "max-height 200ms ease, padding-top 200ms ease, opacity 120ms ease",
-                }}
-              >
-                {modelVersion}
-              </div>
-            )}
           </div>
         )}
 
