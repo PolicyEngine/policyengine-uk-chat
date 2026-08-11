@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { APP_BASE_PATH } from "@/utils/backend";
 
 /**
  * The PolicyEngine site shell.
@@ -67,14 +68,15 @@ export default function SiteHeader() {
         <a
           href={`${SITE}/uk`}
           aria-label="PolicyEngine"
-          style={{
-            textDecoration: "none",
-            color: "var(--text)",
-            fontWeight: 700,
-            letterSpacing: "0.02em",
-          }}
+          style={{ display: "block", textDecoration: "none" }}
         >
-          PolicyEngine
+          <img
+            src={`${APP_BASE_PATH}/policyengine-logo-square.png`}
+            alt=""
+            width={36}
+            height={36}
+            style={{ display: "block", borderRadius: "8px" }}
+          />
         </a>
         <span
           aria-label="Beta"
