@@ -2,14 +2,23 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { User, Session } from "@supabase/supabase-js";
+import { APP_BASE_PATH } from "./backend";
 import { getSupabase } from "./supabase";
+
+export interface AuthResult {
+  error: string | null;
+}
+
+export interface SignUpResult extends AuthResult {
+  requiresEmailConfirmation: boolean;
+}
 
 interface AuthState {
   user: User | null;
   session: Session | null;
   loading: boolean;
-  signUp: (email: string, password: string) => Promise<{ error: string | null }>;
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
+  signUp: (email: string, password: string) => Promise<SignUpResult>;
+  signIn: (email: string, password: string) => Promise<AuthResult>;
   signOut: () => Promise<void>;
 }
 
@@ -17,7 +26,7 @@ const AuthContext = createContext<AuthState>({
   user: null,
   session: null,
   loading: false,
-  signUp: async () => ({ error: "Auth not configured" }),
+  signUp: async () => ({ error: "Auth not configured", requiresEmailConfirmation: false }),
   signIn: async () => ({ error: "Auth not configured" }),
   signOut: async () => {},
 });
@@ -50,9 +59,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string) => {
     const supabase = getSupabase();
-    if (!supabase) return { error: "Auth not configured" };
-    const { error } = await supabase.auth.signUp({ email, password });
-    return { error: error?.message ?? null };
+    if (!supabase) return { error: "Auth not configured", requiresEmailConfirmation: false };
+    const emailRedirectTo = new URL(APP_BASE_PATH, window.location.origin).toString();
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo },
+    });
+    return {
+      error: error?.message ?? null,
+      requiresEmailConfirmation: !error && !data.session,
+    };
   };
 
   const signIn = async (email: string, password: string) => {

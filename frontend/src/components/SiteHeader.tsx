@@ -61,7 +61,6 @@ export default function SiteHeader() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "8px",
           whiteSpace: "nowrap",
         }}
       >
@@ -71,25 +70,34 @@ export default function SiteHeader() {
           style={{
             display: "inline-flex",
             alignItems: "center",
-            padding: "5px 8px",
-            background: "#FFFFFF",
-            borderRadius: "8px",
             textDecoration: "none",
           }}
         >
           <img
             src={`${APP_BASE_PATH}/policyengine-logo.svg`}
             alt=""
-            width={120}
-            height={25}
-            style={{ display: "block" }}
+            width={128}
+            height={27}
+            style={{ display: "block", width: "128px", height: "auto" }}
           />
         </a>
+        <span
+          style={{
+            marginLeft: "20px",
+            color: "var(--text)",
+            fontSize: "16px",
+            lineHeight: "24px",
+            fontWeight: 500,
+          }}
+        >
+          PolicyEngine UK Chat
+        </span>
         <span
           aria-label="Beta"
           style={{
             display: "inline-flex",
             alignItems: "center",
+            marginLeft: "12px",
             border: "1px solid transparent",
             borderRadius: "999px",
             padding: "4px 12px",
@@ -125,13 +133,7 @@ export default function SiteHeader() {
         ))}
         <a
           href={`${SITE}/uk/donate`}
-          style={{
-            color: "var(--text)",
-            textDecoration: "none",
-            border: "1px solid var(--border)",
-            borderRadius: "6px",
-            padding: "6px 14px",
-          }}
+          style={{ color: "var(--text-2)", textDecoration: "none" }}
         >
           Donate
         </a>

@@ -1,8 +1,12 @@
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from conversations import models
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_get_engine_requires_database_url(monkeypatch):
@@ -11,6 +15,17 @@ def test_get_engine_requires_database_url(monkeypatch):
 
     with pytest.raises(RuntimeError, match="DATABASE_URL"):
         models.get_engine()
+
+
+def test_session_unique_migration_never_modifies_conversation_rows():
+    migration = (
+        REPO_ROOT / "supabase/migrations/004_conversation_session_unique.sql"
+    ).read_text()
+    normalized = " ".join(migration.upper().split())
+
+    assert "CREATE UNIQUE INDEX IF NOT EXISTS" in normalized
+    assert "DELETE FROM" not in normalized
+    assert "UPDATE CHAT_CONVERSATIONS" not in normalized
 
 
 def test_get_engine_creates_and_caches_engine(monkeypatch):
@@ -55,7 +70,7 @@ class FakeConnection:
         self.rollbacks += 1
 
 
-def test_ensure_table_adds_columns_and_index(monkeypatch):
+def test_ensure_table_adds_legacy_columns_and_share_index_only(monkeypatch):
     connection = FakeConnection()
     engine = SimpleNamespace(connect=lambda: connection)
     create_all_calls = []
@@ -72,10 +87,12 @@ def test_ensure_table_adds_columns_and_index(monkeypatch):
     assert len(connection.statements) == 3
     assert connection.commits == 3
     assert connection.rollbacks == 0
+    assert not any("DELETE FROM" in sql for sql in connection.statements)
+    assert not any("session_id_unique" in sql for sql in connection.statements)
 
 
 def test_ensure_table_rolls_back_existing_columns_and_failed_index(monkeypatch):
-    connection = FakeConnection(failures=("ADD COLUMN", "CREATE INDEX"))
+    connection = FakeConnection(failures=("ADD COLUMN", "INDEX IF NOT EXISTS"))
     engine = SimpleNamespace(connect=lambda: connection)
     monkeypatch.setattr(models, "get_engine", lambda: engine)
     monkeypatch.setattr(models.SQLModel.metadata, "create_all", lambda _engine: None)

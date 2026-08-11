@@ -19,6 +19,10 @@ class ConversationSummary(BaseModel):
     updated_at: str
 
 
+class ConversationSearchResult(ConversationSummary):
+    snippet: str | None = None
+
+
 class ConversationDetail(ConversationSummary):
     messages: list
 

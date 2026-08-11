@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 class ChatConversation(SQLModel, table=True):
     __tablename__ = "chat_conversations"
     id: Optional[int] = Field(default=None, primary_key=True)
-    session_id: str
+    session_id: str = Field(index=True, unique=True)
     title: str
     messages: str  # JSON string
     user_id: Optional[str] = None
