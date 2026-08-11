@@ -61,7 +61,6 @@ export default function SiteHeader() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "16px",
           whiteSpace: "nowrap",
         }}
       >
@@ -83,10 +82,22 @@ export default function SiteHeader() {
           />
         </a>
         <span
+          style={{
+            marginLeft: "100px",
+            color: "var(--text)",
+            fontSize: "16px",
+            lineHeight: "24px",
+            fontWeight: 500,
+          }}
+        >
+          PolicyEngine UK Chat
+        </span>
+        <span
           aria-label="Beta"
           style={{
             display: "inline-flex",
             alignItems: "center",
+            marginLeft: "12px",
             border: "1px solid transparent",
             borderRadius: "999px",
             padding: "4px 12px",
