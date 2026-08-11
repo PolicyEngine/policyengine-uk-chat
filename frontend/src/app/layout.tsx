@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import "@mantine/core/styles.css";
 import { APP_BASE_PATH } from "@/utils/backend";
+import SiteHeader from "@/components/SiteHeader";
 import Providers from "./Providers";
 
 export const metadata: Metadata = {
@@ -22,6 +23,10 @@ export const viewport: Viewport = {
 
 const themeVars = `
   :root {
+    /* Height of the PolicyEngine site shell. The chat's full-height panes
+       subtract this so the header does not push them below the fold.
+       SiteHeader sets it to 0px for embedded (?embed) copies. */
+    --pe-shell-h: 56px;
     --bg: #ffffff;
     --surface: #ffffff;
     --surface-2: #f4f4f4;
@@ -88,6 +93,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         />
       </head>
       <body style={{ margin: 0, fontFamily: "system-ui, -apple-system, sans-serif", background: "var(--bg)", color: "var(--text)" }}>
+        <SiteHeader />
         <Providers>{children}</Providers>
       </body>
     </html>

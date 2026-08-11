@@ -1544,7 +1544,7 @@ export default function ChatPage() {
   };
 
   return (
-    <div style={{ minHeight: "100dvh", background: "var(--bg)", color: "var(--text)", fontFamily: "system-ui, -apple-system, sans-serif" }}>
+    <div style={{ minHeight: "calc(100dvh - var(--pe-shell-h))", background: "var(--bg)", color: "var(--text)", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <style>{`
         [data-tip],[data-tip-left],[data-tip-right]{position:relative}
         [data-tip]::after,[data-tip-left]::after,[data-tip-right]::after{
@@ -1580,10 +1580,10 @@ export default function ChatPage() {
         }
       `}</style>
       {/* Body */}
-      <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", minHeight: "100dvh" }}>
+      <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", minHeight: "calc(100dvh - var(--pe-shell-h))" }}>
         {!isEmbed && !sidebarOpen && (
           /* Rail */
-          <div data-pe-sidebar style={{ width: "60px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 0", position: "sticky", top: 0, height: "100dvh", boxSizing: "border-box" }}>
+          <div data-pe-sidebar style={{ width: "60px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 0", position: "sticky", top: "var(--pe-shell-h)", height: "calc(100dvh - var(--pe-shell-h))", boxSizing: "border-box" }}>
             <button onClick={() => setSidebarOpen(true)} data-tip-right="Open sidebar" aria-label="Open sidebar" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "8px", borderRadius: "10px", display: "flex", color: "var(--text)", marginBottom: "4px" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
               onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
@@ -1628,7 +1628,7 @@ export default function ChatPage() {
         )}
         {/* Sidebar */}
         {!isEmbed && sidebarOpen && (
-          <div data-pe-sidebar style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: 0, height: "100dvh", alignSelf: "flex-start", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
+          <div data-pe-sidebar style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: "var(--pe-shell-h)", height: "calc(100dvh - var(--pe-shell-h))", alignSelf: "flex-start", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", padding: "4px 4px 4px 10px", gap: "8px" }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={`${APP_BASE_PATH}/policyengine-logo.svg`} alt="PolicyEngine" style={{ display: "block", width: "128px", height: "auto" }} />
@@ -1798,7 +1798,7 @@ export default function ChatPage() {
         )}
 
         {/* Chat area */}
-        <div data-pe-chat style={{ flex: 1, padding: "16px 24px max(24px, env(safe-area-inset-bottom))", minWidth: 0, minHeight: "100dvh", boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center", alignItems: "stretch" }}>
+        <div data-pe-chat style={{ flex: 1, padding: "16px 24px max(24px, env(safe-area-inset-bottom))", minWidth: 0, minHeight: "calc(100dvh - var(--pe-shell-h))", boxSizing: "border-box", display: "flex", flexDirection: "column", justifyContent: hasMessages ? "flex-start" : "center", alignItems: "stretch" }}>
           {!hasMessages && (
             <div style={{ width: "100%", maxWidth: "760px", margin: "0 auto", textAlign: "center", marginBottom: "20px" }}>
               <h1 style={{ fontSize: "30px", fontWeight: 500, color: "var(--text)", margin: 0, letterSpacing: "-0.01em" }}>What&apos;s on your mind today?</h1>
