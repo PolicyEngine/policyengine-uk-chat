@@ -38,6 +38,9 @@ const themeVars = `
     --text-3: #5d5d5d;
     --muted: #8e8e8e;
     --faint: #b4b4b4;
+    /* Mirrors @policyengine/ui-kit primary badge tokens. */
+    --primary: #2C7A7B;
+    --primary-foreground: #FFFFFF;
     --accent: #0d0d0d;
     --accent-fg: #ffffff;
     --accent-hover: #000000;
@@ -60,6 +63,8 @@ const themeVars = `
     --text-3: #b0b0b0;
     --muted: #9ca3af;
     --faint: #6b7280;
+    --primary: #38B2AC;
+    --primary-foreground: #0B0E14;
     --accent: #ececec;
     --accent-fg: #1f1f1f;
     --accent-hover: #ffffff;
