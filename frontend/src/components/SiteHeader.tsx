@@ -71,18 +71,15 @@ export default function SiteHeader() {
           style={{
             display: "inline-flex",
             alignItems: "center",
-            padding: "5px 8px",
-            background: "#FFFFFF",
-            borderRadius: "8px",
             textDecoration: "none",
           }}
         >
           <img
             src={`${APP_BASE_PATH}/policyengine-logo.svg`}
             alt=""
-            width={120}
-            height={25}
-            style={{ display: "block" }}
+            width={128}
+            height={27}
+            style={{ display: "block", width: "128px", height: "auto" }}
           />
         </a>
         <span

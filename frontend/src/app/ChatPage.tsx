@@ -1618,9 +1618,7 @@ export default function ChatPage() {
         {/* Sidebar */}
         {!isEmbed && sidebarOpen && (
           <div data-pe-sidebar style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: "var(--pe-shell-h)", height: "calc(100dvh - var(--pe-shell-h))", alignSelf: "flex-start", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "4px", padding: "4px 4px 4px 10px", gap: "8px" }}>
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img src={`${APP_BASE_PATH}/policyengine-logo.svg`} alt="PolicyEngine" style={{ display: "block", width: "128px", height: "auto" }} />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: "4px", padding: "4px" }}>
               <button onClick={() => setSidebarOpen(false)} data-tip="Close sidebar" aria-label="Close sidebar" style={{ background: "transparent", border: "none", borderRadius: "8px", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "8px" }}
                 onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
                 onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
