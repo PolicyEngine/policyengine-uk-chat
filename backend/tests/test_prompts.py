@@ -162,6 +162,14 @@ def test_secondary_model_prompts_use_neutral_wording():
         assert "punitive" in prompt
 
 
+def test_title_prompt_formats_fixed_sterling_amounts():
+    assert "fixed numeric amount in pounds sterling" in TITLE_SYSTEM
+    assert "£{VALUE}" in TITLE_SYSTEM
+    assert "'£5', not 'five pounds' or '5 pounds'" in TITLE_SYSTEM
+    assert "only for a specified monetary value" in TITLE_SYSTEM
+    assert "general use of the word 'pound'" in TITLE_SYSTEM
+
+
 def test_system_blocks_preserve_cache_breakpoints_after_prompt_refactor():
     pytest.importorskip("anthropic")
 
