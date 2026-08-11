@@ -83,7 +83,7 @@ export default function SiteHeader() {
         </a>
         <span
           style={{
-            marginLeft: "100px",
+            marginLeft: "20px",
             color: "var(--text)",
             fontSize: "16px",
             lineHeight: "24px",
