@@ -1750,11 +1750,6 @@ export default function ChatPage() {
                 {modelVersion}
               </div>
             )}
-            <div style={{ paddingTop: "8px", display: "flex", justifyContent: "center" }}>
-              <span style={{ display: "inline-flex", alignItems: "center", border: "1px solid transparent", borderRadius: "999px", padding: "4px 12px", background: "var(--primary)", color: "var(--primary-foreground)", fontSize: "12px", lineHeight: "16px", fontWeight: 500 }}>
-                BETA
-              </span>
-            </div>
           </div>
         )}
 

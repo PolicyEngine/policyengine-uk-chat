@@ -56,22 +56,44 @@ export default function SiteHeader() {
         padding: "0 24px",
       }}
     >
-      <a
-        href={`${SITE}/uk`}
-        aria-label="PolicyEngine"
+      <div
         style={{
           display: "flex",
           alignItems: "center",
           gap: "8px",
-          textDecoration: "none",
-          color: "var(--text)",
-          fontWeight: 700,
-          letterSpacing: "0.02em",
           whiteSpace: "nowrap",
         }}
       >
-        PolicyEngine
-      </a>
+        <a
+          href={`${SITE}/uk`}
+          aria-label="PolicyEngine"
+          style={{
+            textDecoration: "none",
+            color: "var(--text)",
+            fontWeight: 700,
+            letterSpacing: "0.02em",
+          }}
+        >
+          PolicyEngine
+        </a>
+        <span
+          aria-label="Beta"
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            border: "1px solid transparent",
+            borderRadius: "999px",
+            padding: "4px 12px",
+            background: "var(--primary)",
+            color: "var(--primary-foreground)",
+            fontSize: "12px",
+            lineHeight: "16px",
+            fontWeight: 500,
+          }}
+        >
+          BETA
+        </span>
+      </div>
 
       <nav
         aria-label="PolicyEngine navigation"
