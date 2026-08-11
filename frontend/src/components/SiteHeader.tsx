@@ -122,13 +122,7 @@ export default function SiteHeader() {
         ))}
         <a
           href={`${SITE}/uk/donate`}
-          style={{
-            color: "var(--text)",
-            textDecoration: "none",
-            border: "1px solid var(--border)",
-            borderRadius: "6px",
-            padding: "6px 14px",
-          }}
+          style={{ color: "var(--text-2)", textDecoration: "none" }}
         >
           Donate
         </a>
