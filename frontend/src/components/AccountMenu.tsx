@@ -34,71 +34,81 @@ export default function AccountMenu({
   }, [open]);
 
   return (
-    <div ref={rootRef} style={{ position: "relative", width: compact ? "auto" : "100%" }}>
+    <div ref={rootRef} style={{ position: "relative", width: "100%" }}>
       <button
         type="button"
         aria-label="Open account settings"
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
-        style={compact
-          ? {
-              background: "var(--accent)",
-              color: "var(--accent-fg)",
-              border: "none",
-              cursor: "pointer",
-              width: "32px",
-              height: "32px",
-              borderRadius: "999px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              fontSize: "13px",
-              fontWeight: 600,
-              textTransform: "uppercase",
-            }
-          : {
-              width: "100%",
-              display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              padding: "8px 10px",
-              border: "none",
-              borderRadius: "10px",
-              background: open ? "var(--surface-hover)" : "transparent",
-              color: "var(--text)",
-              cursor: "pointer",
-              fontFamily: "inherit",
-              textAlign: "left",
-            }}
+        style={{
+          width: "100%",
+          height: "40px",
+          display: "flex",
+          alignItems: "center",
+          padding: 0,
+          border: "none",
+          borderRadius: "10px",
+          background: open ? "var(--surface-hover)" : "transparent",
+          color: "var(--text)",
+          cursor: "pointer",
+          fontFamily: "inherit",
+          textAlign: "left",
+          overflow: "hidden",
+        }}
       >
         <span
           aria-hidden="true"
           style={{
-            width: compact ? "auto" : "28px",
-            height: compact ? "auto" : "28px",
-            borderRadius: "999px",
-            background: compact ? "transparent" : "var(--accent)",
-            color: compact ? "inherit" : "var(--accent-fg)",
+            width: "44px",
+            height: "40px",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontSize: "12px",
-            fontWeight: 600,
             flexShrink: 0,
-            textTransform: "uppercase",
           }}
         >
-          {(email || "?").slice(0, 1)}
+          <span
+            style={{
+              width: "28px",
+              height: "28px",
+              borderRadius: "999px",
+              background: "var(--accent)",
+              color: "var(--accent-fg)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontSize: "12px",
+              fontWeight: 600,
+              textTransform: "uppercase",
+            }}
+          >
+            {(email || "?").slice(0, 1)}
+          </span>
         </span>
-        {!compact && (
-          <>
-            <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "13px" }}>
-              {email}
-            </span>
-            <IconChevronDown size={14} aria-hidden="true" />
-          </>
-        )}
+        <span
+          data-pe-sidebar-label
+          aria-hidden={compact}
+          style={{
+            flex: compact ? "0 0 auto" : 1,
+            minWidth: 0,
+            maxWidth: compact ? 0 : "190px",
+            opacity: compact ? 0 : 1,
+            overflow: "hidden",
+            visibility: compact ? "hidden" : "visible",
+            display: "flex",
+            alignItems: "center",
+            gap: "8px",
+            transition: compact
+              ? "opacity 80ms ease, max-width 200ms ease, visibility 0s linear 200ms"
+              : "opacity 120ms ease 80ms, max-width 200ms ease",
+          }}
+        >
+          <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", fontSize: "13px" }}>
+            {compact ? null : email}
+          </span>
+          <IconChevronDown size={14} aria-hidden="true" style={{ flexShrink: 0, marginRight: "10px" }} />
+        </span>
       </button>
 
       {open && (

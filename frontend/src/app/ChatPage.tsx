@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo, type CSSProperties } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconShare, IconBug, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip, IconDots, IconSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconShare, IconBug, IconArrowUp, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip, IconDots, IconSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -1537,6 +1537,43 @@ export default function ChatPage() {
     setChatSearchOpen(true);
   };
 
+  const sidebarButtonStyle: CSSProperties = {
+    width: "100%",
+    height: "40px",
+    flexShrink: 0,
+    border: "none",
+    borderRadius: "10px",
+    background: "transparent",
+    color: "var(--text-2)",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    padding: 0,
+    fontFamily: "inherit",
+    fontSize: "14px",
+    fontWeight: 500,
+    textAlign: "left",
+  };
+  const sidebarIconStyle: CSSProperties = {
+    width: "44px",
+    height: "40px",
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  };
+  const sidebarLabelStyle: CSSProperties = {
+    minWidth: 0,
+    maxWidth: sidebarOpen ? "180px" : 0,
+    opacity: sidebarOpen ? 1 : 0,
+    overflow: "hidden",
+    whiteSpace: "nowrap",
+    visibility: sidebarOpen ? "visible" : "hidden",
+    transition: sidebarOpen
+      ? "opacity 120ms ease 80ms, max-width 200ms ease"
+      : "opacity 80ms ease, max-width 200ms ease, visibility 0s linear 200ms",
+  };
+
   return (
     <div style={{ minHeight: "calc(100dvh - var(--pe-shell-h))", background: "var(--bg)", color: "var(--text)", fontFamily: "system-ui, -apple-system, sans-serif" }}>
       <style>{`
@@ -1566,6 +1603,11 @@ export default function ChatPage() {
         [data-tip-left]:hover::after{content:attr(data-tip-left)}
         [data-tip-right]:hover::after{content:attr(data-tip-right)}
         @keyframes tip-fade{from{opacity:0}to{opacity:1}}
+        @media (prefers-reduced-motion:reduce){
+          [data-pe-sidebar],[data-pe-sidebar-label],[data-pe-sidebar-content],[data-pe-composer]{
+            transition:none !important;
+          }
+        }
         @media (max-width:640px){
           [data-pe-composer][data-fixed="true"]{
             left:50% !important;
@@ -1575,75 +1617,100 @@ export default function ChatPage() {
       `}</style>
       {/* Body */}
       <div style={{ display: "flex", margin: "0 auto", padding: "0", gap: "0", width: "100%", minHeight: "calc(100dvh - var(--pe-shell-h))" }}>
-        {!isEmbed && !sidebarOpen && (
-          /* Rail */
-          <div data-pe-sidebar style={{ width: "60px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", alignItems: "center", padding: "10px 0", position: "sticky", top: "var(--pe-shell-h)", height: "calc(100dvh - var(--pe-shell-h))", boxSizing: "border-box" }}>
-            <button onClick={() => setSidebarOpen(true)} data-tip-right="Open sidebar" aria-label="Open sidebar" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "8px", borderRadius: "10px", display: "flex", color: "var(--text)", marginBottom: "4px" }}
-              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
-              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+        {!isEmbed && (
+          <div
+            data-pe-sidebar
+            data-expanded={sidebarOpen}
+            style={{
+              width: sidebarOpen ? "260px" : "60px",
+              flexShrink: 0,
+              background: "var(--sidebar-bg)",
+              borderRight: "1px solid var(--border)",
+              padding: "10px 8px",
+              position: "sticky",
+              top: "var(--pe-shell-h)",
+              height: "calc(100dvh - var(--pe-shell-h))",
+              alignSelf: "flex-start",
+              display: "flex",
+              flexDirection: "column",
+              boxSizing: "border-box",
+              transition: "width 200ms ease",
+              willChange: "width",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setConversationMenu(null);
+                setSidebarOpen((open) => !open);
+              }}
+              data-tip-right={sidebarOpen ? undefined : "Open sidebar"}
+              aria-label={sidebarOpen ? "Close sidebar" : "Open sidebar"}
+              aria-expanded={sidebarOpen}
+              style={{ ...sidebarButtonStyle, color: "var(--text)", marginBottom: "4px" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
             >
-              <IconLayoutSidebarLeftExpand size={22} />
+              <span style={sidebarIconStyle}>
+                {sidebarOpen ? <IconLayoutSidebarLeftCollapse size={20} /> : <IconLayoutSidebarLeftExpand size={20} />}
+              </span>
+              <span data-pe-sidebar-label aria-hidden={!sidebarOpen} style={sidebarLabelStyle}>Close sidebar</span>
             </button>
-            <button onClick={startNewChat} data-tip-right="New chat" aria-label="New chat" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginTop: "4px" }}
-              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
-              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+            <button
+              type="button"
+              onClick={startNewChat}
+              data-tip-right={sidebarOpen ? undefined : "New chat"}
+              aria-label="New chat"
+              style={{ ...sidebarButtonStyle, marginTop: "4px" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
             >
-              <IconEdit size={20} />
+              <span style={sidebarIconStyle}><IconEdit size={20} /></span>
+              <span data-pe-sidebar-label aria-hidden={!sidebarOpen} style={sidebarLabelStyle}>New chat</span>
             </button>
-            <button onClick={() => setSidebarOpen(true)} data-tip-right="Chats" aria-label="Chats" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)" }}
-              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
-              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+            <button
+              type="button"
+              onClick={() => setSidebarOpen(true)}
+              data-tip-right={sidebarOpen ? undefined : "Chats"}
+              aria-label="Chats"
+              aria-expanded={sidebarOpen}
+              style={sidebarButtonStyle}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
             >
-              <IconMessage size={20} />
-            </button>
-            <button onClick={openChatSearch} data-tip-right="Search chats" aria-label="Search chats" style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)" }}
-              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
-              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
-            >
-              <IconSearch size={20} />
-            </button>
-            <div style={{ flex: 1 }} />
-            <div style={{ marginBottom: "6px" }}>
-              <ThemeSelector compact preference={themePreference} onChange={setThemePreference} />
-            </div>
-            {user ? (
-              <AccountMenu compact email={user.email || "Account"} onSignOut={signOut} />
-            ) : (
-              <button onClick={() => setShowAuth(true)} data-tip-right="Sign in" aria-label="Sign in" style={{ background: "transparent", border: "1px solid var(--border)", cursor: "pointer", padding: "8px", borderRadius: "999px", display: "flex", color: "var(--text-2)" }}>
-                <IconUser size={16} />
-              </button>
-            )}
-          </div>
-        )}
-        {/* Sidebar */}
-        {!isEmbed && sidebarOpen && (
-          <div data-pe-sidebar style={{ width: "260px", flexShrink: 0, background: "var(--sidebar-bg)", borderRight: "1px solid var(--border)", padding: "12px 8px", position: "sticky", top: "var(--pe-shell-h)", height: "calc(100dvh - var(--pe-shell-h))", alignSelf: "flex-start", display: "flex", flexDirection: "column", boxSizing: "border-box" }}>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "flex-end", marginBottom: "4px", padding: "4px" }}>
-              <button onClick={() => setSidebarOpen(false)} data-tip="Close sidebar" aria-label="Close sidebar" style={{ background: "transparent", border: "none", borderRadius: "8px", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "8px" }}
-                onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
-                onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
-              >
-                <IconLayoutSidebarLeftCollapse size={20} />
-              </button>
-            </div>
-            <button onClick={startNewChat} style={{ width: "100%", fontSize: "14px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", fontWeight: 500, justifyContent: "flex-start" }}
-              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
-              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
-            >
-              <IconPlus size={16} /> New chat
+              <span style={sidebarIconStyle}><IconMessage size={20} /></span>
+              <span data-pe-sidebar-label aria-hidden={!sidebarOpen} style={sidebarLabelStyle}>Chats</span>
             </button>
             <button
               type="button"
               onClick={openChatSearch}
+              data-tip-right={sidebarOpen ? undefined : "Search chats"}
+              aria-label="Search chats"
               aria-expanded={chatSearchOpen}
-              style={{ width: "100%", fontSize: "14px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: chatSearchOpen ? "var(--surface-hover)" : "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", fontWeight: 500, justifyContent: "flex-start" }}
-              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
-              onMouseLeave={(e) => { if (!chatSearchOpen) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+              style={{ ...sidebarButtonStyle, background: chatSearchOpen ? "var(--surface-hover)" : "transparent" }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
+              onMouseLeave={(e) => { if (!chatSearchOpen) e.currentTarget.style.background = "transparent"; }}
             >
-              <IconSearch size={16} /> Search chats
+              <span style={sidebarIconStyle}><IconSearch size={20} /></span>
+              <span data-pe-sidebar-label aria-hidden={!sidebarOpen} style={sidebarLabelStyle}>Search chats</span>
             </button>
-            <div onScroll={() => setConversationMenu(null)} style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingTop: "8px" }}>
-              <div style={{ fontSize: "11px", color: "var(--muted)", letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600, marginBottom: "6px", paddingLeft: "10px" }}>Chats</div>
+            <div
+              data-pe-sidebar-content
+              aria-hidden={!sidebarOpen}
+              onScroll={() => setConversationMenu(null)}
+              style={{
+                flex: "1 1 auto",
+                minHeight: 0,
+                overflowY: sidebarOpen ? "auto" : "hidden",
+                paddingTop: "8px",
+                opacity: sidebarOpen ? 1 : 0,
+                visibility: sidebarOpen ? "visible" : "hidden",
+                pointerEvents: sidebarOpen ? "auto" : "none",
+                transition: sidebarOpen
+                  ? "opacity 120ms ease 80ms"
+                  : "opacity 80ms ease, visibility 0s linear 200ms",
+              }}
+            >
               {!user ? (
                 <div style={{ fontSize: "13px", color: "var(--muted)", padding: "8px 10px", lineHeight: 1.5 }}>
                   <button onClick={() => setShowAuth(true)} style={{ color: "var(--text)", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: "13px", textDecoration: "underline" }}>Sign in</button>
@@ -1684,21 +1751,45 @@ export default function ChatPage() {
                 </div>
               )}
             </div>
-            <div style={{ borderTop: "1px solid var(--border)", paddingTop: "8px" }}>
-              <ThemeSelector compact={false} preference={themePreference} onChange={setThemePreference} />
+            <div style={{ borderTop: "1px solid var(--border)", paddingTop: "8px", width: "100%" }}>
+              <ThemeSelector compact={!sidebarOpen} preference={themePreference} onChange={setThemePreference} />
               {user ? (
-                <AccountMenu compact={false} email={user.email || "Account"} onSignOut={signOut} />
+                <AccountMenu compact={!sidebarOpen} email={user.email || "Account"} onSignOut={signOut} />
               ) : (
-                <button onClick={() => setShowAuth(true)} style={{ width: "100%", fontSize: "13px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", justifyContent: "flex-start" }}
-                  onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
-                  onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
+                <button
+                  type="button"
+                  onClick={() => setShowAuth(true)}
+                  data-tip-right={sidebarOpen ? undefined : "Sign in"}
+                  aria-label="Sign in"
+                  style={sidebarButtonStyle}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = "var(--surface-hover)"; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = "transparent"; }}
                 >
-                  <IconUser size={16} /> Sign in
+                  <span style={sidebarIconStyle}>
+                    <span style={{ width: "28px", height: "28px", border: "1px solid var(--border)", borderRadius: "999px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <IconUser size={16} />
+                    </span>
+                  </span>
+                  <span data-pe-sidebar-label aria-hidden={!sidebarOpen} style={sidebarLabelStyle}>Sign in</span>
                 </button>
               )}
             </div>
             {modelVersion && (
-              <div style={{ paddingTop: "8px", textAlign: "center", color: "var(--faint)", fontSize: "11px" }}>
+              <div
+                data-pe-sidebar-content
+                aria-hidden={!sidebarOpen}
+                style={{
+                  maxHeight: sidebarOpen ? "28px" : 0,
+                  paddingTop: sidebarOpen ? "8px" : 0,
+                  opacity: sidebarOpen ? 1 : 0,
+                  overflow: "hidden",
+                  whiteSpace: "nowrap",
+                  textAlign: "center",
+                  color: "var(--faint)",
+                  fontSize: "11px",
+                  transition: "max-height 200ms ease, padding-top 200ms ease, opacity 120ms ease",
+                }}
+              >
                 {modelVersion}
               </div>
             )}
@@ -1916,6 +2007,7 @@ export default function ChatPage() {
               left: hasMessages ? `calc(${sidebarOffset}px + (100% - ${sidebarOffset}px) / 2)` : undefined,
               bottom: hasMessages ? "max(24px, env(safe-area-inset-bottom))" : undefined,
               transform: hasMessages ? "translateX(-50%)" : undefined,
+              transition: hasMessages ? "left 200ms ease" : undefined,
               zIndex: hasMessages ? 50 : undefined,
               flexShrink: 0,
             }}

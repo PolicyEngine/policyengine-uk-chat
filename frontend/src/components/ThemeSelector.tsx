@@ -52,7 +52,7 @@ export default function ThemeSelector({
   }, [open]);
 
   return (
-    <div ref={rootRef} style={{ position: "relative", width: compact ? "auto" : "100%" }}>
+    <div ref={rootRef} style={{ position: "relative", width: "100%" }}>
       <button
         type="button"
         aria-label={`Appearance: ${selected.label}`}
@@ -60,23 +60,42 @@ export default function ThemeSelector({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
         style={{
-          width: compact ? "auto" : "100%",
+          width: "100%",
+          height: "40px",
           background: open ? "var(--surface-hover)" : "transparent",
           border: "none",
           cursor: "pointer",
-          padding: compact ? "10px" : "9px 10px",
+          padding: 0,
           borderRadius: "10px",
           display: "flex",
           alignItems: "center",
-          justifyContent: compact ? "center" : "flex-start",
-          gap: "10px",
+          justifyContent: "flex-start",
           color: "var(--text-2)",
           fontFamily: "inherit",
           fontSize: "13px",
+          overflow: "hidden",
         }}
       >
-        <SelectedIcon size={compact ? 18 : 16} aria-hidden="true" />
-        {!compact && <span>Appearance: {selected.label}</span>}
+        <span style={{ width: "44px", height: "40px", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <SelectedIcon size={18} aria-hidden="true" />
+        </span>
+        <span
+          data-pe-sidebar-label
+          aria-hidden={compact}
+          style={{
+            minWidth: 0,
+            maxWidth: compact ? 0 : "180px",
+            opacity: compact ? 0 : 1,
+            overflow: "hidden",
+            whiteSpace: "nowrap",
+            visibility: compact ? "hidden" : "visible",
+            transition: compact
+              ? "opacity 80ms ease, max-width 200ms ease, visibility 0s linear 200ms"
+              : "opacity 120ms ease 80ms, max-width 200ms ease",
+          }}
+        >
+          Appearance: {selected.label}
+        </span>
       </button>
 
       {open && (

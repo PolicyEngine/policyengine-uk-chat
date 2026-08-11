@@ -61,7 +61,7 @@ export default function SiteHeader() {
         style={{
           display: "flex",
           alignItems: "center",
-          gap: "8px",
+          gap: "16px",
           whiteSpace: "nowrap",
         }}
       >
