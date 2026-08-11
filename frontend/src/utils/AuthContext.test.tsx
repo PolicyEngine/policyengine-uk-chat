@@ -24,27 +24,34 @@ function SignUpHarness() {
 }
 
 function mockClient(session: object | null) {
+  const signUp = vi.fn().mockResolvedValue({ data: { session }, error: null });
   vi.mocked(getSupabase).mockReturnValue({
     auth: {
       getSession: vi.fn().mockResolvedValue({ data: { session: null } }),
       onAuthStateChange: vi.fn().mockReturnValue({
         data: { subscription: { unsubscribe: vi.fn() } },
       }),
-      signUp: vi.fn().mockResolvedValue({ data: { session }, error: null }),
+      signUp,
     },
   } as never);
+  return signUp;
 }
 
 describe("AuthProvider signup", () => {
   beforeEach(() => vi.clearAllMocks());
 
   it("reports that email confirmation is required when signup has no session", async () => {
-    mockClient(null);
+    const signUp = mockClient(null);
     render(<AuthProvider><SignUpHarness /></AuthProvider>);
 
     fireEvent.click(screen.getByRole("button", { name: "Sign up" }));
 
     expect(await screen.findByText(/requiresEmailConfirmation.*true/)).toBeInTheDocument();
+    expect(signUp).toHaveBeenCalledWith({
+      email: "person@example.com",
+      password: "password123",
+      options: { emailRedirectTo: "http://localhost:3000/uk/chat" },
+    });
   });
 
   it("reports immediate authentication when signup returns a session", async () => {

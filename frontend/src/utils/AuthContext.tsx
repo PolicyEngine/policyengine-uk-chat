@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { User, Session } from "@supabase/supabase-js";
+import { APP_BASE_PATH } from "./backend";
 import { getSupabase } from "./supabase";
 
 export interface AuthResult {
@@ -59,7 +60,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const signUp = async (email: string, password: string) => {
     const supabase = getSupabase();
     if (!supabase) return { error: "Auth not configured", requiresEmailConfirmation: false };
-    const { data, error } = await supabase.auth.signUp({ email, password });
+    const emailRedirectTo = new URL(APP_BASE_PATH, window.location.origin).toString();
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { emailRedirectTo },
+    });
     return {
       error: error?.message ?? null,
       requiresEmailConfirmation: !error && !data.session,
