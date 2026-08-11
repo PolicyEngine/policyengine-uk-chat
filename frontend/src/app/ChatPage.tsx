@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconLogout, IconShare, IconBug, IconSun, IconMoon, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip, IconDots, IconSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from "@tabler/icons-react";
+import { IconX, IconTrash, IconChevronDown, IconUser, IconShare, IconBug, IconArrowUp, IconPlus, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip, IconDots, IconSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -10,7 +10,13 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Chart, extractChartSpecs } from "@/components/charts";
 import { THEME } from "@/components/theme";
+import AccountMenu from "@/components/AccountMenu";
+import AuthDialog from "@/components/AuthDialog";
+import ChatSearchDialog, { type ChatSearchResult } from "@/components/ChatSearchDialog";
+import ThemeSelector from "@/components/ThemeSelector";
 import { APP_BASE_PATH, getAppBaseUrl, getBackendEndpoint } from "@/utils/backend";
+import { enqueueSerial } from "@/utils/serialQueue";
+import { useThemePreference } from "@/utils/theme";
 
 const EXAMPLE_QUERIES = [
   "What's the current personal allowance?",
@@ -242,17 +248,10 @@ export default function ChatPage() {
   const [copiedMessageIdx, setCopiedMessageIdx] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
-  const [chatSearchQuery, setChatSearchQuery] = useState("");
-  const chatSearchRef = useRef<HTMLInputElement>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<number | null>(null);
   const conversationCache = useRef<Map<number, ConversationDetail>>(new Map());
   const [showAuth, setShowAuth] = useState(false);
-  const [authMode, setAuthMode] = useState<"signin" | "signup">("signin");
-  const [authEmail, setAuthEmail] = useState("");
-  const [authPassword, setAuthPassword] = useState("");
-  const [authError, setAuthError] = useState<string | null>(null);
-  const [authSubmitting, setAuthSubmitting] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const [reportNote, setReportNote] = useState("");
   const [reportError, setReportError] = useState<string | null>(null);
@@ -266,23 +265,7 @@ export default function ChatPage() {
   const [attachedImage, setAttachedImage] = useState<{ dataUrl: string; mediaType: string; name: string } | null>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [theme, setTheme] = useState<"light" | "dark">("light");
-  useEffect(() => {
-    const stored = typeof window !== "undefined" ? localStorage.getItem("theme") : null;
-    const initial: "light" | "dark" = stored === "dark" ? "dark" : "light";
-    setTheme(initial);
-    if (typeof document !== "undefined") {
-      if (initial === "dark") document.documentElement.setAttribute("data-theme", "dark");
-      else document.documentElement.removeAttribute("data-theme");
-    }
-  }, []);
-  const toggleTheme = () => {
-    const next = theme === "light" ? "dark" : "light";
-    setTheme(next);
-    try { localStorage.setItem("theme", next); } catch {}
-    if (next === "dark") document.documentElement.setAttribute("data-theme", "dark");
-    else document.documentElement.removeAttribute("data-theme");
-  };
+  const { preference: themePreference, setPreference: setThemePreference } = useThemePreference();
   const bottomRef = useRef<HTMLDivElement>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
@@ -300,6 +283,7 @@ export default function ChatPage() {
   // suggestions) only ever POSTs chat/title once per conversation.
   const conversationTitleRef = useRef<string | null>(null);
   const titleGenPromiseRef = useRef<Promise<string> | null>(null);
+  const saveQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   // Restore draft from localStorage on initial mount only. Runs once, so it
   // can't interfere with later state changes (streaming, conversation loads).
@@ -535,59 +519,64 @@ export default function ChatPage() {
     } catch (e) { console.error(e); }
   };
 
-  const saveConversation = useCallback(async (msgs: Message[], sid: string): Promise<ConversationDetail | null> => {
-    const generation = streamGeneration.current;
-    const firstUserMsg = msgs.find((m) => m.role === "user");
-    if (!firstUserMsg) return null;
-    const firstAssistantMsg = msgs.find((m) => m.role === "assistant");
-    const firstAssistantContent = (() => {
-      if (!firstAssistantMsg?.isComplete || !firstAssistantMsg.events?.length) return firstAssistantMsg?.content;
-      const lastToolIdx = firstAssistantMsg.events.reduce((acc, e, i) => e.type === "tool" ? i : acc, -1);
-      if (lastToolIdx >= 0) return firstAssistantMsg.events.slice(lastToolIdx + 1).filter((e): e is { type: "text"; content: string } => e.type === "text").map((e) => e.content).join("") || firstAssistantMsg.content;
-      return firstAssistantMsg.content;
-    })();
+  const saveConversation = useCallback((msgs: Message[], sid: string): Promise<ConversationDetail | null> => {
+    const persist = async (): Promise<ConversationDetail | null> => {
+      const generation = streamGeneration.current;
+      const firstUserMsg = msgs.find((m) => m.role === "user");
+      if (!firstUserMsg) return null;
+      const firstAssistantMsg = msgs.find((m) => m.role === "assistant");
+      const firstAssistantContent = (() => {
+        if (!firstAssistantMsg?.isComplete || !firstAssistantMsg.events?.length) return firstAssistantMsg?.content;
+        const lastToolIdx = firstAssistantMsg.events.reduce((acc, e, i) => e.type === "tool" ? i : acc, -1);
+        if (lastToolIdx >= 0) return firstAssistantMsg.events.slice(lastToolIdx + 1).filter((e): e is { type: "text"; content: string } => e.type === "text").map((e) => e.content).join("") || firstAssistantMsg.content;
+        return firstAssistantMsg.content;
+      })();
 
-    // Generate a title only when the conversation doesn't already have one.
-    // Concurrent saves (done + suggestions arrive close together) share the
-    // same in-flight generation instead of POSTing chat/title twice.
-    let title = conversationTitleRef.current;
-    if (!title) {
-      if (!titleGenPromiseRef.current) {
-        const fallback = firstUserMsg.content.slice(0, 60);
-        titleGenPromiseRef.current = apiRequest<{ title: string }>("POST", "chat/title", undefined, { first_user_message: firstUserMsg.content, first_assistant_message: firstAssistantContent || "" })
-          .then(({ title: generated }) => generated || fallback)
-          .catch((e) => { console.error("Title generation failed", e); return fallback; });
+      // Generate a title only when the conversation doesn't already have one.
+      let title = conversationTitleRef.current;
+      if (!title) {
+        if (!titleGenPromiseRef.current) {
+          const fallback = firstUserMsg.content.slice(0, 60);
+          titleGenPromiseRef.current = apiRequest<{ title: string }>("POST", "chat/title", undefined, { first_user_message: firstUserMsg.content, first_assistant_message: firstAssistantContent || "" })
+            .then(({ title: generated }) => generated || fallback)
+            .catch((e) => { console.error("Title generation failed", e); return fallback; });
+        }
+        title = await titleGenPromiseRef.current;
+        if (streamGeneration.current === generation) conversationTitleRef.current = title;
       }
-      title = await titleGenPromiseRef.current;
-      if (streamGeneration.current === generation) conversationTitleRef.current = title;
-    }
 
-    const apiMessages = msgs.map((m) => {
-      const base: Record<string, unknown> = { role: m.role, content: m.content };
-      if (m.attachment) base.attachment = m.attachment;
-      if (m.role === "assistant") {
-        if (m.isComplete && m.events?.length) base.events = m.events;
-        if (m.cost_gbp !== undefined) base.cost_gbp = m.cost_gbp;
-        if (m.stop_reason) base.stop_reason = m.stop_reason;
-        if (m.stopped) base.stopped = true;
-        if (m.suggestions?.length) base.suggestions = m.suggestions;
-      }
-      return base;
-    });
-
-    try {
-      const saved = await apiRequest<ConversationDetail>("POST", "conversations", undefined, { session_id: sid, title, messages: apiMessages, user_id: user?.id, user_email: user?.email });
-      // The sidebar list and cache stay correct regardless, but only mark this
-      // conversation active if the user hasn't switched away in the meantime.
-      if (streamGeneration.current === generation) setActiveConversationId(saved.id);
-      conversationCache.current.set(saved.id, saved);
-      setConversations((prev) => {
-        const filtered = prev.filter((c) => c.session_id !== sid);
-        return [{ id: saved.id, session_id: sid, title, created_at: saved.created_at, updated_at: saved.updated_at }, ...filtered];
+      const apiMessages = msgs.map((m) => {
+        const base: Record<string, unknown> = { role: m.role, content: m.content };
+        if (m.attachment) base.attachment = m.attachment;
+        if (m.role === "assistant") {
+          if (m.isComplete && m.events?.length) base.events = m.events;
+          if (m.cost_gbp !== undefined) base.cost_gbp = m.cost_gbp;
+          if (m.stop_reason) base.stop_reason = m.stop_reason;
+          if (m.stopped) base.stopped = true;
+          if (m.suggestions?.length) base.suggestions = m.suggestions;
+        }
+        return base;
       });
-      return saved;
-    } catch (e) { console.error("Failed to save conversation", e); }
-    return null;
+
+      try {
+        const saved = await apiRequest<ConversationDetail>("POST", "conversations", undefined, { session_id: sid, title, messages: apiMessages, user_id: user?.id, user_email: user?.email });
+        // The sidebar list and cache stay correct regardless, but only mark this
+        // conversation active if the user hasn't switched away in the meantime.
+        if (streamGeneration.current === generation) setActiveConversationId(saved.id);
+        conversationCache.current.set(saved.id, saved);
+        setConversations((prev) => {
+          const filtered = prev.filter((c) => c.session_id !== sid);
+          return [{ id: saved.id, session_id: sid, title, created_at: saved.created_at, updated_at: saved.updated_at }, ...filtered];
+        });
+        return saved;
+      } catch (e) { console.error("Failed to save conversation", e); }
+      return null;
+    };
+
+    // `done` and `suggestions` are separate stream events. Queue the complete
+    // save jobs in arrival order so the suggestions payload cannot race or be
+    // overwritten by the earlier transcript-only payload.
+    return enqueueSerial(saveQueueRef, persist);
   }, [user]);
 
   const ensureConversationForReport = useCallback(async (): Promise<number | null> => {
@@ -1533,14 +1522,19 @@ export default function ChatPage() {
 
   const isEmbed = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("embed");
   const sidebarOffset = isEmbed ? 0 : sidebarOpen ? 260 : 60;
-  const filteredConversations = chatSearchQuery.trim()
-    ? conversations.filter((conversation) => conversation.title.toLowerCase().includes(chatSearchQuery.trim().toLowerCase()))
-    : conversations;
+  const recentSearchResults = useMemo<ChatSearchResult[]>(
+    () => conversations.map((conversation) => ({ ...conversation, snippet: null })),
+    [conversations],
+  );
+  const searchChats = useCallback(
+    (query: string) => user
+      ? apiRequest<ChatSearchResult[]>("GET", "conversations/search", { user_id: user.id, query })
+      : Promise.resolve([]),
+    [user],
+  );
 
   const openChatSearch = () => {
-    setSidebarOpen(true);
     setChatSearchOpen(true);
-    requestAnimationFrame(() => chatSearchRef.current?.focus());
   };
 
   return (
@@ -1609,18 +1603,13 @@ export default function ChatPage() {
               <IconSearch size={20} />
             </button>
             <div style={{ flex: 1 }} />
-            <button onClick={toggleTheme} data-tip-right={theme === "light" ? "Switch to dark" : "Switch to light"} aria-label={theme === "light" ? "Switch to dark" : "Switch to light"} style={{ background: "transparent", border: "none", cursor: "pointer", padding: "10px", borderRadius: "10px", display: "flex", color: "var(--text-2)", marginBottom: "6px" }}
-              onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
-              onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
-            >
-              {theme === "light" ? <IconMoon size={18} /> : <IconSun size={18} />}
-            </button>
+            <div style={{ marginBottom: "6px" }}>
+              <ThemeSelector compact preference={themePreference} onChange={setThemePreference} />
+            </div>
             {user ? (
-              <button onClick={signOut} data-tip-right={`${user.email} — sign out`} aria-label={`${user.email} — sign out`} style={{ background: "var(--accent)", color: "var(--accent-fg)", border: "none", cursor: "pointer", width: "32px", height: "32px", borderRadius: "999px", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "13px", fontWeight: 600, textTransform: "uppercase" }}>
-                {(user.email || "?").charAt(0)}
-              </button>
+              <AccountMenu compact email={user.email || "Account"} onSignOut={signOut} />
             ) : (
-              <button onClick={() => { setShowAuth(true); setAuthError(null); }} data-tip-right="Sign in" aria-label="Sign in" style={{ background: "transparent", border: "1px solid var(--border)", cursor: "pointer", padding: "8px", borderRadius: "999px", display: "flex", color: "var(--text-2)" }}>
+              <button onClick={() => setShowAuth(true)} data-tip-right="Sign in" aria-label="Sign in" style={{ background: "transparent", border: "1px solid var(--border)", cursor: "pointer", padding: "8px", borderRadius: "999px", display: "flex", color: "var(--text-2)" }}>
                 <IconUser size={16} />
               </button>
             )}
@@ -1647,54 +1636,26 @@ export default function ChatPage() {
             </button>
             <button
               type="button"
-              onClick={() => {
-                setChatSearchOpen((open) => !open);
-                requestAnimationFrame(() => chatSearchRef.current?.focus());
-              }}
+              onClick={openChatSearch}
               aria-expanded={chatSearchOpen}
-              aria-controls="chat-search"
               style={{ width: "100%", fontSize: "14px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: chatSearchOpen ? "var(--surface-hover)" : "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", fontWeight: 500, justifyContent: "flex-start" }}
               onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
               onMouseLeave={(e) => { if (!chatSearchOpen) (e.currentTarget as HTMLElement).style.background = "transparent"; }}
             >
               <IconSearch size={16} /> Search chats
             </button>
-            {chatSearchOpen && (
-              <div id="chat-search" style={{ padding: "4px 8px 6px" }}>
-                <div style={{ position: "relative" }}>
-                  <IconSearch size={15} style={{ position: "absolute", left: "10px", top: "50%", transform: "translateY(-50%)", color: "var(--muted)", pointerEvents: "none" }} />
-                  <input
-                    ref={chatSearchRef}
-                    type="search"
-                    value={chatSearchQuery}
-                    onChange={(event) => setChatSearchQuery(event.target.value)}
-                    onKeyDown={(event) => {
-                      if (event.key === "Escape") {
-                        setChatSearchOpen(false);
-                        setChatSearchQuery("");
-                      }
-                    }}
-                    placeholder="Search chats"
-                    aria-label="Search chats"
-                    style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: "9px", background: "var(--surface)", color: "var(--text)", padding: "8px 10px 8px 32px", fontFamily: "inherit", fontSize: "13px", outline: "none" }}
-                  />
-                </div>
-              </div>
-            )}
             <div onScroll={() => setConversationMenu(null)} style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto", paddingTop: "8px" }}>
               <div style={{ fontSize: "11px", color: "var(--muted)", letterSpacing: "0.04em", textTransform: "uppercase", fontWeight: 600, marginBottom: "6px", paddingLeft: "10px" }}>Chats</div>
               {!user ? (
                 <div style={{ fontSize: "13px", color: "var(--muted)", padding: "8px 10px", lineHeight: 1.5 }}>
-                  <button onClick={() => { setShowAuth(true); setAuthError(null); }} style={{ color: "var(--text)", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: "13px", textDecoration: "underline" }}>Sign in</button>
+                  <button onClick={() => setShowAuth(true)} style={{ color: "var(--text)", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", fontSize: "13px", textDecoration: "underline" }}>Sign in</button>
                   {" to save your chats."}
                 </div>
               ) : conversations.length === 0 ? (
                 <div style={{ fontSize: "13px", color: "var(--muted)", fontStyle: "italic", padding: "8px 10px" }}>No previous chats</div>
-              ) : filteredConversations.length === 0 ? (
-                <div style={{ fontSize: "13px", color: "var(--muted)", fontStyle: "italic", padding: "8px 10px" }}>No matching chats</div>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
-                  {filteredConversations.map((conv) => {
+                  {conversations.map((conv) => {
                     const isActive = activeConversationId === conv.id;
                     return (
                     <div key={conv.id} onClick={() => loadConversation(conv)} style={{ padding: "8px 10px", cursor: "pointer", background: isActive ? "var(--surface-hover)" : "transparent", borderRadius: "8px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px" }}
@@ -1725,19 +1686,12 @@ export default function ChatPage() {
                 </div>
               )}
             </div>
-            <div style={{ borderTop: "1px solid var(--border)", paddingTop: "10px" }}>
+            <div style={{ borderTop: "1px solid var(--border)", paddingTop: "8px" }}>
+              <ThemeSelector compact={false} preference={themePreference} onChange={setThemePreference} />
               {user ? (
-                <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "8px 10px", borderRadius: "10px" }}>
-                  <div style={{ width: "28px", height: "28px", borderRadius: "999px", background: "var(--accent)", color: "var(--accent-fg)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "12px", fontWeight: 600, flexShrink: 0, textTransform: "uppercase" }}>
-                    {(user.email || "?").slice(0, 1)}
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0, fontSize: "13px", color: "var(--text)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{user.email}</div>
-                  <button onClick={signOut} data-tip="Sign out" aria-label="Sign out" style={{ background: "none", border: "none", cursor: "pointer", color: "var(--muted)", display: "flex", padding: "4px" }}>
-                    <IconLogout size={14} />
-                  </button>
-                </div>
+                <AccountMenu compact={false} email={user.email || "Account"} onSignOut={signOut} />
               ) : (
-                <button onClick={() => { setShowAuth(true); setAuthError(null); }} style={{ width: "100%", fontSize: "13px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", justifyContent: "flex-start" }}
+                <button onClick={() => setShowAuth(true)} style={{ width: "100%", fontSize: "13px", color: "var(--text)", cursor: "pointer", padding: "10px 12px", border: "none", borderRadius: "10px", background: "transparent", fontFamily: "inherit", display: "inline-flex", alignItems: "center", gap: "10px", justifyContent: "flex-start" }}
                   onMouseEnter={(e) => (e.currentTarget as HTMLElement).style.background = "var(--surface-hover)"}
                   onMouseLeave={(e) => (e.currentTarget as HTMLElement).style.background = "transparent"}
                 >
@@ -2201,39 +2155,23 @@ export default function ChatPage() {
         </div>
       </div>
 
-      {/* Auth modal */}
-      {showAuth && (
-        <div onClick={() => setShowAuth(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div onClick={(e) => e.stopPropagation()} style={{ background: "var(--surface)", color: "var(--text)", padding: "32px", width: "360px", maxWidth: "90vw", borderRadius: "16px", border: "1px solid var(--border)", boxShadow: "0 10px 40px rgba(0,0,0,0.15)" }}>
-            <h2 style={{ margin: "0 0 20px", fontSize: "18px", fontWeight: 600, color: "var(--text)" }}>
-              {authMode === "signin" ? "Sign in" : "Create account"}
-            </h2>
-            {authError && <div style={{ padding: "8px 12px", background: "var(--accent-15)", color: "#ef4444", fontSize: "13px", marginBottom: "16px", borderRadius: "8px" }}>{authError}</div>}
-            <form onSubmit={async (e) => {
-              e.preventDefault();
-              setAuthSubmitting(true);
-              setAuthError(null);
-              const { error } = authMode === "signin" ? await signIn(authEmail, authPassword) : await signUp(authEmail, authPassword);
-              setAuthSubmitting(false);
-              if (error) setAuthError(error);
-              else { setShowAuth(false); setAuthEmail(""); setAuthPassword(""); }
-            }}>
-              <input type="email" placeholder="Email" value={authEmail} onChange={(e) => setAuthEmail(e.target.value)} required style={{ width: "100%", padding: "10px 12px", fontSize: "14px", border: "1px solid var(--border)", marginBottom: "10px", fontFamily: "inherit", boxSizing: "border-box", borderRadius: "8px", background: "var(--surface)", color: "var(--text)" }} />
-              <input type="password" placeholder="Password" value={authPassword} onChange={(e) => setAuthPassword(e.target.value)} required minLength={6} style={{ width: "100%", padding: "10px 12px", fontSize: "14px", border: "1px solid var(--border)", marginBottom: "16px", fontFamily: "inherit", boxSizing: "border-box", borderRadius: "8px", background: "var(--surface)", color: "var(--text)" }} />
-              <button type="submit" disabled={authSubmitting} style={{ width: "100%", padding: "10px", fontSize: "14px", background: "var(--accent)", color: "var(--accent-fg)", border: "none", cursor: authSubmitting ? "not-allowed" : "pointer", fontFamily: "inherit", opacity: authSubmitting ? 0.7 : 1, borderRadius: "8px", fontWeight: 500 }}>
-                {authSubmitting ? "..." : authMode === "signin" ? "Sign in" : "Create account"}
-              </button>
-            </form>
-            <div style={{ marginTop: "16px", textAlign: "center", fontSize: "13px", color: "var(--muted)" }}>
-              {authMode === "signin" ? (
-                <>No account? <button onClick={() => { setAuthMode("signup"); setAuthError(null); }} style={{ color: "var(--text)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px", textDecoration: "underline" }}>Create one</button></>
-              ) : (
-                <>Have an account? <button onClick={() => { setAuthMode("signin"); setAuthError(null); }} style={{ color: "var(--text)", background: "none", border: "none", cursor: "pointer", fontFamily: "inherit", fontSize: "13px", textDecoration: "underline" }}>Sign in</button></>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      <ChatSearchDialog
+        open={chatSearchOpen}
+        recent={recentSearchResults}
+        search={searchChats}
+        onClose={() => setChatSearchOpen(false)}
+        onSelect={(result) => {
+          setChatSearchOpen(false);
+          void loadConversation(result);
+        }}
+      />
+
+      <AuthDialog
+        open={showAuth}
+        onClose={() => setShowAuth(false)}
+        signIn={signIn}
+        signUp={signUp}
+      />
 
       {reportOpen && (
         <div onClick={() => !reportSubmitting && setReportOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>

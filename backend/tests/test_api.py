@@ -7,6 +7,8 @@ Run inside the backend container: pytest tests/
 import asyncio
 import json
 import os
+import threading
+from concurrent.futures import ThreadPoolExecutor
 from types import SimpleNamespace
 
 import pytest
@@ -165,6 +167,74 @@ class TestConversations:
         r = self._save(session_id="upsert-test-1", title="Updated")
         assert r.status_code == 200
         assert r.json()["title"] == "Updated"
+
+    def test_concurrent_saves_create_one_conversation(self):
+        barrier = threading.Barrier(2)
+
+        def save(title):
+            barrier.wait()
+            return self._save(
+                session_id="concurrent-upsert-1",
+                title=title,
+                user_id="user-1",
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            responses = list(executor.map(save, ["First", "Second"]))
+
+        assert all(response.status_code == 200 for response in responses)
+        ids = {response.json()["id"] for response in responses}
+        assert len(ids) == 1
+
+        listed = client.get("/conversations", params={"user_id": "user-1"})
+        matching = [
+            conversation
+            for conversation in listed.json()
+            if conversation["session_id"] == "concurrent-upsert-1"
+        ]
+        assert len(matching) == 1
+
+    def test_search_matches_message_content_and_scopes_results(self):
+        self._save(
+            session_id="search-owned-1",
+            title="A generic question",
+            user_id="user-1",
+            messages=[
+                {"role": "user", "content": "How does child benefit work?"},
+                {"role": "assistant", "content": "It is paid every four weeks."},
+            ],
+        )
+        self._save(
+            session_id="search-other-1",
+            title="Child benefit for another user",
+            user_id="user-2",
+        )
+
+        response = client.get(
+            "/conversations/search",
+            params={"user_id": "user-1", "query": "child benefit"},
+        )
+
+        assert response.status_code == 200
+        assert [result["session_id"] for result in response.json()] == [
+            "search-owned-1"
+        ]
+        assert "child benefit" in response.json()[0]["snippet"].lower()
+
+    def test_search_matches_titles(self):
+        self._save(
+            session_id="search-title-1",
+            title="Scottish income tax",
+            user_id="user-1",
+        )
+
+        response = client.get(
+            "/conversations/search",
+            params={"user_id": "user-1", "query": "SCOTTISH"},
+        )
+
+        assert response.status_code == 200
+        assert response.json()[0]["session_id"] == "search-title-1"
 
     def test_messages_roundtrip(self):
         messages = [

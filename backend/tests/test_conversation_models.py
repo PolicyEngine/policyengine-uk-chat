@@ -1,6 +1,9 @@
 from types import SimpleNamespace
 
 import pytest
+from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import create_engine
 
 from conversations import models
 
@@ -11,6 +14,74 @@ def test_get_engine_requires_database_url(monkeypatch):
 
     with pytest.raises(RuntimeError, match="DATABASE_URL"):
         models.get_engine()
+
+
+def test_ensure_table_consolidates_legacy_duplicates_and_adds_unique_index(
+    tmp_path, monkeypatch
+):
+    engine = create_engine(f"sqlite:///{tmp_path / 'legacy.sqlite'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                """
+                CREATE TABLE chat_conversations (
+                    id INTEGER PRIMARY KEY,
+                    session_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    messages TEXT NOT NULL,
+                    user_id TEXT,
+                    user_email TEXT,
+                    share_token TEXT,
+                    created_at TIMESTAMP NOT NULL,
+                    updated_at TIMESTAMP NOT NULL
+                )
+                """
+            )
+        )
+        connection.execute(
+            text(
+                """
+                INSERT INTO chat_conversations
+                    (id, session_id, title, messages, share_token, created_at, updated_at)
+                VALUES
+                    (1, 'duplicate-session', 'Old', '[1]', 'shared-token',
+                     '2026-01-01 00:00:00', '2026-01-01 00:00:00'),
+                    (2, 'duplicate-session', 'Newest', '[1, 2]', NULL,
+                     '2026-01-02 00:00:00', '2026-01-02 00:00:00')
+                """
+            )
+        )
+
+    monkeypatch.setattr(models, "_engine", engine)
+    models.ensure_table()
+
+    with engine.begin() as connection:
+        rows = connection.execute(
+            text(
+                "SELECT id, title, messages, share_token, created_at "
+                "FROM chat_conversations"
+            )
+        ).mappings().all()
+
+        assert len(rows) == 1
+        assert rows[0]["id"] == 2
+        assert rows[0]["title"] == "Newest"
+        assert rows[0]["messages"] == "[1, 2]"
+        assert rows[0]["share_token"] == "shared-token"
+        assert str(rows[0]["created_at"]).startswith("2026-01-01")
+
+        with pytest.raises(IntegrityError):
+            connection.execute(
+                text(
+                    """
+                    INSERT INTO chat_conversations
+                        (session_id, title, messages, created_at, updated_at)
+                    VALUES
+                        ('duplicate-session', 'Again', '[]',
+                         '2026-01-03 00:00:00', '2026-01-03 00:00:00')
+                    """
+                )
+            )
 
 
 def test_get_engine_creates_and_caches_engine(monkeypatch):
@@ -69,21 +140,21 @@ def test_ensure_table_adds_columns_and_index(monkeypatch):
     models.ensure_table()
 
     assert create_all_calls == [engine]
-    assert len(connection.statements) == 3
-    assert connection.commits == 3
+    assert len(connection.statements) == 5
+    assert connection.commits == 5
     assert connection.rollbacks == 0
 
 
 def test_ensure_table_rolls_back_existing_columns_and_failed_index(monkeypatch):
-    connection = FakeConnection(failures=("ADD COLUMN", "CREATE INDEX"))
+    connection = FakeConnection(failures=("ADD COLUMN", "INDEX IF NOT EXISTS"))
     engine = SimpleNamespace(connect=lambda: connection)
     monkeypatch.setattr(models, "get_engine", lambda: engine)
     monkeypatch.setattr(models.SQLModel.metadata, "create_all", lambda _engine: None)
 
     models.ensure_table()
 
-    assert connection.commits == 0
-    assert connection.rollbacks == 3
+    assert connection.commits == 1
+    assert connection.rollbacks == 4
 
 
 def test_ensure_table_logs_outer_failure_without_raising(monkeypatch, caplog):
