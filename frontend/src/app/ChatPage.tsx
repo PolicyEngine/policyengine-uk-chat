@@ -17,6 +17,7 @@ import ThemeSelector from "@/components/ThemeSelector";
 import { APP_BASE_PATH, getAppBaseUrl, getBackendEndpoint } from "@/utils/backend";
 import { enqueueSerial } from "@/utils/serialQueue";
 import { useThemePreference } from "@/utils/theme";
+import { STARTER_PROMPTS } from "./chat-prompts";
 
 const EXAMPLE_QUERIES = [
   "What's the current personal allowance?",
@@ -2193,12 +2194,7 @@ export default function ChatPage() {
             )}
             {!hasMessages && !input && (
               <div style={{ marginTop: "14px", display: "flex", flexWrap: "wrap", justifyContent: "center", gap: "8px", position: "relative", zIndex: 1 }}>
-                {[
-                  "What's the personal allowance?",
-                  "Tax on £50,000 income?",
-                  "Child benefit for 3 kids?",
-                  "How does marriage allowance work?",
-                ].map((prompt) => (
+                {STARTER_PROMPTS.map((prompt) => (
                   <button
                     key={prompt}
                     type="button"
