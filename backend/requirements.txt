@@ -3,7 +3,7 @@ uvicorn[standard]
 sqlmodel
 psycopg2-binary
 anthropic
-policyengine[uk]==5.0.1
+policyengine[uk]==5.0.2
 pandas
 pyyaml
 httpx
