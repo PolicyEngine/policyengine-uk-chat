@@ -319,7 +319,8 @@ export default function ChatPage() {
 
   const [modelVersion, setModelVersion] = useState<string | null>(null);
   const hasMessages = messages.length > 0;
-  const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, !hasMessages && !input);
+  const showAnimatedPlaceholder = !hasMessages && !input;
+  const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, showAnimatedPlaceholder);
 
   useEffect(() => {
     apiRequest<{ engine: string; engine_version: string; policyengine_uk: string }>("GET", "version")
@@ -2046,7 +2047,7 @@ export default function ChatPage() {
                 style={{ display: "none" }}
               />
               <div style={{ position: "relative" }}>
-                {!input && !hasMessages && (
+                {showAnimatedPlaceholder && (
                   <div aria-hidden="true" style={{ position: "absolute", top: "4px", left: "0", fontSize: "16px", lineHeight: 1.5, color: "var(--faint)", pointerEvents: "none" }}>
                     {animatedPlaceholder || "Ask anything"}
                     <span style={{ display: "inline-block", width: "2px", height: "1em", background: "var(--muted)", marginLeft: "1px", verticalAlign: "text-bottom", animation: "blink 1s step-end infinite" }} />
@@ -2066,7 +2067,7 @@ export default function ChatPage() {
                   disabled={isStreaming}
                   rows={1}
                   aria-label="Ask a question"
-                  style={{ width: "100%", maxHeight: "240px", background: "transparent", border: "none", outline: "none", fontSize: "16px", lineHeight: 1.5, color: "var(--text)", fontFamily: "inherit", resize: "none", padding: "4px 0", opacity: isStreaming ? 0.5 : 1, overflowY: "hidden", caretColor: "var(--text)", boxSizing: "border-box" }}
+                  style={{ width: "100%", maxHeight: "240px", background: "transparent", border: "none", outline: "none", fontSize: "16px", lineHeight: 1.5, color: "var(--text)", fontFamily: "inherit", resize: "none", padding: "4px 0", opacity: isStreaming ? 0.5 : 1, overflowY: "hidden", caretColor: showAnimatedPlaceholder ? "transparent" : "var(--text)", boxSizing: "border-box" }}
                 />
               </div>
               <div style={{ marginTop: "6px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
