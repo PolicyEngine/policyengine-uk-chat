@@ -2065,7 +2065,7 @@ export default function ChatPage() {
                 <textarea
                   ref={inputRef}
                   value={input}
-                  onChange={(e) => { setHasInteractedWithInput(true); setInput(e.target.value); autoResize(e.target); }}
+                  onChange={(e) => { setHasInteractedWithInput(Boolean(e.target.value)); setInput(e.target.value); autoResize(e.target); }}
                   onClick={() => setHasInteractedWithInput(true)}
                   onKeyDown={(e) => { setHasInteractedWithInput(true); handleKeyDown(e); }}
                   disabled={isStreaming}

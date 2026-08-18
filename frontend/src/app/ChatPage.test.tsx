@@ -44,7 +44,7 @@ afterEach(() => {
 });
 
 describe("ChatPage", () => {
-  it("shows the automated placeholder only until the user interacts with the input", () => {
+  it("restores the automated placeholder when an unsent input is cleared", () => {
     render(<ChatPage />);
 
     const input = screen.getByRole("textbox", { name: "Ask a question" });
@@ -60,7 +60,7 @@ describe("ChatPage", () => {
     expect(input.style.caretColor).toBe("var(--text)");
 
     fireEvent.change(input, { target: { value: "" } });
-    expect(screen.queryByText("Ask anything")).not.toBeInTheDocument();
-    expect(input.style.caretColor).toBe("var(--text)");
+    expect(screen.getByText("Ask anything")).toBeInTheDocument();
+    expect(input.style.caretColor).toBe("transparent");
   });
 });
