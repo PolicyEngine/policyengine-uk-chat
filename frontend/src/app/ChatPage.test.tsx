@@ -44,17 +44,23 @@ afterEach(() => {
 });
 
 describe("ChatPage", () => {
-  it("hides the native caret only while the automated placeholder is visible", () => {
+  it("shows the automated placeholder only until the user interacts with the input", () => {
     render(<ChatPage />);
 
     const input = screen.getByRole("textbox", { name: "Ask a question" });
     expect(input).toHaveFocus();
+    expect(screen.getByText("Ask anything")).toBeInTheDocument();
     expect(input.style.caretColor).toBe("transparent");
+
+    fireEvent.click(input);
+    expect(screen.queryByText("Ask anything")).not.toBeInTheDocument();
+    expect(input.style.caretColor).toBe("var(--text)");
 
     fireEvent.change(input, { target: { value: "How does income tax work?" } });
     expect(input.style.caretColor).toBe("var(--text)");
 
     fireEvent.change(input, { target: { value: "" } });
-    expect(input.style.caretColor).toBe("transparent");
+    expect(screen.queryByText("Ask anything")).not.toBeInTheDocument();
+    expect(input.style.caretColor).toBe("var(--text)");
   });
 });

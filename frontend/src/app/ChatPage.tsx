@@ -241,6 +241,7 @@ export default function ChatPage() {
   const { user, loading: authLoading, signIn, signUp, signOut } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [hasInteractedWithInput, setHasInteractedWithInput] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
   const [collapsedWorking, setCollapsedWorking] = useState<Set<number>>(new Set());
@@ -319,7 +320,7 @@ export default function ChatPage() {
 
   const [modelVersion, setModelVersion] = useState<string | null>(null);
   const hasMessages = messages.length > 0;
-  const showAnimatedPlaceholder = !hasMessages && !input;
+  const showAnimatedPlaceholder = !hasMessages && !input && !hasInteractedWithInput;
   const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, showAnimatedPlaceholder);
 
   useEffect(() => {
@@ -514,6 +515,7 @@ export default function ChatPage() {
         conversationTitleRef.current = null;
         titleGenPromiseRef.current = null;
         setMessages([]);
+        setHasInteractedWithInput(false);
         sessionId.current = null;
         setActiveConversationId(null);
         setCollapsedWorking(new Set());
@@ -616,6 +618,7 @@ export default function ChatPage() {
     conversationTitleRef.current = null;
     titleGenPromiseRef.current = null;
     setMessages([]);
+    setHasInteractedWithInput(false);
     sessionId.current = null;
     setActiveConversationId(null);
     setCollapsedWorking(new Set());
@@ -2062,8 +2065,9 @@ export default function ChatPage() {
                 <textarea
                   ref={inputRef}
                   value={input}
-                  onChange={(e) => { setInput(e.target.value); autoResize(e.target); }}
-                  onKeyDown={handleKeyDown}
+                  onChange={(e) => { setHasInteractedWithInput(true); setInput(e.target.value); autoResize(e.target); }}
+                  onClick={() => setHasInteractedWithInput(true)}
+                  onKeyDown={(e) => { setHasInteractedWithInput(true); handleKeyDown(e); }}
                   disabled={isStreaming}
                   rows={1}
                   aria-label="Ask a question"
