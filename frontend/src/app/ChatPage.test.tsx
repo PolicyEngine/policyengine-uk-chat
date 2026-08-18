@@ -49,7 +49,7 @@ describe("ChatPage", () => {
 
     const input = screen.getByRole("textbox", { name: "Ask a question" });
     expect(input).not.toHaveFocus();
-    expect(screen.getByText("Ask anything")).toBeInTheDocument();
+    expect(screen.queryByText("Ask anything")).not.toBeInTheDocument();
     expect(input.style.caretColor).toBe("transparent");
 
     act(() => input.focus());
@@ -66,7 +66,7 @@ describe("ChatPage", () => {
 
     act(() => input.blur());
     expect(input).not.toHaveFocus();
-    expect(screen.getByText("Ask anything")).toBeInTheDocument();
+    expect(screen.queryByText("Ask anything")).not.toBeInTheDocument();
     expect(input.style.caretColor).toBe("transparent");
   });
 });

@@ -2051,7 +2051,7 @@ export default function ChatPage() {
               <div style={{ position: "relative" }}>
                 {showAnimatedPlaceholder && (
                   <div aria-hidden="true" style={{ position: "absolute", top: "4px", left: "0", fontSize: "16px", lineHeight: 1.5, color: "var(--faint)", pointerEvents: "none" }}>
-                    {animatedPlaceholder || "Ask anything"}
+                    {animatedPlaceholder}
                     <span style={{ display: "inline-block", width: "2px", height: "1em", background: "var(--muted)", marginLeft: "1px", verticalAlign: "text-bottom", animation: "blink 1s step-end infinite" }} />
                     <style>{`@keyframes blink{50%{opacity:0}}`}</style>
                   </div>
