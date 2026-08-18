@@ -5,6 +5,9 @@ import ChatPage from "./ChatPage";
 
 const FIRST_EXAMPLE_QUERY = "What's the current personal allowance?";
 
+const encodeStreamEvent = (event: Record<string, unknown>): Uint8Array =>
+  new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
+
 vi.mock("@/utils/AuthContext", () => ({
   useAuth: () => ({
     user: null,
@@ -22,6 +25,10 @@ vi.mock("@/utils/theme", () => ({
   }),
 }));
 
+vi.mock("@mantine/core", () => ({
+  Loader: () => <span data-testid="loader" />,
+}));
+
 beforeEach(() => {
   const storedValues = new Map<string, string>();
   Object.defineProperty(window, "localStorage", {
@@ -33,6 +40,11 @@ beforeEach(() => {
     },
   });
   vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(() => {})));
+  vi.stubGlobal("ResizeObserver", class {
+    disconnect() {}
+    observe() {}
+    unobserve() {}
+  });
   Object.defineProperty(Element.prototype, "scrollIntoView", {
     configurable: true,
     value: vi.fn(),
@@ -48,6 +60,79 @@ afterEach(() => {
 });
 
 describe("ChatPage", () => {
+  it("shows active wording during tool processing and completed wording after output appears", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+    vi.mocked(fetch).mockImplementation((input) =>
+      String(input).includes("chat/message")
+        ? Promise.resolve(new Response(stream, { status: 200 }))
+        : new Promise<Response>(() => {}),
+    );
+
+    render(<ChatPage />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask a question" }), {
+      target: { value: "Calculate my tax" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await act(async () => {
+      streamController?.enqueue(encodeStreamEvent({
+        type: "tool_start",
+        tool_name: "run_python",
+        tool_id: "tool-1",
+      }));
+    });
+    expect(screen.getByText("Working through the problem")).toBeInTheDocument();
+
+    await act(async () => {
+      streamController?.enqueue(encodeStreamEvent({
+        type: "chunk",
+        content: "Your tax result is £1,000.",
+      }));
+      streamController?.enqueue(encodeStreamEvent({ type: "done" }));
+      streamController?.close();
+    });
+    expect(screen.getByText("Worked through the problem")).toBeInTheDocument();
+  });
+
+  it("keeps active wording when a completed tool response has no visible output", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+    vi.mocked(fetch).mockImplementation((input) =>
+      String(input).includes("chat/message")
+        ? Promise.resolve(new Response(stream, { status: 200 }))
+        : new Promise<Response>(() => {}),
+    );
+
+    render(<ChatPage />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask a question" }), {
+      target: { value: "Calculate my tax" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await act(async () => {
+      streamController?.enqueue(encodeStreamEvent({
+        type: "tool_start",
+        tool_name: "run_python",
+        tool_id: "tool-1",
+      }));
+      streamController?.enqueue(encodeStreamEvent({ type: "chunk", content: "   " }));
+      streamController?.enqueue(encodeStreamEvent({ type: "done" }));
+      streamController?.close();
+    });
+
+    expect(screen.getByText("Working through the problem")).toBeInTheDocument();
+    expect(screen.queryByText("Worked through the problem")).not.toBeInTheDocument();
+  });
+
   it("shows the automated placeholder only for an empty, blurred new-chat input", () => {
     render(<ChatPage />);
 
