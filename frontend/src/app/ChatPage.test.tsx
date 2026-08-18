@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChatPage from "./ChatPage";
@@ -44,15 +44,16 @@ afterEach(() => {
 });
 
 describe("ChatPage", () => {
-  it("restores the automated placeholder when an unsent input is cleared", () => {
+  it("shows the automated placeholder only for an empty, blurred new-chat input", () => {
     render(<ChatPage />);
 
     const input = screen.getByRole("textbox", { name: "Ask a question" });
-    expect(input).toHaveFocus();
+    expect(input).not.toHaveFocus();
     expect(screen.getByText("Ask anything")).toBeInTheDocument();
     expect(input.style.caretColor).toBe("transparent");
 
-    fireEvent.click(input);
+    act(() => input.focus());
+    expect(input).toHaveFocus();
     expect(screen.queryByText("Ask anything")).not.toBeInTheDocument();
     expect(input.style.caretColor).toBe("var(--text)");
 
@@ -60,6 +61,11 @@ describe("ChatPage", () => {
     expect(input.style.caretColor).toBe("var(--text)");
 
     fireEvent.change(input, { target: { value: "" } });
+    expect(screen.queryByText("Ask anything")).not.toBeInTheDocument();
+    expect(input.style.caretColor).toBe("var(--text)");
+
+    act(() => input.blur());
+    expect(input).not.toHaveFocus();
     expect(screen.getByText("Ask anything")).toBeInTheDocument();
     expect(input.style.caretColor).toBe("transparent");
   });

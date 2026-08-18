@@ -241,7 +241,7 @@ export default function ChatPage() {
   const { user, loading: authLoading, signIn, signUp, signOut } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
-  const [hasInteractedWithInput, setHasInteractedWithInput] = useState(false);
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
   const [collapsedWorking, setCollapsedWorking] = useState<Set<number>>(new Set());
@@ -320,7 +320,9 @@ export default function ChatPage() {
 
   const [modelVersion, setModelVersion] = useState<string | null>(null);
   const hasMessages = messages.length > 0;
-  const showAnimatedPlaceholder = !hasMessages && !input && !hasInteractedWithInput;
+  const showPlaceholder = !input && (hasMessages || !isInputFocused);
+  const showAnimatedPlaceholder = showPlaceholder && !hasMessages;
+  const showStaticPlaceholder = showPlaceholder && hasMessages;
   const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, showAnimatedPlaceholder);
 
   useEffect(() => {
@@ -332,7 +334,6 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    inputRef.current?.focus();
     if (!authLoading && user) {
       apiRequest<ConversationSummary[]>("GET", "conversations", { user_id: user.id })
         .then((convs) => {
@@ -515,7 +516,6 @@ export default function ChatPage() {
         conversationTitleRef.current = null;
         titleGenPromiseRef.current = null;
         setMessages([]);
-        setHasInteractedWithInput(false);
         sessionId.current = null;
         setActiveConversationId(null);
         setCollapsedWorking(new Set());
@@ -618,7 +618,6 @@ export default function ChatPage() {
     conversationTitleRef.current = null;
     titleGenPromiseRef.current = null;
     setMessages([]);
-    setHasInteractedWithInput(false);
     sessionId.current = null;
     setActiveConversationId(null);
     setCollapsedWorking(new Set());
@@ -2057,7 +2056,7 @@ export default function ChatPage() {
                     <style>{`@keyframes blink{50%{opacity:0}}`}</style>
                   </div>
                 )}
-                {!input && hasMessages && (
+                {showStaticPlaceholder && (
                   <div aria-hidden="true" style={{ position: "absolute", top: "4px", left: "0", fontSize: "16px", lineHeight: 1.5, color: "var(--faint)", pointerEvents: "none" }}>
                     Ask anything
                   </div>
@@ -2065,9 +2064,10 @@ export default function ChatPage() {
                 <textarea
                   ref={inputRef}
                   value={input}
-                  onChange={(e) => { setHasInteractedWithInput(Boolean(e.target.value)); setInput(e.target.value); autoResize(e.target); }}
-                  onClick={() => setHasInteractedWithInput(true)}
-                  onKeyDown={(e) => { setHasInteractedWithInput(true); handleKeyDown(e); }}
+                  onChange={(e) => { setInput(e.target.value); autoResize(e.target); }}
+                  onFocus={() => setIsInputFocused(true)}
+                  onBlur={() => setIsInputFocused(false)}
+                  onKeyDown={handleKeyDown}
                   disabled={isStreaming}
                   rows={1}
                   aria-label="Ask a question"
