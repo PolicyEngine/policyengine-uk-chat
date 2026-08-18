@@ -78,36 +78,55 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "help",  description: "Insert a starter prompt",           kind: "fill", fillText: "Help me understand " },
 ];
 
+const PLACEHOLDER_TYPE_DELAY_MS = 50;
+const PLACEHOLDER_HOLD_DELAY_MS = 2000;
+const PLACEHOLDER_DELETE_DELAY_MS = 30;
+
 function useAnimatedPlaceholder(queries: string[], enabled: boolean) {
-  const [placeholder, setPlaceholder] = useState("");
   const [queryIndex, setQueryIndex] = useState(0);
   const [charIndex, setCharIndex] = useState(0);
   const [isDeleting, setIsDeleting] = useState(false);
+  const currentQuery = queries[queryIndex] ?? "";
 
   useEffect(() => {
     setQueryIndex(Math.floor(Math.random() * queries.length));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!enabled) { setPlaceholder(""); return; }
-    const currentQuery = queries[queryIndex];
-    const pauseTime = isDeleting ? 500 : 2000;
-    const typeSpeed = isDeleting ? 30 : 50;
+    if (!enabled || !currentQuery) {
+      setCharIndex(0);
+      setIsDeleting(false);
+      return;
+    }
+
+    const finishedTyping = charIndex === currentQuery.length;
+    const finishedDeleting = charIndex === 0;
+    const delay = finishedTyping && !isDeleting
+      ? PLACEHOLDER_HOLD_DELAY_MS
+      : isDeleting
+        ? PLACEHOLDER_DELETE_DELAY_MS
+        : PLACEHOLDER_TYPE_DELAY_MS;
 
     const timeout = setTimeout(() => {
-      if (!isDeleting) {
-        if (charIndex < currentQuery.length) { setPlaceholder(currentQuery.slice(0, charIndex + 1)); setCharIndex(charIndex + 1); }
-        else setTimeout(() => setIsDeleting(true), pauseTime);
-      } else {
-        if (charIndex > 0) { setPlaceholder(currentQuery.slice(0, charIndex - 1)); setCharIndex(charIndex - 1); }
-        else { setIsDeleting(false); setQueryIndex((queryIndex + 1 + Math.floor(Math.random() * (queries.length - 1))) % queries.length); }
+      if (finishedTyping && !isDeleting) {
+        setIsDeleting(true);
+        return;
       }
-    }, charIndex === currentQuery.length && !isDeleting ? pauseTime : typeSpeed);
+      if (finishedDeleting && isDeleting) {
+        const offset = queries.length > 1
+          ? 1 + Math.floor(Math.random() * (queries.length - 1))
+          : 0;
+        setQueryIndex((queryIndex + offset) % queries.length);
+        setIsDeleting(false);
+        return;
+      }
+      setCharIndex((current) => current + (isDeleting ? -1 : 1));
+    }, delay);
 
     return () => clearTimeout(timeout);
-  }, [queries, queryIndex, charIndex, isDeleting, enabled]);
+  }, [queries, queryIndex, charIndex, currentQuery, isDeleting, enabled]);
 
-  return placeholder;
+  return enabled ? currentQuery.slice(0, charIndex) : "";
 }
 
 interface ToolData {
@@ -241,6 +260,7 @@ export default function ChatPage() {
   const { user, loading: authLoading, signIn, signUp, signOut } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
+  const [isInputFocused, setIsInputFocused] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
   const [collapsedWorking, setCollapsedWorking] = useState<Set<number>>(new Set());
@@ -319,7 +339,10 @@ export default function ChatPage() {
 
   const [modelVersion, setModelVersion] = useState<string | null>(null);
   const hasMessages = messages.length > 0;
-  const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, !hasMessages && !input);
+  const showPlaceholder = !input && (hasMessages || !isInputFocused);
+  const showAnimatedPlaceholder = showPlaceholder && !hasMessages;
+  const showStaticPlaceholder = showPlaceholder && hasMessages;
+  const animatedPlaceholder = useAnimatedPlaceholder(EXAMPLE_QUERIES, showAnimatedPlaceholder);
 
   useEffect(() => {
     apiRequest<{ engine: string; engine_version: string; policyengine_uk: string }>("GET", "version")
@@ -330,7 +353,6 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    inputRef.current?.focus();
     if (!authLoading && user) {
       apiRequest<ConversationSummary[]>("GET", "conversations", { user_id: user.id })
         .then((convs) => {
@@ -2046,14 +2068,14 @@ export default function ChatPage() {
                 style={{ display: "none" }}
               />
               <div style={{ position: "relative" }}>
-                {!input && !hasMessages && (
+                {showAnimatedPlaceholder && (
                   <div aria-hidden="true" style={{ position: "absolute", top: "4px", left: "0", fontSize: "16px", lineHeight: 1.5, color: "var(--faint)", pointerEvents: "none" }}>
-                    {animatedPlaceholder || "Ask anything"}
+                    {animatedPlaceholder}
                     <span style={{ display: "inline-block", width: "2px", height: "1em", background: "var(--muted)", marginLeft: "1px", verticalAlign: "text-bottom", animation: "blink 1s step-end infinite" }} />
                     <style>{`@keyframes blink{50%{opacity:0}}`}</style>
                   </div>
                 )}
-                {!input && hasMessages && (
+                {showStaticPlaceholder && (
                   <div aria-hidden="true" style={{ position: "absolute", top: "4px", left: "0", fontSize: "16px", lineHeight: 1.5, color: "var(--faint)", pointerEvents: "none" }}>
                     Ask anything
                   </div>
@@ -2062,11 +2084,13 @@ export default function ChatPage() {
                   ref={inputRef}
                   value={input}
                   onChange={(e) => { setInput(e.target.value); autoResize(e.target); }}
+                  onFocus={() => setIsInputFocused(true)}
+                  onBlur={() => setIsInputFocused(false)}
                   onKeyDown={handleKeyDown}
                   disabled={isStreaming}
                   rows={1}
                   aria-label="Ask a question"
-                  style={{ width: "100%", maxHeight: "240px", background: "transparent", border: "none", outline: "none", fontSize: "16px", lineHeight: 1.5, color: "var(--text)", fontFamily: "inherit", resize: "none", padding: "4px 0", opacity: isStreaming ? 0.5 : 1, overflowY: "hidden", caretColor: "var(--text)", boxSizing: "border-box" }}
+                  style={{ width: "100%", maxHeight: "240px", background: "transparent", border: "none", outline: "none", fontSize: "16px", lineHeight: 1.5, color: "var(--text)", fontFamily: "inherit", resize: "none", padding: "4px 0", opacity: isStreaming ? 0.5 : 1, overflowY: "hidden", caretColor: showAnimatedPlaceholder ? "transparent" : "var(--text)", boxSizing: "border-box" }}
                 />
               </div>
               <div style={{ marginTop: "6px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: "8px" }}>
