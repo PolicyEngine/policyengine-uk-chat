@@ -3,6 +3,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import ChatPage from "./ChatPage";
 
+const FIRST_EXAMPLE_QUERY = "What's the current personal allowance?";
+
 vi.mock("@/utils/AuthContext", () => ({
   useAuth: () => ({
     user: null,
@@ -41,6 +43,8 @@ afterEach(() => {
   Reflect.deleteProperty(Element.prototype, "scrollIntoView");
   Reflect.deleteProperty(window, "localStorage");
   vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("ChatPage", () => {
@@ -68,5 +72,33 @@ describe("ChatPage", () => {
     expect(input).not.toHaveFocus();
     expect(screen.queryByText("Ask anything")).not.toBeInTheDocument();
     expect(input.style.caretColor).toBe("transparent");
+  });
+
+  it("holds the complete example before deleting and restarts after focus", () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0);
+    const { unmount } = render(<ChatPage />);
+    const input = screen.getByRole("textbox", { name: "Ask a question" });
+
+    for (let index = 0; index < FIRST_EXAMPLE_QUERY.length; index += 1) {
+      act(() => vi.advanceTimersByTime(50));
+    }
+    expect(screen.getByText(FIRST_EXAMPLE_QUERY)).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(1_999));
+    expect(screen.getByText(FIRST_EXAMPLE_QUERY)).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByText(FIRST_EXAMPLE_QUERY)).toBeInTheDocument();
+
+    act(() => vi.advanceTimersByTime(30));
+    expect(screen.getByText(FIRST_EXAMPLE_QUERY.slice(0, -1))).toBeInTheDocument();
+
+    act(() => input.focus());
+    act(() => input.blur());
+    act(() => vi.advanceTimersByTime(50));
+    expect(screen.getByText(FIRST_EXAMPLE_QUERY[0])).toBeInTheDocument();
+
+    unmount();
   });
 });

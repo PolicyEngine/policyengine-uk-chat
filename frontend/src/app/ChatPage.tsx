@@ -78,36 +78,55 @@ const SLASH_COMMANDS: SlashCommand[] = [
   { name: "help",  description: "Insert a starter prompt",           kind: "fill", fillText: "Help me understand " },
 ];
 
+const PLACEHOLDER_TYPE_DELAY_MS = 50;
+const PLACEHOLDER_HOLD_DELAY_MS = 2000;
+const PLACEHOLDER_DELETE_DELAY_MS = 30;
+
 function useAnimatedPlaceholder(queries: string[], enabled: boolean) {
-  const [placeholder, setPlaceholder] = useState("");
   const [queryIndex, setQueryIndex] = useState(0);
   const [charIndex, setCharIndex] = useState(0);
   const [isDeleting, setIsDeleting] = useState(false);
+  const currentQuery = queries[queryIndex] ?? "";
 
   useEffect(() => {
     setQueryIndex(Math.floor(Math.random() * queries.length));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!enabled) { setPlaceholder(""); return; }
-    const currentQuery = queries[queryIndex];
-    const pauseTime = isDeleting ? 500 : 2000;
-    const typeSpeed = isDeleting ? 30 : 50;
+    if (!enabled || !currentQuery) {
+      setCharIndex(0);
+      setIsDeleting(false);
+      return;
+    }
+
+    const finishedTyping = charIndex === currentQuery.length;
+    const finishedDeleting = charIndex === 0;
+    const delay = finishedTyping && !isDeleting
+      ? PLACEHOLDER_HOLD_DELAY_MS
+      : isDeleting
+        ? PLACEHOLDER_DELETE_DELAY_MS
+        : PLACEHOLDER_TYPE_DELAY_MS;
 
     const timeout = setTimeout(() => {
-      if (!isDeleting) {
-        if (charIndex < currentQuery.length) { setPlaceholder(currentQuery.slice(0, charIndex + 1)); setCharIndex(charIndex + 1); }
-        else setTimeout(() => setIsDeleting(true), pauseTime);
-      } else {
-        if (charIndex > 0) { setPlaceholder(currentQuery.slice(0, charIndex - 1)); setCharIndex(charIndex - 1); }
-        else { setIsDeleting(false); setQueryIndex((queryIndex + 1 + Math.floor(Math.random() * (queries.length - 1))) % queries.length); }
+      if (finishedTyping && !isDeleting) {
+        setIsDeleting(true);
+        return;
       }
-    }, charIndex === currentQuery.length && !isDeleting ? pauseTime : typeSpeed);
+      if (finishedDeleting && isDeleting) {
+        const offset = queries.length > 1
+          ? 1 + Math.floor(Math.random() * (queries.length - 1))
+          : 0;
+        setQueryIndex((queryIndex + offset) % queries.length);
+        setIsDeleting(false);
+        return;
+      }
+      setCharIndex((current) => current + (isDeleting ? -1 : 1));
+    }, delay);
 
     return () => clearTimeout(timeout);
-  }, [queries, queryIndex, charIndex, isDeleting, enabled]);
+  }, [queries, queryIndex, charIndex, currentQuery, isDeleting, enabled]);
 
-  return placeholder;
+  return enabled ? currentQuery.slice(0, charIndex) : "";
 }
 
 interface ToolData {
