@@ -238,8 +238,11 @@ function parseRetryAfterSeconds(header: string | null): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
 }
 
-/** Fixed label for the collapsed working section of an assistant message. */
-const WORKING_SUMMARY_LABEL = "Worked through the problem";
+/** Describe tool-backed work as complete only after final output is visible. */
+const getWorkingSummaryLabel = (finalEvents: readonly StreamEvent[]): string =>
+  finalEvents.some((event) => event.type === "text" && event.content.trim())
+    ? "Worked through the problem"
+    : "Working through the problem";
 
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
   const url = new URL(getBackendEndpoint(endpoint), window.location.origin);
@@ -1519,7 +1522,7 @@ export default function ChatPage() {
           <>
             <div onClick={toggleWorking} style={{ display: "flex", alignItems: "baseline", gap: "6px", color: THEME.muted, fontSize: "12px", cursor: "pointer", userSelect: "none", margin: "6px 0", padding: "2px 0" }}>
               <IconChevronDown size={12} style={{ opacity: 0.5, transform: isWorkingCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", flexShrink: 0, position: "relative", top: "1px" }} />
-              <span style={{ color: THEME.text3, fontStyle: "italic" }}>{WORKING_SUMMARY_LABEL}</span>
+              <span style={{ color: THEME.text3, fontStyle: "italic" }}>{getWorkingSummaryLabel(finalEvents)}</span>
             </div>
             {!isWorkingCollapsed && (
               <div style={{ margin: "8px 0 16px", paddingLeft: "4px", borderLeft: `2px solid ${THEME.border}` }}>
