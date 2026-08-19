@@ -46,6 +46,20 @@ changed code. For broader verification, use:
 make test-backend
 ```
 
+Changes to the typed analysis connectors, lifecycle core, request compiler, or
+execution engine also require the currently scoped strict check:
+
+```bash
+make typecheck-backend
+```
+
+This target checks `analysis.store`, `analysis.dependencies`,
+`analysis.lifecycle`, `analysis.request_compiler`, and
+`analysis.execution_engine`. It is intentionally narrower than the complete
+backend while older imported modules are migrated. Expand the target when a new
+public analysis connector, including `AnalysisTurnService`, is added; do not
+claim that the complete analysis package is strictly checked yet.
+
 Before handing off frontend changes, run:
 
 ```bash

@@ -4,6 +4,34 @@ This record maps the ten reviewed problem groups to the implementation that
 resolves them. It also records compatibility boundaries, acceptance evidence,
 and the verification required before the change is archived.
 
+## Current implementation status
+
+The R1-R10 corrections and the request-compilation, execution, finalization,
+projection, billing, and store-interface facades are implemented. The broader
+application-service simplification is not complete. The OpenSpec checklist
+currently records 212 of 231 tasks complete.
+
+Implemented simplification work includes complete lifecycle-state validation,
+typed status mutations, scoped connector protocols, one operation catalogue,
+the typed `TurnInterpreter` dependency, `RequestCompiler`, `ExecutionEngine`,
+typed `FinalizationResult`, `ChatEventProjector`, billing-intent processing, and
+the `AnalysisStore` protocol with `SqlAnalysisStore`.
+
+The remaining work is explicit rather than implicit:
+
+- enforce the final one-way chat-to-analysis import direction;
+- separate internal SQL row/version-one parsing concerns and move lifecycle
+  choices out of mutating store methods;
+- replace `run_analysis_turn` with `AnalysisTurnService` plus a small chat-side
+  adapter;
+- expand service/store/state-sequence and manual model evaluation coverage;
+- remove compatibility aliases and direct internal entry points; and
+- run the final PostgreSQL, offline evaluation, strict typing, documentation,
+  obsolete-symbol, and complete-diff checks.
+
+Until those tasks are complete, this document is a progress record and must not
+be used as evidence that the OpenSpec change is ready to archive.
+
 ## Production symbol replacement inventory
 
 | Earlier production concept or symbol | Target symbol or boundary | Compatibility treatment |
@@ -18,6 +46,11 @@ and the verification required before the change is archived.
 | plan claim fields used as worker authority | durable `ExecutionAttempt` and hashed execution token | Version-one execution metadata is read-only |
 | branch-specific receipt updates and aggregate usage | `finalize_turn`, `ModelUsageEntry`, and `BillingIntent` | Version-one receipts are upgraded on read |
 | workflow snapshot construction in coordinator/persistence branches | reducer-owned `AnalysisSessionState` and `WorkflowTransition` | Version-one session documents are upgraded on read |
+| direct coordinator calls across semantic reduction, binding, and plan compilation | `RequestCompiler` | The facade is active; internal compatibility helpers remain for tests and migration |
+| direct standard/exploratory strategy selection | `ExecutionEngine` | The facade is active; direct strategy functions remain temporary internal compatibility surfaces |
+| analysis finalization constructing chat events and prices | `FinalizationResult`, `ChatEventProjector`, and billing adapters | Production finalization is separated; the coordinator still invokes projection until `AnalysisTurnService` lands |
+| `AnalysisStateStore` as the concrete application name | `AnalysisStore` protocol and `SqlAnalysisStore` implementation | `AnalysisStateStore` remains a temporary alias |
+| `run_analysis_turn` as the complete application coordinator | `AnalysisTurnService.run(TurnCommand)` | Target service is not implemented; the current coordinator is the documented temporary exception to one-way imports |
 
 The public chat event fields remain compatible. New internal outcome categories
 are projected through the existing streaming protocol, with explicit conflict,
@@ -133,39 +166,35 @@ operations, lifecycle outcome, and public outcome category where applicable.
 - Duplicate processing receipt timeout: 600 seconds, after which a duplicate
   receives a retryable conflict and must use a new turn identifier.
 
-## Verification record
+## Verification checkpoint
 
-Verification completed on 19 August 2026:
+Latest checks against commit `bcb1e9e` on 19 August 2026:
 
-- Focused compiler, coordinator, lifecycle, executor, persistence, and
-  finalization runs passed, including generated multi-event lifecycle
-  sequences, complete operation input contracts, allowlisted operation outputs,
-  cancellation between operations, an exploratory chart consuming an earlier
-  program-breakdown result, execution questions during another active
-  calculation, clarification-resolution outcomes, common conflict finalization,
-  explanation narration failure, branching result dependencies, post-claim
-  exceptions, and end-to-end fake-model/fake-PolicyEngine request families.
-- `make test-backend`: 501 passed, 7 skipped, with 82.45% coverage against the
-  configured 80% requirement.
-- `make test-frontend`: 69 tests passed and the Next.js production build
-  completed successfully.
-- `make eval-ai-offline`: 140 passed, 0 failed, 27 skipped. The run logs the
-  intentional rejection of `gov.made_up.parameter` from its invalid-reform
-  case; the case and command complete successfully.
-- Migration `006_analysis_compiler_hardening.sql` applied twice to a clean
-  PostgreSQL 16 database. All five synchronized PostgreSQL interleaving tests
-  passed: claim/claim, claim/cancel, revision/completion,
-  recovery/completion, and pending-plan promotion/claim.
-- `openspec validate harden-stateful-analysis-compiler --strict` passed.
-- `git diff --check` passed.
-- The analysis tests dispose their owned SQLite and PostgreSQL connection pools;
-  the complete backend run reports no unclosed-database warnings. The remaining
-  two warnings originate in external Starlette and PolicyEngine dependencies.
-- The complete diff was reviewed for directional ownership, obsolete runtime
-  references, compatibility readers, public streaming fields, generated
-  artifacts, and unrelated edits. Active production code contains no earlier
-  gateway imports or write-path adapters; previous-schema handling remains
-  read-only.
+- The complete backend suite passed: 538 passed, 7 skipped, with 83.07% coverage
+  against the configured 80% requirement. Five PostgreSQL concurrency cases and
+  two data-dependent cases accounted for the skips.
+- The complete frontend check passed: 73 tests passed and the Next.js production
+  build completed successfully.
+- The scoped strict check passed for `analysis.store`,
+  `analysis.dependencies`, `analysis.lifecycle`, `analysis.request_compiler`,
+  and `analysis.execution_engine`.
+- Focused request compiler, capability, operation catalogue, semantic reducer,
+  lifecycle, and execution-engine tests passed after the final typing cleanup.
+- `git diff --check` passed, and the pushed branch matched commit `bcb1e9e`.
+- The remaining two backend warnings originate in external Starlette and
+  PolicyEngine dependencies.
+
+Earlier verification before the later facade simplification recorded 140
+offline evaluation cases passed with 27 skipped and all five synchronized
+PostgreSQL interleavings passed against PostgreSQL 16. Those results remain
+useful historical evidence, but they are not a substitute for the final rerun
+required by OpenSpec tasks 28.4 and 29.5.
+
+Final verification is therefore still outstanding. In particular, the current
+branch has not rerun the PostgreSQL cases with
+`ANALYSIS_TEST_POSTGRES_URL`, has not rerun the offline evaluation after the
+latest facade changes, and has not completed strict checking or structural
+import enforcement for the future turn service and compatibility cleanup.
 
 Post-verification corrections additionally established that:
 

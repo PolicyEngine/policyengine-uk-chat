@@ -40,6 +40,11 @@ separately:
 - `public_outcome_category`: the eventual public outcome category; and
 - `response_outcome`: the expected processing path or typed rejection.
 
+This suite ends at interpretation, request compilation, and the expected
+lifecycle/public category. It does not execute a claimed plan or validate the
+unfinished `AnalysisTurnService`. Cover store, execution, finalization, and chat
+projection behavior in their deterministic backend and frontend tests.
+
 Offline turn-interpretation cases must include `offline_candidate`. Live mode
 replaces that fixture with the production structured interpreter, while the
 same deterministic reduction and compilation assertions remain in force.

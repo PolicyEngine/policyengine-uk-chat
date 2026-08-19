@@ -3,37 +3,67 @@
 Use this guidance when changing the UK chat model pathway, prompts, calculation
 operations, lifecycle persistence, or numerical response boundaries.
 
+## Current integration status
+
+The runtime currently uses the typed `TurnInterpreter` dependency implemented
+by `interpret_turn`, plus `RequestCompiler`, `ExecutionEngine`,
+`FinalizationResult`, `ChatEventProjector`, `AnalysisStore`, and
+`SqlAnalysisStore`. `backend/analysis/coordinator.py::run_analysis_turn` remains
+the application coordinator and the one temporary analysis module that imports
+chat input and projection types. The target `AnalysisTurnService` does not yet
+exist. Do not document or test it as production behavior until the coordinator
+has been reduced to a chat-side adapter.
+
+Temporary compatibility surfaces also remain: `AnalysisStateStore` aliases
+`SqlAnalysisStore`, direct binder/compiler/executor helpers remain available to
+older tests and callers, and several store mutations still combine lifecycle
+selection with SQL application. New production code should use the typed
+facades and protocol names, not these compatibility surfaces.
+
 ## Component ownership
 
 - `backend/analysis/interpreter.py` asks the model for an untrusted
-  `CandidateTurnUpdate`; it does not decide whether that update is valid.
+  `CandidateTurnUpdate`. Its `interpret_turn` implementation satisfies the
+  typed `TurnInterpreter` dependency, invokes deterministic candidate
+  validation, and returns a validated update plus usage or a typed failure.
 - `backend/analysis/candidate_validation.py` checks candidate types, evidence,
   semantic field legality, and references against loaded state. It produces a
   `ValidatedTurnUpdate`.
 - `SemanticRequestReducer` applies only validated semantic starts, revisions,
   explicit clearing, output changes, relationships, and clarification answers.
   Its output is an immutable `SemanticRequestRevision` containing user meaning.
-- `RequestBinder` applies registered defaults, resolves catalogue terms,
-  computes typed reform transformations, validates requested outputs, and
-  produces a separate immutable `BoundRequest`.
-- `ExecutionPlanCompiler` is a pure function of `BoundRequest` and the versioned
-  `CapabilityRegistry`. It emits exact standard steps or the smallest applicable
-  server-owned exploratory operation profile.
+- `RequestCompiler` is the production facade for semantic calculation updates.
+  It calls `SemanticRequestReducer`, `RequestBinder`, and
+  `ExecutionPlanCompiler` once and returns a compiled, clarification,
+  unsupported, or failed decision.
+- Inside that facade, `RequestBinder` applies registered defaults, resolves
+  catalogue terms, computes typed reform transformations, validates requested
+  outputs, and produces a separate immutable `BoundRequest`.
+- Inside that facade, `ExecutionPlanCompiler` is a pure function of
+  `BoundRequest`, the versioned `CapabilityRegistry`, runtime versions, and the
+  supplied operation catalogue. It emits exact standard steps or the smallest
+  applicable server-owned exploratory operation profile.
 - `LifecycleReducer` is the only production component that creates a next
   `AnalysisSessionState` or a `ClarificationResolution`. It converts a typed
   lifecycle event to a complete `WorkflowTransition`.
-- `AnalysisStateStore.commit_transition` validates identities and conditionally
-  commits the complete transition in one short database transaction.
-- The executor requires a durable `ExecutionAttempt` and its raw execution
-  token. It validates registered operation inputs, actual outputs, and
-  execution-local result dependencies.
+- `AnalysisStore` is the application persistence protocol.
+  `SqlAnalysisStore` is the concrete implementation; it validates identities
+  and conditionally commits related records in one short database transaction.
+- `ExecutionEngine` is the production facade for a claimed plan. It selects the
+  standard or exploratory strategy and returns typed progress plus one typed
+  execution result. Both strategies use the same registered operation input,
+  dependency, output, fact, summary, and public-argument path.
 - `finalize_turn` validates agreement between `TurnOutcome` and lifecycle state,
   then commits the final lifecycle change, sanitized replay data, per-call usage,
-  and the idempotent billing intent together. It also derives the public event
-  sequence from the committed outcome.
-- `backend/chat/` prepares transport input and projects typed outcomes to the
-  existing public streaming-event protocol. It must not implement another
-  analysis path.
+  and an already constructed idempotent billing intent together. It returns a
+  `FinalizationResult` and imports neither chat events nor pricing code.
+- `ChatEventProjector` under `backend/chat/` converts typed execution progress,
+  replay outcomes, and finalization results into the existing public streaming
+  protocol.
+- Billing adapters build immutable per-model charge inputs and process pending
+  intents outside analysis finalization and outside the database transaction.
+- `run_analysis_turn` currently sequences these components. Its replacement by
+  `AnalysisTurnService` is unfinished; do not add another orchestration path.
 
 Production analysis code must not import `backend/eval/`. Evaluation code may
 import production boundaries.
@@ -42,31 +72,31 @@ import production boundaries.
 
 ```mermaid
 flowchart TB
-    Request["ChatTurnInput"] --> Load["Load AnalysisSessionState and immutable records"]
+    classDef transitional fill:#fff2cc,stroke:#b8860b,color:#222,stroke-width:2px
+    classDef adapter fill:#f2e6ff,stroke:#7455b8,color:#222
+
+    Request["ChatTurnInput"] --> Coordinator["run_analysis_turn<br/>current coordinator"]:::transitional
+    Coordinator --> Load["AnalysisStore.load_or_create"]
     Load --> Receipt{"Existing turn receipt?"}
     Receipt -->|yes| Replay["Replay original outcome category or StillProcessing"]
-    Receipt -->|no| Interpret["Interpreter: CandidateTurnUpdate"]
+    Receipt -->|no| Interpret["TurnInterpreter: CandidateTurnUpdate"]
     Interpret --> Validate["CandidateValidator: ValidatedTurnUpdate"]
-    Validate --> Semantic["SemanticRequestReducer"]
-    Semantic --> Revision["SemanticRequestRevision"]
-    Revision --> Bind["RequestBinder"]
-    Registry["Semantic field and capability registries"] --> Validate
-    Registry --> Bind
-    Bind --> Decision{"BindingDecision"}
+    Validate --> RequestCompiler["RequestCompiler"]
+    Registry["Semantic field, capability,<br/>and operation catalogues"] --> Validate
+    Registry --> RequestCompiler
+    RequestCompiler --> Decision{"Compilation decision"}
     Decision -->|clarify / unsupported / failed| Lifecycle["LifecycleReducer"]
-    Decision -->|ready| Bound["BoundRequest"]
-    Bound --> Compile["ExecutionPlanCompiler"]
-    Registry --> Compile
-    Compile --> Plan["ExecutionPlan"]
+    Decision -->|compiled| Plan["SemanticRequestRevision +<br/>BoundRequest + ExecutionPlan"]
     Plan --> Lifecycle
     Lifecycle --> Transition["WorkflowTransition"]
-    Transition --> Commit["commit_transition"]
+    Transition --> Commit["SqlAnalysisStore.commit_transition"]
     Commit -->|response only| Finalize["finalize_turn"]
     Commit -->|ready calculation| Claim["Atomic claim creates ExecutionAttempt and token"]
-    Claim --> Execute{"Plan mode"}
+    Claim --> Engine["ExecutionEngine"]
+    Engine --> Execute{"Plan mode"}
     Execute -->|standard| Standard["Exact compiled steps"]
     Execute -->|exploratory| Exploratory["Model selects only compiled operations"]
-    Operations["Registered input/output contracts"] --> Standard
+    Operations["One operation catalogue"] --> Standard
     Operations --> Exploratory
     Standard --> Results["Execution-local ResultEnvelope values"]
     Exploratory --> Results
@@ -75,11 +105,19 @@ flowchart TB
     Narrate --> Outcome["TurnOutcome"]
     Outcome --> Lifecycle
     Lifecycle --> Finalize
-    Finalize --> Public["Public streaming events"]
-    Finalize --> Billing["Per-call pricing and idempotent billing retry"]
+    Finalize --> FinalResult["FinalizationResult"]
+    Replay --> Projector["ChatEventProjector"]:::adapter
+    Engine --> Projector
+    FinalResult --> Projector
+    Projector --> Public["Public streaming events"]
+    FinalResult --> Billing["Billing intent processor"]:::adapter
+
+    Target["Target: AnalysisTurnService"]:::transitional
+    Target -. replaces after remaining refactor .-> Coordinator
 ```
 
-The arrows are one-way ownership boundaries. A later component may reject an
+The solid arrows describe the current production pathway. The dotted arrow is
+the unfinished application-service refactor. A later component may reject an
 input but must not rewrite an earlier component's accepted output.
 
 ## Session lifecycle state versus calculation instructions
@@ -129,9 +167,11 @@ readiness state, or compiled operations.
 
 ## Binding, clarifications, and reforms
 
-`RequestBinder.bind` returns exactly one of `Ready`, `NeedsClarification`,
-`Unsupported`, or `BindingFailed`. `Ready` contains a `BoundRequest`; it never
-contains a modified semantic revision.
+Within `RequestCompiler`, binding returns exactly one of `Ready`,
+`NeedsClarification`, `Unsupported`, or `BindingFailed`. `Ready` contains a
+`BoundRequest`; it never contains a modified semantic revision. Normal runtime
+callers consume the facade's compilation decision rather than calling binding
+and plan compilation separately.
 
 Each registered default is recorded as a distinct `RequestField` with default
 provenance. Catalogue labels resolve to authoritative identifiers in the bound
@@ -189,6 +229,13 @@ producer.
 Standard requests compile to an exact graph. A model cannot add, remove,
 reorder, or rewrite its operations. Multi-output compilation deduplicates shared
 simulation prerequisites.
+
+`RequestCompiler` is the only normal component that sequences semantic
+reduction, binding, and plan compilation for one accepted calculation update.
+`ExecutionEngine` is the only normal component that selects standard versus
+exploratory execution for one claimed plan. Compatibility helpers may remain
+until the service refactor is complete, but new production code must not bypass
+these facades.
 
 Exploratory compilation selects the smallest server-owned profile capable of
 producing the requested outputs. Before every exploratory dispatch, validate
@@ -265,11 +312,13 @@ clarification, unsupported, failed, cancelled, conflict, or still processing.
 Narration occurs before completed attempt, plan, session, and receipt state is
 committed. `finalize_turn` verifies that outcome and lifecycle state agree and
 commits final record changes, category-aware replay metadata, model usage, and
-billing intent together, then returns the public event sequence. Conflict uses
-the same function with a receipt-only `WorkflowTransition`: it persists the
-conflict receipt and permitted usage without changing the current session state.
-There is no separate conflict-receipt finalization method. `still_processing`
-is replay-only and never enters finalization as a newly completed turn.
+billing intent together, then returns `FinalizationResult`.
+`ChatEventProjector` creates the public event sequence after finalization.
+Conflict uses the same finalization function with a receipt-only
+`WorkflowTransition`: it persists the conflict receipt and permitted usage
+without changing the current session state. There is no separate
+conflict-receipt finalization method. `still_processing` is replay-only and
+never enters finalization as a newly completed turn.
 
 A duplicate processing receipt returns `still_processing` and performs no
 interpretation, calculation, narration, or billing. A finalized duplicate
@@ -333,9 +382,19 @@ documents. Active writes use only version-two target models. Database migration
 claimed, running, or cancellation-requested attempt per session in PostgreSQL;
 the persistence layer performs the same check for test databases.
 
+`AnalysisStore` is the durable application boundary and `SqlAnalysisStore` is
+the current implementation. SQL row definitions and version-one parsing still
+share `persistence.py`, and claim/recovery methods still contain some lifecycle
+selection. Those are known transitional details, not extension patterns.
+
 ## Required verification
 
 Follow `testing.md` for unit, integration, API, property, migration, and
 concurrency tests. Follow `ai-evals.md` for manual model evaluation fixtures.
 The default automated evaluation remains offline and deterministic. Live model
 and population-data cases require the repository's explicit controls.
+
+Run `make typecheck-backend` for the currently scoped strict connector check.
+The check covers the declared store and dependency protocols, lifecycle core,
+request compiler, and execution engine. It does not yet prove the unfinished
+turn-service or all compatibility modules are strictly typed.

@@ -6,6 +6,34 @@ maintains semantic request history, resolves authoritative inputs, compiles
 calculation instructions, controls lifecycle changes, and validates actual
 operation results.
 
+## Implementation status
+
+The compiler, lifecycle, execution, finalization, projection, billing, and SQL
+storage boundaries described below are implemented. The application-service
+simplification is still in progress:
+
+- The typed `TurnInterpreter` dependency is implemented by `interpret_turn`,
+  which parses and validates the model-authored candidate before routing.
+- `RequestCompiler` is the normal entry point for semantic reduction,
+  authoritative binding, and plan compilation.
+- `ExecutionEngine` is the normal entry point for standard or exploratory plan
+  execution.
+- `AnalysisStore` is the persistence protocol and `SqlAnalysisStore` is its SQL
+  implementation. `AnalysisStateStore` remains as a temporary compatibility
+  alias.
+- `finalize_turn` returns `FinalizationResult`; `ChatEventProjector` separately
+  creates public streaming events, and billing adapters separately create and
+  process immutable billing intents.
+- `run_analysis_turn` in `backend/analysis/coordinator.py` still sequences the
+  complete turn and is the one temporary analysis module that imports chat
+  types. It has not yet been replaced by `AnalysisTurnService`.
+
+The remaining design work is to narrow the SQL store methods, introduce
+`AnalysisTurnService`, reduce `run_analysis_turn` to a chat-side compatibility
+adapter, expand the corresponding invariant and evaluation coverage, and then
+remove temporary aliases and direct strategy entry points. The OpenSpec task
+list is the authoritative completion record for that work.
+
 ## Directional architecture
 
 ```mermaid
@@ -15,48 +43,56 @@ flowchart TB
     classDef persisted fill:#e8ddff,stroke:#7455b8,color:#222
     classDef execution fill:#dcecff,stroke:#2867a8,color:#222
 
-    Input["ChatTurnInput<br/>session and stable turn identifiers"]
-    Input --> Recover["Recover expired attempts<br/>for this session"]:::deterministic
-    Recover --> Load["Load AnalysisSessionState<br/>and immutable related records"]:::persisted
+    classDef transitional fill:#fff2cc,stroke:#b8860b,color:#222,stroke-width:2px
+    classDef adapter fill:#f2e6ff,stroke:#7455b8,color:#222
+
+    Chat["Chat adapter<br/>run_chat_turn"]:::adapter
+    Chat --> Coordinator["run_analysis_turn<br/>current application coordinator"]:::transitional
+    Coordinator --> Recover["Recover expired attempts<br/>for this session"]:::deterministic
+    Recover --> Load["AnalysisStore<br/>load AnalysisSessionState and records"]:::persisted
     Load --> Receipt{"Existing turn receipt?"}
     Receipt -->|yes| Replay["Replay original category<br/>or report still processing"]:::deterministic
-    Receipt -->|no| Interpret["Interpreter<br/>CandidateTurnUpdate"]:::model
+    Receipt -->|no| Interpret["interpret_turn<br/>model candidate and validation"]:::model
 
     Interpret --> Validate["CandidateValidator<br/>types, evidence, references"]:::deterministic
     Fields["Semantic field registry"]:::deterministic --> Validate
     Validate --> Update["ValidatedTurnUpdate"]:::deterministic
-    Update --> Semantic["SemanticRequestReducer"]:::deterministic
-    Semantic --> Revision["SemanticRequestRevision<br/>immutable user meaning"]:::persisted
+    Update --> Request["RequestCompiler<br/>one compilation decision"]:::deterministic
+    Capabilities["CapabilityRegistry and<br/>operation catalogue"]:::deterministic --> Request
+    Catalogue["PolicyEngine catalogue and<br/>authoritative current values"]:::execution --> Request
+    Selector["Optional bounded reform-target selector<br/>identifiers and evidence only"]:::model --> Request
 
-    Revision --> Bind["RequestBinder<br/>defaults, catalogue identifiers,<br/>reform values, output producers"]:::deterministic
-    Capabilities["CapabilityRegistry<br/>outputs, producers, templates,<br/>exploratory profiles"]:::deterministic --> Bind
-    Catalogue["PolicyEngine catalogue and<br/>authoritative current values"]:::execution --> Bind
-    Selector["Optional bounded reform-target selector<br/>identifiers and evidence only"]:::model --> Bind
-    Bind --> Decision{"BindingDecision"}
+    subgraph CompilerCore["RequestCompiler internals"]
+        Semantic["SemanticRequestReducer"]:::deterministic
+        Revision["SemanticRequestRevision"]:::persisted
+        Bind["RequestBinder"]:::deterministic
+        Bound["BoundRequest"]:::persisted
+        Compile["ExecutionPlanCompiler"]:::deterministic
+        Plan["ExecutionPlan"]:::persisted
+        Semantic --> Revision --> Bind --> Bound --> Compile --> Plan
+    end
+    Request --> Semantic
+    Request --> Decision{"Compilation decision"}
     Decision -->|clarification / unsupported / failed| LifecycleEvent["LifecycleEvent"]:::deterministic
-    Decision -->|ready| Bound["BoundRequest<br/>immutable compiler input"]:::persisted
-
-    Bound --> Compile["ExecutionPlanCompiler<br/>pure deterministic compilation"]:::deterministic
-    Capabilities --> Compile
-    Compile --> Plan["ExecutionPlan<br/>exact graph or restricted profile"]:::persisted
-    Plan --> LifecycleEvent
+    Decision -->|compiled| LifecycleEvent
 
     LifecycleEvent --> Lifecycle["LifecycleReducer<br/>complete WorkflowTransition"]:::deterministic
-    Lifecycle --> Commit["commit_transition<br/>version and identity checks,<br/>one database transaction"]:::persisted
+    Lifecycle --> Commit["SqlAnalysisStore<br/>commit typed transition"]:::persisted
     Commit --> State{"Committed phase"}
     State -->|response without calculation| Finalize["finalize_turn"]:::deterministic
     State -->|ready calculation| Claim["Atomic claim creates<br/>ExecutionAttempt and token"]:::persisted
     State -->|replacement pending| Wait["Accepting request waits for prior<br/>attempt to close and plan promotion"]:::deterministic
     Wait -->|poll committed state and recover expired attempt| State
 
-    Claim --> Mode{"Compiled execution mode"}
+    Claim --> Engine["ExecutionEngine<br/>typed progress and result"]:::deterministic
+    Engine --> Mode{"Compiled execution mode"}
     Mode -->|standard| Standard["Exact compiled steps"]:::deterministic
     Mode -->|exploratory| Explore["Model selects only compiled<br/>operations and dependencies"]:::model
-    Operations["OperationRegistry<br/>input/output adapters, result type,<br/>fact and public-summary extractors"]:::deterministic --> Standard
+    Operations["Operation catalogue<br/>input/output adapters, dispatch,<br/>facts and public summaries"]:::deterministic --> Standard
     Operations --> Explore
-    Standard --> Arguments["Separate internal dispatch arguments<br/>from public source-step descriptions"]:::deterministic
+    Standard --> Arguments["Shared operation path<br/>internal dispatch and public projection"]:::deterministic
     Explore --> Arguments
-    Arguments --> OperationEvents["Public operation events<br/>no request-local result identifiers"]:::deterministic
+    Arguments --> OperationEvents["Typed operation progress<br/>no request-local result identifiers"]:::deterministic
     Arguments --> Dispatch["Validate and dispatch<br/>registered operation"]:::execution
     Operations --> Dispatch
     Watch["Attempt validation<br/>token, lease, cancellation"]:::persisted --> Dispatch
@@ -66,14 +102,23 @@ flowchart TB
     Narrate --> Outcome["TurnOutcome"]:::deterministic
     Outcome --> LifecycleEvent
     Lifecycle --> Finalize
-    Finalize --> Public["Public streaming events"]
+    Finalize --> FinalResult["FinalizationResult"]:::deterministic
+    Replay --> Project
+    OperationEvents --> Project["ChatEventProjector"]:::adapter
+    FinalResult --> Project
+    Project --> Public["Public streaming events"]
     Public --> Artifact["Live-only chart artifact<br/>removed before conversation save"]:::execution
-    Finalize --> Usage["Per-call model usage and<br/>idempotent billing intent"]:::persisted
-    Usage --> Retry["Later authenticated request retries<br/>pending intent with immutable charge inputs"]:::deterministic
+    FinalResult --> Usage["Persisted per-call usage and<br/>immutable billing intent"]:::persisted
+    Usage --> Retry["BillingIntentProcessor<br/>idempotent external retry"]:::adapter
+
+    Target["Target: AnalysisTurnService<br/>replaces coordinator sequencing"]:::transitional
+    Target -. not implemented yet .-> Coordinator
 ```
 
-Each arrow is an ownership boundary. A later component may reject its input,
-but it does not modify a record owned by an earlier component.
+Each solid arrow is an implemented ownership boundary. The yellow coordinator
+is transitional: it uses the request and execution facades but still assembles
+lifecycle, persistence, narration, finalization, and chat projection itself.
+The dotted arrow marks the intended replacement, not production behavior.
 
 ## Distinct state and instruction types
 
@@ -103,11 +148,16 @@ one plan, using a stored token hash and a time-limited lease.
 
 | Component | Input | Output | Exclusive responsibility |
 | --- | --- | --- | --- |
+| `TurnInterpreter` / `interpret_turn` | loaded state and latest user message | validated update and per-call usage | Call the interpretation model, parse the candidate, validate evidence and state references, and bound retry behavior |
 | `SemanticRequestReducer` | `ValidatedTurnUpdate`, current semantic records | `SemanticRequestRevision` | Start, revise, inherit, clear, relate, and apply a validated clarification answer |
 | `RequestBinder` | semantic revision, capability registry, authoritative catalogue | `Ready`, `NeedsClarification`, `Unsupported`, or `BindingFailed` | Apply defaults, resolve identifiers, calculate typed reforms, and prove every output has complete inputs |
 | `ExecutionPlanCompiler` | `BoundRequest`, capability registry | `ExecutionPlan` | Produce deterministic operation instructions and authority limits |
+| `RequestCompiler` | validated semantic update and loaded state | compiled, clarification, unsupported, or failed decision | Invoke semantic reduction, binding, and plan compilation once for one accepted calculation update |
 | `LifecycleReducer` | `AnalysisSessionState`, typed lifecycle event | `WorkflowTransition` | Construct the complete next session state and all related record/status changes |
-| `AnalysisStateStore` | `WorkflowTransition` | committed state or typed conflict | Check versions and parent identities and commit the transition atomically |
+| `AnalysisStore` / `SqlAnalysisStore` | typed load, transition, claim, attempt, recovery, and finalization inputs | typed persisted results or conflicts | Retain atomic ownership of related analysis records; some mutating methods still need typed-command cleanup |
+| `ExecutionEngine` | claimed execution request | typed progress plus completed, failed, or cancelled result | Select standard or exploratory execution and use the shared operation-validation path |
+| `finalize_turn` | typed outcome, transition context, usage, and optional billing intent | `FinalizationResult` | Validate and persist the final analysis result without creating chat events or calculating prices |
+| `ChatEventProjector` | typed execution progress, replay outcome, or finalization result | public streaming events | Translate analysis values into the chat transport contract |
 
 The term “workflow” refers to the overall processing sequence. In code, use the
 specific `AnalysisSessionState` or `WorkflowTransition` type instead of treating
@@ -173,17 +223,18 @@ block with a fixed explanatory placeholder.
 ## Persistence and finalization
 
 `LifecycleReducer` constructs every next `AnalysisSessionState`.
-`AnalysisStateStore.commit_transition` then validates state version, session
+`SqlAnalysisStore.commit_transition` then validates state version, session
 identity, parent-child links, active-attempt uniqueness, and every conditional
 status update. All appended records, status updates, session state, receipt,
 usage, and billing-intent writes roll back together on a mismatch.
 
 Narration completes before a successful attempt and receipt are finalized.
 `finalize_turn` checks that the typed outcome agrees with the next lifecycle
-phase, stores sanitized category-aware replay metadata, and derives public
-events. Duplicate processing returns a still-processing response without model
-or calculation calls. Finalized duplicates preserve the original category and
-do not submit billing again. A processing receipt older than the request timeout
+phase and stores sanitized category-aware replay metadata. It returns a
+`FinalizationResult`; `ChatEventProjector` creates public events afterward.
+Duplicate processing returns a still-processing response without model or
+calculation calls. Finalized duplicates preserve the original category and do
+not submit billing again. A processing receipt older than the request timeout
 and a reused turn identifier with different content produce typed conflicts
 before model work. Recovery compares the exact lease it observed, so a racing
 worker heartbeat prevents an incorrect expiry. Billing intents store the user
