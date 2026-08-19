@@ -91,21 +91,86 @@ def record_usage(
     *,
     user_id: str | None,
     session_id: str,
+    turn_id: str | None = None,
     model: str | None,
     input_tokens: int,
     output_tokens: int,
     cache_creation_input_tokens: int = 0,
     cache_read_input_tokens: int = 0,
+    usage_entries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Record token usage and deduct cost from user credits."""
-    cost = calculate_cost_gbp(
-        model=model,
-        input_tokens=input_tokens,
-        output_tokens=output_tokens,
-        cache_creation_input_tokens=cache_creation_input_tokens,
-        cache_read_input_tokens=cache_read_input_tokens,
-    )
+    if usage_entries:
+        cost = sum(
+            float(entry["cost_gbp"])
+            if isinstance(entry.get("cost_gbp"), (int, float))
+            else calculate_cost_gbp(
+                model=entry.get("model"),
+                input_tokens=int(entry.get("input_tokens", 0)),
+                output_tokens=int(entry.get("output_tokens", 0)),
+                cache_creation_input_tokens=int(
+                    entry.get("cache_creation_input_tokens", 0)
+                ),
+                cache_read_input_tokens=int(
+                    entry.get("cache_read_input_tokens", 0)
+                ),
+            )
+            for entry in usage_entries
+        )
+        models = {entry.get("model") for entry in usage_entries}
+        model = (
+            "mixed"
+            if len(models) > 1
+            else usage_entries[0].get("model")
+        )
+    else:
+        cost = calculate_cost_gbp(
+            model=model,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_creation_input_tokens=cache_creation_input_tokens,
+            cache_read_input_tokens=cache_read_input_tokens,
+        )
     sb = get_supabase()
+
+    if turn_id:
+        try:
+            result = sb.rpc(
+                "record_chat_usage_idempotent",
+                {
+                    "p_user_id": user_id,
+                    "p_session_id": session_id,
+                    "p_turn_id": turn_id,
+                    "p_model": _normalise_model_name(model),
+                    "p_input_tokens": input_tokens,
+                    "p_output_tokens": output_tokens,
+                    "p_cache_creation_input_tokens": cache_creation_input_tokens,
+                    "p_cache_read_input_tokens": cache_read_input_tokens,
+                    "p_cost_gbp": cost,
+                    "p_free_tier_gbp": FREE_TIER_GBP,
+                },
+            ).execute()
+            inserted = bool(result.data)
+        except Exception as e:
+            logger.warning(
+                "Could not record idempotent token usage for %s: %s",
+                turn_id,
+                e,
+            )
+            return {
+                "cost_gbp": 0,
+                "model": _normalise_model_name(model),
+                "balance": get_balance_summary(user_id) if user_id else None,
+                "duplicate": False,
+                "recorded": False,
+            }
+        return {
+            "cost_gbp": cost if inserted else 0,
+            "model": _normalise_model_name(model),
+            "balance": get_balance_summary(user_id) if user_id else None,
+            "duplicate": not inserted,
+            "recorded": True,
+        }
 
     # Insert usage row
     try:

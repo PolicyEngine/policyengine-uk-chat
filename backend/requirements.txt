@@ -11,4 +11,5 @@ supabase
 stripe
 slowapi
 python-dateutil
+jsonschema
 policyengine-observability[fastapi,httpx,google]==1.3.2

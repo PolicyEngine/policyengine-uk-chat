@@ -140,16 +140,26 @@ def _parameter_value(parameter: Any, year: int) -> Any:
 
 
 def _parameter_item(path: str, parameter: Any, year: int | None = None) -> dict[str, Any]:
+    metadata = getattr(parameter, "metadata", None)
+    if not isinstance(metadata, dict):
+        metadata = {}
     item = {
         "path": path,
         "label": getattr(parameter, "label", None),
         "description": getattr(parameter, "description", None),
         "unit": getattr(parameter, "unit", None),
         "aliases": list(COMMON_REFORM_TARGETS.get(path, ())),
+        "inactive_value": json_safe(metadata.get("inactive_value")),
     }
     if year is not None:
         item["year"] = year
-        item["value"] = json_safe(_parameter_value(parameter, year))
+        current_value = _parameter_value(parameter, year)
+        item["value"] = json_safe(current_value)
+        if "inactive_value" not in metadata:
+            if isinstance(current_value, bool):
+                item["inactive_value"] = False
+            elif isinstance(current_value, (int, float)):
+                item["inactive_value"] = 0
     return item
 
 

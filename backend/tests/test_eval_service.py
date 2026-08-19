@@ -15,20 +15,23 @@ from chat.events import (
     TurnFailed,
 )
 from chat.schemas import ChatRequest
+from analysis.trace import AnalysisTrace
 from eval.schemas import EvalChatResponse
-from gateway.trace import GatewayTrace, GatewayTraceReason
 
 
 async def connected():
     return False
 
 
-TRACE = GatewayTrace(
-    selected_tool="run_society_simulation",
-    target_tool="compute_budgetary_impact",
-    gating_reasons=(GatewayTraceReason("missing_output", "output"),),
-    defaults_applied={"year": 2026},
-    catalogue_recovery_used=False,
+TRACE = AnalysisTrace(
+    workflow_version=4,
+    update_kind="start_analysis",
+    binding_outcome="ready",
+    execution_mode="standard",
+    permitted_operations=(
+        "run_society_simulation",
+        "compute_budgetary_impact",
+    ),
 )
 
 
@@ -58,7 +61,7 @@ def test_eval_service_collects_complete_trace_and_stops_at_completion(monkeypatc
             outcome="ready",
             stop_reason="end_turn",
             usage=ChatUsage(input_tokens=20, output_tokens=5),
-            gateway_trace=TRACE,
+            analysis_trace=TRACE,
         )
         advanced_after_completion = True
         yield SuggestionsGenerated(["Another question?"])
@@ -84,10 +87,13 @@ def test_eval_service_collects_complete_trace_and_stops_at_completion(monkeypatc
         "2026-01-01": {"budgetary_impact": -1_000_000_000}
     }
     assert advanced_after_completion is False
-    assert response.gateway_trace.selected_tool == "run_society_simulation"
-    assert response.gateway_trace.target_tool == "compute_budgetary_impact"
-    assert response.gateway_trace.defaults_applied == {"year": 2026}
-    assert response.gateway_trace.gating_reasons[0].code == "missing_output"
+    assert response.analysis_trace.update_kind == "start_analysis"
+    assert response.analysis_trace.binding_outcome == "ready"
+    assert response.analysis_trace.execution_mode == "standard"
+    assert response.analysis_trace.permitted_operations == [
+        "run_society_simulation",
+        "compute_budgetary_impact",
+    ]
 
 
 def test_eval_service_returns_structured_terminal_failure(monkeypatch):
@@ -100,7 +106,7 @@ def test_eval_service_returns_structured_terminal_failure(monkeypatch):
             stop_reason="loop_detected",
             usage=ChatUsage(input_tokens=30),
             billable=True,
-            gateway_trace=TRACE,
+            analysis_trace=TRACE,
         )
 
     monkeypatch.setattr(service, "run_chat_turn", fake_turn)
@@ -118,7 +124,7 @@ def test_eval_service_returns_structured_terminal_failure(monkeypatch):
     assert response.status == "failed"
     assert response.stop_reason == "loop_detected"
     assert response.usage.input_tokens == 30
-    assert response.gateway_trace.defaults_applied["year"] == 2026
+    assert response.analysis_trace.workflow_version == 4
 
 
 def test_eval_service_retains_trace_on_cancellation(monkeypatch):
@@ -130,7 +136,7 @@ def test_eval_service_retains_trace_on_cancellation(monkeypatch):
             model=None,
             route="lightweight",
             usage=ChatUsage(input_tokens=4),
-            gateway_trace=TRACE,
+            analysis_trace=TRACE,
         )
 
     monkeypatch.setattr(service, "run_chat_turn", fake_turn)
@@ -147,7 +153,7 @@ def test_eval_service_retains_trace_on_cancellation(monkeypatch):
 
     assert response.status == "failed"
     assert response.stop_reason == "client_disconnected"
-    assert response.gateway_trace.target_tool == "compute_budgetary_impact"
+    assert "compute_budgetary_impact" in response.analysis_trace.permitted_operations
 
 
 def test_public_and_eval_adapters_preserve_turn_parity(monkeypatch):

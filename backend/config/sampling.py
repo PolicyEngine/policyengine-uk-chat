@@ -2,8 +2,8 @@
 
 import os
 
-# 0 = deterministic, which is what the compute loop, titling, the gateway
-# classifier, and the evals all want.
+# 0 = deterministic, which is required for typed interpretation, bounded
+# execution, narration, titles, and evaluation fixtures.
 DEFAULT_TEMPERATURE = float(os.environ.get("ANTHROPIC_TEMPERATURE", "0"))
 
 # Follow-up suggestion chips deliberately sample with variety, so they get their

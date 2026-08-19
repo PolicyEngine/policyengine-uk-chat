@@ -17,12 +17,32 @@ the UK chat pathway.
 - `trajectory`: user prompt to model tool calls and arguments.
 - `answer`: frozen tool output to final prose.
 - `tool_loop`: user prompt through one or more model/tool turns to final prose.
+- `turn_interpretation`: latest user message plus typed workflow state through
+  candidate validation, reduction, binding, and deterministic plan compilation.
 
 Keep cases focused on one boundary. If a case needs to check both tool choice
 and final prose, split it into one trajectory case and one answer case.
 Use `tool_loop` only when the seam being tested requires deterministic tool
 execution between model turns, such as calculate-then-chart or
 validate-then-calculate flows.
+
+Use `turn_interpretation` for continuation semantics. Each case supplies a
+`AnalysisSessionState` and, when relevant, the active semantic request revision,
+clarification, and non-payload execution metadata. Assert these boundaries
+separately:
+
+- `candidate_contains`: the untrusted model-authored state update;
+- `reduced_revision_contains`: the immutable request revision after reduction;
+- `binding_outcome`: readiness, clarification, unsupported scope, or explanation;
+- `plan_contains`: compiler-owned mode, arguments, dependencies, and limits;
+- `permitted_operations`: the exact operations authorized by the plan; and
+- `lifecycle_outcome`: the lifecycle event family expected at this boundary;
+- `public_outcome_category`: the eventual public outcome category; and
+- `response_outcome`: the expected processing path or typed rejection.
+
+Offline turn-interpretation cases must include `offline_candidate`. Live mode
+replaces that fixture with the production structured interpreter, while the
+same deterministic reduction and compilation assertions remain in force.
 
 ## Case Rules
 
@@ -40,6 +60,13 @@ validate-then-calculate flows.
   probabilistic checks. Keep the threshold explicit in the case file.
 - Use `messages` on trajectory or tool-loop cases when the expected behavior
   depends on prior conversation turns.
+- Keep user evidence quotes exact in turn-interpretation fixtures. Add explicit
+  rejection cases for invented evidence, stale revisions, resolved questions,
+  cross-session execution identifiers, concurrent-state changes, and unsafe
+  exploratory operation requests.
+- For numerical follow-ups, assert a new or revised compiled request. Do not
+  represent discarded result payloads or prior assistant prose as calculation
+  authority.
 - Use `charts_mode: true` when the chart-mode directive is part of the behavior
   under test.
 - Use deterministic graders first: JSON partial match, path checks, numeric
@@ -78,9 +105,9 @@ Checks that generated source-synced cases are fresh.
 make eval-ai-offline
 ```
 
-Runs schema validation, deterministic tool-contract evals, fake-provider
-trajectory/answer cases, and fake-provider tool-loop cases with deterministic
-tool execution.
+Runs schema validation, deterministic stateful turn-interpretation cases,
+tool-contract evals, fake-provider trajectory/answer cases, and fake-provider
+tool-loop cases with deterministic operation execution.
 
 ```bash
 ANTHROPIC_API_KEY=... make eval-ai-live

@@ -57,6 +57,7 @@ def isolated_conversations_table(tmp_path, monkeypatch):
     """Give every test a fresh conversations table without touching Postgres."""
     from sqlmodel import SQLModel, create_engine
     from conversations import models as conversations
+    import analysis.persistence  # noqa: F401 - register internal SQLModel tables
 
     engine = create_engine(
         f"sqlite:///{tmp_path / 'conversations.sqlite'}",

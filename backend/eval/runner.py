@@ -8,7 +8,26 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
-from prompts import CHARTS_MODE_DIRECTIVE, SYSTEM_PROMPT
+from analysis.binding import BindingFailed, NeedsClarification, Ready, Unsupported, bind_request
+from analysis.candidate_validation import validate_candidate
+from analysis.common import AnalysisError, RuntimeVersions
+from analysis.compiler import compile_plan
+from analysis.executor import authorize_exploratory_call
+from analysis.facts import approved_non_result_values
+from analysis.interpreter import (
+    InterpreterContext,
+    interpret_turn,
+)
+from analysis.models import (
+    CANDIDATE_TURN_UPDATE_ADAPTER,
+    FactRegister,
+    ResultEnvelope,
+    ValidatedAskAboutExecution,
+    ValidatedCancelAnalysis,
+)
+from analysis.narration import NARRATION_DRAFT_ADAPTER, validate_narration
+from analysis.reducer import reduce_semantic_update
+from prompts.analysis import NARRATOR_SYSTEM
 from tools.context import new_tool_context
 from tools.definitions import TOOL_DEFINITIONS
 from tools.dispatch import execute_tool
@@ -22,11 +41,12 @@ from eval.schemas import (
     CaseResult,
     EvalCase,
     EvalReport,
-    GatewayCase,
     ModelTurn,
+    OutputExpectation,
     ToolContractCase,
     ToolLoopCase,
     TrajectoryCase,
+    TurnInterpretationCase,
 )
 from eval.tool_loop_grading import (
     aggregate_tool_loop_trials,
@@ -43,8 +63,19 @@ SUITE_DIRS = {
     "trajectory": CASE_ROOT / "trajectory",
     "answer": CASE_ROOT / "answer",
     "tool_loop": CASE_ROOT / "tool_loop",
-    "gateway": CASE_ROOT / "gateway",
+    "turn_interpretation": CASE_ROOT / "turn_interpretation",
 }
+
+
+EVAL_OPERATION_SELECTION_SYSTEM = """
+Select only from the supplied UK tax-and-benefit calculation operations. Use
+their schemas exactly, preserve the user's stated year and policy inputs, and
+do not invent unavailable operations or arbitrary code execution.
+""".strip()
+EVAL_CHARTS_MODE_DIRECTIVE = """
+Chart mode is enabled. Generate a chart only after its source calculation has
+completed and use only the supplied chart operation.
+""".strip()
 
 
 def _utc_now() -> str:
@@ -146,9 +177,9 @@ def _messages_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, An
 
 
 def _system_for_case(case: TrajectoryCase | ToolLoopCase) -> str:
-    sections = [SYSTEM_PROMPT]
+    sections = [EVAL_OPERATION_SELECTION_SYSTEM]
     if case.charts_mode:
-        sections.append(CHARTS_MODE_DIRECTIVE)
+        sections.append(EVAL_CHARTS_MODE_DIRECTIVE)
     return "\n\n".join(sections)
 
 
@@ -218,7 +249,7 @@ def _run_answer(case: AnswerCase, client: ModelClient) -> CaseResult:
                 {"role": "user", "content": case.prompt},
                 {"role": "user", "content": _tool_result_text(case)},
             ],
-            system=SYSTEM_PROMPT,
+            system=NARRATOR_SYSTEM,
             tools=None,
         )
     except Exception as exc:
@@ -315,53 +346,279 @@ def _run_tool_loop_trials(case: ToolLoopCase, client: ModelClient) -> CaseResult
     return aggregate_tool_loop_trials(case, trial_results)
 
 
-def _run_gateway(case: GatewayCase) -> CaseResult:
-    """Live-only: run the gateway pre-pass and grade the verdict. Outcome is the
-    primary assertion; tool/forbidden_tool and per-slot expectations are
-    secondary (graded only when the case declares them). Binary 0/1 score to
-    match the other suites, with the full plan stashed in details for tuning."""
-    from gateway import run_gateway
+def _partial_errors(actual: Dict[str, Any], expected: Dict[str, Any]) -> List[str]:
+    return grade_output(actual, OutputExpectation(contains=expected))
 
-    try:
-        verdict = run_gateway(case.prompt)
-    except Exception as exc:
-        return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
 
+def _turn_response_outcome(*, update, binding, plan) -> str:
+    if isinstance(update, ValidatedAskAboutExecution):
+        return "execution_question"
+    if isinstance(update, ValidatedCancelAnalysis):
+        return "cancelled"
+    if binding is None:
+        return "revision_accepted"
+    if isinstance(binding, NeedsClarification):
+        return "needs_clarification"
+    if isinstance(binding, (Unsupported, BindingFailed)):
+        return "unsupported"
+    if plan is not None and plan.mode.value == "explanation":
+        return "explanation"
+    if plan is not None and plan.mode.value == "exploratory":
+        return "ready_exploratory"
+    return "ready_standard"
+
+
+def _turn_contract(response_outcome: str) -> tuple[str, str]:
+    if response_outcome == "execution_question":
+        return "conversation_advanced", "completed"
+    if response_outcome == "cancelled":
+        return "cancellation_requested", "cancelled"
+    if response_outcome == "needs_clarification":
+        return "clarification_required", "clarification"
+    if response_outcome == "unsupported":
+        return "request_rejected", "unsupported"
+    if response_outcome in {
+        "explanation",
+        "ready_standard",
+        "ready_exploratory",
+        "revision_accepted",
+    }:
+        return "plan_ready", "completed"
+    if response_outcome in {"operation_rejected", "narration_rejected"}:
+        return "attempt_outcome", "failed"
+    return "turn_failed", "failed"
+
+
+def _grade_turn_contract(case, details, errors, response_outcome: str) -> None:
+    lifecycle, public = _turn_contract(response_outcome)
+    details["lifecycle_outcome"] = lifecycle
+    details["public_outcome_category"] = public
+    if (
+        case.expect.lifecycle_outcome is not None
+        and lifecycle != case.expect.lifecycle_outcome
+    ):
+        errors.append(
+            "lifecycle outcome: expected "
+            f"{case.expect.lifecycle_outcome!r}, got {lifecycle!r}"
+        )
+    if (
+        case.expect.public_outcome_category is not None
+        and public != case.expect.public_outcome_category
+    ):
+        errors.append(
+            "public outcome category: expected "
+            f"{case.expect.public_outcome_category!r}, got {public!r}"
+        )
+
+
+def _run_turn_interpretation(
+    case: TurnInterpretationCase,
+    *,
+    mode: str,
+    client: ModelClient,
+) -> CaseResult:
+    """Evaluate interpretation, reduction, binding, and compilation separately."""
+
+    context = InterpreterContext(
+        state=case.initial_state,
+        active_revision=case.active_revision,
+        active_clarification=case.active_clarification,
+        executions={item.execution_id: item for item in case.executions},
+        latest_user_message=case.prompt,
+        recent_messages=tuple(case.recent_messages),
+        permitted_revision_ids=frozenset(case.permitted_revision_ids),
+    )
+    details: Dict[str, Any] = {}
     errors: List[str] = []
-    if verdict.outcome != case.expected_outcome:
-        errors.append(f"expected outcome {case.expected_outcome!r}, got {verdict.outcome!r}")
-    if case.expected_tool and verdict.tool != case.expected_tool:
-        errors.append(f"expected tool {case.expected_tool!r}, got {verdict.tool!r}")
-    if case.forbidden_tool and verdict.tool == case.forbidden_tool:
-        errors.append(f"forbidden tool {case.forbidden_tool!r} was selected")
-    if case.expected_gating_slots:
-        got = set(verdict.gating_slots)
-        want = set(case.expected_gating_slots)
-        if got != want:
-            errors.append(f"gating slots: expected {sorted(want)}, got {sorted(got)}")
+    try:
+        if mode == "live":
+            raw_client = getattr(client, "client", None)
+            interpretation = interpret_turn(context, client=raw_client)
+            update = interpretation.update
+            validated_update = interpretation.validated_update
+        else:
+            if case.offline_candidate is None:
+                return _result(
+                    case,
+                    "skipped",
+                    0.0,
+                    ["offline_candidate is required for offline turn interpretation"],
+                )
+            update = CANDIDATE_TURN_UPDATE_ADAPTER.validate_python(
+                case.offline_candidate
+            )
+            validated_update = validate_candidate(
+                update,
+                state=context.state,
+                current_revision=context.active_revision,
+                active_clarification=context.active_clarification,
+                executions=context.executions,
+                user_message=case.prompt,
+            )
+        candidate = CANDIDATE_TURN_UPDATE_ADAPTER.dump_python(update, mode="json")
+        details["candidate"] = candidate
+        errors.extend(
+            _partial_errors(candidate, case.expect.candidate_contains)
+        )
 
-    by_name = {s.name: s for s in verdict.slots}
-    for exp in case.expected_slots:
-        got_slot = by_name.get(exp.slot)
-        if got_slot is None:
-            errors.append(f"slot {exp.slot!r} missing from plan")
-            continue
-        if exp.source is not None and got_slot.source != exp.source:
-            errors.append(f"slot {exp.slot!r} source: expected {exp.source!r}, got {got_slot.source!r}")
-        if exp.gates is not None and (exp.slot in verdict.gating_slots) != exp.gates:
-            errors.append(f"slot {exp.slot!r} gates: expected {exp.gates}, got {exp.slot in verdict.gating_slots}")
+        binding = None
+        plan = None
+        reduced_revision = None
+        if not isinstance(
+            validated_update,
+            (ValidatedAskAboutExecution, ValidatedCancelAnalysis),
+        ):
+            reduced_revision = reduce_semantic_update(
+                validated_update,
+                state=case.initial_state,
+                current_revision=case.active_revision,
+                active_clarification=case.active_clarification,
+                turn_id=case.turn_id,
+                bootstrap=bool(case.recent_messages and case.active_revision is None),
+            )
+            reduced = reduced_revision.model_dump(mode="json")
+            details["reduced_revision"] = reduced
+            errors.extend(
+                _partial_errors(
+                    reduced,
+                    case.expect.reduced_revision_contains,
+                )
+            )
+            runtime_versions = RuntimeVersions(
+                catalogue_version="eval-catalogue-v1",
+                engine_version="eval-engine-v1",
+                country_package_version="eval-country-v1",
+                dataset_identifier="eval-dataset-v1",
+            )
+            binding = bind_request(
+                reduced_revision,
+                default_year=2026,
+                runtime_versions=runtime_versions,
+                reform_validator=lambda reform, _year: {
+                    "valid": True,
+                    "normalized_reform": reform,
+                },
+            )
+            binding_name = (
+                "clarification"
+                if isinstance(binding, NeedsClarification)
+                else "unsupported"
+                if isinstance(binding, Unsupported)
+                else "failed"
+                if isinstance(binding, BindingFailed)
+                else "explanation"
+                if (
+                    isinstance(binding, Ready)
+                    and binding.bound_request.fields["analysis_kind"].value
+                    == "explanation"
+                )
+                else "ready"
+            )
+            details["binding_outcome"] = binding_name
+            if (
+                case.expect.binding_outcome is not None
+                and binding_name != case.expect.binding_outcome
+            ):
+                errors.append(
+                    "binding outcome: expected "
+                    f"{case.expect.binding_outcome!r}, got {binding_name!r}"
+                )
+            if isinstance(binding, Ready):
+                plan = compile_plan(binding.bound_request)
+                plan_data = plan.model_dump(mode="json")
+                details["plan"] = plan_data
+                errors.extend(
+                    _partial_errors(plan_data, case.expect.plan_contains)
+                )
+                if list(plan.allowed_operations) != case.expect.permitted_operations:
+                    errors.append(
+                        "permitted operations: expected "
+                        f"{case.expect.permitted_operations!r}, got "
+                        f"{list(plan.allowed_operations)!r}"
+                    )
+                if case.adversarial_operation_call is not None:
+                    call = case.adversarial_operation_call
+                    authorize_exploratory_call(
+                        plan=plan,
+                        execution_id="eval_execution",
+                        operation=call.name,
+                        arguments=call.input,
+                        envelopes={
+                            step.step_id: ResultEnvelope(
+                                execution_id="eval_execution",
+                                source_step_id=step.step_id,
+                                result_id=f"{step.result_binding}_eval_local",
+                                result_type=step.result_type,
+                                value={"status": "success"},
+                            )
+                            for step in plan.steps
+                        },
+                        definitions={
+                            item["name"]: item for item in TOOL_DEFINITIONS
+                        },
+                    )
+                if case.adversarial_narration_draft is not None:
+                    draft = NARRATION_DRAFT_ADAPTER.validate_python(
+                        case.adversarial_narration_draft
+                    )
+                    validate_narration(
+                        draft,
+                        facts=FactRegister(),
+                        approved_values=approved_non_result_values(
+                            reduced_revision,
+                            plan_maximum_iterations=(
+                                plan.max_model_iterations or None
+                            ),
+                            plan_maximum_operation_calls=(
+                                plan.max_operation_calls or None
+                            ),
+                        ),
+                    )
 
-    details = {
-        "outcome": verdict.outcome,
-        "tool": verdict.tool,
-        "gating_slots": verdict.gating_slots,
-        "unmodellable_outputs": verdict.unmodellable_outputs,
-        "slots": [
-            {"name": s.name, "kind": s.kind, "source": s.source, "value": s.value}
-            for s in verdict.slots
-        ],
-    }
-    return _result(case, "failed" if errors else "passed", 0.0 if errors else 1.0, errors, details)
+        outcome = _turn_response_outcome(
+            update=validated_update,
+            binding=binding,
+            plan=plan,
+        )
+        details["response_outcome"] = outcome
+        _grade_turn_contract(case, details, errors, outcome)
+        if outcome != case.expect.response_outcome:
+            errors.append(
+                f"response outcome: expected {case.expect.response_outcome!r}, got {outcome!r}"
+            )
+        if case.expect.error_code is not None:
+            errors.append(
+                f"expected error code {case.expect.error_code!r}, but processing succeeded"
+            )
+    except AnalysisError as exc:
+        details["error_code"] = exc.code.value
+        _grade_turn_contract(
+            case,
+            details,
+            errors,
+            case.expect.response_outcome,
+        )
+        if case.expect.response_outcome not in {
+            "candidate_rejected",
+            "plan_rejected",
+            "operation_rejected",
+            "narration_rejected",
+        }:
+            errors.append(f"unexpected analysis error {exc.code.value!r}: {exc}")
+        if case.expect.error_code != exc.code.value:
+            errors.append(
+                f"error code: expected {case.expect.error_code!r}, got {exc.code.value!r}"
+            )
+    except Exception as exc:
+        errors.append(f"{type(exc).__name__}: {exc}")
+
+    return _result(
+        case,
+        "failed" if errors else "passed",
+        0.0 if errors else 1.0,
+        errors,
+        details,
+    )
 
 
 def run_eval(
@@ -412,8 +669,10 @@ def run_eval(
                 results.append(_run_tool_loop_trials(case, client))
             else:
                 results.append(_run_tool_loop(case, client))
-        elif isinstance(case, GatewayCase):
-            results.append(_run_gateway(case))
+        elif isinstance(case, TurnInterpretationCase):
+            results.append(
+                _run_turn_interpretation(case, mode=mode, client=client)
+            )
 
     report = EvalReport(
         mode=mode,

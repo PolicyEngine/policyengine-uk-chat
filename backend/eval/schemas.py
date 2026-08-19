@@ -4,6 +4,14 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from analysis.models import (
+    AnalysisSessionState,
+    ExecutionAttempt,
+    PendingClarification,
+    PersistedExecutionMetadata,
+    SemanticRequestRevision,
+)
+
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -114,18 +122,21 @@ class AnswerCase(CaseBase):
     offline_response: Optional[ModelTurn] = None
 
 
-class GatewayTraceExpectation(StrictModel):
-    route: Literal["compute", "lightweight"]
-    outcome: Literal[
-        "irrelevant",
-        "out_of_scope",
-        "partial",
-        "needs_plan",
-        "ready",
-    ]
-    defaults_contains: Dict[str, Any] = Field(default_factory=dict)
-    min_reform_confidence: Optional[int] = Field(default=None, ge=0, le=100)
-    require_parameter_binding: bool = False
+class AnalysisTraceExpectation(StrictModel):
+    route: Optional[
+        Literal[
+            "clarification",
+            "explanation",
+            "standard",
+            "exploratory",
+            "execution_question",
+            "cancellation",
+        ]
+    ] = None
+    outcome: Optional[str] = None
+    binding_outcome: Optional[str] = None
+    execution_mode: Optional[Literal["explanation", "standard", "exploratory"]] = None
+    required_operations: List[str] = Field(default_factory=list)
 
 
 class ToolLoopCase(CaseBase):
@@ -140,28 +151,121 @@ class ToolLoopCase(CaseBase):
     trials: int = Field(default=1, ge=1, le=10)
     pass_threshold: float = Field(default=1.0, ge=0.0, le=1.0)
     offline_responses: List[ModelTurn] = Field(default_factory=list)
-    gateway_expect: Optional[GatewayTraceExpectation] = None
+    analysis_expect: Optional[AnalysisTraceExpectation] = None
 
 
-class SlotExpectation(StrictModel):
-    slot: str
-    source: Optional[Literal["prompt", "default", "assumed", "runtime"]] = None
-    gates: Optional[bool] = None  # whether this slot should trigger a question
-
-
-class GatewayCase(CaseBase):
-    suite: Literal["gateway"] = "gateway"
-    prompt: str
-    expected_outcome: Literal[
-        "irrelevant", "out_of_scope", "partial", "needs_plan", "ready"
+class TurnInterpretationExpectation(StrictModel):
+    candidate_contains: Dict[str, Any] = Field(default_factory=dict)
+    reduced_revision_contains: Dict[str, Any] = Field(default_factory=dict)
+    binding_outcome: Optional[
+        Literal["explanation", "clarification", "unsupported", "failed", "ready"]
+    ] = None
+    plan_contains: Dict[str, Any] = Field(default_factory=dict)
+    permitted_operations: List[str] = Field(default_factory=list)
+    lifecycle_outcome: Optional[
+        Literal[
+            "conversation_advanced",
+            "clarification_required",
+            "request_rejected",
+            "plan_ready",
+            "cancellation_requested",
+            "attempt_outcome",
+            "turn_failed",
+        ]
+    ] = None
+    public_outcome_category: Optional[
+        Literal[
+            "completed",
+            "clarification",
+            "unsupported",
+            "failed",
+            "cancelled",
+            "conflict",
+            "still_processing",
+        ]
+    ] = None
+    response_outcome: Literal[
+        "candidate_rejected",
+        "plan_rejected",
+        "revision_accepted",
+        "needs_clarification",
+        "unsupported",
+        "explanation",
+        "ready_standard",
+        "ready_exploratory",
+        "execution_question",
+        "cancelled",
+        "operation_rejected",
+        "narration_rejected",
     ]
-    expected_tool: Optional[str] = None
-    forbidden_tool: Optional[str] = None
-    expected_gating_slots: List[str] = Field(default_factory=list)
-    expected_slots: List[SlotExpectation] = Field(default_factory=list)
+    error_code: Optional[str] = None
 
 
-EvalCase = ToolContractCase | TrajectoryCase | AnswerCase | ToolLoopCase | GatewayCase
+class TurnInterpretationCase(CaseBase):
+    suite: Literal["turn_interpretation"] = "turn_interpretation"
+    prompt: str
+    turn_id: str
+    initial_state: AnalysisSessionState
+    active_revision: Optional[SemanticRequestRevision] = None
+    active_clarification: Optional[PendingClarification] = None
+    executions: List[PersistedExecutionMetadata] = Field(default_factory=list)
+    recent_messages: List[Dict[str, Any]] = Field(default_factory=list)
+    permitted_revision_ids: List[str] = Field(default_factory=list)
+    offline_candidate: Optional[Dict[str, Any]] = None
+    adversarial_operation_call: Optional[ModelToolCall] = None
+    adversarial_narration_draft: Optional[Dict[str, Any]] = None
+    expect: TurnInterpretationExpectation
+
+    @model_validator(mode="before")
+    @classmethod
+    def upgrade_legacy_analysis_fixtures(cls, value):
+        if not isinstance(value, dict):
+            return value
+        upgraded = dict(value)
+        state = upgraded.get("initial_state")
+        if isinstance(state, dict) and state.get("schema_version") == 1:
+            state = dict(state)
+            state["schema_version"] = 2
+            state.setdefault("active_bound_request_id", None)
+            state.setdefault("active_execution_id", None)
+            state.setdefault("pending_plan_id", None)
+            upgraded["initial_state"] = state
+        revision = upgraded.get("active_revision")
+        if isinstance(revision, dict) and revision.get("schema_version") == 1:
+            revision = dict(revision)
+            revision["schema_version"] = 2
+            revision.pop("readiness", None)
+            upgraded["active_revision"] = revision
+        clarification = upgraded.get("active_clarification")
+        if (
+            isinstance(clarification, dict)
+            and clarification.get("schema_version") == 1
+        ):
+            clarification = dict(clarification)
+            clarification["schema_version"] = 2
+            clarification.setdefault("target_contract", "legacy")
+            clarification.setdefault(
+                "choice_mode",
+                "advisory" if clarification.get("permitted_choices") else "open",
+            )
+            upgraded["active_clarification"] = clarification
+        executions = []
+        for execution in upgraded.get("executions", []):
+            if isinstance(execution, dict) and execution.get("schema_version") == 1:
+                execution = dict(execution)
+                execution["schema_version"] = 2
+            executions.append(execution)
+        upgraded["executions"] = executions
+        return upgraded
+
+
+EvalCase = (
+    ToolContractCase
+    | TrajectoryCase
+    | AnswerCase
+    | ToolLoopCase
+    | TurnInterpretationCase
+)
 
 
 class CaseResult(StrictModel):
@@ -211,47 +315,22 @@ class EvalToolTrace(StrictModel):
     output: Any = None
 
 
-class EvalGatewaySlot(StrictModel):
-    name: str
-    kind: str
-    source: str
-    value: Optional[str] = None
-
-
-class EvalGatewayReason(StrictModel):
-    code: str
-    slot: str
-    options: List[str] = Field(default_factory=list)
-    evidence: Optional[str] = None
-
-
-class EvalGatewayBinding(StrictModel):
-    parameter_path: str
-    label: str
-    catalogue_evidence: str
-
-
-class EvalGatewayAlternative(StrictModel):
-    summary: str
-    parameter_bindings: List[EvalGatewayBinding] = Field(default_factory=list)
-    reform: Dict[str, Any] = Field(default_factory=dict)
-
-
-class EvalGatewayTrace(StrictModel):
-    selected_tool: Optional[str] = None
-    target_tool: Optional[str] = None
-    slots: List[EvalGatewaySlot] = Field(default_factory=list)
-    gating_reasons: List[EvalGatewayReason] = Field(default_factory=list)
-    defaults_applied: Dict[str, Any] = Field(default_factory=dict)
-    reform_confidence: Optional[int] = Field(default=None, ge=0, le=100)
-    reform_summary: Optional[str] = None
-    reform_search_queries: List[str] = Field(default_factory=list)
-    catalogue_version: Optional[str] = None
-    resolver_model: Optional[str] = None
-    parameter_bindings: List[EvalGatewayBinding] = Field(default_factory=list)
-    alternatives: List[EvalGatewayAlternative] = Field(default_factory=list)
-    catalogue_recovery_used: bool = False
-    proposal_resumed: bool = False
+class EvalAnalysisTrace(StrictModel):
+    workflow_version: int
+    update_kind: Optional[str] = None
+    revision_relationship: Optional[str] = None
+    inherited_fields: List[str] = Field(default_factory=list)
+    cleared_fields: List[str] = Field(default_factory=list)
+    binding_outcome: Optional[str] = None
+    clarification_id: Optional[str] = None
+    plan_id: Optional[str] = None
+    plan_hash: Optional[str] = None
+    execution_mode: Optional[str] = None
+    permitted_operations: List[str] = Field(default_factory=list)
+    step_status: List[List[str]] = Field(default_factory=list)
+    conflict_count: int = 0
+    interpretation_retries: int = 0
+    model_usage: Dict[str, int] = Field(default_factory=dict)
 
 
 class EvalChatResponse(StrictModel):
@@ -264,4 +343,4 @@ class EvalChatResponse(StrictModel):
     stop_reason: Optional[str] = None
     usage: EvalUsage = Field(default_factory=EvalUsage)
     tool_trace: List[EvalToolTrace] = Field(default_factory=list)
-    gateway_trace: Optional[EvalGatewayTrace] = None
+    analysis_trace: Optional[EvalAnalysisTrace] = None

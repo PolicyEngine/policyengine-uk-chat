@@ -61,57 +61,54 @@ def _failed_trial(
     )
 
 
-def grade_gateway_expectation(
+def grade_analysis_expectation(
     case: ToolLoopCase,
     response: EvalChatResponse,
 ) -> list[str]:
-    """Grade routing and reform authorization before tool/answer quality."""
+    """Grade stateful routing and plan authorization before answer quality."""
 
-    expectation = case.gateway_expect
+    expectation = case.analysis_expect
     if expectation is None:
         return []
     errors: list[str] = []
-    if response.route != expectation.route:
+    if expectation.route is not None and response.route != expectation.route:
         errors.append(
-            f"gateway route was {response.route!r}, expected {expectation.route!r}"
+            f"analysis route was {response.route!r}, expected {expectation.route!r}"
         )
-    if response.outcome != expectation.outcome:
+    if expectation.outcome is not None and response.outcome != expectation.outcome:
         errors.append(
-            f"gateway outcome was {response.outcome!r}, expected {expectation.outcome!r}"
+            f"analysis outcome was {response.outcome!r}, expected {expectation.outcome!r}"
         )
-    trace = response.gateway_trace
+    trace = response.analysis_trace
     if trace is None:
-        errors.append("gateway trace was missing")
+        errors.append("analysis trace was missing")
         return errors
-    for name, expected in expectation.defaults_contains.items():
-        if name not in trace.defaults_applied:
-            errors.append(
-                f"gateway default {name!r} was missing; expected {expected!r}"
-            )
-        elif trace.defaults_applied[name] != expected:
-            errors.append(
-                f"gateway default {name!r} was {trace.defaults_applied[name]!r}, "
-                f"expected {expected!r}"
-            )
-    minimum = expectation.min_reform_confidence
-    if minimum is not None:
-        if trace.reform_confidence is None:
-            errors.append(
-                "gateway reform confidence was missing; "
-                f"expected at least {minimum}"
-            )
-        elif trace.reform_confidence < minimum:
-            errors.append(
-                f"gateway reform confidence was {trace.reform_confidence}, "
-                f"expected at least {minimum}"
-            )
-    if expectation.require_parameter_binding and not trace.parameter_bindings:
-        errors.append("gateway produced no validated parameter binding")
+    if (
+        expectation.binding_outcome is not None
+        and trace.binding_outcome != expectation.binding_outcome
+    ):
+        errors.append(
+            f"binding outcome was {trace.binding_outcome!r}, "
+            f"expected {expectation.binding_outcome!r}"
+        )
+    if (
+        expectation.execution_mode is not None
+        and trace.execution_mode != expectation.execution_mode
+    ):
+        errors.append(
+            f"execution mode was {trace.execution_mode!r}, "
+            f"expected {expectation.execution_mode!r}"
+        )
+    missing = set(expectation.required_operations).difference(
+        trace.permitted_operations
+    )
+    if missing:
+        errors.append(f"permitted operations were missing {sorted(missing)!r}")
     return errors
 
 
 def _grade_response(case: ToolLoopCase, response: EvalChatResponse) -> CaseResult:
-    gateway_errors = grade_gateway_expectation(case, response)
+    analysis_errors = grade_analysis_expectation(case, response)
     response_details = {
         "session_id": response.session_id,
         "model": response.model,
@@ -119,9 +116,9 @@ def _grade_response(case: ToolLoopCase, response: EvalChatResponse) -> CaseResul
         "outcome": response.outcome,
         "stop_reason": response.stop_reason,
         "usage": response.usage.model_dump(),
-        "gateway_trace": (
-            response.gateway_trace.model_dump()
-            if response.gateway_trace is not None
+        "analysis_trace": (
+            response.analysis_trace.model_dump()
+            if response.analysis_trace is not None
             else None
         ),
     }
@@ -136,7 +133,7 @@ def _grade_response(case: ToolLoopCase, response: EvalChatResponse) -> CaseResul
             },
         )
         return failed.model_copy(
-            update={"errors": [*failed.errors, *gateway_errors]}
+            update={"errors": [*failed.errors, *analysis_errors]}
         )
 
     tool_calls = [
@@ -148,7 +145,7 @@ def _grade_response(case: ToolLoopCase, response: EvalChatResponse) -> CaseResul
         text=response.content,
         tool_calls=tool_calls,
         tool_outputs=[trace.output for trace in response.tool_trace],
-        errors=gateway_errors,
+        errors=analysis_errors,
     )
     return result.model_copy(
         update={"details": {**result.details, "deployed": response_details}}

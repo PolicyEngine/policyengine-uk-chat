@@ -73,7 +73,7 @@ def test_simulation_schema_uses_current_year_and_fixed_dataset():
     ).parameters
 
 
-def test_society_simulation_rejects_reform_different_from_gateway_approval(monkeypatch):
+def test_society_simulation_rejects_reform_different_from_plan_approval(monkeypatch):
     approved = {"gov.hmrc.income_tax.rates.uk[0].rate": 0.21}
     context = new_tool_context("guarded-simulation")
     context.require_approved_reform = True
@@ -93,11 +93,11 @@ def test_society_simulation_rejects_reform_different_from_gateway_approval(monke
         _context=context,
     )
 
-    assert result["error"] == "Gateway-approved reform mismatch"
+    assert result["error"] == "Plan-approved reform mismatch"
     assert called is False
 
 
-def test_society_simulation_accepts_exact_gateway_approved_reform(monkeypatch):
+def test_society_simulation_accepts_exact_plan_approved_reform(monkeypatch):
     approved = {"gov.hmrc.income_tax.rates.uk[0].rate": 0.21}
     context = new_tool_context("guarded-simulation")
     context.require_approved_reform = True
@@ -230,6 +230,7 @@ def test_decile_tool_rejects_concepts_outside_three_states():
     }
 
 
+@requires_policyengine_py
 def test_discovery_tools_are_split_by_catalog_area():
     assert agent_tools.list_supported_outputs()["status"] == "success"
     society_outputs = agent_tools.list_society_output_variables(entity="household")

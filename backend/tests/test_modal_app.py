@@ -332,7 +332,6 @@ def test_modal_secret_sync_omits_billing_credentials_when_disabled(tmp_path):
     environment = {
         "MODAL_SECRET_NAME": "test-secret",
         "ANTHROPIC_API_KEY": "anthropic",
-        "GATEWAY_PROPOSAL_SIGNING_KEY": "gateway-signing-key",
         "UK_CHAT_EVAL_TOKEN": "eval-token",
         "POLICYENGINE_UK_DATA_TOKEN": "uk-data",
         "HUGGING_FACE_TOKEN": "hugging-face",
@@ -374,7 +373,6 @@ def test_modal_secret_sync_requires_credentials_when_billing_is_enabled(
     environment = {
         "MODAL_SECRET_NAME": "test-secret",
         "ANTHROPIC_API_KEY": "anthropic",
-        "GATEWAY_PROPOSAL_SIGNING_KEY": "gateway-signing-key",
         "UK_CHAT_EVAL_TOKEN": "eval-token",
         "POLICYENGINE_UK_DATA_TOKEN": "uk-data",
         "HUGGING_FACE_TOKEN": "hugging-face",
@@ -445,7 +443,7 @@ def test_deploy_workflows_reuse_modal_secret_and_smoke_test_scripts():
 
     for workflow in (production, preview):
         assert "run: .github/scripts/sync-modal-secret.sh" in workflow
-        assert "GATEWAY_PROPOSAL_SIGNING_KEY" in workflow
+        assert "GATEWAY_PROPOSAL_SIGNING_KEY" not in workflow
         assert "run: .github/scripts/smoke-test-modal-backend.sh" in workflow
         assert workflow.count(
             "UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}"

@@ -175,5 +175,8 @@ def delete_conversation(conversation_id: int):
         row = session.get(ChatConversation, conversation_id)
         if not row:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        from analysis.persistence import SqlAnalysisStore
+
+        SqlAnalysisStore(engine).delete_session(row.session_id, db=session)
         session.delete(row)
         session.commit()

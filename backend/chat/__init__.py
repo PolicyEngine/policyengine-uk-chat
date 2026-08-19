@@ -1,7 +1,11 @@
-"""The chat turn: orchestration, system-block assembly, model selection,
-titles, and follow-up suggestions. Re-exports the router for app wiring.
-"""
-
-from chat.routes import router
+"""Lazy chat package exports that keep event and schema imports lightweight."""
 
 __all__ = ["router"]
+
+
+def __getattr__(name):
+    if name == "router":
+        from chat.routes import router
+
+        return router
+    raise AttributeError(name)

@@ -13,6 +13,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     messages: List[ChatMessage]
     session_id: str | None = None
+    turn_id: str | None = None
     user_id: str | None = None
     charts_mode: bool = False
     # Optional image attached to the latest user message. Sent as raw base64

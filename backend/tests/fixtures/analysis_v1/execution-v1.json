@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "execution_id": "legacy_execution",
+  "session_id": "legacy_session",
+  "plan_id": "legacy_plan",
+  "plan_hash": "plan_hash",
+  "status": "completed",
+  "catalogue_version": "legacy",
+  "engine_version": "legacy",
+  "country_package_version": "legacy",
+  "dataset_identifier": "legacy",
+  "operations": [],
+  "created_at": "2026-01-01T00:00:00Z"
+}

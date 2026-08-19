@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "plan_id": "legacy_plan",
+  "session_id": "legacy_session",
+  "request_revision_id": "legacy_revision",
+  "canonical_request_hash": "request_hash",
+  "plan_hash": "plan_hash",
+  "mode": "standard",
+  "catalogue_version": "legacy",
+  "engine_version": "legacy",
+  "country_package_version": "legacy",
+  "dataset_identifier": "legacy",
+  "steps": [
+    {
+      "step_id": "simulation",
+      "operation": "run_society_simulation",
+      "arguments": {"year": 2026},
+      "result_binding": "society_simulation"
+    }
+  ]
+}

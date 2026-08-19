@@ -23,6 +23,12 @@ Use this skill whenever adding, moving, or reviewing tests.
   dependencies before running the full backend suite.
 - Conversation-table tests should use the named isolated table fixture rather
   than a shared developer database.
+- Stateful analysis reducer tests use Hypothesis for generated valid and
+  adversarial update sequences, including starts, revisions, clarification
+  answers, execution questions, cancellations, stale identifiers, foreign
+  execution references, and invalid evidence. Keep examples deterministic
+  under pytest's recorded seed output and isolate database concurrency tests
+  from shared developer data.
 
 ## Commands
 
@@ -51,6 +57,21 @@ For changes spanning both sides, run:
 ```bash
 make test
 ```
+
+Stateful analysis persistence changes also require PostgreSQL 16 interleaving
+tests. Point the test process at an empty or disposable database owned by the
+developer, then run:
+
+```bash
+ANALYSIS_TEST_POSTGRES_URL=postgresql://postgres:postgres@localhost:5432/analysis_test \
+  make test-analysis-postgres
+```
+
+The test target applies migration 006 twice to verify repeatability and uses
+explicit thread synchronization for claim-versus-claim, claim-versus-cancel,
+revision-versus-completion, recovery-versus-completion, and pending-plan
+promotion. The pull-request backend job runs the same file against its
+dedicated PostgreSQL 16 service. Never point this target at production.
 
 `make test-backend` writes branch-aware Python coverage to `coverage.xml` and
 prints missing lines. Its coverage boundary includes all repository Python:

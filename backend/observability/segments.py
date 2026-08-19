@@ -10,8 +10,11 @@ from policyengine_observability import coerce_segment_name as _coerce_segment
 class SegmentName(StrEnum):
     UNKNOWN = UNKNOWN_SEGMENT
 
-    GATEWAY_CLASSIFY = "gateway.classify"
-    GATEWAY_PLAN_SERIALIZE = "gateway.plan_serialize"
+    ANALYSIS_INTERPRET = "analysis.interpret"
+    ANALYSIS_BIND = "analysis.bind"
+    ANALYSIS_COMPILE = "analysis.compile"
+    ANALYSIS_EXECUTE = "analysis.execute"
+    ANALYSIS_NARRATE = "analysis.narrate"
     MODEL_SELECT = "model.select"
     SYSTEM_BUILD = "system.build"
     TOOL_SCHEMA_BUILD = "tool_schema.build"

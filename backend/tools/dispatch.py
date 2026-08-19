@@ -52,7 +52,24 @@ from tools.definitions import (
     VALIDATE_REFORM_DESCRIPTION,
     VALIDATE_REFORM_INPUT_SCHEMA,
 )
-from tools.registry import register_tool, tool_definitions, tool_handlers
+from tools.registry import (
+    AggregateResultOutput,
+    BudgetaryImpactOutput,
+    ChartOutput,
+    DecileImpactsOutput,
+    HouseholdValidationOutput,
+    HouseholdSimulationOutput,
+    InequalityMetricsOutput,
+    ParameterOutput,
+    PovertyMetricsOutput,
+    ProgramBreakdownOutput,
+    ReformValidationOutput,
+    SocietySimulationOutput,
+    WinnersLosersOutput,
+    register_tool,
+    tool_definitions,
+    tool_handlers,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -95,13 +112,23 @@ def _store(
 ) -> str:
     if context is None:
         raise RuntimeError("Result-producing tools require a shared tool execution context.")
-    return context.result_store.put(kind, payload, summary)
+    return context.result_store.put(
+        kind,
+        payload,
+        summary,
+        execution_id=context.execution_id,
+        source_step_id=context.active_step_id,
+    )
 
 
 def _get_stored(context: ToolExecutionContext | None, result_id: str, expected: str | tuple[str, ...]):
     if context is None:
         raise KeyError("Tool result handles are only available within a chat turn.")
-    return context.result_store.get(result_id, expected)
+    return context.result_store.get(
+        result_id,
+        expected,
+        execution_id=context.execution_id,
+    )
 
 
 @register_tool(name="list_entities", description=DISCOVERY_DESCRIPTION, input_schema=LIST_ENTITIES_INPUT_SCHEMA)
@@ -132,7 +159,13 @@ def search_parameters(query: str = "", limit: int = 25) -> Dict[str, Any]:
     return discovery.search_parameters(query=query, limit=limit)
 
 
-@register_tool(name="get_parameter", description=DISCOVERY_DESCRIPTION, input_schema=GET_PARAMETER_INPUT_SCHEMA)
+@register_tool(
+    name="get_parameter",
+    description=DISCOVERY_DESCRIPTION,
+    input_schema=GET_PARAMETER_INPUT_SCHEMA,
+    output_model=ParameterOutput,
+    result_type="parameter",
+)
 def get_parameter(path: str, year: int = DEFAULT_SIMULATION_YEAR) -> Dict[str, Any]:
     return discovery.get_parameter(path=path, year=year)
 
@@ -161,12 +194,24 @@ def list_supported_outputs(scope: str | None = None) -> Dict[str, Any]:
     return discovery.list_supported_outputs(scope=scope)
 
 
-@register_tool(name="validate_reform", description=VALIDATE_REFORM_DESCRIPTION, input_schema=VALIDATE_REFORM_INPUT_SCHEMA)
+@register_tool(
+    name="validate_reform",
+    description=VALIDATE_REFORM_DESCRIPTION,
+    input_schema=VALIDATE_REFORM_INPUT_SCHEMA,
+    output_model=ReformValidationOutput,
+    result_type="reform_validation",
+)
 def validate_reform(reform: Optional[Dict[str, Any]] = None, year: int = DEFAULT_SIMULATION_YEAR) -> Dict[str, Any]:
     return validate_reform_dict(reform, year=year)
 
 
-@register_tool(name="validate_household", description=VALIDATE_HOUSEHOLD_DESCRIPTION, input_schema=VALIDATE_HOUSEHOLD_INPUT_SCHEMA)
+@register_tool(
+    name="validate_household",
+    description=VALIDATE_HOUSEHOLD_DESCRIPTION,
+    input_schema=VALIDATE_HOUSEHOLD_INPUT_SCHEMA,
+    output_model=HouseholdValidationOutput,
+    result_type="household_validation",
+)
 def validate_household(
     people: list[dict[str, Any]],
     benunit: Optional[Dict[str, Any]] = None,
@@ -185,7 +230,13 @@ def validate_household(
     )
 
 
-@register_tool(name="run_household_simulation", description=RUN_HOUSEHOLD_SIMULATION_DESCRIPTION, input_schema=RUN_HOUSEHOLD_SIMULATION_INPUT_SCHEMA)
+@register_tool(
+    name="run_household_simulation",
+    description=RUN_HOUSEHOLD_SIMULATION_DESCRIPTION,
+    input_schema=RUN_HOUSEHOLD_SIMULATION_INPUT_SCHEMA,
+    output_model=HouseholdSimulationOutput,
+    result_type="household_simulation",
+)
 def run_household_simulation(
     people: list[dict[str, Any]],
     benunit: Optional[Dict[str, Any]] = None,
@@ -209,7 +260,13 @@ def run_household_simulation(
     return result
 
 
-@register_tool(name="run_society_simulation", description=RUN_SOCIETY_SIMULATION_DESCRIPTION, input_schema=RUN_SOCIETY_SIMULATION_INPUT_SCHEMA)
+@register_tool(
+    name="run_society_simulation",
+    description=RUN_SOCIETY_SIMULATION_DESCRIPTION,
+    input_schema=RUN_SOCIETY_SIMULATION_INPUT_SCHEMA,
+    output_model=SocietySimulationOutput,
+    result_type="society_simulation",
+)
 def run_society_simulation(
     year: int = DEFAULT_SIMULATION_YEAR,
     reform: Optional[Dict[str, Any]] = None,
@@ -222,15 +279,15 @@ def run_society_simulation(
             approved = normalize_reform_dict(_context.approved_reform)
         except Exception as exc:
             return {
-                "error": "Gateway-approved reform mismatch",
+                "error": "Plan-approved reform mismatch",
                 "detail": str(exc),
             }
         if submitted != approved:
             return {
-                "error": "Gateway-approved reform mismatch",
+                "error": "Plan-approved reform mismatch",
                 "detail": (
                     "The submitted society reform did not exactly match the "
-                    "validated gateway construction."
+                    "validated reform recorded in the current execution plan."
                 ),
             }
     try:
@@ -264,7 +321,14 @@ def _derivative_result(
     return result
 
 
-@register_tool(name="compute_budgetary_impact", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_BUDGETARY_IMPACT_INPUT_SCHEMA)
+@register_tool(
+    name="compute_budgetary_impact",
+    description=DERIVATIVE_DESCRIPTION,
+    input_schema=COMPUTE_BUDGETARY_IMPACT_INPUT_SCHEMA,
+    output_model=BudgetaryImpactOutput,
+    result_type="budgetary_impact",
+    permitted_dependency_types=("society_simulation",),
+)
 def compute_budgetary_impact(simulation_id: str, _context: ToolExecutionContext | None = None) -> Dict[str, Any]:
     payload = _society_payload(_context, simulation_id)
     summary = {
@@ -275,7 +339,14 @@ def compute_budgetary_impact(simulation_id: str, _context: ToolExecutionContext 
     return _derivative_result(_context, "budgetary_impact", summary)
 
 
-@register_tool(name="compute_program_breakdown", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_PROGRAM_BREAKDOWN_INPUT_SCHEMA)
+@register_tool(
+    name="compute_program_breakdown",
+    description=DERIVATIVE_DESCRIPTION,
+    input_schema=COMPUTE_PROGRAM_BREAKDOWN_INPUT_SCHEMA,
+    output_model=ProgramBreakdownOutput,
+    result_type="program_breakdown",
+    permitted_dependency_types=("society_simulation",),
+)
 def compute_program_breakdown(
     simulation_id: str,
     programs: Optional[list[str]] = None,
@@ -294,6 +365,9 @@ def compute_program_breakdown(
     name="compute_decile_impacts",
     description=DECILE_IMPACTS_DESCRIPTION,
     input_schema=COMPUTE_DECILE_IMPACTS_INPUT_SCHEMA,
+    output_model=DecileImpactsOutput,
+    result_type="decile_impacts",
+    permitted_dependency_types=("society_simulation",),
 )
 def compute_decile_impacts(
     simulation_id: str,
@@ -312,7 +386,14 @@ def compute_decile_impacts(
     return _derivative_result(_context, "decile_impacts", summary)
 
 
-@register_tool(name="compute_winners_losers", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_WINNERS_LOSERS_INPUT_SCHEMA)
+@register_tool(
+    name="compute_winners_losers",
+    description=DERIVATIVE_DESCRIPTION,
+    input_schema=COMPUTE_WINNERS_LOSERS_INPUT_SCHEMA,
+    output_model=WinnersLosersOutput,
+    result_type="winners_losers",
+    permitted_dependency_types=("society_simulation",),
+)
 def compute_winners_losers(
     simulation_id: str,
     basis: str = "income",
@@ -327,7 +408,14 @@ def compute_winners_losers(
     return _derivative_result(_context, "winners_losers", summary)
 
 
-@register_tool(name="compute_poverty_metrics", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_POVERTY_METRICS_INPUT_SCHEMA)
+@register_tool(
+    name="compute_poverty_metrics",
+    description=DERIVATIVE_DESCRIPTION,
+    input_schema=COMPUTE_POVERTY_METRICS_INPUT_SCHEMA,
+    output_model=PovertyMetricsOutput,
+    result_type="poverty_metrics",
+    permitted_dependency_types=("society_simulation",),
+)
 def compute_poverty_metrics(simulation_id: str, _context: ToolExecutionContext | None = None) -> Dict[str, Any]:
     payload = _society_payload(_context, simulation_id)
     summary = {
@@ -338,7 +426,14 @@ def compute_poverty_metrics(simulation_id: str, _context: ToolExecutionContext |
     return _derivative_result(_context, "poverty_metrics", summary)
 
 
-@register_tool(name="compute_inequality_metrics", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_INEQUALITY_METRICS_INPUT_SCHEMA)
+@register_tool(
+    name="compute_inequality_metrics",
+    description=DERIVATIVE_DESCRIPTION,
+    input_schema=COMPUTE_INEQUALITY_METRICS_INPUT_SCHEMA,
+    output_model=InequalityMetricsOutput,
+    result_type="inequality_metrics",
+    permitted_dependency_types=("society_simulation",),
+)
 def compute_inequality_metrics(simulation_id: str, _context: ToolExecutionContext | None = None) -> Dict[str, Any]:
     payload = _society_payload(_context, simulation_id)
     summary = {
@@ -349,7 +444,14 @@ def compute_inequality_metrics(simulation_id: str, _context: ToolExecutionContex
     return _derivative_result(_context, "inequality_metrics", summary)
 
 
-@register_tool(name="aggregate_result", description=DERIVATIVE_DESCRIPTION, input_schema=AGGREGATE_RESULT_INPUT_SCHEMA)
+@register_tool(
+    name="aggregate_result",
+    description=DERIVATIVE_DESCRIPTION,
+    input_schema=AGGREGATE_RESULT_INPUT_SCHEMA,
+    output_model=AggregateResultOutput,
+    result_type="aggregate_result",
+    permitted_dependency_types=("society_simulation",),
+)
 def aggregate_result(
     simulation_id: str,
     entity: str,
@@ -533,7 +635,22 @@ def _preset_chart_data(chart_kind: str, result: dict[str, Any]) -> list[dict[str
     return result if isinstance(result, list) else []
 
 
-@register_tool(name="generate_chart", description=GENERATE_CHART_DESCRIPTION, input_schema=GENERATE_CHART_INPUT_SCHEMA)
+@register_tool(
+    name="generate_chart",
+    description=GENERATE_CHART_DESCRIPTION,
+    input_schema=GENERATE_CHART_INPUT_SCHEMA,
+    output_model=ChartOutput,
+    result_type="chart",
+    permitted_dependency_types=(
+        "budgetary_impact",
+        "program_breakdown",
+        "decile_impacts",
+        "winners_losers",
+        "poverty_metrics",
+        "inequality_metrics",
+        "aggregate_result",
+    ),
+)
 def generate_chart(
     chart_kind: str,
     result_id: str | None = None,

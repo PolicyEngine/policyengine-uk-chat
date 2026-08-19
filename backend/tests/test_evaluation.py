@@ -26,6 +26,7 @@ from eval.schemas import (
     ToolCallExpectation,
     ToolLoopCase,
     TrajectoryCase,
+    TurnInterpretationCase,
 )
 from eval.sync_policyengine_uk import render_generated_cases
 from eval.tool_loop_grading import (
@@ -33,9 +34,7 @@ from eval.tool_loop_grading import (
     expectation_with_trace_numbers,
     numbers_from_value,
 )
-from gateway.execution import analysis_tool_for_output
-from gateway.intent import output_from_prompt
-from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
+from tools.definitions import TOOL_DEFINITIONS
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -49,25 +48,57 @@ def test_loads_yaml_cases_with_typed_schemas():
     assert cases[0].expected_tools[0].name == "run_household_simulation"
 
 
-def test_population_cases_declare_gateway_expectations_and_derivative_targets():
+def test_population_cases_declare_stateful_plan_expectations():
     cases = load_case_file(
         REPO_ROOT / "evals" / "cases" / "tool_loop" / "uk_population_live.yaml"
     )
 
     assert len(cases) == 20
     for case in cases:
-        assert case.gateway_expect.route == "compute"
-        assert case.gateway_expect.outcome == "ready"
-        assert case.gateway_expect.defaults_contains == {"year": 2026}
-        assert case.gateway_expect.defaults_contains["year"] == DEFAULT_SIMULATION_YEAR
-        assert case.gateway_expect.min_reform_confidence == 80
-        assert case.gateway_expect.require_parameter_binding is True
-        output = output_from_prompt(case.prompt)
-        assert output is not None
-        assert (
-            analysis_tool_for_output("run_society_simulation", output.value)
-            == case.expected_tools[-1].name
-        )
+        assert case.analysis_expect.route == "standard"
+        assert case.analysis_expect.outcome == "completed"
+        assert case.analysis_expect.binding_outcome == "ready"
+        assert case.analysis_expect.execution_mode == "standard"
+        assert case.analysis_expect.required_operations == [
+            "run_society_simulation"
+        ]
+        assert case.expected_tools[0].name == "run_society_simulation"
+
+
+def test_turn_interpretation_cases_cover_typed_state_boundaries():
+    cases = load_case_file(
+        REPO_ROOT
+        / "evals"
+        / "cases"
+        / "turn_interpretation"
+        / "core.yaml"
+    )
+
+    assert len(cases) >= 15
+    assert all(isinstance(case, TurnInterpretationCase) for case in cases)
+    outcomes = {case.expect.response_outcome for case in cases}
+    assert {
+        "ready_standard",
+        "ready_exploratory",
+        "needs_clarification",
+        "explanation",
+        "execution_question",
+            "cancelled",
+            "candidate_rejected",
+            "operation_rejected",
+            "narration_rejected",
+    }.issubset(outcomes)
+
+
+def test_offline_turn_interpretation_eval_passes_without_provider_or_data():
+    report = run_eval(
+        suites=["turn_interpretation"],
+        mode="offline",
+        write_reports=False,
+    )
+
+    assert report.failed == 0
+    assert report.passed >= 15
 
 
 def test_grade_output_supports_partial_paths_and_numeric_tolerance():
@@ -426,7 +457,7 @@ def test_charts_mode_trajectory_adds_directive_and_keeps_tools():
 
     assert result.status == "passed"
     assert client.calls[0]["tools"]
-    assert "chart mode" in client.calls[0]["system"]
+    assert "chart mode" in client.calls[0]["system"].lower()
 
 
 def test_multiturn_trajectory_uses_case_messages():

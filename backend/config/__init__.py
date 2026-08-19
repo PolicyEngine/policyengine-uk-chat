@@ -3,8 +3,8 @@
 Split by sub-responsibility (models / sampling / clients) so each file
 owns one concern, but this package re-exports the public surface so callers do
 `from config import X` regardless of which sub-module owns X. Kept import-light
-(no heavy deps) so the gateway and the eval harness can import it without
-dragging in the chat route.
+(no heavy dependencies) so provider-facing analysis modules and the evaluation
+harness can import it without loading the chat route.
 """
 
 from config.clients import get_async_client, get_sync_client

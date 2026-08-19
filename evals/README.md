@@ -22,9 +22,10 @@ Checks that generated source-synced cases are fresh.
 make eval-ai-offline
 ```
 
-Runs deterministic tool-contract cases plus fake-provider trajectory and answer
-cases, plus fake-provider tool-loop cases that execute deterministic tools
-between frozen model turns. This checks schemas, runners, and graders without
+Runs deterministic tool-contract and typed turn-interpretation cases plus
+fake-provider trajectory, answer, and tool-loop cases. The tool-loop cases
+execute deterministic operations between frozen model turns. This checks
+schemas, state reduction, plan compilation, runners, and graders without
 calling a live model.
 
 ```bash
@@ -54,15 +55,13 @@ make eval-ai-deployed-uk-population
 ```
 
 Runs the 20 population cases through the same deployed UK Chat model and tool
-loop used by `/chat/message`. Each trial is a separate request to the
+path used by `/chat/message`. Each trial is a separate request to the
 token-protected `/eval/chat/message` route, has a 600-second timeout, and is
-graded first from the internal gateway trace and then from the complete tool
-trace and answer returned by the backend. The population cases require
-`compute/ready`, the current simulation-year default, reform confidence of at
-least 80, and at least one validated parameter binding. This keeps routing and
-reform-resolution failures separate from simulation, derivative-tool, and
-answer failures. The runner uses four concurrent requests by default and does
-not retry failed requests.
+graded from the private typed-analysis trace, the operation trace, and the
+answer returned by the backend. The population cases assert the expected
+binding outcome, execution mode, plan-permitted operations, calculation
+operations, and grounded response. The runner uses four concurrent requests by
+default and does not retry failed requests.
 
 Use `python -m eval.run_deployed --case-id CASE_ID` to run one case. The token
 is read only from `EVAL_RUN_TOKEN`; it is never accepted as a command-line
@@ -81,7 +80,7 @@ missing or invalid request token.
 20 inputs are submitted together with `spawn_map`; Modal may reuse any idle
 worker container and may scale the worker pool to at most 25 containers. Each
 case runs its three trials concurrently inside its worker. Run it detached so
-the batch survives a terminal disconnect:
+the batch survives the command-line connection closing:
 
 ```bash
 POLICYENGINE_UK_CHAT_EVAL_MODAL_APP_NAME=pe-uk-chat-evals-231 \
@@ -107,6 +106,8 @@ PYTHONPATH=backend python -m eval.collect_modal \
 - `answer`: frozen tool output to final prose.
 - `tool_loop`: prompt through model tool calls, deterministic tool execution,
   and final prose.
+- `turn_interpretation`: latest user content plus typed workflow state through
+  candidate validation, deterministic reduction, binding, and plan compilation.
 
 Trajectory and tool-loop cases can set `messages` for multi-turn transcripts
 and `charts_mode: true` to test the chart-mode directive.

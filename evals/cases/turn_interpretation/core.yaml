@@ -1,0 +1,731 @@
+idle: &idle
+  schema_version: 1
+  session_id: eval-session
+  state_version: 0
+  phase: idle
+  updated_at: 2026-08-18T00:00:00Z
+
+completed: &completed
+  schema_version: 1
+  session_id: eval-session
+  state_version: 4
+  phase: completed
+  active_revision_id: rev-1
+  active_plan_id: plan-1
+  latest_execution_id: execution-1
+  updated_at: 2026-08-18T00:00:00Z
+
+ready: &ready
+  schema_version: 1
+  session_id: eval-session
+  state_version: 3
+  phase: ready
+  active_revision_id: rev-1
+  active_plan_id: plan-1
+  updated_at: 2026-08-18T00:00:00Z
+
+society_revision: &society_revision
+  schema_version: 1
+  revision_id: rev-1
+  session_id: eval-session
+  revision_number: 1
+  turn_id: prior-turn
+  relationship: new
+  fields:
+    analysis_kind: {value: society, provenance: user}
+    year: {value: 2026, provenance: user}
+    reform:
+      value: {"gov.hmrc.income_tax.rates.uk[0].rate": 0.21}
+      provenance: catalogue
+  outputs: [budgetary_impact]
+  readiness: ready
+  created_at: 2026-08-18T00:00:00Z
+
+cases:
+  - id: turn_opening_society_analysis
+    suite: turn_interpretation
+    description: An opening numerical request becomes a standard plan.
+    prompt: Set gov.hmrc.income_tax.rates.uk[0].rate to 0.21, run a 2026 society simulation, and show the budgetary impact.
+    turn_id: turn-open
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind:
+          value: society
+          evidence: {quote: society simulation}
+        fields:
+          year: {value: 2026, evidence: {quote: "2026"}}
+          reform_intent:
+            value: gov.hmrc.income_tax.rates.uk[0].rate
+            evidence: {quote: "gov.hmrc.income_tax.rates.uk[0].rate"}
+          reform_instruction:
+            value: {kind: set_exact, value: 0.21}
+            evidence: {quote: "0.21"}
+        outputs: [budgetary_impact]
+        output_evidence: {quote: budgetary impact}
+    expect:
+      candidate_contains: {kind: start_analysis, relationship: new}
+      reduced_revision_contains:
+        relationship: new
+        fields: {analysis_kind: {value: society}, year: {value: 2026}}
+        outputs: [budgetary_impact]
+      binding_outcome: ready
+      plan_contains:
+        mode: standard
+        steps:
+          - {operation: validate_reform}
+          - {operation: run_society_simulation}
+          - {operation: compute_budgetary_impact}
+      permitted_operations: [validate_reform, run_society_simulation, compute_budgetary_impact]
+      lifecycle_outcome: plan_ready
+      public_outcome_category: completed
+      response_outcome: ready_standard
+
+  - id: turn_explicit_boolean_reform_value
+    suite: turn_interpretation
+    description: An explicit boolean reform value keeps its JSON type through deterministic binding.
+    tags: [reform_binding, explicit_value]
+    requirements: [policyengine_py]
+    prompt: Set gov.hmrc.income_tax.allowances.personal_allowance.amount to false in a 2026 society simulation and show the budgetary impact.
+    turn_id: turn-boolean-reform
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind:
+          value: society
+          evidence: {quote: society simulation}
+        fields:
+          year: {value: 2026, evidence: {quote: "2026"}}
+          reform_intent:
+            value: gov.hmrc.income_tax.allowances.personal_allowance.amount
+            evidence: {quote: gov.hmrc.income_tax.allowances.personal_allowance.amount}
+          reform_instruction:
+            value: {kind: set_exact, value: false}
+            evidence: {quote: "false"}
+        outputs: [budgetary_impact]
+        output_evidence: {quote: budgetary impact}
+    expect:
+      candidate_contains:
+        candidate:
+          fields:
+            reform_instruction: {value: {kind: set_exact, value: false}}
+      reduced_revision_contains:
+        fields:
+          reform_instruction: {value: {kind: set_exact, value: false}, provenance: user}
+      binding_outcome: ready
+      plan_contains:
+        mode: standard
+        steps:
+          - operation: validate_reform
+            arguments:
+              reform:
+                gov.hmrc.income_tax.allowances.personal_allowance.amount: false
+      permitted_operations: [validate_reform, run_society_simulation, compute_budgetary_impact]
+      lifecycle_outcome: plan_ready
+      public_outcome_category: completed
+      response_outcome: ready_standard
+
+  - id: turn_completed_society_then_another_simulation
+    suite: turn_interpretation
+    description: A completed simulation can start a related independent simulation.
+    prompt: Run another related simulation for 2027 and show poverty impact.
+    turn_id: turn-related
+    initial_state: *completed
+    active_revision: *society_revision
+    offline_candidate:
+      kind: start_analysis
+      relationship: related
+      related_revision_id: rev-1
+      candidate:
+        analysis_kind: {value: society, evidence: {quote: simulation}}
+        fields:
+          year: {value: 2027, evidence: {quote: "2027"}}
+        outputs: [poverty_impact]
+        output_evidence: {quote: poverty impact}
+    expect:
+      candidate_contains:
+        kind: start_analysis
+        relationship: related
+        related_revision_id: rev-1
+      reduced_revision_contains:
+        base_revision_id: rev-1
+        relationship: related
+        outputs: [poverty_impact]
+      binding_outcome: ready
+      plan_contains:
+        mode: standard
+        steps:
+          - {operation: run_society_simulation}
+          - {operation: compute_poverty_metrics}
+      permitted_operations: [run_society_simulation, compute_poverty_metrics]
+      lifecycle_outcome: plan_ready
+      public_outcome_category: completed
+      response_outcome: ready_standard
+
+  - id: turn_correct_year
+    suite: turn_interpretation
+    description: A correction changes one field and inherits the remaining request.
+    prompt: Use 2027 instead.
+    turn_id: turn-correction
+    initial_state: *completed
+    active_revision: *society_revision
+    offline_candidate:
+      kind: revise_analysis
+      base_revision_id: rev-1
+      relationship: correction
+      patches:
+        year: {op: set, value: 2027, evidence: {quote: "2027"}}
+      outputs: {op: inherit}
+    expect:
+      candidate_contains: {kind: revise_analysis, relationship: correction}
+      reduced_revision_contains:
+        base_revision_id: rev-1
+        fields:
+          year: {value: 2027, provenance: user}
+          reform: {provenance: inherited}
+      binding_outcome: ready
+      plan_contains: {mode: standard}
+      permitted_operations: [validate_reform, run_society_simulation, compute_budgetary_impact]
+      lifecycle_outcome: plan_ready
+      public_outcome_category: completed
+      response_outcome: ready_standard
+
+  - id: turn_add_output
+    suite: turn_interpretation
+    description: An additional output preserves current inputs and recompiles.
+    prompt: Also show poverty impact.
+    turn_id: turn-output
+    initial_state: *completed
+    active_revision: *society_revision
+    offline_candidate:
+      kind: revise_analysis
+      base_revision_id: rev-1
+      relationship: additional_output
+      outputs:
+        op: add
+        outputs: [poverty_impact]
+        evidence: {quote: poverty impact}
+    expect:
+      candidate_contains: {kind: revise_analysis, relationship: additional_output}
+      reduced_revision_contains:
+        outputs: [budgetary_impact, poverty_impact]
+      binding_outcome: ready
+      plan_contains: {mode: standard}
+      permitted_operations: [validate_reform, run_society_simulation, compute_budgetary_impact, compute_poverty_metrics]
+      lifecycle_outcome: plan_ready
+      public_outcome_category: completed
+      response_outcome: ready_standard
+
+  - id: turn_answer_output_clarification
+    suite: turn_interpretation
+    description: A clarification answer changes only the requested output.
+    prompt: Use budgetary impact.
+    turn_id: turn-answer
+    initial_state:
+      schema_version: 1
+      session_id: eval-session
+      state_version: 2
+      phase: awaiting_clarification
+      active_revision_id: rev-1
+      active_clarification_id: question-1
+      updated_at: 2026-08-18T00:00:00Z
+    active_revision:
+      <<: *society_revision
+      outputs: []
+      readiness: incomplete
+    active_clarification:
+      schema_version: 1
+      question_id: question-1
+      session_id: eval-session
+      request_revision_id: rev-1
+      target_field: outputs
+      reason_code: missing_output
+      prompt: Which result should I calculate?
+      created_at: 2026-08-18T00:00:00Z
+    offline_candidate:
+      kind: answer_clarification
+      question_id: question-1
+      answer: budgetary_impact
+      evidence: {quote: budgetary impact}
+    expect:
+      candidate_contains: {kind: answer_clarification, question_id: question-1}
+      reduced_revision_contains:
+        relationship: clarification_answer
+        outputs: [budgetary_impact]
+      binding_outcome: ready
+      plan_contains: {mode: standard}
+      permitted_operations: [validate_reform, run_society_simulation, compute_budgetary_impact]
+      lifecycle_outcome: plan_ready
+      public_outcome_category: completed
+      response_outcome: ready_standard
+
+  - id: turn_ambiguous_reform_target_requires_bounded_selection
+    suite: turn_interpretation
+    description: Ambiguous reform language reaches bounded authoritative target selection without a model-authored value.
+    tags: [reform_target_selection, ambiguity]
+    requirements: [policyengine_py]
+    prompt: Run a 2026 society analysis, increase income tax by 10 percent, and show the budgetary impact.
+    turn_id: turn-ambiguous-reform
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind: {value: society, evidence: {quote: society analysis}}
+        fields:
+          year: {value: 2026, evidence: {quote: "2026"}}
+          reform_intent: {value: income tax, evidence: {quote: income tax}}
+          reform_instruction:
+            value: {kind: change_by_percent, percent: 10}
+            evidence: {quote: 10 percent}
+        outputs: [budgetary_impact]
+        output_evidence: {quote: budgetary impact}
+    expect:
+      candidate_contains:
+        candidate:
+          fields:
+            reform_instruction:
+              value: {kind: change_by_percent, percent: 10}
+      reduced_revision_contains:
+        fields:
+          reform_intent: {value: income tax}
+          reform_instruction:
+            value: {kind: change_by_percent, percent: 10}
+      binding_outcome: clarification
+      permitted_operations: []
+      lifecycle_outcome: clarification_required
+      public_outcome_category: clarification
+      response_outcome: needs_clarification
+
+  - id: turn_missing_household_requires_clarification
+    suite: turn_interpretation
+    description: Missing household members produce typed clarification state.
+    prompt: Calculate my 2026 benefit entitlement.
+    turn_id: turn-missing-household
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind: {value: household, evidence: {quote: benefit entitlement}}
+        fields:
+          year: {value: 2026, evidence: {quote: "2026"}}
+        outputs: [benefit_entitlement]
+        output_evidence: {quote: benefit entitlement}
+    expect:
+      candidate_contains: {kind: start_analysis}
+      reduced_revision_contains:
+        fields: {analysis_kind: {value: household}}
+      binding_outcome: clarification
+      permitted_operations: []
+      lifecycle_outcome: clarification_required
+      public_outcome_category: clarification
+      response_outcome: needs_clarification
+
+  - id: turn_cancel_ready_request
+    suite: turn_interpretation
+    description: Cancellation applies only to the current cancellable request.
+    prompt: Cancel this analysis.
+    turn_id: turn-cancel
+    initial_state: *ready
+    active_revision: *society_revision
+    offline_candidate:
+      kind: cancel_analysis
+      request_revision_id: rev-1
+    expect:
+      candidate_contains: {kind: cancel_analysis, request_revision_id: rev-1}
+      permitted_operations: []
+      response_outcome: cancelled
+
+  - id: turn_start_unrelated_explanation
+    suite: turn_interpretation
+    description: Unrelated work does not inherit the completed numerical request.
+    prompt: "Unrelated question: explain what marginal tax rate means."
+    turn_id: turn-unrelated
+    initial_state: *completed
+    active_revision: *society_revision
+    offline_candidate:
+      kind: start_analysis
+      relationship: unrelated
+      candidate:
+        analysis_kind: {value: explanation, evidence: {quote: explain}}
+    expect:
+      candidate_contains: {kind: start_analysis, relationship: unrelated}
+      reduced_revision_contains:
+        base_revision_id: null
+        relationship: unrelated
+        fields: {analysis_kind: {value: explanation}}
+      binding_outcome: explanation
+      plan_contains: {mode: explanation, steps: []}
+      permitted_operations: []
+      response_outcome: explanation
+
+  - id: turn_later_chart_regenerates_prerequisites
+    suite: turn_interpretation
+    description: A later chart request recompiles the discarded numerical prerequisites.
+    prompt: Also create a budget waterfall chart.
+    turn_id: turn-chart
+    initial_state: *completed
+    active_revision: *society_revision
+    offline_candidate:
+      kind: revise_analysis
+      base_revision_id: rev-1
+      relationship: additional_output
+      patches:
+        chart_kind:
+          op: set
+          value: budget_waterfall
+          evidence: {quote: budget waterfall chart}
+      outputs:
+        op: add
+        outputs: [chart]
+        evidence: {quote: chart}
+    expect:
+      candidate_contains: {kind: revise_analysis, relationship: additional_output}
+      reduced_revision_contains: {outputs: [budgetary_impact, chart]}
+      binding_outcome: ready
+      plan_contains:
+        steps:
+          - {operation: validate_reform}
+          - {operation: run_society_simulation}
+          - {operation: compute_budgetary_impact}
+          - {operation: generate_chart}
+      permitted_operations: [validate_reform, run_society_simulation, compute_budgetary_impact, generate_chart]
+      response_outcome: ready_standard
+
+  - id: turn_methodology_question
+    suite: turn_interpretation
+    description: A method question refers to immutable execution metadata.
+    prompt: Which dataset and operations did that execution use?
+    turn_id: turn-method
+    initial_state: *completed
+    active_revision: *society_revision
+    executions:
+      - schema_version: 1
+        execution_id: execution-1
+        session_id: eval-session
+        plan_id: plan-1
+        plan_hash: plan-hash-1
+        status: completed
+        catalogue_version: catalogue-v1
+        engine_version: engine-v1
+        country_package_version: country-v1
+        dataset_identifier: dataset-v1
+        created_at: 2026-08-18T00:00:00Z
+    offline_candidate:
+      kind: ask_about_execution
+      execution_id: execution-1
+      question: Which dataset and operations did that execution use?
+      evidence: {quote: "Which dataset and operations did that execution use?"}
+    expect:
+      candidate_contains: {kind: ask_about_execution, execution_id: execution-1}
+      permitted_operations: []
+      response_outcome: execution_question
+
+  - id: turn_numerical_follow_up_requires_rerun
+    suite: turn_interpretation
+    description: A numerical follow-up becomes revised work instead of an execution question.
+    prompt: Rerun it and add poverty impact.
+    turn_id: turn-rerun
+    initial_state: *completed
+    active_revision: *society_revision
+    offline_candidate:
+      kind: revise_analysis
+      base_revision_id: rev-1
+      relationship: additional_output
+      outputs:
+        op: add
+        outputs: [poverty_impact]
+        evidence: {quote: poverty impact}
+    expect:
+      candidate_contains: {kind: revise_analysis}
+      reduced_revision_contains: {outputs: [budgetary_impact, poverty_impact]}
+      binding_outcome: ready
+      plan_contains: {mode: standard}
+      permitted_operations: [validate_reform, run_society_simulation, compute_budgetary_impact, compute_poverty_metrics]
+      response_outcome: ready_standard
+
+  - id: turn_reject_invented_evidence
+    suite: turn_interpretation
+    description: Evidence absent from the current message rejects the candidate.
+    prompt: Use 2027 instead.
+    turn_id: turn-bad-evidence
+    initial_state: *completed
+    active_revision: *society_revision
+    offline_candidate:
+      kind: revise_analysis
+      base_revision_id: rev-1
+      relationship: correction
+      patches:
+        year: {op: set, value: 2027, evidence: {quote: next fiscal year}}
+      outputs: {op: inherit}
+    expect:
+      permitted_operations: []
+      response_outcome: candidate_rejected
+      error_code: invalid_evidence
+
+  - id: turn_reject_runtime_field_override
+    suite: turn_interpretation
+    description: A model-authored update cannot replace a runtime-owned catalogue version.
+    prompt: Run a society simulation using catalogue-old.
+    turn_id: turn-runtime-override
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind: {value: society, evidence: {quote: society simulation}}
+        fields:
+          catalogue_version:
+            value: catalogue-old
+            evidence: {quote: catalogue-old}
+    expect:
+      permitted_operations: []
+      response_outcome: candidate_rejected
+      error_code: invalid_candidate
+
+  - id: turn_reject_stale_revision
+    suite: turn_interpretation
+    description: A stale revision identifier cannot change the active request.
+    prompt: Use 2027 instead.
+    turn_id: turn-stale
+    initial_state: *completed
+    active_revision: *society_revision
+    offline_candidate:
+      kind: revise_analysis
+      base_revision_id: rev-stale
+      relationship: correction
+      patches:
+        year: {op: set, value: 2027, evidence: {quote: "2027"}}
+      outputs: {op: inherit}
+    expect:
+      permitted_operations: []
+      response_outcome: candidate_rejected
+      error_code: state_precondition_failed
+
+  - id: turn_reject_resolved_clarification
+    suite: turn_interpretation
+    description: A resolved clarification identifier is not active state.
+    prompt: Use budgetary impact.
+    turn_id: turn-resolved-question
+    initial_state: *completed
+    active_revision: *society_revision
+    offline_candidate:
+      kind: answer_clarification
+      question_id: old-question
+      answer: budgetary_impact
+      evidence: {quote: budgetary impact}
+    expect:
+      permitted_operations: []
+      response_outcome: candidate_rejected
+      error_code: state_precondition_failed
+
+  - id: turn_reject_foreign_execution
+    suite: turn_interpretation
+    description: Execution metadata from another session cannot answer a question.
+    prompt: Which dataset did that execution use?
+    turn_id: turn-foreign-execution
+    initial_state: *completed
+    active_revision: *society_revision
+    executions:
+      - schema_version: 1
+        execution_id: execution-foreign
+        session_id: different-session
+        plan_id: plan-foreign
+        plan_hash: plan-hash-foreign
+        status: completed
+        catalogue_version: catalogue-v1
+        engine_version: engine-v1
+        country_package_version: country-v1
+        dataset_identifier: dataset-v1
+        created_at: 2026-08-18T00:00:00Z
+    offline_candidate:
+      kind: ask_about_execution
+      execution_id: execution-foreign
+      question: Which dataset did that execution use?
+      evidence: {quote: "Which dataset did that execution use?"}
+    expect:
+      permitted_operations: []
+      response_outcome: candidate_rejected
+      error_code: state_precondition_failed
+
+  - id: turn_concurrent_change_rejects_stale_base
+    suite: turn_interpretation
+    description: A candidate based on pre-conflict state is rejected after state reload.
+    prompt: Add poverty impact.
+    turn_id: turn-conflict
+    initial_state: *completed
+    active_revision: *society_revision
+    offline_candidate:
+      kind: revise_analysis
+      base_revision_id: rev-before-concurrent-change
+      relationship: additional_output
+      outputs:
+        op: add
+        outputs: [poverty_impact]
+        evidence: {quote: poverty impact}
+    expect:
+      permitted_operations: []
+      response_outcome: candidate_rejected
+      error_code: state_precondition_failed
+
+  - id: turn_exploratory_plan_limits_operations
+    suite: turn_interpretation
+    description: Exploratory work exposes only compiler-approved operations and limits.
+    prompt: Explore the budget impact by programme using at most two analytical calls.
+    turn_id: turn-explore
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind: {value: exploratory, evidence: {quote: Explore}}
+        fields:
+          objective:
+            value: Compare budget impact by programme
+            evidence: {quote: budget impact by programme}
+        outputs: [budgetary_impact, program_breakdown]
+        output_evidence: {quote: budget impact}
+    expect:
+      candidate_contains: {kind: start_analysis}
+      reduced_revision_contains:
+        fields: {analysis_kind: {value: exploratory}}
+      binding_outcome: ready
+      plan_contains:
+        mode: exploratory
+        max_model_iterations: 4
+        max_operation_calls: 6
+        required_result_types: [budgetary_impact, program_breakdown]
+      permitted_operations: [compute_budgetary_impact, compute_program_breakdown]
+      lifecycle_outcome: plan_ready
+      public_outcome_category: completed
+      response_outcome: ready_exploratory
+
+  - id: turn_reject_unproducible_exploratory_result
+    suite: turn_interpretation
+    description: Exploratory compilation rejects an operation set that cannot produce a requested result.
+    prompt: Explore the budgetary impact using only a programme breakdown.
+    turn_id: turn-unproducible-exploration
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind: {value: exploratory, evidence: {quote: Explore}}
+        fields:
+          objective:
+            value: Calculate budgetary impact
+            evidence: {quote: budgetary impact}
+          permitted_operations:
+            value: [compute_program_breakdown]
+            evidence: {quote: programme breakdown}
+          operation_constraints:
+            value: {compute_program_breakdown: {}}
+            evidence: {quote: programme breakdown}
+          max_model_iterations: {value: 2, evidence: {quote: Explore}}
+          max_operation_calls: {value: 2, evidence: {quote: Explore}}
+        outputs: [budgetary_impact]
+        output_evidence: {quote: budgetary impact}
+    expect:
+      candidate_contains: {kind: start_analysis}
+      permitted_operations: []
+      response_outcome: candidate_rejected
+      error_code: invalid_candidate
+
+  - id: turn_reject_arbitrary_code_operation
+    suite: turn_interpretation
+    description: Arbitrary code execution cannot enter an exploratory plan.
+    prompt: Explore this with a Python operation.
+    turn_id: turn-python
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind: {value: exploratory, evidence: {quote: Explore}}
+        fields:
+          objective: {value: Run arbitrary code, evidence: {quote: Python operation}}
+          permitted_operations:
+            value: [python]
+            evidence: {quote: Python operation}
+          operation_constraints:
+            value: {python: {}}
+            evidence: {quote: Python operation}
+          max_model_iterations: {value: 1, evidence: {quote: Explore}}
+          max_operation_calls: {value: 1, evidence: {quote: Explore}}
+        outputs: [budgetary_impact]
+        output_evidence: {quote: Explore}
+    expect:
+      candidate_contains: {kind: start_analysis}
+      permitted_operations: []
+      response_outcome: candidate_rejected
+      error_code: invalid_candidate
+
+  - id: turn_reject_altered_exploratory_reform
+    suite: turn_interpretation
+    description: Exploratory execution cannot replace the plan-approved reform.
+    prompt: Explore the budget impact of setting gov.hmrc.income_tax.rates.uk[0].rate to 0.21 using one analytical call.
+    turn_id: turn-altered-reform
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind: {value: exploratory, evidence: {quote: Explore}}
+        fields:
+          reform_intent:
+            value: gov.hmrc.income_tax.rates.uk[0].rate
+            evidence: {quote: "gov.hmrc.income_tax.rates.uk[0].rate"}
+          reform_instruction:
+            value: {kind: set_exact, value: 0.21}
+            evidence: {quote: "0.21"}
+          objective: {value: Calculate budget impact, evidence: {quote: budget impact}}
+        outputs: [budgetary_impact]
+        output_evidence: {quote: budget impact}
+    adversarial_operation_call:
+      id: altered-reform-call
+      name: compute_budgetary_impact
+      input:
+        simulation_id: {source_step_id: society_simulation}
+        reform: {"gov.hmrc.income_tax.rates.uk[0].rate": 0.4}
+    expect:
+      candidate_contains: {kind: start_analysis}
+      reduced_revision_contains: {fields: {analysis_kind: {value: exploratory}}}
+      binding_outcome: ready
+      plan_contains: {mode: exploratory, max_operation_calls: 6}
+      permitted_operations: [compute_budgetary_impact]
+      response_outcome: operation_rejected
+      error_code: operation_not_permitted
+
+  - id: turn_reject_unsupported_narrator_number
+    suite: turn_interpretation
+    description: Narration free text cannot introduce a number absent from the fact register.
+    prompt: Run a 2026 society simulation and show the budgetary impact.
+    turn_id: turn-narrator-number
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind: {value: society, evidence: {quote: society simulation}}
+        fields:
+          year: {value: 2026, evidence: {quote: "2026"}}
+        outputs: [budgetary_impact]
+        output_evidence: {quote: budgetary impact}
+    adversarial_narration_draft:
+      segments:
+        - {type: text, text: "The result is £999."}
+    expect:
+      candidate_contains: {kind: start_analysis}
+      reduced_revision_contains: {fields: {analysis_kind: {value: society}}}
+      binding_outcome: ready
+      plan_contains: {mode: standard}
+      permitted_operations: [run_society_simulation, compute_budgetary_impact]
+      lifecycle_outcome: attempt_outcome
+      public_outcome_category: failed
+      response_outcome: narration_rejected
+      error_code: narration_invalid

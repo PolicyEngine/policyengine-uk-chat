@@ -14,6 +14,22 @@ jobs:
   test:
     name: Backend pytest
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: analysis_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d analysis_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ANALYSIS_TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/analysis_test
     permissions:
       contents: read
       id-token: write
@@ -108,7 +124,6 @@ jobs:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GATEWAY_PROPOSAL_SIGNING_KEY: ${{ secrets.GATEWAY_PROPOSAL_SIGNING_KEY }}
           UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}
           POLICYENGINE_UK_DATA_TOKEN: ${{ secrets.POLICYENGINE_UK_DATA_TOKEN }}
           # TEMPORARY: data access for the policyengine.py engine override.

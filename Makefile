@@ -1,4 +1,4 @@
-.PHONY: up down build logs restart shell-backend shell-frontend test test-backend test-frontend sync-policyengine-uk-evals check-policyengine-uk-evals eval-ai-offline eval-ai-live eval-ai-live-uk-population eval-ai-deployed-uk-population
+.PHONY: up down build logs restart shell-backend shell-frontend test test-backend typecheck-backend test-analysis-postgres test-frontend sync-policyengine-uk-evals check-policyengine-uk-evals eval-ai-offline eval-ai-live eval-ai-live-uk-population eval-ai-deployed-uk-population
 
 # Start all services in dev mode (live reload)
 up:
@@ -48,6 +48,13 @@ test: test-backend test-frontend
 
 test-backend:
 	PYTHONPATH=backend python -m pytest backend/tests --cov --cov-config=.coveragerc --cov-report=term-missing --cov-report=xml --cov-fail-under=80
+
+typecheck-backend:
+	PYTHONPATH=backend python -m mypy --config-file=mypy.ini backend/analysis/store.py backend/analysis/dependencies.py backend/analysis/lifecycle.py backend/analysis/request_compiler.py backend/analysis/execution_engine.py
+
+test-analysis-postgres:
+	@test -n "$$ANALYSIS_TEST_POSTGRES_URL" || (echo "ANALYSIS_TEST_POSTGRES_URL is required" && exit 1)
+	PYTHONPATH=backend python -m pytest backend/tests/test_analysis_postgres_concurrency.py -v
 
 test-frontend:
 	cd frontend && npm run test:coverage

@@ -7,11 +7,10 @@ import pytest
 import yaml
 
 from eval.schemas import (
+    AnalysisTraceExpectation,
+    EvalAnalysisTrace,
     EvalChatResponse,
-    EvalGatewayBinding,
-    EvalGatewayTrace,
     EvalToolTrace,
-    GatewayTraceExpectation,
     ToolLoopCase,
 )
 
@@ -25,15 +24,18 @@ def completed_response(content="Completed annual result £100."):
         content=content,
         session_id="remote-session",
         model="claude",
-        route="compute",
-        outcome="ready",
+        route="standard",
+        outcome="completed",
         stop_reason="end_turn",
-        gateway_trace=EvalGatewayTrace(
-            selected_tool="run_society_simulation",
-            target_tool="compute_budgetary_impact",
-            defaults_applied={"year": 2026},
-            reform_confidence=92,
-            catalogue_recovery_used=False,
+        analysis_trace=EvalAnalysisTrace(
+            workflow_version=5,
+            update_kind="start_analysis",
+            binding_outcome="ready",
+            execution_mode="standard",
+            permitted_operations=[
+                "run_society_simulation",
+                "compute_budgetary_impact",
+            ],
         ),
         tool_trace=[
             EvalToolTrace(
@@ -218,7 +220,7 @@ def test_deployed_report_schema_accepts_deployed_mode():
     assert report.mode == "deployed"
 
 
-def test_deployed_result_details_preserve_gateway_trace():
+def test_deployed_result_details_preserve_analysis_trace():
     from eval.deployed_runner import _grade_response
 
     result = _grade_response(
@@ -232,121 +234,114 @@ def test_deployed_result_details_preserve_gateway_trace():
         completed_response(),
     )
 
-    trace = result.details["deployed"]["gateway_trace"]
-    assert trace["target_tool"] == "compute_budgetary_impact"
-    assert trace["defaults_applied"] == {"year": 2026}
-    assert trace["reform_confidence"] == 92
+    trace = result.details["deployed"]["analysis_trace"]
+    assert trace["workflow_version"] == 5
+    assert trace["execution_mode"] == "standard"
+    assert trace["permitted_operations"] == [
+        "run_society_simulation",
+        "compute_budgetary_impact",
+    ]
 
 
-def test_gateway_grading_rejects_lightweight_route_even_when_answer_passes():
+def test_analysis_grading_rejects_wrong_route_even_when_answer_passes():
     from eval.deployed_runner import _grade_response
 
     case = ToolLoopCase(
-        id="gateway-route-case",
-        description="Requires compute routing",
+        id="analysis-route-case",
+        description="Requires standard execution routing",
         prompt="Calculate",
         expected_tools=[{"name": "run_society_simulation"}],
         expect={"required": ["annual"]},
-        gateway_expect={"route": "compute", "outcome": "ready"},
+        analysis_expect={"route": "standard", "outcome": "completed"},
     )
     response = completed_response().model_copy(
-        update={"route": "lightweight", "outcome": "needs_plan"}
+        update={"route": "clarification", "outcome": "needs_clarification"}
     )
 
     result = _grade_response(case, response)
 
     assert result.status == "failed"
     assert result.errors[:2] == [
-        "gateway route was 'lightweight', expected 'compute'",
-        "gateway outcome was 'needs_plan', expected 'ready'",
+        "analysis route was 'clarification', expected 'standard'",
+        "analysis outcome was 'needs_clarification', expected 'completed'",
     ]
 
 
-def test_gateway_grading_rejects_missing_default():
-    from eval.deployed_runner import grade_gateway_expectation
+def test_analysis_grading_rejects_binding_outcome_mismatch():
+    from eval.deployed_runner import grade_analysis_expectation
 
     case = ToolLoopCase(
-        id="gateway-default-case",
-        description="Requires current year",
+        id="analysis-binding-case",
+        description="Requires ready binding",
         prompt="Calculate",
-        gateway_expect={
-            "route": "compute",
-            "outcome": "ready",
-            "defaults_contains": {"year": 2026},
+        analysis_expect={
+            "route": "standard",
+            "outcome": "completed",
+            "binding_outcome": "ready",
         },
     )
     response = completed_response().model_copy(
         update={
-            "gateway_trace": completed_response().gateway_trace.model_copy(
-                update={"defaults_applied": {}}
+            "analysis_trace": completed_response().analysis_trace.model_copy(
+                update={"binding_outcome": "clarification"}
             )
         }
     )
 
-    assert grade_gateway_expectation(case, response) == [
-        "gateway default 'year' was missing; expected 2026"
+    assert grade_analysis_expectation(case, response) == [
+        "binding outcome was 'clarification', expected 'ready'"
     ]
 
 
-def test_gateway_grading_accepts_ready_compute_default_and_confident_binding():
-    from eval.deployed_runner import grade_gateway_expectation
+def test_analysis_grading_accepts_mode_and_required_operations():
+    from eval.deployed_runner import grade_analysis_expectation
 
     case = ToolLoopCase(
-        id="gateway-pass-case",
-        description="Requires an executable reform",
+        id="analysis-pass-case",
+        description="Requires a standard authorized plan",
         prompt="Calculate",
-        gateway_expect=GatewayTraceExpectation(
-            route="compute",
-            outcome="ready",
-            defaults_contains={"year": 2026},
-            min_reform_confidence=80,
-            require_parameter_binding=True,
+        analysis_expect=AnalysisTraceExpectation(
+            route="standard",
+            outcome="completed",
+            binding_outcome="ready",
+            execution_mode="standard",
+            required_operations=[
+                "run_society_simulation",
+                "compute_budgetary_impact",
+            ],
         ),
+    )
+    response = completed_response()
+
+    assert grade_analysis_expectation(case, response) == []
+
+
+def test_analysis_grading_rejects_wrong_mode_and_missing_operation():
+    from eval.deployed_runner import grade_analysis_expectation
+
+    case = ToolLoopCase(
+        id="analysis-authorization-case",
+        description="Requires compiler-authorized operations",
+        prompt="Calculate",
+        analysis_expect={
+            "execution_mode": "standard",
+            "required_operations": ["compute_budgetary_impact"],
+        },
     )
     response = completed_response().model_copy(
         update={
-            "gateway_trace": completed_response().gateway_trace.model_copy(
+            "analysis_trace": completed_response().analysis_trace.model_copy(
                 update={
-                    "parameter_bindings": [
-                        EvalGatewayBinding(
-                            parameter_path="gov.example.rate",
-                            label="Example rate",
-                            catalogue_evidence="example rate",
-                        )
-                    ]
+                    "execution_mode": "exploratory",
+                    "permitted_operations": ["run_society_simulation"],
                 }
             )
         }
     )
 
-    assert grade_gateway_expectation(case, response) == []
-
-
-def test_gateway_grading_rejects_low_confidence_and_missing_binding():
-    from eval.deployed_runner import grade_gateway_expectation
-
-    case = ToolLoopCase(
-        id="gateway-authorization-case",
-        description="Requires a safe exact construction",
-        prompt="Calculate",
-        gateway_expect={
-            "route": "compute",
-            "outcome": "ready",
-            "min_reform_confidence": 80,
-            "require_parameter_binding": True,
-        },
-    )
-    response = completed_response().model_copy(
-        update={
-            "gateway_trace": completed_response().gateway_trace.model_copy(
-                update={"reform_confidence": 79, "parameter_bindings": []}
-            )
-        }
-    )
-
-    assert grade_gateway_expectation(case, response) == [
-        "gateway reform confidence was 79, expected at least 80",
-        "gateway produced no validated parameter binding",
+    assert grade_analysis_expectation(case, response) == [
+        "execution mode was 'exploratory', expected 'standard'",
+        "permitted operations were missing ['compute_budgetary_impact']",
     ]
 
 

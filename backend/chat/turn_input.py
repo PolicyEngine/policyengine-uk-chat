@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from chat.schemas import ChatRequest
+from analysis.common import stable_identifier, canonical_hash
 
 
 ALLOWED_IMAGE_MEDIA_TYPES = {"image/jpeg", "image/png", "image/webp", "image/gif"}
@@ -18,7 +19,9 @@ class InvalidChatRequest(ValueError):
 class ChatTurnInput:
     messages: list[dict[str, Any]]
     session_id: str
+    turn_id: str
     charts_mode: bool = False
+    user_id: str | None = None
 
 
 def prepare_turn_input(chat_request: ChatRequest) -> ChatTurnInput:
@@ -63,8 +66,16 @@ def prepare_turn_input(chat_request: ChatRequest) -> ChatTurnInput:
             deduplicated[index] = {"role": "user", "content": content}
             break
 
+    session_id = chat_request.session_id or str(uuid.uuid4())
+    turn_id = chat_request.turn_id or stable_identifier(
+        "turn",
+        session_id,
+        canonical_hash(deduplicated),
+    )
     return ChatTurnInput(
         messages=deduplicated,
-        session_id=chat_request.session_id or str(uuid.uuid4()),
+        session_id=session_id,
+        turn_id=turn_id,
         charts_mode=chat_request.charts_mode,
+        user_id=chat_request.user_id,
     )

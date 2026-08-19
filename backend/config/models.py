@@ -2,8 +2,8 @@
 
 import os
 
-# Fast model: the default chat model under the token threshold, plus the gateway
-# classifier, titling, and follow-up suggestions.
+# Fast model: the default interpreter, exploratory executor, narrator, title,
+# and follow-up-suggestion model unless a caller configures a narrower model.
 DEFAULT_FAST_MODEL = os.environ.get("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5")
 
 # Complex model: used once a turn's estimated input exceeds the fast-model cap.

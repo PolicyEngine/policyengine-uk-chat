@@ -39,7 +39,9 @@ def get_engine():
 def ensure_table():
     try:
         engine = get_engine()
-        SQLModel.metadata.create_all(engine)
+        from analysis.persistence import ensure_analysis_tables
+
+        ensure_analysis_tables(engine)
         # Add columns that may not exist yet on older databases
         from sqlalchemy import text
         with engine.connect() as conn:

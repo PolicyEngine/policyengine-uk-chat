@@ -7,7 +7,7 @@ set -euo pipefail
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 app_status="$(
   modal app list --json |
-    python "$script_dir/modal-app-status.py" "$MODAL_APP_NAME"
+    python3 "$script_dir/modal-app-status.py" "$MODAL_APP_NAME"
 )"
 
 if [[ "$app_status" == "missing" || "$app_status" == "stopped" ]]; then

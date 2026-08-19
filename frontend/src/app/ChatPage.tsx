@@ -9,14 +9,20 @@ import remarkGfm from "remark-gfm";
 import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import { Chart, extractChartSpecs } from "@/components/charts";
+import {
+  requestLocalArtifactText,
+  stripRequestLocalChartData,
+} from "@/utils/requestLocalArtifacts";
 import { THEME } from "@/components/theme";
 import AccountMenu from "@/components/AccountMenu";
 import AuthDialog from "@/components/AuthDialog";
 import ChatSearchDialog, { type ChatSearchResult } from "@/components/ChatSearchDialog";
 import ThemeSelector from "@/components/ThemeSelector";
 import { APP_BASE_PATH, getAppBaseUrl, getBackendEndpoint } from "@/utils/backend";
+import { reduceChatStreamControlEvent } from "@/utils/chatStream";
 import { enqueueSerial } from "@/utils/serialQueue";
 import { useThemePreference } from "@/utils/theme";
+import { createTurnId, postChatTurnWithRetry } from "@/utils/turnId";
 import { STARTER_PROMPTS } from "./chat-prompts";
 
 const EXAMPLE_QUERIES = [
@@ -139,6 +145,18 @@ interface ToolData {
 
 type StreamEvent = { type: "text"; content: string } | { type: "tool"; data: ToolData };
 
+interface AttachedImage {
+  dataUrl: string;
+  mediaType: string;
+  name: string;
+}
+
+interface ConflictRetry {
+  content: string;
+  turnId: string;
+  image?: AttachedImage;
+}
+
 interface Message {
   role: "user" | "assistant";
   content: string;
@@ -152,6 +170,10 @@ interface Message {
   stopped?: boolean;
   /** Optional 2–3 follow-up question suggestions generated after the turn. */
   suggestions?: string[];
+  /** Transient information used to resubmit a conflicted semantic request. */
+  conflictRetry?: ConflictRetry;
+  /** Previous conflicted continuation turn, excluded from the next submission. */
+  conflictTurnId?: string;
 }
 
 interface MessageAttachment {
@@ -286,7 +308,7 @@ export default function ChatPage() {
   // Image attachment for the next user message. Stored as the full data URL
   // (`data:image/png;base64,...`) so the thumbnail can be rendered directly
   // via <img src>. We split off the prefix before sending to the backend.
-  const [attachedImage, setAttachedImage] = useState<{ dataUrl: string; mediaType: string; name: string } | null>(null);
+  const [attachedImage, setAttachedImage] = useState<AttachedImage | null>(null);
   const [attachError, setAttachError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { preference: themePreference, setPreference: setThemePreference } = useThemePreference();
@@ -557,13 +579,16 @@ export default function ChatPage() {
         if (lastToolIdx >= 0) return firstAssistantMsg.events.slice(lastToolIdx + 1).filter((e): e is { type: "text"; content: string } => e.type === "text").map((e) => e.content).join("") || firstAssistantMsg.content;
         return firstAssistantMsg.content;
       })();
+      const persistedFirstAssistantContent = stripRequestLocalChartData(
+        firstAssistantContent || "",
+      );
 
       // Generate a title only when the conversation doesn't already have one.
       let title = conversationTitleRef.current;
       if (!title) {
         if (!titleGenPromiseRef.current) {
           const fallback = firstUserMsg.content.slice(0, 60);
-          titleGenPromiseRef.current = apiRequest<{ title: string }>("POST", "chat/title", undefined, { first_user_message: firstUserMsg.content, first_assistant_message: firstAssistantContent || "" })
+          titleGenPromiseRef.current = apiRequest<{ title: string }>("POST", "chat/title", undefined, { first_user_message: firstUserMsg.content, first_assistant_message: persistedFirstAssistantContent })
             .then(({ title: generated }) => generated || fallback)
             .catch((e) => { console.error("Title generation failed", e); return fallback; });
         }
@@ -572,10 +597,22 @@ export default function ChatPage() {
       }
 
       const apiMessages = msgs.map((m) => {
-        const base: Record<string, unknown> = { role: m.role, content: m.content };
+        const base: Record<string, unknown> = {
+          role: m.role,
+          content: stripRequestLocalChartData(m.content),
+        };
         if (m.attachment) base.attachment = m.attachment;
         if (m.role === "assistant") {
-          if (m.isComplete && m.events?.length) base.events = m.events;
+          if (m.isComplete && m.events?.length) {
+            base.events = m.events.map((event) =>
+              event.type === "text"
+                ? {
+                    ...event,
+                    content: stripRequestLocalChartData(event.content),
+                  }
+                : event,
+            );
+          }
           if (m.cost_gbp !== undefined) base.cost_gbp = m.cost_gbp;
           if (m.stop_reason) base.stop_reason = m.stop_reason;
           if (m.stopped) base.stopped = true;
@@ -647,8 +684,11 @@ export default function ChatPage() {
     setTimeout(() => inputRef.current?.focus(), 0);
   };
 
-  const sendMessage = async () => {
-    if ((!input.trim() && !attachedImage) || isStreaming) return;
+  const sendMessage = async (retry?: ConflictRetry) => {
+    if ((!retry?.content.trim() && !input.trim() && !attachedImage) || isStreaming) return;
+    // Keep this identifier stable for the lifetime of this submission so an
+    // HTTP retry cannot create a second workflow transition or usage charge.
+    const turnId = createTurnId(retry?.turnId);
     // Capture the stream generation for this send. If the user starts a new
     // chat, loads another conversation, or deletes the active one while this
     // stream is in flight, the generation bumps and every state write below
@@ -657,8 +697,8 @@ export default function ChatPage() {
     const isStale = () => streamGeneration.current !== generation;
     // If the user attached an image but didn't type anything, give the model
     // a minimal nudge so the request still has a coherent user turn.
-    const sendingImage = attachedImage;
-    const displayContent = input.trim() || (sendingImage ? `[Attached image: ${sendingImage.name}]` : "");
+    const sendingImage = retry?.image ?? attachedImage;
+    const displayContent = retry?.content.trim() || input.trim() || (sendingImage ? `[Attached image: ${sendingImage.name}]` : "");
     const userMessage: Message = {
       role: "user",
       content: displayContent,
@@ -667,12 +707,15 @@ export default function ChatPage() {
     const allMessages = [...messages, userMessage];
     setMessages((prev) => [...prev, userMessage]);
     if (messages.length === 0 && user) setSidebarOpen(true);
-    // Snapshot the attachment for this send, then clear it from the input.
-    setInput("");
-    setAttachedImage(null);
-    setAttachError(null);
-    if (typeof window !== "undefined") {
-      try { localStorage.removeItem("policyengine-uk-chat:draft"); } catch {}
+    // Snapshot the attachment for this send, then clear the composer only for
+    // a new submission. A conflict retry must not erase a draft started later.
+    if (!retry) {
+      setInput("");
+      setAttachedImage(null);
+      setAttachError(null);
+      if (typeof window !== "undefined") {
+        try { localStorage.removeItem("policyengine-uk-chat:draft"); } catch {}
+      }
     }
     setIsStreaming(true);
     setIsWaiting(true);
@@ -756,10 +799,10 @@ export default function ChatPage() {
             image_media_type: sendingImage.mediaType,
           }
         : {};
-      const response = await fetch(getBackendEndpoint("chat/message"), {
+      const response = await postChatTurnWithRetry(getBackendEndpoint("chat/message"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, charts_mode: chartsMode, ...imagePayload }),
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, turn_id: turnId, user_id: user?.id || null, charts_mode: chartsMode, ...imagePayload }),
         signal: controller.signal,
       });
       if (response.status === 402) {
@@ -778,7 +821,7 @@ export default function ChatPage() {
       if (!reader) throw new Error("No body");
 
       let buffer = "";
-      while (true) {
+      streamLoop: while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -790,7 +833,78 @@ export default function ChatPage() {
           if (!line.startsWith("data: ")) continue;
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.type === "chunk") {
+            const control = reduceChatStreamControlEvent(data);
+            if (control?.kind === "conflict") {
+              setIsWaiting(false);
+              if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
+              const separator = currentText.trim() ? "\n\n" : "";
+              const lastEvent = events[events.length - 1];
+              if (lastEvent?.type === "text") lastEvent.content += separator + control.content;
+              else events.push({ type: "text", content: separator + control.content });
+              currentText += separator + control.content;
+              displayedText = currentText;
+              const resolvedSessionId = control.sessionId || sessionId.current;
+              if (resolvedSessionId) sessionId.current = resolvedSessionId;
+              const conflictTurnId = control.turnId || turnId;
+              const finalAssistant: Message = {
+                role: "assistant",
+                content: currentText,
+                events: [...events],
+                isComplete: true,
+                conflictRetry: control.retryable
+                  ? {
+                      content: displayContent,
+                      turnId: conflictTurnId,
+                      image: sendingImage || undefined,
+                    }
+                  : undefined,
+              };
+              setMessages((prev) => {
+                const next = [...prev];
+                const lastIdx = next.length - 1;
+                if (next[lastIdx]?.role === "assistant") next[lastIdx] = finalAssistant;
+                else next.push(finalAssistant);
+                return next;
+              });
+              if (resolvedSessionId) {
+                saveConversation([...allMessages, finalAssistant], resolvedSessionId);
+              }
+              void reader.cancel().catch(() => {});
+              break streamLoop;
+            } else if (control?.kind === "failure") {
+              setIsWaiting(false);
+              if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
+              const separator = currentText.trim() ? "\n\n" : "";
+              const lastEvent = events[events.length - 1];
+              if (lastEvent?.type === "text") lastEvent.content += separator + control.content;
+              else events.push({ type: "text", content: separator + control.content });
+              currentText += separator + control.content;
+              displayedText = currentText;
+              const resolvedSessionId = control.sessionId || sessionId.current;
+              if (resolvedSessionId) sessionId.current = resolvedSessionId;
+              msgCost = control.costGbp;
+              stopReason = control.stopReason;
+              const finalAssistant: Message = {
+                role: "assistant",
+                content: currentText,
+                events: [...events],
+                isComplete: true,
+                cost_gbp: msgCost,
+                stop_reason: stopReason,
+              };
+              setMessages((prev) => {
+                const next = [...prev];
+                const lastIdx = next.length - 1;
+                if (next[lastIdx]?.role === "assistant") next[lastIdx] = finalAssistant;
+                else next.push(finalAssistant);
+                return next;
+              });
+              if (resolvedSessionId) {
+                saveConversation([...allMessages, finalAssistant], resolvedSessionId);
+              }
+              void reader.cancel().catch(() => {});
+              break streamLoop;
+            } else if (data.type === "chunk") {
               setIsWaiting(false);
               const lastEvent = events[events.length - 1];
               if (lastEvent?.type === "text") lastEvent.content += data.content;
@@ -820,6 +934,12 @@ export default function ChatPage() {
               setIsWaiting(false);
               // Flush remaining text
               if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
+              const artifactText = requestLocalArtifactText(data.artifacts);
+              if (artifactText) {
+                const separator = currentText.trim() ? "\n\n" : "";
+                events.push({ type: "text", content: separator + artifactText });
+                currentText += separator + artifactText;
+              }
               displayedText = currentText;
               updateMessage();
               if (data.session_id) sessionId.current = data.session_id;
@@ -933,13 +1053,12 @@ export default function ChatPage() {
 
   const stopStreaming = () => { abortRef.current?.abort(); };
 
-  /** Resume a previously truncated or stopped assistant turn.
+  /** Request continuation through the same typed user-turn pathway.
    *
-   * The conversation up to and including the partial assistant message is
-   * sent to /chat/message; the model continues from there via Anthropic's
-   * assistant-prefill behaviour (no extra user nudge needed). New text and
-   * events are appended into the SAME message bubble so the user sees one
-   * continuous answer.
+   * The visible response still appends to the same assistant bubble, but the
+   * backend receives an explicit user message. It can therefore interpret the
+   * continuation against current workflow state and recompile numerical work
+   * when request-local results are no longer available.
    */
   const continueMessage = async (idx: number) => {
     if (isStreaming) return;
@@ -949,6 +1068,7 @@ export default function ChatPage() {
     const isStale = () => streamGeneration.current !== generation;
     const target = messages[idx];
     if (!target || target.role !== "assistant" || !target.isComplete) return;
+    const turnId = createTurnId(target.conflictTurnId);
     // Refuse if a tool is still pending in this message — re-triggering
     // would orphan the partial tool call.
     if (target.events?.some((e) => e.type === "tool" && e.data.status === "pending")) return;
@@ -963,23 +1083,24 @@ export default function ChatPage() {
       return { role: msg.role, content };
     });
 
-    // The partial turn is sent as the final message so the model continues it
-    // (assistant prefill). Anthropic rejects a prefill that is empty or ends
-    // with whitespace — trim it, and bail if there is nothing to continue from.
-    const prefill = apiMessages[apiMessages.length - 1];
-    prefill.content = prefill.content.trimEnd();
-    if (!prefill.content) return;
+    const partial = apiMessages[apiMessages.length - 1];
+    partial.content = partial.content.trimEnd();
+    if (!partial.content) return;
+    apiMessages.push({
+      role: "user",
+      content: "Continue the previous answer. If numerical results are needed, rerun the active analysis rather than relying on prior prose.",
+    });
 
     // Snapshot the flags we are about to clear so early-exit paths (402, 429,
     // fetch failure) can restore them instead of leaving the message stuck
     // incomplete with no Continue affordance.
-    const prevFlags = { isComplete: target.isComplete, stop_reason: target.stop_reason, stopped: target.stopped };
+    const prevFlags = { isComplete: target.isComplete, stop_reason: target.stop_reason, stopped: target.stopped, conflictTurnId: target.conflictTurnId };
     const restoreTargetFlags = () => {
       setMessages((prev) => prev.map((m, i) => i === idx ? { ...m, ...prevFlags } : m));
     };
 
     // Optimistic: clear truncation/stopped flags and mark in-flight.
-    setMessages((prev) => prev.map((m, i) => i === idx ? { ...m, isComplete: false, stop_reason: undefined, stopped: undefined } : m));
+    setMessages((prev) => prev.map((m, i) => i === idx ? { ...m, isComplete: false, stop_reason: undefined, stopped: undefined, conflictTurnId: undefined } : m));
     setIsStreaming(true);
     setIsWaiting(true);
 
@@ -1005,10 +1126,10 @@ export default function ChatPage() {
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (user?.id) headers["X-User-Id"] = user.id;
-      const response = await fetch(getBackendEndpoint("chat/message"), {
+      const response = await postChatTurnWithRetry(getBackendEndpoint("chat/message"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, charts_mode: chartsMode }),
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, turn_id: turnId, user_id: user?.id || null, charts_mode: chartsMode }),
         signal: controller.signal,
       });
       if (response.status === 402) {
@@ -1033,7 +1154,7 @@ export default function ChatPage() {
       if (!reader) throw new Error("No body");
 
       let buffer = "";
-      while (true) {
+      streamLoop: while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         buffer += decoder.decode(value, { stream: true });
@@ -1044,7 +1165,66 @@ export default function ChatPage() {
           if (!line.startsWith("data: ")) continue;
           try {
             const data = JSON.parse(line.slice(6));
-            if (data.type === "chunk") {
+            const control = reduceChatStreamControlEvent(data);
+            if (control?.kind === "conflict") {
+              setIsWaiting(false);
+              const separator = (baseContent + appendedText).trim() ? "\n\n" : "";
+              const lastEvent = newEvents[newEvents.length - 1];
+              if (lastEvent?.type === "text") lastEvent.content += separator + control.content;
+              else newEvents.push({ type: "text", content: separator + control.content });
+              appendedText += separator + control.content;
+              const finalContent = baseContent + appendedText;
+              const finalEvents = [...baseEvents, ...newEvents];
+              const resolvedSessionId = control.sessionId || sessionId.current;
+              if (resolvedSessionId) sessionId.current = resolvedSessionId;
+              const conflictedMessage: Message = {
+                ...target,
+                isComplete: true,
+                content: finalContent,
+                events: finalEvents,
+                cost_gbp: target.cost_gbp,
+                stop_reason: prevFlags.stop_reason,
+                stopped: prevFlags.stopped,
+                conflictTurnId: control.retryable
+                  ? control.turnId || turnId
+                  : undefined,
+              };
+              setMessages((prev) => prev.map((m, i) => i === idx ? conflictedMessage : m));
+              if (resolvedSessionId) {
+                const savedMessages = messages.map((m, i) => i === idx ? conflictedMessage : m);
+                saveConversation(savedMessages, resolvedSessionId);
+              }
+              void reader.cancel().catch(() => {});
+              break streamLoop;
+            } else if (control?.kind === "failure") {
+              setIsWaiting(false);
+              const separator = (baseContent + appendedText).trim() ? "\n\n" : "";
+              const lastEvent = newEvents[newEvents.length - 1];
+              if (lastEvent?.type === "text") lastEvent.content += separator + control.content;
+              else newEvents.push({ type: "text", content: separator + control.content });
+              appendedText += separator + control.content;
+              const finalContent = baseContent + appendedText;
+              const finalEvents = [...baseEvents, ...newEvents];
+              const resolvedSessionId = control.sessionId || sessionId.current;
+              if (resolvedSessionId) sessionId.current = resolvedSessionId;
+              const failedMessage: Message = {
+                ...target,
+                isComplete: true,
+                content: finalContent,
+                events: finalEvents,
+                cost_gbp: baseCost + (control.costGbp || 0),
+                stop_reason: control.stopReason,
+                stopped: false,
+                conflictTurnId: undefined,
+              };
+              setMessages((prev) => prev.map((m, i) => i === idx ? failedMessage : m));
+              if (resolvedSessionId) {
+                const savedMessages = messages.map((m, i) => i === idx ? failedMessage : m);
+                saveConversation(savedMessages, resolvedSessionId);
+              }
+              void reader.cancel().catch(() => {});
+              break streamLoop;
+            } else if (data.type === "chunk") {
               setIsWaiting(false);
               const lastEvent = newEvents[newEvents.length - 1];
               if (lastEvent?.type === "text") lastEvent.content += data.content;
@@ -1069,6 +1249,12 @@ export default function ChatPage() {
               setIsWaiting(true);
             } else if (data.type === "done") {
               setIsWaiting(false);
+              const artifactText = requestLocalArtifactText(data.artifacts);
+              if (artifactText) {
+                const separator = (baseContent + appendedText).trim() ? "\n\n" : "";
+                newEvents.push({ type: "text", content: separator + artifactText });
+                appendedText += separator + artifactText;
+              }
               const newCost = typeof data.cost_gbp === "number" ? data.cost_gbp : 0;
               const stopReason = typeof data.stop_reason === "string" ? data.stop_reason : undefined;
               const finalContent = baseContent + appendedText;
@@ -1081,6 +1267,7 @@ export default function ChatPage() {
                 cost_gbp: baseCost + newCost,
                 stop_reason: stopReason,
                 stopped: false,
+                conflictTurnId: undefined,
               } : m));
               if (sessionId.current) {
                 // Persist the fresh post-continuation metadata too — otherwise a
@@ -1094,6 +1281,7 @@ export default function ChatPage() {
                   cost_gbp: baseCost + newCost,
                   stop_reason: stopReason,
                   stopped: false,
+                  conflictTurnId: undefined,
                 } : m);
                 saveConversation(savedMessages, sessionId.current);
               }
@@ -1929,6 +2117,21 @@ export default function ChatPage() {
                           )}
                         </div>
                       )}
+                      {msg.isComplete && idx === messages.length - 1 && !isStreaming && msg.conflictRetry && (
+                        <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "8px" }}>
+                          <button
+                            type="button"
+                            onClick={() => void sendMessage(msg.conflictRetry)}
+                            data-tip="Submit this request again using the latest conversation state."
+                            style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "12px", color: "var(--accent)", background: "transparent", border: "1px solid var(--accent)", borderRadius: "999px", padding: "4px 10px", cursor: "pointer", fontFamily: "inherit" }}
+                          >
+                            ↻ Retry request
+                          </button>
+                          <span style={{ fontSize: "11px", color: "var(--muted)" }}>
+                            Conversation changed during processing
+                          </span>
+                        </div>
+                      )}
                       {msg.isComplete && !isStreaming && (msg.stop_reason === "max_tokens" || msg.stopped) && !msg.events?.some((e) => e.type === "tool" && e.data.status === "pending") && (
                         <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "8px" }}>
                           <button
@@ -2157,7 +2360,7 @@ export default function ChatPage() {
                   </button>
                 ) : (
                   <button
-                    onClick={sendMessage}
+                    onClick={() => void sendMessage()}
                     disabled={!input.trim() && !attachedImage}
                     data-tip="Send"
                     aria-label="Send"

@@ -7,10 +7,13 @@ import pytest
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from billing.pricing import calculate_cost_gbp
+from billing.intents import build_billing_intent
+from billing.processor import BillingIntentProcessor, BillingRecordResult
 from billing import credits
 from billing import config
 from billing import routes
 from billing import stripe_integration
+from analysis.models import ModelUsageEntry
 
 
 class FakeQuery:
@@ -62,6 +65,12 @@ class FakeSupabase:
 
     def table(self, name):
         return FakeQuery(self, name)
+
+    def rpc(self, name, value):
+        query = FakeQuery(self, name)
+        query.operation = "rpc"
+        query.payload = value
+        return query
 
     def execute(self, query):
         return self._execute(query)
@@ -126,6 +135,134 @@ def test_cache_tokens_contribute_to_cost():
         cache_read_input_tokens=5_000,
     )
     assert with_cache > baseline
+
+
+def test_billing_intent_prices_each_actual_model_call_once():
+    priced = []
+    entries = (
+        ModelUsageEntry(
+            usage_entry_id="usage-one",
+            session_id="session",
+            turn_id="turn",
+            operation="interpretation",
+            model="model-one",
+            input_tokens=3,
+            output_tokens=1,
+        ),
+        ModelUsageEntry(
+            usage_entry_id="usage-two",
+            session_id="session",
+            turn_id="turn",
+            operation="narration",
+            model="model-two",
+            input_tokens=7,
+            output_tokens=2,
+            cache_read_input_tokens=4,
+        ),
+    )
+
+    def price(**values):
+        priced.append(values)
+        return 0.1 if values["model"] == "model-one" else 0.25
+
+    intent = build_billing_intent(
+        session_id="session",
+        turn_id="turn",
+        user_id="user",
+        usage_entries=entries,
+        pricing=price,
+    )
+
+    assert intent is not None
+    assert [item.model for item in intent.charge_inputs] == [
+        "model-one",
+        "model-two",
+    ]
+    assert [item.cost_gbp for item in intent.charge_inputs] == [0.1, 0.25]
+    assert priced[1]["cache_read_input_tokens"] == 4
+
+
+def test_billing_processor_reuses_stored_charge_after_pricing_changes():
+    entry = ModelUsageEntry(
+        usage_entry_id="usage",
+        session_id="session",
+        turn_id="turn",
+        operation="narration",
+        model="model-one",
+        input_tokens=10,
+        output_tokens=2,
+    )
+    intent = build_billing_intent(
+        session_id="session",
+        turn_id="turn",
+        user_id="user",
+        usage_entries=(entry,),
+        pricing=lambda **_values: 0.125,
+    )
+    assert intent is not None
+    recorded_costs = []
+
+    class Store:
+        marked = []
+
+        def pending_billing_intents(self, *, user_id):
+            return (intent,)
+
+        def mark_billing_recorded(self, session_id, turn_id):
+            self.marked.append((session_id, turn_id))
+            return True
+
+    def record(stored_intent):
+        recorded_costs.append(
+            sum(charge.cost_gbp for charge in stored_intent.charge_inputs)
+        )
+        return BillingRecordResult(recorded=True, duplicate=True)
+
+    store = Store()
+    results = BillingIntentProcessor(store=store, recorder=record).process_pending(
+        user_id="user"
+    )
+
+    assert results[0].duplicate is True
+    assert recorded_costs == [0.125]
+    assert store.marked == [("session", "turn")]
+
+
+def test_failed_billing_record_remains_pending():
+    entry = ModelUsageEntry(
+        usage_entry_id="usage",
+        session_id="session",
+        turn_id="turn",
+        operation="interpretation",
+        model="model-one",
+    )
+    intent = build_billing_intent(
+        session_id="session",
+        turn_id="turn",
+        user_id="user",
+        usage_entries=(entry,),
+        pricing=lambda **_values: 0,
+    )
+    assert intent is not None
+
+    class Store:
+        marked = []
+
+        def pending_billing_intents(self, *, user_id):
+            return (intent,)
+
+        def mark_billing_recorded(self, session_id, turn_id):
+            self.marked.append((session_id, turn_id))
+            return True
+
+    store = Store()
+    result = BillingIntentProcessor(
+        store=store,
+        recorder=lambda _intent: BillingRecordResult(recorded=False),
+    ).process(intent)
+
+    assert result.recorded is False
+    assert store.marked == []
 
 
 def test_get_supabase_requires_configuration_and_caches_client(monkeypatch):
@@ -232,6 +369,133 @@ def test_record_usage_for_anonymous_user_tolerates_insert_failure(monkeypatch):
         "model": "claude-haiku-4-5",
         "balance": None,
     }
+
+
+def test_record_usage_uses_atomic_turn_idempotency(monkeypatch):
+    inserted = iter([True, False])
+
+    def execute(query):
+        assert query.operation == "rpc"
+        return SimpleNamespace(data=next(inserted))
+
+    database = FakeSupabase(execute)
+    monkeypatch.setattr(credits, "get_supabase", lambda: database)
+    monkeypatch.setattr(credits, "calculate_cost_gbp", lambda **_kwargs: 0.25)
+
+    first = credits.record_usage(
+        user_id=None,
+        session_id="session-1",
+        turn_id="turn-1",
+        model="claude-haiku-4-5",
+        input_tokens=10,
+        output_tokens=2,
+    )
+    duplicate = credits.record_usage(
+        user_id=None,
+        session_id="session-1",
+        turn_id="turn-1",
+        model="claude-haiku-4-5",
+        input_tokens=10,
+        output_tokens=2,
+    )
+
+    assert first["cost_gbp"] == 0.25
+    assert first["duplicate"] is False
+    assert duplicate["cost_gbp"] == 0
+    assert duplicate["duplicate"] is True
+    assert all(
+        call.payload["p_turn_id"] == "turn-1" for call in database.calls
+    )
+
+
+def test_record_usage_retry_after_unknown_rpc_result_does_not_charge_twice(
+    monkeypatch,
+):
+    outcomes = iter([RuntimeError("response lost"), False])
+
+    def execute(_query):
+        outcome = next(outcomes)
+        if isinstance(outcome, Exception):
+            raise outcome
+        return SimpleNamespace(data=outcome)
+
+    database = FakeSupabase(execute)
+    monkeypatch.setattr(credits, "get_supabase", lambda: database)
+    monkeypatch.setattr(credits, "calculate_cost_gbp", lambda **_kwargs: 0.25)
+
+    uncertain = credits.record_usage(
+        user_id=None,
+        session_id="session-1",
+        turn_id="turn-retry",
+        model="claude-haiku-4-5",
+        input_tokens=10,
+        output_tokens=2,
+    )
+    duplicate = credits.record_usage(
+        user_id=None,
+        session_id="session-1",
+        turn_id="turn-retry",
+        model="claude-haiku-4-5",
+        input_tokens=10,
+        output_tokens=2,
+    )
+
+    assert uncertain["cost_gbp"] == 0
+    assert duplicate["cost_gbp"] == 0
+    assert duplicate["duplicate"] is True
+
+
+def test_record_usage_prices_each_model_call_and_cache_tokens_separately(
+    monkeypatch,
+):
+    database = FakeSupabase(
+        lambda query: SimpleNamespace(data=True)
+        if query.operation == "rpc"
+        else SimpleNamespace(data=[])
+    )
+    priced = []
+
+    def price(**usage):
+        priced.append(usage)
+        return 0.1 if usage["model"] == "model-one" else 0.25
+
+    monkeypatch.setattr(credits, "get_supabase", lambda: database)
+    monkeypatch.setattr(credits, "calculate_cost_gbp", price)
+
+    result = credits.record_usage(
+        user_id=None,
+        session_id="session-mixed",
+        turn_id="turn-mixed",
+        model="ignored-aggregate-model",
+        input_tokens=13,
+        output_tokens=5,
+        cache_creation_input_tokens=7,
+        cache_read_input_tokens=11,
+        usage_entries=[
+            {
+                "model": "model-one",
+                "input_tokens": 3,
+                "output_tokens": 1,
+                "cache_creation_input_tokens": 2,
+                "cache_read_input_tokens": 4,
+            },
+            {
+                "model": "model-two",
+                "input_tokens": 10,
+                "output_tokens": 4,
+                "cache_creation_input_tokens": 5,
+                "cache_read_input_tokens": 7,
+            },
+        ],
+    )
+
+    assert [call["model"] for call in priced] == ["model-one", "model-two"]
+    assert priced[0]["cache_read_input_tokens"] == 4
+    assert result["cost_gbp"] == pytest.approx(0.35)
+    rpc = database.calls[0]
+    assert rpc.payload["p_model"] == "mixed"
+    assert rpc.payload["p_cost_gbp"] == pytest.approx(0.35)
+    assert result["recorded"] is True
 
 
 @pytest.mark.parametrize(

@@ -1,10 +1,11 @@
 """Framework-independent events emitted by a UK Chat turn."""
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 from typing import Any, Awaitable, Callable, Literal, TypeAlias
 
-from gateway.trace import GatewayTrace
-
+from analysis.models import BillingIntent
 
 CancellationProbe: TypeAlias = Callable[[], Awaitable[bool]]
 
@@ -23,6 +24,21 @@ class ChatUsage:
             "cache_creation_input_tokens": self.cache_creation_input_tokens,
             "cache_read_input_tokens": self.cache_read_input_tokens,
         }
+
+    def plus(self, values: dict[str, int] | "ChatUsage") -> "ChatUsage":
+        added = values.as_dict() if isinstance(values, ChatUsage) else values
+        return ChatUsage(
+            input_tokens=self.input_tokens + added.get("input_tokens", 0),
+            output_tokens=self.output_tokens + added.get("output_tokens", 0),
+            cache_creation_input_tokens=(
+                self.cache_creation_input_tokens
+                + added.get("cache_creation_input_tokens", 0)
+            ),
+            cache_read_input_tokens=(
+                self.cache_read_input_tokens
+                + added.get("cache_read_input_tokens", 0)
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,7 +85,12 @@ class TurnCompleted:
     outcome: str | None
     stop_reason: str | None
     usage: ChatUsage
-    gateway_trace: GatewayTrace | None = None
+    turn_id: str | None = None
+    processed_duplicate: bool = False
+    analysis_trace: Any | None = None
+    usage_entries: tuple[Any, ...] = ()
+    response_artifacts: tuple[Any, ...] = ()
+    billing_intent: BillingIntent | None = None
     type: Literal["done"] = field(default="done", init=False)
 
 
@@ -85,8 +106,12 @@ class TurnFailed:
     session_id: str
     stop_reason: str
     usage: ChatUsage
+    turn_id: str | None = None
+    model: str | None = None
     billable: bool = False
-    gateway_trace: GatewayTrace | None = None
+    analysis_trace: Any | None = None
+    usage_entries: tuple[Any, ...] = ()
+    billing_intent: BillingIntent | None = None
     type: Literal["error"] = field(default="error", init=False)
 
 
@@ -96,8 +121,43 @@ class TurnCancelled:
     model: str | None
     route: str
     usage: ChatUsage
-    gateway_trace: GatewayTrace | None = None
+    turn_id: str | None = None
+    analysis_trace: Any | None = None
     type: Literal["cancelled"] = field(default="cancelled", init=False)
+
+
+@dataclass(frozen=True, slots=True)
+class ClarificationRequired:
+    question_id: str
+    reason_code: str
+    type: Literal["clarification"] = field(default="clarification", init=False)
+
+
+@dataclass(frozen=True, slots=True)
+class TurnConflict:
+    content: str
+    session_id: str
+    turn_id: str
+    retryable: bool
+    type: Literal["conflict"] = field(default="conflict", init=False)
+
+
+@dataclass(frozen=True, slots=True)
+class DuplicateProcessed:
+    session_id: str
+    turn_id: str
+    status: str
+    type: Literal["processed_duplicate"] = field(
+        default="processed_duplicate", init=False
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class CancellationAccepted:
+    session_id: str
+    turn_id: str
+    request_revision_id: str | None
+    type: Literal["cancellation"] = field(default="cancellation", init=False)
 
 
 ChatEvent: TypeAlias = (
@@ -110,4 +170,8 @@ ChatEvent: TypeAlias = (
     | SuggestionsGenerated
     | TurnFailed
     | TurnCancelled
+    | ClarificationRequired
+    | TurnConflict
+    | DuplicateProcessed
+    | CancellationAccepted
 )
