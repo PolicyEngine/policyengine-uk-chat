@@ -82,8 +82,8 @@ def test_revision_with_stale_base_is_rejected():
 def test_semantic_reducer_has_no_binding_compilation_or_persistence_dependency():
     source = inspect.getsource(SemanticRequestReducer)
     for forbidden in (
-        "bind_request",
-        "compile_plan",
+        "RequestBinder",
+        "ExecutionPlanCompiler",
         "commit_transition",
         "catalogue_version",
         "dataset_identifier",

@@ -192,7 +192,13 @@ def _validate_analysis_kind(
 ) -> ValidatedCandidateField:
     spec = registry.fields["analysis_kind"]
     reference = evidence_reference(field.evidence, user_message)
-    value = _controlled_value(spec, field.value, reference.quote)
+    if spec.evidence_policy == EvidencePolicy.CONTROLLED:
+        value = _controlled_value(spec, field.value, reference.quote)
+    else:
+        # The analysis kind is a closed server enum inferred from ordinary user
+        # language. Its evidence grounds the classification in this message;
+        # users do not have to state an internal category label verbatim.
+        value = spec.validate(field.value)
     registry.capability_for(value)
     return ValidatedCandidateField(value=value, evidence=reference)
 

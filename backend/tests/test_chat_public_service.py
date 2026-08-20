@@ -16,6 +16,7 @@ from analysis.models import (
     StillProcessingTurnOutcome,
 )
 from analysis.trace import AnalysisTrace
+from analysis.store import MarkBillingRecordedCommand
 from chat.events import (
     ChatUsage,
     SuggestionsGenerated,
@@ -302,8 +303,8 @@ def test_public_service_retries_pending_billing_from_durable_inputs(monkeypatch)
             assert user_id == "user-1"
             return (intent,)
 
-        def mark_billing_recorded(self, session_id, turn_id):
-            self.recorded.append((session_id, turn_id))
+        def mark_billing_recorded(self, command: MarkBillingRecordedCommand):
+            self.recorded.append((command.session_id, command.turn_id))
             return True
 
     usage_calls = []
@@ -533,8 +534,8 @@ def test_public_billing_retries_pending_intent_and_marks_only_recorded_result(
         public_service,
         "SqlAnalysisStore",
         lambda: SimpleNamespace(
-            mark_billing_recorded=lambda session_id, turn_id: marked.append(
-                (session_id, turn_id)
+            mark_billing_recorded=lambda command: marked.append(
+                (command.session_id, command.turn_id)
             )
         ),
     )
@@ -571,7 +572,7 @@ def test_public_billing_keeps_intent_pending_after_failed_retries(monkeypatch):
         public_service,
         "SqlAnalysisStore",
         lambda: SimpleNamespace(
-            mark_billing_recorded=lambda *args: marked.append(args)
+            mark_billing_recorded=lambda command: marked.append(command)
         ),
     )
 

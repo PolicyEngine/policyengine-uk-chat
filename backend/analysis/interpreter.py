@@ -96,8 +96,17 @@ def candidate_tool_definition() -> dict[str, Any]:
         update_schema["$defs"].update(value_schema.pop("$defs", {}))
         field_value_schemas[name] = value_schema
 
+    field_value_schemas["analysis_kind"]["description"] = (
+        "Classify the requested outcome from ordinary user language; the user does "
+        "not need to name an internal category. Allowed classifications:\n"
+        + "\n".join(
+            f"- {name}: {capability.interpretation_guidance}"
+            for name, capability in CAPABILITY_REGISTRY.capabilities.items()
+        )
+    )
+
     def candidate_field_schema(name: str) -> dict[str, Any]:
-        return {
+        schema = {
             "type": "object",
             "properties": {
                 "value": field_value_schemas[name],
@@ -106,6 +115,10 @@ def candidate_tool_definition() -> dict[str, Any]:
             "required": ["value", "evidence"],
             "additionalProperties": False,
         }
+        guidance = CAPABILITY_REGISTRY.fields[name].interpretation_guidance
+        if guidance:
+            schema["description"] = guidance
+        return schema
 
     def patch_schema(name: str) -> dict[str, Any]:
         return {
@@ -169,7 +182,9 @@ def candidate_tool_definition() -> dict[str, Any]:
     return {
         "name": "emit_turn_update",
         "description": "Emit one typed semantic update to the current workflow state.",
-        "strict": True,
+        # Anthropic strict tool schemas do not support the ``oneOf`` constructs
+        # required by this discriminated update union. Candidate output remains
+        # untrusted and is validated below before semantic reduction.
         "input_schema": {
             "type": "object",
             "properties": {
@@ -276,7 +291,10 @@ def _extract_update(response: Any) -> CandidateTurnUpdate:
         ):
             value = getattr(block, "input", None)
             if isinstance(value, dict) and "update" in value:
-                return CANDIDATE_TURN_UPDATE_ADAPTER.validate_python(value["update"])
+                update = value["update"]
+                if isinstance(update, str):
+                    update = json.loads(update)
+                return CANDIDATE_TURN_UPDATE_ADAPTER.validate_python(update)
     raise AnalysisError(
         AnalysisErrorCode.INVALID_CANDIDATE,
         "interpreter returned no turn update",
@@ -348,10 +366,14 @@ def interpret_turn(
                     if isinstance(exc, AnalysisError)
                     else "schema_validation_failed"
                 ),
+                "validation_error": str(exc),
                 "instruction": (
                     "Return a different candidate that satisfies the supplied state, "
                     "identifier, and exact-evidence requirements. Numerical follow-ups "
-                    "must be new or revised calculation work, not execution questions."
+                    "must be new or revised calculation work, not execution questions. "
+                    "If start_analysis explicitly includes a non-empty outputs list, "
+                    "output_evidence belongs inside the candidate object next to that "
+                    "list and must quote the latest user message exactly."
                 ),
             }
     raise InterpretationFailure(

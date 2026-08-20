@@ -9,7 +9,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlmodel import Session
 
-from analysis.persistence import AnalysisStateStore, AnalysisWorkflowRow
+from analysis.persistence import SqlAnalysisStore, AnalysisWorkflowRow
+from analysis.store import CreateSessionCommand
 from api.main import app
 
 
@@ -150,7 +151,9 @@ class TestConversations:
             user_email=email,
         )
         conversation_id = created.json()["id"]
-        AnalysisStateStore().create_session("private-session")
+        SqlAnalysisStore().create_session(
+            CreateSessionCommand(session_id="private-session")
+        )
 
         shared = client.post(
             f"/conversations/{conversation_id}/share",
@@ -175,8 +178,8 @@ class TestConversations:
     def test_delete_removes_internal_workflow_records(self):
         created = self._save(session_id="delete-state-session")
         conversation_id = created.json()["id"]
-        store = AnalysisStateStore()
-        store.create_session("delete-state-session")
+        store = SqlAnalysisStore()
+        store.create_session(CreateSessionCommand(session_id="delete-state-session"))
 
         response = client.delete(f"/conversations/{conversation_id}")
 

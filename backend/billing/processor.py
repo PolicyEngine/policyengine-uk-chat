@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Mapping, Protocol
 
 from analysis.models import BillingIntent
+from analysis.store import MarkBillingRecordedCommand
 
 
 @dataclass(frozen=True)
@@ -23,7 +24,7 @@ class BillingRecorder(Protocol):
 class BillingIntentStore(Protocol):
     def pending_billing_intents(self, *, user_id: str) -> tuple[BillingIntent, ...]: ...
 
-    def mark_billing_recorded(self, session_id: str, turn_id: str) -> bool: ...
+    def mark_billing_recorded(self, command: MarkBillingRecordedCommand) -> bool: ...
 
 
 class BillingIntentProcessor:
@@ -42,8 +43,10 @@ class BillingIntentProcessor:
         result = self._recorder(intent)
         if result.recorded:
             self._store.mark_billing_recorded(
-                str(intent.session_id),
-                str(intent.turn_id),
+                MarkBillingRecordedCommand(
+                    session_id=str(intent.session_id),
+                    turn_id=str(intent.turn_id),
+                )
             )
         return result
 

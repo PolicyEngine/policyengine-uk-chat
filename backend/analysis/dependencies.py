@@ -12,6 +12,7 @@ from analysis.binding import (
 )
 from analysis.common import RuntimeVersions
 from analysis.executor import ExecutionOutcome, OperationEvent
+from analysis.execution_engine import ExecutionRequest, ExecutionResult
 from analysis.interpreter import InterpretationResult, InterpreterContext
 from analysis.models import (
     BillingIntent,
@@ -56,6 +57,10 @@ class RequestCompilationService(Protocol):
         self,
         compilation_input: CompilationInput,
     ) -> RequestCompilation: ...
+
+
+class ExecutionService(Protocol):
+    def execute(self, request: ExecutionRequest) -> ExecutionResult: ...
 
 
 class BillingIntentBuilder(Protocol):
@@ -118,15 +123,6 @@ class Clock(Protocol):
 
 class IdentifierFactory(Protocol):
     def __call__(self, namespace: str, *parts: object) -> str: ...
-
-
-class OperationDispatcher(Protocol):
-    def __call__(
-        self,
-        name: str,
-        arguments: dict[str, Any],
-        context: Any,
-    ) -> dict[str, Any]: ...
 
 
 class AsyncCancellationProbe(Protocol):

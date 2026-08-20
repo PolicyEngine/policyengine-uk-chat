@@ -113,3 +113,15 @@ def test_registry_rejects_duplicate_required_default():
         },
     )
     _assert_invalid(registry, "both requires and defaults")
+
+
+def test_registry_rejects_missing_analysis_kind_guidance():
+    capability = CAPABILITY_REGISTRY.capabilities["society"]
+    registry = replace(
+        CAPABILITY_REGISTRY,
+        capabilities={
+            **CAPABILITY_REGISTRY.capabilities,
+            "society": replace(capability, interpretation_guidance=""),
+        },
+    )
+    _assert_invalid(registry, "has no interpretation guidance")

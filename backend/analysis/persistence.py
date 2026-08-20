@@ -5,37 +5,23 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Any, assert_never
 
 from sqlalchemy import (
-    Column,
-    DateTime,
-    Index,
-    String,
-    Text,
-    UniqueConstraint,
     delete,
-    text,
     update,
 )
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
-from sqlmodel import Field, Session, SQLModel, select
+from sqlalchemy.engine import Engine
+from sqlmodel import Session, SQLModel, select
 
 from analysis.common import (
     AnalysisError,
     AnalysisErrorCode,
-    PLAN_SCHEMA_VERSION,
     WORKFLOW_SCHEMA_VERSION,
     canonical_hash,
     stable_identifier,
-)
-from analysis.lifecycle import (
-    AttemptOutcomeEvent,
-    LifecycleReducer,
-    PlanClaimedEvent,
-    RecoveryEvent,
 )
 from analysis.models import (
     AnalysisSessionState,
@@ -60,7 +46,37 @@ from analysis.models import (
     WorkflowPhase,
     WorkflowTransition,
 )
-from analysis.store import ClaimedExecution, LoadedAnalysisState, TurnStart
+from analysis.persistence_compat import parse_persisted as _parse_persisted
+from analysis.persistence_rows import (
+    AnalysisBillingIntentRow,
+    AnalysisBoundRequestRow,
+    AnalysisClarificationResolutionRow,
+    AnalysisClarificationRow,
+    AnalysisExecutionAttemptRow,
+    AnalysisExecutionRow,
+    AnalysisModelUsageRow,
+    AnalysisPlanRow,
+    AnalysisRequestRevisionRow,
+    AnalysisTurnReceiptRow,
+    AnalysisWorkflowRow,
+)
+from analysis.store import (
+    AttemptCompletionCommand,
+    BeginTurnCommand,
+    ClaimPlanCommand,
+    ClaimedExecution,
+    CreateSessionCommand,
+    DeleteAnalysisSessionCommand,
+    HeartbeatAttemptCommand,
+    LoadedAnalysisState,
+    LoadOrCreateSessionCommand,
+    MarkBillingRecordedCommand,
+    SessionDeletionResult,
+    TurnStart,
+    DEFAULT_EXECUTION_HEARTBEAT_SECONDS,
+    DEFAULT_EXECUTION_LEASE_SECONDS,
+    DEFAULT_PROCESSING_RECEIPT_TIMEOUT_SECONDS,
+)
 
 
 ACTIVE_ATTEMPT_STATUSES = (
@@ -68,25 +84,6 @@ ACTIVE_ATTEMPT_STATUSES = (
     ExecutionAttemptStatus.RUNNING.value,
     ExecutionAttemptStatus.CANCELLATION_REQUESTED.value,
 )
-DEFAULT_EXECUTION_LEASE_SECONDS = 180
-DEFAULT_EXECUTION_HEARTBEAT_SECONDS = 15
-DEFAULT_PROCESSING_RECEIPT_TIMEOUT_SECONDS = 600
-
-_LEGACY_RESULT_TYPES = {
-    "get_parameter": "parameter",
-    "validate_reform": "reform_validation",
-    "validate_household": "household_validation",
-    "run_household_simulation": "household_simulation",
-    "run_society_simulation": "society_simulation",
-    "compute_budgetary_impact": "budgetary_impact",
-    "compute_program_breakdown": "program_breakdown",
-    "compute_decile_impacts": "decile_impacts",
-    "compute_winners_losers": "winners_losers",
-    "compute_poverty_metrics": "poverty_metrics",
-    "compute_inequality_metrics": "inequality_metrics",
-    "aggregate_result": "aggregate_result",
-    "generate_chart": "chart",
-}
 
 
 def _now() -> datetime:
@@ -95,311 +92,6 @@ def _now() -> datetime:
 
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def _upgrade_payload(model_type, payload: dict[str, Any]) -> dict[str, Any]:
-    """Adapt version-one documents without creating historical result data."""
-
-    upgraded = dict(payload)
-    upgraded["schema_version"] = WORKFLOW_SCHEMA_VERSION
-    if model_type is SemanticRequestRevision:
-        upgraded.pop("readiness", None)
-    elif model_type is AnalysisSessionState:
-        upgraded.setdefault("active_bound_request_id", None)
-        upgraded.setdefault("active_execution_id", None)
-        upgraded.setdefault("pending_plan_id", None)
-    elif model_type is PendingClarification:
-        upgraded.setdefault("target_contract", "legacy")
-        upgraded.setdefault(
-            "choice_mode",
-            "advisory" if upgraded.get("permitted_choices") else "open",
-        )
-    elif model_type is ExecutionPlan:
-        upgraded["schema_version"] = PLAN_SCHEMA_VERSION
-        upgraded.setdefault(
-            "bound_request_id",
-            f"bound_legacy_{upgraded.get('request_revision_id', 'unknown')}",
-        )
-        upgraded.setdefault("capability_version", "1")
-        upgraded_steps = []
-        for raw_step in upgraded.get("steps", ()):
-            step = dict(raw_step)
-            step.setdefault(
-                "result_type",
-                _LEGACY_RESULT_TYPES.get(
-                    step.get("operation"),
-                    step.get("result_binding", "unknown"),
-                ),
-            )
-            upgraded_steps.append(step)
-        upgraded["steps"] = upgraded_steps
-        upgraded_constraints = []
-        for raw_constraint in upgraded.get("operation_constraints", ()):
-            constraint = dict(raw_constraint)
-            constraint.setdefault("permitted_dependency_types", ())
-            upgraded_constraints.append(constraint)
-        upgraded["operation_constraints"] = upgraded_constraints
-    return upgraded
-
-
-def _parse_persisted(model_type, payload_json: str):
-    expected_version = (
-        PLAN_SCHEMA_VERSION if model_type is ExecutionPlan else WORKFLOW_SCHEMA_VERSION
-    )
-    try:
-        payload = json.loads(payload_json)
-    except (TypeError, json.JSONDecodeError) as exc:
-        raise AnalysisError(
-            AnalysisErrorCode.STATE_UNAVAILABLE,
-            "persisted analysis state is invalid",
-        ) from exc
-    actual_version = payload.get("schema_version") if isinstance(payload, dict) else None
-    if actual_version == 1 and expected_version == 2:
-        payload = _upgrade_payload(model_type, payload)
-    elif actual_version != expected_version:
-        raise AnalysisError(
-            AnalysisErrorCode.UNSUPPORTED_SCHEMA,
-            (
-                f"persisted {model_type.__name__} schema version "
-                f"{actual_version!r} is unsupported; expected {expected_version}"
-            ),
-        )
-    try:
-        return model_type.model_validate(payload)
-    except ValueError as exc:
-        raise AnalysisError(
-            AnalysisErrorCode.STATE_UNAVAILABLE,
-            "persisted analysis state is invalid",
-        ) from exc
-
-
-class AnalysisWorkflowRow(SQLModel, table=True):
-    __tablename__ = "analysis_workflows"
-
-    session_id: str = Field(primary_key=True)
-    schema_version: int = Field(default=WORKFLOW_SCHEMA_VERSION)
-    state_version: int = Field(default=0, index=True)
-    phase: str = Field(index=True)
-    active_bound_request_id: str | None = Field(default=None, index=True)
-    active_execution_id: str | None = Field(default=None, index=True)
-    pending_plan_id: str | None = Field(default=None, index=True)
-    snapshot_json: str = Field(sa_column=Column(Text, nullable=False))
-    updated_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
-
-
-class AnalysisRequestRevisionRow(SQLModel, table=True):
-    __tablename__ = "analysis_request_revisions"
-    __table_args__ = (
-        UniqueConstraint(
-            "session_id", "revision_number", name="uq_analysis_revision_number"
-        ),
-    )
-
-    revision_id: str = Field(primary_key=True)
-    session_id: str = Field(index=True)
-    schema_version: int = Field(default=WORKFLOW_SCHEMA_VERSION)
-    revision_number: int = Field(index=True)
-    turn_id: str = Field(index=True)
-    payload_json: str = Field(sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
-
-
-class AnalysisBoundRequestRow(SQLModel, table=True):
-    __tablename__ = "analysis_bound_requests"
-
-    bound_request_id: str = Field(primary_key=True)
-    session_id: str = Field(index=True)
-    request_revision_id: str = Field(index=True)
-    schema_version: int = Field(default=WORKFLOW_SCHEMA_VERSION)
-    capability_version: str = Field(index=True)
-    payload_json: str = Field(sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
-
-
-class AnalysisClarificationRow(SQLModel, table=True):
-    __tablename__ = "analysis_clarifications"
-
-    question_id: str = Field(primary_key=True)
-    session_id: str = Field(index=True)
-    request_revision_id: str = Field(index=True)
-    schema_version: int = Field(default=WORKFLOW_SCHEMA_VERSION)
-    payload_json: str = Field(sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
-
-
-class AnalysisClarificationResolutionRow(SQLModel, table=True):
-    __tablename__ = "analysis_clarification_resolutions"
-    __table_args__ = (
-        UniqueConstraint(
-            "session_id",
-            "question_id",
-            name="uq_analysis_clarification_resolution",
-        ),
-    )
-
-    resolution_id: str = Field(primary_key=True)
-    session_id: str = Field(index=True)
-    question_id: str = Field(index=True)
-    request_revision_id: str = Field(index=True)
-    resolving_turn_id: str = Field(index=True)
-    schema_version: int = Field(default=WORKFLOW_SCHEMA_VERSION)
-    outcome: str = Field(index=True)
-    payload_json: str = Field(sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
-
-
-class AnalysisPlanRow(SQLModel, table=True):
-    __tablename__ = "analysis_plans"
-
-    plan_id: str = Field(primary_key=True)
-    session_id: str = Field(index=True)
-    request_revision_id: str = Field(index=True)
-    bound_request_id: str = Field(index=True)
-    schema_version: int
-    plan_hash: str = Field(index=True)
-    status: str = Field(default="ready", index=True)
-    payload_json: str = Field(sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
-
-
-class AnalysisExecutionAttemptRow(SQLModel, table=True):
-    __tablename__ = "analysis_execution_attempts"
-    __table_args__ = (
-        Index(
-            "uq_analysis_active_attempt_session",
-            "session_id",
-            unique=True,
-            postgresql_where=text(
-                "status IN ('claimed', 'running', 'cancellation_requested')"
-            ),
-            sqlite_where=text(
-                "status IN ('claimed', 'running', 'cancellation_requested')"
-            ),
-        ),
-    )
-
-    execution_id: str = Field(primary_key=True)
-    session_id: str = Field(index=True)
-    request_revision_id: str = Field(index=True)
-    bound_request_id: str = Field(index=True)
-    plan_id: str = Field(index=True)
-    plan_hash: str = Field(index=True)
-    token_hash: str = Field(sa_column=Column(String, nullable=False))
-    schema_version: int = Field(default=WORKFLOW_SCHEMA_VERSION)
-    status: str = Field(index=True)
-    worker_id: str = Field(index=True)
-    payload_json: str = Field(sa_column=Column(Text, nullable=False))
-    claimed_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
-    heartbeat_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
-    lease_expires_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False, index=True)
-    )
-    completed_at: datetime | None = Field(
-        default=None,
-        sa_column=Column(DateTime(timezone=True), nullable=True),
-    )
-
-
-class AnalysisExecutionRow(SQLModel, table=True):
-    """Read-only compatibility with version-one execution metadata."""
-
-    __tablename__ = "analysis_executions"
-
-    execution_id: str = Field(primary_key=True)
-    session_id: str = Field(index=True)
-    plan_id: str = Field(index=True)
-    schema_version: int = Field(default=1)
-    status: str = Field(index=True)
-    payload_json: str = Field(sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
-
-
-class AnalysisTurnReceiptRow(SQLModel, table=True):
-    __tablename__ = "analysis_turn_receipts"
-
-    session_id: str = Field(primary_key=True)
-    turn_id: str = Field(primary_key=True)
-    schema_version: int = Field(default=WORKFLOW_SCHEMA_VERSION)
-    request_hash: str = Field(index=True)
-    state_version: int
-    status: str = Field(index=True)
-    outcome_category: str | None = Field(default=None, index=True)
-    response_content: str | None = Field(
-        default=None,
-        sa_column=Column(Text, nullable=True),
-    )
-    response_metadata_json: str = Field(
-        default="{}",
-        sa_column=Column(Text, nullable=False, server_default="{}"),
-    )
-    usage_id: str | None = Field(default=None, index=True)
-    response_checksum: str | None = None
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
-
-
-class AnalysisModelUsageRow(SQLModel, table=True):
-    __tablename__ = "analysis_model_usage"
-    __table_args__ = (
-        UniqueConstraint(
-            "session_id",
-            "turn_id",
-            "operation",
-            "usage_entry_id",
-            name="uq_analysis_model_usage_entry",
-        ),
-    )
-
-    usage_entry_id: str = Field(primary_key=True)
-    session_id: str = Field(index=True)
-    turn_id: str = Field(index=True)
-    schema_version: int = Field(default=WORKFLOW_SCHEMA_VERSION)
-    operation: str = Field(index=True)
-    model: str = Field(index=True)
-    input_tokens: int = 0
-    output_tokens: int = 0
-    cache_creation_input_tokens: int = 0
-    cache_read_input_tokens: int = 0
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
-
-
-class AnalysisBillingIntentRow(SQLModel, table=True):
-    __tablename__ = "analysis_billing_intents"
-    __table_args__ = (
-        UniqueConstraint("session_id", "turn_id", name="uq_analysis_billing_turn"),
-    )
-
-    billing_intent_id: str = Field(primary_key=True)
-    session_id: str = Field(index=True)
-    turn_id: str = Field(index=True)
-    user_id: str | None = Field(default=None, index=True)
-    schema_version: int = Field(default=WORKFLOW_SCHEMA_VERSION)
-    status: str = Field(index=True)
-    payload_json: str = Field(sa_column=Column(Text, nullable=False))
-    created_at: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
 
 
 def ensure_analysis_tables(engine=None) -> None:
@@ -420,7 +112,7 @@ def ensure_analysis_tables(engine=None) -> None:
 class SqlAnalysisStore:
     """SQL implementation of the atomic analysis persistence contract."""
 
-    def __init__(self, engine=None):
+    def __init__(self, engine: Engine | None = None):
         if engine is None:
             from conversations.models import get_engine
 
@@ -441,20 +133,18 @@ class SqlAnalysisStore:
             updated_at=state.updated_at,
         )
 
-    def create_session(
-        self,
-        session_id: str,
-        *,
-        at: datetime | None = None,
-    ) -> AnalysisSessionState:
-        state = AnalysisSessionState(session_id=session_id, updated_at=at or _now())
+    def create_session(self, command: CreateSessionCommand) -> AnalysisSessionState:
+        state = AnalysisSessionState(
+            session_id=command.session_id,
+            updated_at=command.at or _now(),
+        )
         try:
             with Session(self.engine) as db:
                 db.add(self._state_row(state))
                 db.commit()
             return state
         except IntegrityError:
-            return self.load_state(session_id)
+            return self.load_state(command.session_id)
         except SQLAlchemyError as exc:
             raise self._unavailable(exc) from exc
 
@@ -473,13 +163,17 @@ class SqlAnalysisStore:
         except (SQLAlchemyError, ValueError) as exc:
             raise self._unavailable(exc) from exc
 
-    def load_or_create(self, session_id: str) -> LoadedAnalysisState:
+    def load_or_create(
+        self,
+        command: LoadOrCreateSessionCommand,
+    ) -> LoadedAnalysisState:
+        session_id = command.session_id
         try:
             state = self.load_state(session_id)
         except AnalysisError as exc:
             if exc.code != AnalysisErrorCode.STATE_PRECONDITION_FAILED:
                 raise
-            state = self.create_session(session_id)
+            state = self.create_session(CreateSessionCommand(session_id=session_id))
         return self.load(session_id, state=state)
 
     def load(
@@ -1288,41 +982,24 @@ class SqlAnalysisStore:
         except SQLAlchemyError as exc:
             raise self._unavailable(exc) from exc
 
-    def claim_plan(
-        self,
-        *,
-        session_id: str,
-        plan: ExecutionPlan,
-        worker_id: str,
-        expected_state_version: int,
-        lease_seconds: int = DEFAULT_EXECUTION_LEASE_SECONDS,
-    ) -> ClaimedExecution:
-        state = self.load_state(session_id)
-        if state.state_version != expected_state_version:
+    def commit_plan_claim(self, command: ClaimPlanCommand) -> ClaimedExecution:
+        """Commit a lifecycle-owned plan claim without selecting its transition."""
+        if command.attempt not in command.transition.execution_attempts:
             raise AnalysisError(
-                AnalysisErrorCode.STATE_CONFLICT,
-                "analysis session changed before plan claim",
-                retryable=True,
+                AnalysisErrorCode.STATE_UNAVAILABLE,
+                "claim command attempt is absent from its transition",
             )
-        token = secrets.token_urlsafe(32)
-        claimed_at = _now()
-        event = PlanClaimedEvent(
-            plan=plan,
-            execution_id=stable_identifier(
-                "execution",
-                session_id,
-                plan.plan_id,
-                secrets.token_hex(16),
-            ),
-            token_hash=_token_hash(token),
-            worker_id=worker_id,
-            claimed_at=claimed_at,
-            lease_expires_at=claimed_at + timedelta(seconds=lease_seconds),
+        if not hmac.compare_digest(command.attempt.token_hash, _token_hash(command.token)):
+            raise AnalysisError(
+                AnalysisErrorCode.EXECUTION_TOKEN_INVALID,
+                "claim command token does not match its execution attempt",
+            )
+        state = self.commit_transition(command.transition)
+        return ClaimedExecution(
+            state=state,
+            attempt=command.attempt,
+            token=command.token,
         )
-        transition = LifecycleReducer.reduce(state, event)
-        next_state = self.commit_transition(transition)
-        attempt = transition.execution_attempts[0]
-        return ClaimedExecution(state=next_state, attempt=attempt, token=token)
 
     def verify_attempt(
         self,
@@ -1361,17 +1038,18 @@ class SqlAnalysisStore:
 
     def heartbeat_attempt(
         self,
-        *,
-        execution_id: str,
-        token: str,
-        lease_seconds: int = DEFAULT_EXECUTION_LEASE_SECONDS,
+        command: HeartbeatAttemptCommand,
     ) -> ExecutionAttempt:
-        attempt = self.verify_attempt(execution_id=execution_id, token=token)
+        attempt = self.verify_attempt(
+            execution_id=command.execution_id,
+            token=command.token,
+        )
         now = _now()
         updated_attempt = attempt.model_copy(
             update={
                 "heartbeat_at": now,
-                "lease_expires_at": now + timedelta(seconds=lease_seconds),
+                "lease_expires_at": now
+                + timedelta(seconds=command.lease_seconds),
             }
         )
         try:
@@ -1379,7 +1057,8 @@ class SqlAnalysisStore:
                 result = db.exec(
                     update(AnalysisExecutionAttemptRow)
                     .where(
-                        AnalysisExecutionAttemptRow.execution_id == execution_id,
+                        AnalysisExecutionAttemptRow.execution_id
+                        == command.execution_id,
                         AnalysisExecutionAttemptRow.token_hash == attempt.token_hash,
                         AnalysisExecutionAttemptRow.status == attempt.status.value,
                     )
@@ -1415,37 +1094,33 @@ class SqlAnalysisStore:
             ExecutionAttemptStatus.EXPIRED,
         }
 
-    def finish_attempt(
+    def commit_attempt_completion(
         self,
-        *,
-        state: AnalysisSessionState,
-        attempt: ExecutionAttempt,
-        token: str,
-        completion: ExecutionCompletion,
-        completed_at: datetime | None = None,
+        command: AttemptCompletionCommand,
     ) -> AnalysisSessionState:
-        current_attempt = self.verify_attempt(
-            execution_id=attempt.execution_id,
-            token=token,
+        """Commit a caller-owned attempt completion after token verification."""
+        attempt = self.verify_attempt(
+            execution_id=command.execution_id,
+            token=command.token,
             require_active=True,
         )
-        current_state = self.load_state(state.session_id)
-        event = AttemptOutcomeEvent(
-            attempt=current_attempt,
-            completion=completion,
-            completed_at=completed_at or _now(),
-        )
-        transition = LifecycleReducer.reduce(current_state, event)
-        return self.commit_transition(transition)
+        if attempt.execution_id not in {
+            completion.execution_id
+            for completion in command.transition.execution_completions
+        }:
+            raise AnalysisError(
+                AnalysisErrorCode.STATE_UNAVAILABLE,
+                "attempt completion command omits its verified execution attempt",
+            )
+        return self.commit_transition(command.transition)
 
-    def recover_expired_attempts(
+    def expired_attempts(
         self,
         *,
         at: datetime | None = None,
         session_id: str | None = None,
-    ) -> tuple[str, ...]:
+    ) -> tuple[ExecutionAttempt, ...]:
         cutoff = at or _now()
-        recovered: list[str] = []
         try:
             with Session(self.engine) as db:
                 query = select(AnalysisExecutionAttemptRow).where(
@@ -1457,51 +1132,30 @@ class SqlAnalysisStore:
                         AnalysisExecutionAttemptRow.session_id == session_id
                     )
                 rows = db.exec(query).all()
-            for row in rows:
-                attempt = _parse_persisted(ExecutionAttempt, row.payload_json)
-                state = self.load_state(attempt.session_id)
-                if state.active_execution_id != attempt.execution_id:
-                    continue
-                transition = LifecycleReducer.reduce(
-                    state,
-                    RecoveryEvent(attempt=attempt, recovered_at=cutoff),
-                )
-                try:
-                    self.commit_transition(transition)
-                except AnalysisError as exc:
-                    if exc.code == AnalysisErrorCode.STATE_CONFLICT:
-                        # A heartbeat, completion, cancellation, or newer
-                        # conversation transition won after the expired row was
-                        # selected.  That current state is authoritative.
-                        continue
-                    raise
-                recovered.append(attempt.execution_id)
-            return tuple(recovered)
+            return tuple(
+                _parse_persisted(ExecutionAttempt, row.payload_json) for row in rows
+            )
         except AnalysisError:
             raise
         except SQLAlchemyError as exc:
             raise self._unavailable(exc) from exc
 
-    def begin_turn(
-        self,
-        *,
-        session_id: str,
-        turn_id: str,
-        request_content: object,
-        state_version: int,
-    ) -> TurnStart:
-        request_hash = canonical_hash(request_content)
+    def begin_turn(self, command: BeginTurnCommand) -> TurnStart:
+        request_hash = canonical_hash(command.request_content)
         receipt = TurnReceipt(
-            session_id=session_id,
-            turn_id=turn_id,
+            session_id=command.session_id,
+            turn_id=command.turn_id,
             request_hash=request_hash,
-            state_version=state_version,
+            state_version=command.state_version,
             status=TurnReceiptStatus.PROCESSING,
             created_at=_now(),
         )
         try:
             with Session(self.engine) as db:
-                existing = db.get(AnalysisTurnReceiptRow, (session_id, turn_id))
+                existing = db.get(
+                    AnalysisTurnReceiptRow,
+                    (command.session_id, command.turn_id),
+                )
                 if existing:
                     restored = self._receipt(existing)
                     if restored.request_hash != request_hash:
@@ -1516,12 +1170,7 @@ class SqlAnalysisStore:
         except AnalysisError:
             raise
         except IntegrityError:
-            return self.begin_turn(
-                session_id=session_id,
-                turn_id=turn_id,
-                request_content=request_content,
-                state_version=state_version,
-            )
+            return self.begin_turn(command)
         except SQLAlchemyError as exc:
             raise self._unavailable(exc) from exc
 
@@ -1608,13 +1257,13 @@ class SqlAnalysisStore:
         except SQLAlchemyError as exc:
             raise self._unavailable(exc) from exc
 
-    def mark_billing_recorded(self, session_id: str, turn_id: str) -> bool:
+    def mark_billing_recorded(self, command: MarkBillingRecordedCommand) -> bool:
         try:
             with Session(self.engine) as db:
                 row = db.exec(
                     select(AnalysisBillingIntentRow).where(
-                        AnalysisBillingIntentRow.session_id == session_id,
-                        AnalysisBillingIntentRow.turn_id == turn_id,
+                        AnalysisBillingIntentRow.session_id == command.session_id,
+                        AnalysisBillingIntentRow.turn_id == command.turn_id,
                     )
                 ).first()
                 if row is None:
@@ -1675,7 +1324,12 @@ class SqlAnalysisStore:
         except SQLAlchemyError as exc:
             raise self._unavailable(exc) from exc
 
-    def delete_session(self, session_id: str, *, db: Session | None = None) -> None:
+    def delete_session(
+        self,
+        command: DeleteAnalysisSessionCommand,
+        *,
+        db: Session | None = None,
+    ) -> SessionDeletionResult:
         owns_session = db is None
         db = db or Session(self.engine)
         try:
@@ -1692,9 +1346,12 @@ class SqlAnalysisStore:
                 AnalysisRequestRevisionRow,
                 AnalysisWorkflowRow,
             ):
-                db.exec(delete(table).where(table.session_id == session_id))
+                db.exec(
+                    delete(table).where(table.session_id == command.session_id)
+                )
             if owns_session:
                 db.commit()
+            return SessionDeletionResult(session_id=command.session_id)
         except SQLAlchemyError as exc:
             if owns_session:
                 db.rollback()
@@ -1751,7 +1408,3 @@ class SqlAnalysisStore:
             "analysis state persistence is unavailable",
             retryable=True,
         )
-
-
-# Temporary import compatibility while callers migrate to the explicit SQL name.
-AnalysisStateStore = SqlAnalysisStore

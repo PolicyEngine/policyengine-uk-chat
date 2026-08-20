@@ -224,7 +224,8 @@ def _resolve_single_catalogue_candidate(
 ) -> CatalogueCandidate | NeedsClarification:
     resolution = require_catalogue(resolver(kind, query))
     matches = resolution.authoritative
-    if len(matches) != 1:
+    match = resolution.unique_best_authoritative
+    if match is None:
         return _clarify(
             revision,
             target_field,
@@ -234,7 +235,7 @@ def _resolve_single_catalogue_candidate(
                 item.label for item in (matches or resolution.candidates[:3])
             ),
         )
-    return matches[0]
+    return match
 
 
 def _apply_reform_instruction(
@@ -367,8 +368,9 @@ def _bind_reform(
             choices=tuple(item.label for item in resolution.candidates[:3]),
         )
     usage_entries: tuple[ModelUsageEntry, ...] = ()
-    if len(candidates) == 1:
-        bindings = (candidates[0],)
+    unique_best = resolution.unique_best_authoritative
+    if unique_best is not None:
+        bindings = (unique_best,)
     elif target_selector is None:
         return _clarify(
             revision,
@@ -459,229 +461,225 @@ def _bind_reform(
     return bound_fields, usage_entries
 
 
-class _RequestBinderImplementation:
-    """Resolve server defaults and authoritative identifiers without mutation."""
+def _bind_request(
+    revision: SemanticRequestRevision,
+    *,
+    runtime_versions: RuntimeVersions,
+    registry: CapabilityRegistry = CAPABILITY_REGISTRY,
+    catalogue_resolver: CatalogueResolver | None = None,
+    reform_target_selector: ReformTargetSelector | None = None,
+    reform_validator: ReformValidator = _validate_reform,
+    current_value_resolver: CurrentValueResolver = _current_parameter_values,
+    inactive_value_resolver: InactiveValueResolver = _inactive_parameter_values,
+    household_validator: HouseholdValidator = _validate_household,
+    default_year: int | None = None,
+    operation_catalogue=None,
+) -> BindingDecision:
+    if operation_catalogue is None:
+        from analysis.operations import default_operation_catalogue
 
-    @staticmethod
-    def bind(
-        revision: SemanticRequestRevision,
-        *,
-        runtime_versions: RuntimeVersions,
-        registry: CapabilityRegistry = CAPABILITY_REGISTRY,
-        catalogue_resolver: CatalogueResolver | None = None,
-        reform_target_selector: ReformTargetSelector | None = None,
-        reform_validator: ReformValidator = _validate_reform,
-        current_value_resolver: CurrentValueResolver = _current_parameter_values,
-        inactive_value_resolver: InactiveValueResolver = _inactive_parameter_values,
-        household_validator: HouseholdValidator = _validate_household,
-        default_year: int | None = None,
-        operation_catalogue=None,
-    ) -> BindingDecision:
-        if operation_catalogue is None:
-            from analysis.operations import default_operation_catalogue
-
-            operation_catalogue = default_operation_catalogue()
-        fields = dict(revision.fields)
-        kind = _field_value(fields, "analysis_kind")
-        if not isinstance(kind, str):
-            return _clarify(
-                revision, "analysis_kind", "missing_analysis_kind"
-            )
-        try:
-            capability = registry.capability_for(kind)
-        except AnalysisError as exc:
-            return Unsupported(str(exc))
-
-        for name, value in capability.defaults.items():
-            _set_default_if_absent(fields, name, value)
-        if kind != "explanation":
-            _set_default_if_absent(
-                fields,
-                "year",
-                default_year if default_year is not None else _default_year(),
-            )
-        jurisdiction = _field_value(fields, "jurisdiction")
-        if jurisdiction != "uk":
-            return Unsupported("only UK tax and benefit analysis is supported")
-
-        for required in capability.required_fields:
-            if required not in fields:
-                reason = {
-                    "analysis_kind": "missing_analysis_kind",
-                    "people": "missing_household",
-                    "parameter_query": "missing_parameter",
-                    "objective": "unsupported_partial_request",
-                }.get(required, "unsupported_partial_request")
-                return _clarify(revision, required, reason)
-
-        resolver = _catalogue_resolver(catalogue_resolver)
-        if kind == "parameter_lookup":
-            query = _field_value(fields, "parameter_query")
-            match = _resolve_single_catalogue_candidate(
-                revision=revision,
-                target_field="parameter_query",
-                kind="reform_target",
-                query=str(query),
-                resolver=resolver,
-                prompt="Which exact tax or benefit parameter did you mean?",
-            )
-            if isinstance(match, NeedsClarification):
-                return match
-            fields["parameter_path"] = RequestField(
-                value=match.identifier,
-                provenance=FieldProvenance.CATALOGUE,
-                evidence=fields["parameter_query"].evidence,
-            )
-            fields["parameter_label"] = RequestField(
-                value=match.label,
-                provenance=FieldProvenance.CATALOGUE,
-                evidence=fields["parameter_query"].evidence,
-            )
-
-        requested_outputs = revision.outputs or capability.default_outputs
-        if kind in {"society", "exploratory"} and not requested_outputs:
-            return _clarify(revision, "outputs", "missing_output")
-        producer_outputs = list(requested_outputs)
-        if "chart" in producer_outputs:
-            chart_kind = _field_value(fields, "chart_kind")
-            recipe = operation_catalogue.chart_recipes.get(chart_kind)
-            if recipe is None:
-                return _clarify(
-                    revision,
-                    "chart_kind",
-                    "unsupported_partial_request",
-                    prompt="Which supported chart format should I use?",
-                )
-            source_output = recipe.source_output
-            if source_output not in producer_outputs:
-                producer_outputs.insert(0, source_output)
-
-        aggregate_outputs = set(producer_outputs).intersection(
-            {"aggregate", "caseload", "marginal_rate"}
+        operation_catalogue = default_operation_catalogue()
+    fields = dict(revision.fields)
+    kind = _field_value(fields, "analysis_kind")
+    if not isinstance(kind, str):
+        return _clarify(
+            revision, "analysis_kind", "missing_analysis_kind"
         )
-        if aggregate_outputs:
-            query = _field_value(fields, "variable_query")
-            if not isinstance(query, str) or not query.strip():
-                return _clarify(
-                    revision, "variable_query", "missing_aggregate_variable"
-                )
-            match = _resolve_single_catalogue_candidate(
-                revision=revision,
-                target_field="variable_query",
-                kind="variable",
-                query=query,
-                resolver=resolver,
-                prompt="Which exact model variable should I aggregate?",
-            )
-            if isinstance(match, NeedsClarification):
-                return match
-            fields["aggregate_variable"] = RequestField(
-                value=match.identifier,
-                provenance=FieldProvenance.CATALOGUE,
-                evidence=fields["variable_query"].evidence,
-            )
-            fields["aggregate_variable_label"] = RequestField(
-                value=match.label,
-                provenance=FieldProvenance.CATALOGUE,
-                evidence=fields["variable_query"].evidence,
-            )
-            if "aggregate_entity" not in fields:
-                return _clarify(
-                    revision, "aggregate_entity", "missing_aggregate_entity"
-                )
-            if "aggregate" in aggregate_outputs and "aggregate_operation" not in fields:
-                return _clarify(
-                    revision, "aggregate_operation", "missing_aggregate_operation"
-                )
+    try:
+        capability = registry.capability_for(kind)
+    except AnalysisError as exc:
+        return Unsupported(str(exc))
 
-        year = _field_value(fields, "year")
-        reform_result = _bind_reform(
-            revision,
+    for name, value in capability.defaults.items():
+        _set_default_if_absent(fields, name, value)
+    if kind != "explanation":
+        _set_default_if_absent(
             fields,
-            year=year,
-            resolver=resolver,
-            target_selector=reform_target_selector,
-            reform_validator=reform_validator,
-            current_value_resolver=current_value_resolver,
-            inactive_value_resolver=inactive_value_resolver,
+            "year",
+            default_year if default_year is not None else _default_year(),
         )
-        if isinstance(reform_result, (NeedsClarification, Unsupported, BindingFailed)):
-            return reform_result
-        fields, usage_entries = reform_result
+    jurisdiction = _field_value(fields, "jurisdiction")
+    if jurisdiction != "uk":
+        return Unsupported("only UK tax and benefit analysis is supported")
 
-        if kind == "household":
-            household_validation = household_validator(
-                people=_field_value(fields, "people"),
-                benunit=_field_value(fields, "benunit"),
-                household=_field_value(fields, "household"),
-                year=year,
-                reform=_field_value(fields, "reform"),
-            )
-            if not household_validation.get("valid"):
-                errors = household_validation.get("errors")
-                detail = (
-                    errors[0].get("message")
-                    if isinstance(errors, list)
-                    and errors
-                    and isinstance(errors[0], dict)
-                    else "the household description is invalid"
-                )
-                return _clarify(
-                    revision,
-                    "people",
-                    "missing_household",
-                    prompt=f"Please correct the household description: {detail}",
-                    usage_entries=usage_entries,
-                )
+    for required in capability.required_fields:
+        if required not in fields:
+            reason = {
+                "analysis_kind": "missing_analysis_kind",
+                "people": "missing_household",
+                "parameter_query": "missing_parameter",
+                "objective": "unsupported_partial_request",
+            }.get(required, "unsupported_partial_request")
+            return _clarify(revision, required, reason)
 
-        if kind == "reform_validation" and "reform" not in fields:
+    resolver = _catalogue_resolver(catalogue_resolver)
+    if kind == "parameter_lookup":
+        query = _field_value(fields, "parameter_query")
+        match = _resolve_single_catalogue_candidate(
+            revision=revision,
+            target_field="parameter_query",
+            kind="reform_target",
+            query=str(query),
+            resolver=resolver,
+            prompt="Which exact tax or benefit parameter did you mean?",
+        )
+        if isinstance(match, NeedsClarification):
+            return match
+        fields["parameter_path"] = RequestField(
+            value=match.identifier,
+            provenance=FieldProvenance.CATALOGUE,
+            evidence=fields["parameter_query"].evidence,
+        )
+        fields["parameter_label"] = RequestField(
+            value=match.label,
+            provenance=FieldProvenance.CATALOGUE,
+            evidence=fields["parameter_query"].evidence,
+        )
+
+    requested_outputs = revision.outputs or capability.default_outputs
+    if kind in {"society", "exploratory"} and not requested_outputs:
+        return _clarify(revision, "outputs", "missing_output")
+    producer_outputs = list(requested_outputs)
+    if "chart" in producer_outputs:
+        chart_kind = _field_value(fields, "chart_kind")
+        recipe = operation_catalogue.chart_recipes.get(chart_kind)
+        if recipe is None:
             return _clarify(
                 revision,
-                "reform_intent",
+                "chart_kind",
                 "unsupported_partial_request",
-                prompt="Which exact policy change should I validate?",
+                prompt="Which supported chart format should I use?",
+            )
+        source_output = recipe.source_output
+        if source_output not in producer_outputs:
+            producer_outputs.insert(0, source_output)
+
+    aggregate_outputs = set(producer_outputs).intersection(
+        {"aggregate", "caseload", "marginal_rate"}
+    )
+    if aggregate_outputs:
+        query = _field_value(fields, "variable_query")
+        if not isinstance(query, str) or not query.strip():
+            return _clarify(
+                revision, "variable_query", "missing_aggregate_variable"
+            )
+        match = _resolve_single_catalogue_candidate(
+            revision=revision,
+            target_field="variable_query",
+            kind="variable",
+            query=query,
+            resolver=resolver,
+            prompt="Which exact model variable should I aggregate?",
+        )
+        if isinstance(match, NeedsClarification):
+            return match
+        fields["aggregate_variable"] = RequestField(
+            value=match.identifier,
+            provenance=FieldProvenance.CATALOGUE,
+            evidence=fields["variable_query"].evidence,
+        )
+        fields["aggregate_variable_label"] = RequestField(
+            value=match.label,
+            provenance=FieldProvenance.CATALOGUE,
+            evidence=fields["variable_query"].evidence,
+        )
+        if "aggregate_entity" not in fields:
+            return _clarify(
+                revision, "aggregate_entity", "missing_aggregate_entity"
+            )
+        if "aggregate" in aggregate_outputs and "aggregate_operation" not in fields:
+            return _clarify(
+                revision, "aggregate_operation", "missing_aggregate_operation"
+            )
+
+    year = _field_value(fields, "year")
+    reform_result = _bind_reform(
+        revision,
+        fields,
+        year=year,
+        resolver=resolver,
+        target_selector=reform_target_selector,
+        reform_validator=reform_validator,
+        current_value_resolver=current_value_resolver,
+        inactive_value_resolver=inactive_value_resolver,
+    )
+    if isinstance(reform_result, (NeedsClarification, Unsupported, BindingFailed)):
+        return reform_result
+    fields, usage_entries = reform_result
+
+    if kind == "household":
+        household_validation = household_validator(
+            people=_field_value(fields, "people"),
+            benunit=_field_value(fields, "benunit"),
+            household=_field_value(fields, "household"),
+            year=year,
+            reform=_field_value(fields, "reform"),
+        )
+        if not household_validation.get("valid"):
+            errors = household_validation.get("errors")
+            detail = (
+                errors[0].get("message")
+                if isinstance(errors, list)
+                and errors
+                and isinstance(errors[0], dict)
+                else "the household description is invalid"
+            )
+            return _clarify(
+                revision,
+                "people",
+                "missing_household",
+                prompt=f"Please correct the household description: {detail}",
                 usage_entries=usage_entries,
             )
 
-        producers = []
-        for output in producer_outputs:
-            try:
-                producer = registry.producer_for(kind, output)
-            except AnalysisError as exc:
-                return Unsupported(str(exc), usage_entries)
-            missing = [name for name in producer.required_fields if name not in fields]
-            if missing:
-                return BindingFailed(
-                    f"producer {producer.producer_id} is missing inputs: "
-                    + ", ".join(missing),
-                    usage_entries=usage_entries,
-                )
-            producers.append(producer)
-
-        bound_body = {
-            "session_id": revision.session_id,
-            "request_revision_id": revision.revision_id,
-            "fields": {
-                name: value.model_dump(mode="json") for name, value in fields.items()
-            },
-            "outputs": requested_outputs,
-            "producer_outputs": producer_outputs,
-            "output_producers": [producer.producer_id for producer in producers],
-            "capability_version": registry.version,
-            "catalogue_version": runtime_versions.catalogue_version,
-            "engine_version": runtime_versions.engine_version,
-            "country_package_version": runtime_versions.country_package_version,
-            "dataset_identifier": runtime_versions.dataset_identifier,
-            "plan_schema_version": runtime_versions.plan_schema_version,
-        }
-        bound_request = BoundRequest(
-            bound_request_id=stable_identifier(
-                "bound", revision.revision_id, canonical_hash(bound_body)
-            ),
-            created_at=revision.created_at,
-            **bound_body,
+    if kind == "reform_validation" and "reform" not in fields:
+        return _clarify(
+            revision,
+            "reform_intent",
+            "unsupported_partial_request",
+            prompt="Which exact policy change should I validate?",
+            usage_entries=usage_entries,
         )
-        return Ready(bound_request=bound_request, usage_entries=usage_entries)
+
+    producers = []
+    for output in producer_outputs:
+        try:
+            producer = registry.producer_for(kind, output)
+        except AnalysisError as exc:
+            return Unsupported(str(exc), usage_entries)
+        missing = [name for name in producer.required_fields if name not in fields]
+        if missing:
+            return BindingFailed(
+                f"producer {producer.producer_id} is missing inputs: "
+                + ", ".join(missing),
+                usage_entries=usage_entries,
+            )
+        producers.append(producer)
+
+    bound_body = {
+        "session_id": revision.session_id,
+        "request_revision_id": revision.revision_id,
+        "fields": {
+            name: value.model_dump(mode="json") for name, value in fields.items()
+        },
+        "outputs": requested_outputs,
+        "producer_outputs": producer_outputs,
+        "output_producers": [producer.producer_id for producer in producers],
+        "capability_version": registry.version,
+        "catalogue_version": runtime_versions.catalogue_version,
+        "engine_version": runtime_versions.engine_version,
+        "country_package_version": runtime_versions.country_package_version,
+        "dataset_identifier": runtime_versions.dataset_identifier,
+        "plan_schema_version": runtime_versions.plan_schema_version,
+    }
+    bound_request = BoundRequest(
+        bound_request_id=stable_identifier(
+            "bound", revision.revision_id, canonical_hash(bound_body)
+        ),
+        created_at=revision.created_at,
+        **bound_body,
+    )
+    return Ready(bound_request=bound_request, usage_entries=usage_entries)
 
 
 class RequestBinder:
@@ -707,7 +705,7 @@ class RequestBinder:
         runtime_versions: RuntimeVersions,
     ) -> BindingDecision:
         try:
-            return _RequestBinderImplementation.bind(
+            return _bind_request(
                 revision,
                 runtime_versions=runtime_versions,
                 registry=self._registry,
@@ -724,35 +722,3 @@ class RequestBinder:
             if exc.code == AnalysisErrorCode.REQUEST_UNSUPPORTED:
                 return Unsupported(str(exc))
             return BindingFailed(str(exc), exc.code)
-
-
-def bind_request(
-    revision: SemanticRequestRevision,
-    *,
-    runtime_versions: RuntimeVersions,
-    registry: CapabilityRegistry = CAPABILITY_REGISTRY,
-    catalogue_resolver: CatalogueResolver | None = None,
-    reform_target_selector: ReformTargetSelector | None = None,
-    reform_validator: ReformValidator = _validate_reform,
-    current_value_resolver: CurrentValueResolver = _current_parameter_values,
-    inactive_value_resolver: InactiveValueResolver = _inactive_parameter_values,
-    household_validator: HouseholdValidator = _validate_household,
-    default_year: int | None = None,
-    operation_catalogue: OperationCatalogue | None = None,
-) -> BindingDecision:
-    """Compatibility entry point while callers migrate to `RequestCompiler`."""
-
-    services = BindingServices(
-        catalogue_resolver=catalogue_resolver or _resolve_catalogue,
-        reform_target_selector=reform_target_selector,
-        reform_validator=reform_validator,
-        current_value_resolver=current_value_resolver,
-        inactive_value_resolver=inactive_value_resolver,
-        household_validator=household_validator,
-        default_year=default_year,
-    )
-    return RequestBinder(
-        services=services,
-        registry=registry,
-        operation_catalogue=operation_catalogue,
-    ).bind(revision, runtime_versions=runtime_versions)

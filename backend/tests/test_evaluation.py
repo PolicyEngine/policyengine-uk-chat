@@ -88,6 +88,16 @@ def test_turn_interpretation_cases_cover_typed_state_boundaries():
             "operation_rejected",
             "narration_rejected",
     }.issubset(outcomes)
+    tags = {tag for case in cases for tag in case.tags}
+    assert {
+        "later_start",
+        "later_revision",
+        "clarification",
+        "unrelated_request",
+        "stale_state",
+        "permitted_override",
+        "exploratory_authority_rejection",
+    }.issubset(tags)
 
 
 def test_offline_turn_interpretation_eval_passes_without_provider_or_data():

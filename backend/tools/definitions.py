@@ -1,6 +1,7 @@
 """Model-facing tool definitions for the UK chat runtime."""
 
 from datetime import date
+from types import MappingProxyType
 
 from engine.constants import HOUSEHOLD_COUNTRY_IDS
 from engine.decile_concepts import (
@@ -57,22 +58,61 @@ CHART_FORMAT_SCHEMA = {
     "enum": ["currency", "percent", "percent_decimal", "number", "compact", "year"],
 }
 
+CHART_PRESET_SOURCES = MappingProxyType(
+    {
+        "budget_waterfall": (
+            "budgetary_impact",
+            "compute_budgetary_impact",
+            "budgetary_impact",
+        ),
+        "program_budget_waterfall": (
+            "program_breakdown",
+            "compute_program_breakdown",
+            "program_breakdown",
+        ),
+        "decile_absolute_bar": (
+            "decile_impact",
+            "compute_decile_impacts",
+            "decile_impacts",
+        ),
+        "decile_relative_bar": (
+            "decile_impact",
+            "compute_decile_impacts",
+            "decile_impacts",
+        ),
+        "winners_losers_stacked_bar": (
+            "winners_losers",
+            "compute_winners_losers",
+            "winners_losers",
+        ),
+        "poverty_relative_bar": (
+            "poverty_impact",
+            "compute_poverty_metrics",
+            "poverty_metrics",
+        ),
+        "inequality_relative_bar": (
+            "inequality_impact",
+            "compute_inequality_metrics",
+            "inequality_metrics",
+        ),
+    }
+)
+CHART_EXPLICIT_DATA_KINDS = ("earnings_variation_line",)
+CHART_GENERIC_KINDS = (
+    "generic_line",
+    "generic_bar",
+    "generic_area",
+    "generic_scatter",
+)
+CHART_KIND_VALUES = (
+    *CHART_PRESET_SOURCES,
+    *CHART_EXPLICIT_DATA_KINDS,
+    *CHART_GENERIC_KINDS,
+)
+
 CHART_KIND_SCHEMA = {
     "type": "string",
-    "enum": [
-        "budget_waterfall",
-        "program_budget_waterfall",
-        "decile_absolute_bar",
-        "decile_relative_bar",
-        "winners_losers_stacked_bar",
-        "poverty_relative_bar",
-        "inequality_relative_bar",
-        "earnings_variation_line",
-        "generic_line",
-        "generic_bar",
-        "generic_area",
-        "generic_scatter",
-    ],
+    "enum": list(CHART_KIND_VALUES),
     "description": "Deterministic chart layout preset.",
 }
 

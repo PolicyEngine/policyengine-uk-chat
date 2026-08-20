@@ -4,10 +4,11 @@ import pytest
 
 from analysis.binding import (
     BindingFailed,
+    BindingServices,
     NeedsClarification,
     Ready,
+    RequestBinder,
     Unsupported,
-    bind_request,
 )
 from analysis.capabilities import CAPABILITY_REGISTRY
 from analysis.catalogue import CatalogueCandidate, CatalogueResolution
@@ -48,25 +49,31 @@ def _validator(reform, _year):
 
 
 def _bind(kind, *, fields=None, outputs=()):
-    return bind_request(
+    binder = RequestBinder(
+        services=BindingServices(
+            default_year=2026,
+            catalogue_resolver=_catalogue,
+            reform_validator=_validator,
+            current_value_resolver=lambda paths, _year: {
+                path: 0.2 for path in paths
+            },
+            inactive_value_resolver=lambda paths, _year: {
+                path: False for path in paths
+            },
+        )
+    )
+    return binder.bind(
         revision(kind, fields=fields, outputs=outputs),
         runtime_versions=VERSIONS,
-        default_year=2026,
-        catalogue_resolver=_catalogue,
-        reform_validator=_validator,
-        current_value_resolver=lambda paths, _year: {path: 0.2 for path in paths},
-        inactive_value_resolver=lambda paths, _year: {path: False for path in paths},
     )
 
 
 def test_binding_returns_immutable_bound_request_without_changing_semantics():
     semantic = revision("society", outputs=("budgetary_impact",))
     before = semantic.model_dump_json()
-    decision = bind_request(
-        semantic,
-        runtime_versions=VERSIONS,
-        default_year=2026,
-    )
+    decision = RequestBinder(
+        services=BindingServices(default_year=2026)
+    ).bind(semantic, runtime_versions=VERSIONS)
     assert isinstance(decision, Ready)
     assert semantic.model_dump_json() == before
     assert decision.bound_request.fields["year"].provenance.value == "default"
@@ -121,6 +128,141 @@ def test_missing_reform_for_validation_is_not_ready():
     assert isinstance(decision, NeedsClarification)
 
 
+def test_parameter_lookup_uses_unique_highest_confidence_catalogue_match():
+    def resolver(_kind, query):
+        return CatalogueResolution(
+            available=True,
+            query=query,
+            candidates=(
+                CatalogueCandidate(
+                    kind="reform_target",
+                    query=query,
+                    identifier="income_tax_personal_allowance",
+                    label="Personal allowance",
+                    match_type="exact_alias",
+                    score=1.0,
+                ),
+                CatalogueCandidate(
+                    kind="reform_target",
+                    query=query,
+                    identifier="housing_benefit_personal_allowance",
+                    label="Housing benefit personal allowance",
+                    match_type="strong_phrase",
+                    score=0.9,
+                ),
+            ),
+        )
+
+    decision = RequestBinder(
+        services=BindingServices(
+            default_year=2026,
+            catalogue_resolver=resolver,
+        )
+    ).bind(
+        revision(
+            "parameter_lookup",
+            fields={"parameter_query": "personal allowance"},
+            outputs=(),
+        ),
+        runtime_versions=VERSIONS,
+    )
+
+    assert isinstance(decision, Ready)
+    assert (
+        decision.bound_request.fields["parameter_path"].value
+        == "income_tax_personal_allowance"
+    )
+
+
+def test_parameter_lookup_clarifies_tied_authoritative_catalogue_matches():
+    def resolver(_kind, query):
+        return CatalogueResolution(
+            available=True,
+            query=query,
+            candidates=tuple(
+                CatalogueCandidate(
+                    kind="reform_target",
+                    query=query,
+                    identifier=f"parameter_{index}",
+                    label=f"Parameter {index}",
+                    match_type="strong_phrase",
+                    score=0.9,
+                )
+                for index in range(2)
+            ),
+        )
+
+    decision = RequestBinder(
+        services=BindingServices(
+            default_year=2026,
+            catalogue_resolver=resolver,
+        )
+    ).bind(
+        revision(
+            "parameter_lookup",
+            fields={"parameter_query": "shared phrase"},
+            outputs=(),
+        ),
+        runtime_versions=VERSIONS,
+    )
+
+    assert isinstance(decision, NeedsClarification)
+    assert decision.clarification.target_field == "parameter_query"
+
+
+def test_reform_uses_unique_highest_confidence_catalogue_match():
+    def resolver(_kind, query):
+        return CatalogueResolution(
+            available=True,
+            query=query,
+            candidates=(
+                CatalogueCandidate(
+                    kind="reform_target",
+                    query=query,
+                    identifier="income_tax_personal_allowance",
+                    label="Personal allowance",
+                    match_type="exact_alias",
+                    score=1.0,
+                ),
+                CatalogueCandidate(
+                    kind="reform_target",
+                    query=query,
+                    identifier="housing_benefit_personal_allowance",
+                    label="Housing benefit personal allowance",
+                    match_type="strong_phrase",
+                    score=0.9,
+                ),
+            ),
+        )
+
+    def unexpected_selection(_request):
+        raise AssertionError("a unique highest-confidence match needs no selection")
+
+    decision = RequestBinder(
+        services=BindingServices(
+            default_year=2026,
+            catalogue_resolver=resolver,
+            reform_target_selector=unexpected_selection,
+            reform_validator=_validator,
+        )
+    ).bind(
+        revision(
+            "reform_validation",
+            fields={
+                "reform_intent": "personal allowance",
+                "reform_instruction": SetExactReform(value=15000),
+            },
+            outputs=(),
+        ),
+        runtime_versions=VERSIONS,
+    )
+
+    assert isinstance(decision, Ready)
+    assert decision.bound_request.fields["reform"].value == {
+        "income_tax_personal_allowance": 15000
+    }
+
+
 def test_missing_society_output_is_not_ready():
     assert isinstance(_bind("society"), NeedsClarification)
 
@@ -135,7 +277,16 @@ def test_unsupported_jurisdiction_is_typed_unsupported():
 
 
 def test_invalid_deterministic_reform_is_binding_failure():
-    decision = bind_request(
+    decision = RequestBinder(
+        services=BindingServices(
+            default_year=2026,
+            catalogue_resolver=_catalogue,
+            reform_validator=lambda *_: {"valid": False},
+            current_value_resolver=lambda paths, _year: {
+                path: 0.2 for path in paths
+            },
+        )
+    ).bind(
         revision(
             "society",
             fields={
@@ -145,23 +296,22 @@ def test_invalid_deterministic_reform_is_binding_failure():
             outputs=("budgetary_impact",),
         ),
         runtime_versions=VERSIONS,
-        default_year=2026,
-        catalogue_resolver=_catalogue,
-        reform_validator=lambda *_: {"valid": False},
-        current_value_resolver=lambda paths, _year: {path: 0.2 for path in paths},
     )
     assert isinstance(decision, BindingFailed)
 
 
 def test_invalid_authoritative_household_is_not_ready():
-    decision = bind_request(
+    decision = RequestBinder(
+        services=BindingServices(
+            default_year=2026,
+            household_validator=lambda **_kwargs: {
+                "valid": False,
+                "errors": [{"message": "age must be non-negative"}],
+            },
+        )
+    ).bind(
         revision("household", fields={"people": [{"age": -1}]}),
         runtime_versions=VERSIONS,
-        default_year=2026,
-        household_validator=lambda **_kwargs: {
-            "valid": False,
-            "errors": [{"message": "age must be non-negative"}],
-        },
     )
     assert isinstance(decision, NeedsClarification)
     assert decision.clarification.target_field == "people"

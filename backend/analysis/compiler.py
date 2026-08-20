@@ -496,20 +496,6 @@ class ExecutionPlanCompiler:
         return plan
 
 
-def compile_plan(
-    request: BoundRequest,
-    registry: CapabilityRegistry = CAPABILITY_REGISTRY,
-    operation_catalogue: OperationCatalogue | None = None,
-) -> ExecutionPlan:
-    """Compatibility entry point while callers migrate to `RequestCompiler`."""
-
-    return ExecutionPlanCompiler.compile(
-        request,
-        registry,
-        operation_catalogue or default_operation_catalogue(),
-    )
-
-
 def _walk_result_references(value: Any) -> Iterable[ResultReference]:
     if isinstance(value, ResultReference):
         yield value

@@ -14,6 +14,7 @@ runtime without being able to mutate the canonical registry by accident.
 from collections.abc import Callable, Mapping
 from copy import deepcopy
 from dataclasses import dataclass
+import re
 from types import MappingProxyType
 from typing import Annotated, Any, Literal
 
@@ -77,7 +78,7 @@ class ResultHandleOutput(SuccessfulStatusOutput):
 
 
 class HouseholdCalculationOutput(ContractOutput):
-    person: dict[str, Any]
+    person: list[dict[str, Any]]
     benunit: dict[str, Any]
     household: dict[str, Any]
 
@@ -85,7 +86,7 @@ class HouseholdCalculationOutput(ContractOutput):
 class HouseholdSimulationOutput(ResultHandleOutput):
     year: StrictInt
     reform_applied: StrictBool
-    person: dict[str, Any] | None = Field(
+    person: list[dict[str, Any]] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
     benunit: dict[str, Any] | None = Field(
@@ -251,6 +252,32 @@ class ChartOutput(ContractOutput):
 
 def default_fact_extractor(value: dict[str, Any]) -> dict[str, Any]:
     return default_public_summary(value)
+
+
+def parameter_fact_extractor(value: dict[str, Any]) -> dict[str, Any]:
+    """Project only a parameter's current numerical value into narration facts."""
+
+    parameter = value.get("parameter")
+    if not isinstance(parameter, dict):
+        return {}
+    current_value = parameter.get("value")
+    if isinstance(current_value, bool) or not isinstance(
+        current_value, (int, float)
+    ):
+        return {}
+    path = str(parameter.get("path") or "")
+    label = str(parameter.get("label") or path.rsplit(".", 1)[-1] or "parameter")
+    fact_name = re.sub(r"[^a-z0-9]+", "_", label.casefold()).strip("_")
+    unit = str(parameter.get("unit") or "").casefold()
+    if "currency" in unit or path.endswith(".amount"):
+        suffix = "amount"
+    elif "percent" in unit or path.endswith(".rate"):
+        suffix = "rate"
+    else:
+        suffix = "value"
+    if not fact_name.endswith(f"_{suffix}") and fact_name != suffix:
+        fact_name = f"{fact_name}_{suffix}"
+    return {fact_name: current_value}
 
 
 def default_public_summary(value: dict[str, Any]) -> dict[str, Any]:

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -63,7 +64,8 @@ def _state():
 
 
 def test_candidate_schema_is_generated_without_execution_authority():
-    schema_text = str(candidate_tool_definition())
+    tool = candidate_tool_definition()
+    schema_text = str(tool)
     for forbidden in (
         "permitted_operations",
         "operation_constraints",
@@ -73,6 +75,14 @@ def test_candidate_schema_is_generated_without_execution_authority():
     ):
         assert forbidden not in schema_text
     assert "reform_instruction" in schema_text
+    assert "Retrieve a current policy rate" in schema_text
+    assert "Calculate an aggregate UK population result" in schema_text
+    assert "does not need to name an internal category" in schema_text
+    assert "exclude count, population, and entity wording" in schema_text
+    assert "do not add role labels" in schema_text
+    assert "server apply its UK default" in schema_text
+    assert "oneOf" in schema_text
+    assert "strict" not in tool
 
 
 @pytest.mark.parametrize(
@@ -289,9 +299,11 @@ class _Messages:
     def __init__(self, responses):
         self.responses = iter(responses)
         self.calls = 0
+        self.requests = []
 
-    def create(self, **_kwargs):
+    def create(self, **kwargs):
         self.calls += 1
+        self.requests.append(kwargs)
         return next(self.responses)
 
 
@@ -312,6 +324,89 @@ def test_interpreter_retries_invalid_candidate_and_records_each_call():
     assert result.retry_count == 1
     assert len(result.call_usages) == 2
     assert result.usage.input_tokens == 4
+    retry_context = json.loads(messages.requests[1]["messages"][0]["content"])
+    feedback = retry_context["retry_feedback"]
+    assert "non-empty outputs list" in feedback["instruction"]
+    assert "year" in feedback["validation_error"]
+
+
+def test_interpreter_validates_json_encoded_tool_update():
+    update = _start(fields={"year": _field(2026, "2026")}).model_dump(mode="json")
+    messages = _Messages([_Response(json.dumps(update))])
+
+    result = interpret_turn(
+        InterpreterContext(
+            state=_state(),
+            active_revision=None,
+            active_clarification=None,
+            executions={},
+            latest_user_message="society in 2026",
+        ),
+        client=SimpleNamespace(messages=messages),
+    )
+
+    assert result.validated_update.candidate.fields["year"].value == 2026
+    assert messages.calls == 1
+
+
+def test_interpreter_accepts_starter_prompt_analysis_kind_classification():
+    message = "What's the personal allowance?"
+    update = StartAnalysis(
+        candidate=CandidateAnalysis(
+            analysis_kind=_field("parameter_lookup", message),
+            fields={
+                "parameter_query": _field("personal allowance", message),
+            },
+        )
+    )
+    messages = _Messages([_Response(json.dumps(update.model_dump(mode="json")))])
+
+    result = interpret_turn(
+        InterpreterContext(
+            state=_state(),
+            active_revision=None,
+            active_clarification=None,
+            executions={},
+            latest_user_message=message,
+        ),
+        client=SimpleNamespace(messages=messages),
+    )
+
+    assert result.validated_update.candidate.analysis_kind.value == "parameter_lookup"
+    assert (
+        result.validated_update.candidate.fields["parameter_query"].value
+        == "personal allowance"
+    )
+    assert result.retry_count == 0
+    assert messages.calls == 1
+
+
+def test_candidate_validation_maps_natural_aggregate_vocabulary():
+    message = "How many people receive Universal Credit?"
+    update = StartAnalysis(
+        candidate=CandidateAnalysis(
+            analysis_kind=_field("society", message),
+            fields={
+                "variable_query": _field("Universal Credit", "Universal Credit"),
+                "aggregate_entity": _field("person", "people"),
+                "aggregate_operation": _field("count", "How many"),
+            },
+            outputs=("caseload",),
+            output_evidence=EvidenceClaim(quote=message),
+        )
+    )
+
+    result = validate_candidate(
+        update,
+        state=_state(),
+        current_revision=None,
+        active_clarification=None,
+        executions={},
+        user_message=message,
+    )
+
+    assert result.candidate.fields["aggregate_entity"].value == "person"
+    assert result.candidate.fields["aggregate_operation"].value == "count"
 
 
 class _SelectionBlock:

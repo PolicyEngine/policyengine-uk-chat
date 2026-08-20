@@ -17,11 +17,20 @@ import pytest
 from sqlalchemy import create_engine
 
 from analysis.common import AnalysisError
-from analysis.compiler import compile_plan
+from analysis.compiler import ExecutionPlanCompiler
 from analysis.lifecycle import LifecycleReducer, PlanReadyEvent
 from analysis.models import ExecutionCompletion
-from analysis.persistence import AnalysisStateStore
-from analysis_helpers import NOW, bound_request, revision
+from analysis.persistence import SqlAnalysisStore, ensure_analysis_tables
+from analysis_helpers import (
+    NOW,
+    bound_request,
+    claim_plan,
+    create_session,
+    finish_attempt,
+    recover_expired_attempts,
+    revision,
+)
+from analysis_store_contract import assert_analysis_store_contract
 
 
 POSTGRES_URL = os.environ.get("ANALYSIS_TEST_POSTGRES_URL")
@@ -49,21 +58,24 @@ def postgres_store():
         connection.close()
     engine = create_engine(POSTGRES_URL, pool_pre_ping=True)
     try:
-        yield AnalysisStateStore(engine)
+        # Production performs this model-owned compatibility bootstrap after
+        # database migrations; a fresh test database must follow the same path.
+        ensure_analysis_tables(engine)
+        yield SqlAnalysisStore(engine)
     finally:
         engine.dispose()
 
 
-def _ready(store: AnalysisStateStore, suffix: str):
+def _ready(store: SqlAnalysisStore, suffix: str):
     suffix = f"{suffix}_{uuid4().hex}"
     session_id = f"postgres_{suffix}"
-    state = store.create_session(session_id, at=NOW)
+    state = create_session(store, session_id)
     semantic = revision(session_id=session_id, revision_id=f"rev_{suffix}")
     bound = bound_request(
         session_id=session_id,
         revision_id=semantic.revision_id,
     )
-    plan = compile_plan(bound)
+    plan = ExecutionPlanCompiler.compile(bound)
     ready = store.commit_transition(
         LifecycleReducer.reduce(
             state,
@@ -92,11 +104,18 @@ def _race(*operations):
 
 
 def _claim(store, ready, plan, worker="worker"):
-    return store.claim_plan(
-        session_id=str(ready.session_id),
+    return claim_plan(
+        store,
+        state=ready,
         plan=plan,
         worker_id=worker,
-        expected_state_version=ready.state_version,
+    )
+
+
+def test_postgres_analysis_store_contract(postgres_store):
+    assert_analysis_store_contract(
+        postgres_store,
+        suffix=f"postgres_{uuid4().hex}",
     )
 
 
@@ -145,7 +164,7 @@ def test_postgres_revision_versus_completion(postgres_store):
         turn_id=replacement_revision.turn_id,
         outputs=("poverty_impact",),
     )
-    replacement_plan = compile_plan(replacement_bound)
+    replacement_plan = ExecutionPlanCompiler.compile(replacement_bound)
     replacement = LifecycleReducer.reduce(
         claim.state,
         PlanReadyEvent(
@@ -156,7 +175,8 @@ def test_postgres_revision_versus_completion(postgres_store):
     )
     results = _race(
         lambda: postgres_store.commit_transition(replacement),
-        lambda: postgres_store.finish_attempt(
+        lambda: finish_attempt(
+            postgres_store,
             state=claim.state,
             attempt=claim.attempt,
             token=claim.token,
@@ -176,10 +196,12 @@ def test_postgres_recovery_versus_completion(postgres_store):
     )
     claim = _claim(postgres_store, ready, plan)
     results = _race(
-        lambda: postgres_store.recover_expired_attempts(
+        lambda: recover_expired_attempts(
+            postgres_store,
             at=claim.attempt.lease_expires_at + timedelta(seconds=1),
         ),
-        lambda: postgres_store.finish_attempt(
+        lambda: finish_attempt(
+            postgres_store,
             state=claim.state,
             attempt=claim.attempt,
             token=claim.token,
@@ -214,7 +236,7 @@ def test_postgres_pending_plan_promotion_and_claim(postgres_store):
         turn_id=replacement_revision.turn_id,
         outputs=("poverty_impact",),
     )
-    replacement_plan = compile_plan(replacement_bound)
+    replacement_plan = ExecutionPlanCompiler.compile(replacement_bound)
     queued = postgres_store.commit_transition(
         LifecycleReducer.reduce(
             claim.state,
@@ -226,7 +248,8 @@ def test_postgres_pending_plan_promotion_and_claim(postgres_store):
         )
     )
     _race(
-        lambda: postgres_store.finish_attempt(
+        lambda: finish_attempt(
+            postgres_store,
             state=queued,
             attempt=claim.attempt,
             token=claim.token,

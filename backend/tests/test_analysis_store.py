@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import inspect
 from concurrent.futures import ThreadPoolExecutor
 from datetime import timedelta
 from pathlib import Path
@@ -10,7 +11,8 @@ from sqlalchemy import text
 from sqlmodel import Session, create_engine, select
 
 from analysis.common import AnalysisError, AnalysisErrorCode
-from analysis.compiler import compile_plan
+from analysis import persistence_compat, persistence_rows
+from analysis.compiler import ExecutionPlanCompiler
 from analysis.lifecycle import (
     ConversationAdvancedEvent,
     LifecycleReducer,
@@ -35,13 +37,24 @@ from analysis.persistence import (
     AnalysisModelUsageRow,
     AnalysisPlanRow,
     AnalysisRequestRevisionRow,
-    AnalysisStateStore,
+    SqlAnalysisStore,
     AnalysisTurnReceiptRow,
     AnalysisWorkflowRow,
-    _parse_persisted,
     ensure_analysis_tables,
 )
-from analysis_helpers import NOW, bound_request, owned_analysis_store, revision
+from analysis.persistence_compat import parse_persisted
+from analysis.store import HeartbeatAttemptCommand
+from analysis_helpers import (
+    NOW,
+    bound_request,
+    claim_plan,
+    create_session,
+    finish_attempt,
+    owned_analysis_store,
+    recover_expired_attempts,
+    revision,
+)
+from analysis_store_contract import assert_analysis_store_contract
 
 
 def _store(tmp_path):
@@ -54,16 +67,20 @@ def _store(tmp_path):
 
 
 def _ready(store):
-    state = store.create_session("session_test", at=NOW)
+    state = create_session(store, "session_test")
     semantic = revision()
     bound = bound_request()
-    plan = compile_plan(bound)
+    plan = ExecutionPlanCompiler.compile(bound)
     transition = LifecycleReducer.reduce(
         state,
         PlanReadyEvent(revision=semantic, bound_request=bound, plan=plan),
     )
     ready = store.commit_transition(transition)
     return ready, semantic, bound, plan
+
+
+def test_sqlite_analysis_store_contract(tmp_path):
+    assert_analysis_store_contract(_store(tmp_path), suffix="sqlite")
 
 
 def test_atomic_transition_persists_linked_records(tmp_path):
@@ -78,10 +95,10 @@ def test_atomic_transition_persists_linked_records(tmp_path):
 
 def test_version_conflict_rolls_back_all_appended_records(tmp_path):
     store = _store(tmp_path)
-    state = store.create_session("session_test", at=NOW)
+    state = create_session(store, "session_test")
     semantic = revision()
     bound = bound_request()
-    plan = compile_plan(bound)
+    plan = ExecutionPlanCompiler.compile(bound)
     transition = LifecycleReducer.reduce(
         state,
         PlanReadyEvent(revision=semantic, bound_request=bound, plan=plan),
@@ -100,10 +117,10 @@ def test_version_conflict_rolls_back_all_appended_records(tmp_path):
 
 def test_wrong_parent_reference_rolls_back_transition(tmp_path):
     store = _store(tmp_path)
-    state = store.create_session("session_test", at=NOW)
+    state = create_session(store, "session_test")
     semantic = revision()
     bound = bound_request().model_copy(update={"request_revision_id": "missing"})
-    plan = compile_plan(bound)
+    plan = ExecutionPlanCompiler.compile(bound)
     with pytest.raises(AnalysisError):
         transition = LifecycleReducer.reduce(
             state,
@@ -115,10 +132,10 @@ def test_wrong_parent_reference_rolls_back_transition(tmp_path):
 
 def test_wrong_session_record_rolls_back_complete_transition(tmp_path):
     store = _store(tmp_path)
-    state = store.create_session("session_test", at=NOW)
+    state = create_session(store, "session_test")
     semantic = revision()
     bound = bound_request()
-    plan = compile_plan(bound)
+    plan = ExecutionPlanCompiler.compile(bound)
     transition = LifecycleReducer.reduce(
         state,
         PlanReadyEvent(revision=semantic, bound_request=bound, plan=plan),
@@ -154,7 +171,7 @@ def test_failed_conditional_status_update_rolls_back_new_records(tmp_path):
         turn_id="turn_replacement",
         outputs=("poverty_impact",),
     )
-    replacement_plan = compile_plan(replacement_bound)
+    replacement_plan = ExecutionPlanCompiler.compile(replacement_bound)
     transition = LifecycleReducer.reduce(
         ready,
         PlanReadyEvent(
@@ -188,11 +205,11 @@ def test_two_workers_claim_exactly_one_attempt(tmp_path):
 
     def claim(worker):
         try:
-            return store.claim_plan(
-                session_id="session_test",
+            return claim_plan(
+                store,
+                state=ready,
                 plan=plan,
                 worker_id=worker,
-                expected_state_version=ready.state_version,
             )
         except AnalysisError as exc:
             return exc
@@ -208,11 +225,11 @@ def test_two_workers_claim_exactly_one_attempt(tmp_path):
 def test_token_remains_valid_after_unrelated_state_advance(tmp_path):
     store = _store(tmp_path)
     ready, _semantic, _bound, plan = _ready(store)
-    claim = store.claim_plan(
-        session_id="session_test",
+    claim = claim_plan(
+        store,
+        state=ready,
         plan=plan,
         worker_id="worker",
-        expected_state_version=ready.state_version,
     )
     advanced = LifecycleReducer.reduce(
         claim.state,
@@ -230,11 +247,11 @@ def test_token_remains_valid_after_unrelated_state_advance(tmp_path):
 def test_replacement_is_queued_until_active_attempt_finishes(tmp_path):
     store = _store(tmp_path)
     ready, _semantic, _bound, plan = _ready(store)
-    claim = store.claim_plan(
-        session_id="session_test",
+    claim = claim_plan(
+        store,
+        state=ready,
         plan=plan,
         worker_id="worker",
-        expected_state_version=ready.state_version,
     )
     replacement_revision = revision(
         revision_id="rev_replacement",
@@ -247,7 +264,7 @@ def test_replacement_is_queued_until_active_attempt_finishes(tmp_path):
         turn_id="turn_replacement",
         outputs=("poverty_impact",),
     )
-    replacement_plan = compile_plan(replacement_bound)
+    replacement_plan = ExecutionPlanCompiler.compile(replacement_bound)
     queued_transition = LifecycleReducer.reduce(
         claim.state,
         PlanReadyEvent(
@@ -260,13 +277,14 @@ def test_replacement_is_queued_until_active_attempt_finishes(tmp_path):
     assert queued.pending_plan_id == replacement_plan.plan_id
     assert store.load_attempt(claim.attempt.execution_id).status.value == "cancellation_requested"
     with pytest.raises(AnalysisError):
-        store.claim_plan(
-            session_id="session_test",
+        claim_plan(
+            store,
+            state=queued,
             plan=replacement_plan,
             worker_id="other",
-            expected_state_version=queued.state_version,
         )
-    promoted = store.finish_attempt(
+    promoted = finish_attempt(
+        store,
         state=queued,
         attempt=claim.attempt,
         token=claim.token,
@@ -283,18 +301,20 @@ def test_replacement_is_queued_until_active_attempt_finishes(tmp_path):
 def test_expired_attempt_recovery_is_bounded_and_idempotent(tmp_path):
     store = _store(tmp_path)
     ready, _semantic, _bound, plan = _ready(store)
-    claim = store.claim_plan(
-        session_id="session_test",
+    claim = claim_plan(
+        store,
+        state=ready,
         plan=plan,
         worker_id="worker",
-        expected_state_version=ready.state_version,
         lease_seconds=-1,
     )
-    recovered = store.recover_expired_attempts(
+    recovered = recover_expired_attempts(
+        store,
         at=claim.attempt.lease_expires_at + timedelta(seconds=1)
     )
     assert recovered == (claim.attempt.execution_id,)
-    assert store.recover_expired_attempts(
+    assert recover_expired_attempts(
+        store,
         at=claim.attempt.lease_expires_at + timedelta(seconds=2)
     ) == ()
     assert store.load_attempt(claim.attempt.execution_id).status.value == "expired"
@@ -303,11 +323,11 @@ def test_expired_attempt_recovery_is_bounded_and_idempotent(tmp_path):
 def test_recovery_transition_cannot_expire_an_attempt_after_heartbeat(tmp_path):
     store = _store(tmp_path)
     ready, _semantic, _bound, plan = _ready(store)
-    claim = store.claim_plan(
-        session_id="session_test",
+    claim = claim_plan(
+        store,
+        state=ready,
         plan=plan,
         worker_id="worker",
-        expected_state_version=ready.state_version,
     )
     stale_recovery = LifecycleReducer.reduce(
         claim.state,
@@ -318,8 +338,10 @@ def test_recovery_transition_cannot_expire_an_attempt_after_heartbeat(tmp_path):
     )
 
     refreshed = store.heartbeat_attempt(
-        execution_id=claim.attempt.execution_id,
-        token=claim.token,
+        HeartbeatAttemptCommand(
+            execution_id=claim.attempt.execution_id,
+            token=claim.token,
+        )
     )
     with pytest.raises(AnalysisError) as raised:
         store.commit_transition(stale_recovery)
@@ -341,20 +363,40 @@ def test_recovery_transition_cannot_expire_an_attempt_after_heartbeat(tmp_path):
 )
 def test_previous_schema_fixtures_load_through_compatibility_reader(fixture_name, model):
     fixture = Path(__file__).parent / "fixtures" / "analysis_v1" / fixture_name
-    restored = _parse_persisted(model, fixture.read_text())
+    restored = parse_persisted(model, fixture.read_text())
     assert restored.schema_version == 2
+
+
+def test_store_uses_separate_sql_rows_and_compatibility_reader():
+    durable_rows = (
+        AnalysisWorkflowRow,
+        AnalysisRequestRevisionRow,
+        AnalysisBoundRequestRow,
+        AnalysisClarificationRow,
+        AnalysisClarificationResolutionRow,
+        AnalysisPlanRow,
+        AnalysisExecutionAttemptRow,
+        AnalysisExecutionRow,
+        AnalysisTurnReceiptRow,
+        AnalysisModelUsageRow,
+        AnalysisBillingIntentRow,
+    )
+
+    assert {inspect.getmodule(row) for row in durable_rows} == {persistence_rows}
+    assert parse_persisted.__module__ == persistence_compat.__name__
 
 
 def test_durable_analysis_schema_defines_no_result_payload_columns(tmp_path):
     store = _store(tmp_path)
     ready, _semantic, _bound, plan = _ready(store)
-    claim = store.claim_plan(
-        session_id="session_test",
+    claim = claim_plan(
+        store,
+        state=ready,
         plan=plan,
         worker_id="worker",
-        expected_state_version=ready.state_version,
     )
-    store.finish_attempt(
+    finish_attempt(
+        store,
         state=claim.state,
         attempt=claim.attempt,
         token=claim.token,

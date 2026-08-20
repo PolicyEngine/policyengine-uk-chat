@@ -9,8 +9,8 @@ from analysis.common import AnalysisError, AnalysisErrorCode
 from analysis.executor import (
     ExecutionOutcome,
     OperationEvent,
-    execute_exploratory_plan,
-    execute_standard_plan,
+    _execute_exploratory_plan,
+    _execute_standard_plan,
 )
 from analysis.models import (
     BoundRequest,
@@ -23,7 +23,7 @@ from analysis.models import (
     ResultEnvelope,
     SemanticRequestRevision,
 )
-from analysis.operations import OperationCatalogue
+from analysis.operations import OperationCatalogue, default_operation_catalogue
 from tools.context import ToolExecutionContext, TurnResultStore
 
 
@@ -111,8 +111,6 @@ class ExecutionRequest:
     token: str
     revision: SemanticRequestRevision
     bound_request: BoundRequest
-    operation_catalogue: OperationCatalogue
-    result_store: TurnResultStore
     control: ExecutionControl
     exploratory_model_adapter: ExploratoryModelAdapter | None = None
 
@@ -143,6 +141,11 @@ class ExecutionCancelled(_ExecutionResultBase):
 
 
 ExecutionResult = ExecutionCompleted | ExecutionFailed | ExecutionCancelled
+ResultStoreFactory = Callable[[str], TurnResultStore]
+
+
+def _result_store(execution_id: str) -> TurnResultStore:
+    return TurnResultStore(default_execution_id=execution_id)
 
 
 class StandardExecutionStrategy(Protocol):
@@ -176,7 +179,7 @@ class ExploratoryExecutionStrategy(Protocol):
         dispatch: OperationDispatch = ...,
         context: ToolExecutionContext,
         operation_catalogue: OperationCatalogue,
-        client: Any | None,
+        client: ExploratoryModelAdapter | None,
         is_cancelled: CancellationProbe,
         on_event: Callable[[OperationEvent], None],
     ) -> ExecutionOutcome: ...
@@ -264,13 +267,19 @@ class ExecutionEngine:
     def __init__(
         self,
         *,
-        standard_strategy: StandardExecutionStrategy = execute_standard_plan,
-        exploratory_strategy: ExploratoryExecutionStrategy = execute_exploratory_plan,
+        standard_strategy: StandardExecutionStrategy = _execute_standard_plan,
+        exploratory_strategy: ExploratoryExecutionStrategy = _execute_exploratory_plan,
         dispatch: OperationDispatch | None = None,
+        operation_catalogue: OperationCatalogue | None = None,
+        result_store_factory: ResultStoreFactory = _result_store,
     ) -> None:
         self._standard_strategy = standard_strategy
         self._exploratory_strategy = exploratory_strategy
         self._dispatch = dispatch
+        self._operation_catalogue = (
+            operation_catalogue or default_operation_catalogue()
+        )
+        self._result_store_factory = result_store_factory
 
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
         progress: list[ExecutionProgress] = []
@@ -281,10 +290,11 @@ class ExecutionEngine:
             request.control.report_progress(item)
 
         reform_field = request.bound_request.fields.get("reform")
+        result_store = self._result_store_factory(str(request.attempt.execution_id))
         context = ToolExecutionContext(
             turn_id=str(request.revision.turn_id),
             execution_id=str(request.attempt.execution_id),
-            result_store=request.result_store,
+            result_store=result_store,
             approved_reform=(reform_field.value if reform_field else None),
             require_approved_reform=reform_field is not None,
         )
@@ -296,7 +306,7 @@ class ExecutionEngine:
             "bound_request": request.bound_request,
             "verify_attempt": request.control.verify_attempt,
             "context": context,
-            "operation_catalogue": request.operation_catalogue,
+            "operation_catalogue": self._operation_catalogue,
             "is_cancelled": request.control.is_cancelled,
             "on_event": report,
         }

@@ -37,6 +37,7 @@ from chat.orchestrator import run_chat_turn
 from chat.schemas import ChatRequest
 from chat.turn_input import ChatTurnInput, prepare_turn_input
 from analysis.persistence import SqlAnalysisStore
+from analysis.store import MarkBillingRecordedCommand
 
 
 logger = logging.getLogger(__name__)
@@ -102,7 +103,9 @@ def _mark_billing_intent_recorded(
     if not billing_result or not billing_result.get("recorded") or not turn_id:
         return
     try:
-        SqlAnalysisStore().mark_billing_recorded(session_id, turn_id)
+        SqlAnalysisStore().mark_billing_recorded(
+            MarkBillingRecordedCommand(session_id=session_id, turn_id=turn_id)
+        )
     except Exception:
         logger.warning(
             "[CHAT] Billing succeeded but the analysis billing intent "

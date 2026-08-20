@@ -28,6 +28,7 @@ ANALYSIS_KINDS = (
 class EvidencePolicy(StrEnum):
     EXACT = "exact"
     CONTROLLED = "controlled"
+    CLASSIFICATION = "classification"
     STRUCTURED = "structured"
     NARRATIVE = "narrative"
     NONE = "none"
@@ -45,6 +46,7 @@ class SemanticFieldSpec:
     adapter: TypeAdapter[Any]
     analysis_kinds: frozenset[str]
     evidence_policy: EvidencePolicy
+    interpretation_guidance: str | None = None
     allow_set: bool = True
     allow_clear: bool = True
     clarification_contract: str | None = None
@@ -87,6 +89,7 @@ class ExploratoryProfile:
 @dataclass(frozen=True)
 class AnalysisCapability:
     analysis_kind: str
+    interpretation_guidance: str
     semantic_fields: frozenset[str]
     required_fields: tuple[str, ...]
     optional_fields: tuple[str, ...]
@@ -148,6 +151,8 @@ class CapabilityRegistry:
         for name, capability in self.capabilities.items():
             if name != capability.analysis_kind:
                 errors.append(f"capability key {name} disagrees with its kind")
+            if not capability.interpretation_guidance.strip():
+                errors.append(f"{name} has no interpretation guidance")
             missing_fields = capability.semantic_fields.difference(self.fields)
             if missing_fields:
                 errors.append(
@@ -302,31 +307,19 @@ _FIELDS: dict[str, SemanticFieldSpec] = {
         "analysis_kind",
         _adapter(Literal[*ANALYSIS_KINDS]),
         _ALL_KINDS,
-        EvidencePolicy.CONTROLLED,
+        EvidencePolicy.CLASSIFICATION,
         allow_clear=False,
         clarification_contract="analysis_kind",
-        controlled_values=MappingProxyType(
-            {
-                "explain": "explanation",
-                "explanation": "explanation",
-                "parameter": "parameter_lookup",
-                "parameter lookup": "parameter_lookup",
-                "validate reform": "reform_validation",
-                "household": "household",
-                "benefit entitlement": "household",
-                "society": "society",
-                "population": "society",
-                "simulation": "society",
-                "exploratory": "exploratory",
-                "explore": "exploratory",
-            }
-        ),
     ),
     "jurisdiction": SemanticFieldSpec(
         "jurisdiction",
         _adapter(StrictStr),
         _ALL_KINDS,
         EvidencePolicy.CONTROLLED,
+        interpretation_guidance=(
+            "Set only when the user explicitly names a jurisdiction; otherwise "
+            "omit it and let the server apply its UK default."
+        ),
         controlled_values=MappingProxyType(
             {"uk": "uk", "united kingdom": "uk", "gb": "uk", "britain": "uk"}
         ),
@@ -343,6 +336,11 @@ _FIELDS: dict[str, SemanticFieldSpec] = {
         _adapter(list[dict[str, Any]]),
         frozenset({"household"}),
         EvidencePolicy.STRUCTURED,
+        interpretation_guidance=(
+            "Person input objects. Put each person's age and income directly on "
+            "that person using PolicyEngine keys such as age and "
+            "employment_income; do not add role labels."
+        ),
         clarification_contract="household_people",
     ),
     "benunit": SemanticFieldSpec(
@@ -356,6 +354,10 @@ _FIELDS: dict[str, SemanticFieldSpec] = {
         _adapter(dict[str, Any]),
         frozenset({"household"}),
         EvidencePolicy.STRUCTURED,
+        interpretation_guidance=(
+            "Only explicit PolicyEngine household-entity inputs; never put a "
+            "person's earnings or family membership in this object."
+        ),
     ),
     "comparison_basis": SemanticFieldSpec(
         "comparison_basis",
@@ -371,6 +373,10 @@ _FIELDS: dict[str, SemanticFieldSpec] = {
         _adapter(StrictStr),
         frozenset({"parameter_lookup"}),
         EvidencePolicy.NARRATIVE,
+        interpretation_guidance=(
+            "The user's ordinary name for the requested policy setting, without "
+            "inventing an internal parameter path."
+        ),
         clarification_contract="parameter_query",
     ),
     "variable_query": SemanticFieldSpec(
@@ -378,6 +384,10 @@ _FIELDS: dict[str, SemanticFieldSpec] = {
         _adapter(StrictStr),
         _SOCIETY_KINDS,
         EvidencePolicy.NARRATIVE,
+        interpretation_guidance=(
+            "The shortest ordinary name for the value to aggregate, such as "
+            "Universal Credit; exclude count, population, and entity wording."
+        ),
         clarification_contract="variable_query",
     ),
     "reform_intent": SemanticFieldSpec(
@@ -385,6 +395,10 @@ _FIELDS: dict[str, SemanticFieldSpec] = {
         _adapter(StrictStr),
         _REFORM_KINDS,
         EvidencePolicy.NARRATIVE,
+        interpretation_guidance=(
+            "The user's ordinary name for the policy setting to change, without "
+            "inventing an internal parameter path."
+        ),
         clarification_contract="reform_target",
     ),
     "reform_instruction": SemanticFieldSpec(
@@ -406,6 +420,23 @@ _FIELDS: dict[str, SemanticFieldSpec] = {
         _adapter(Literal["person", "benunit", "household"]),
         _SOCIETY_KINDS,
         EvidencePolicy.CONTROLLED,
+        interpretation_guidance=(
+            "The unit whose model rows are aggregated: person, benefit unit, or "
+            "household. Infer it from ordinary singular or plural user wording."
+        ),
+        controlled_values=MappingProxyType(
+            {
+                "person": "person",
+                "people": "person",
+                "individual": "person",
+                "individuals": "person",
+                "benunit": "benunit",
+                "benefit unit": "benunit",
+                "benefit units": "benunit",
+                "household": "household",
+                "households": "household",
+            }
+        ),
         clarification_contract="aggregate_entity",
     ),
     "aggregate_operation": SemanticFieldSpec(
@@ -413,6 +444,21 @@ _FIELDS: dict[str, SemanticFieldSpec] = {
         _adapter(Literal["sum", "mean", "count"]),
         _SOCIETY_KINDS,
         EvidencePolicy.CONTROLLED,
+        interpretation_guidance=(
+            "The requested aggregation: sum for total, mean for average, or count "
+            "for how many."
+        ),
+        controlled_values=MappingProxyType(
+            {
+                "sum": "sum",
+                "total": "sum",
+                "mean": "mean",
+                "average": "mean",
+                "count": "count",
+                "how many": "count",
+                "number": "count",
+            }
+        ),
         clarification_contract="aggregate_operation",
     ),
     "aggregate_target": SemanticFieldSpec(
@@ -603,6 +649,10 @@ _EXPLORATORY_PROFILE = ExploratoryProfile(
 _CAPABILITIES: dict[str, AnalysisCapability] = {
     "explanation": AnalysisCapability(
         analysis_kind="explanation",
+        interpretation_guidance=(
+            "A conceptual tax-and-benefit explanation that needs no current "
+            "policy value, synthetic-household calculation, or population result."
+        ),
         semantic_fields=_COMMON_FIELDS,
         required_fields=("analysis_kind",),
         optional_fields=("jurisdiction", "assumptions"),
@@ -614,6 +664,10 @@ _CAPABILITIES: dict[str, AnalysisCapability] = {
     ),
     "parameter_lookup": AnalysisCapability(
         analysis_kind="parameter_lookup",
+        interpretation_guidance=(
+            "Retrieve a current policy rate, threshold, allowance, limit, or other "
+            "legislated setting named in ordinary user language."
+        ),
         semantic_fields=_COMMON_FIELDS | {"year", "parameter_query"},
         required_fields=("analysis_kind", "parameter_query"),
         optional_fields=("jurisdiction", "year", "assumptions"),
@@ -625,6 +679,10 @@ _CAPABILITIES: dict[str, AnalysisCapability] = {
     ),
     "reform_validation": AnalysisCapability(
         analysis_kind="reform_validation",
+        interpretation_guidance=(
+            "Validate one explicitly proposed policy change without calculating "
+            "its effect on a household or the UK population."
+        ),
         semantic_fields=_COMMON_FIELDS | {"year"} | _REFORM_FIELDS,
         required_fields=("analysis_kind",),
         optional_fields=(
@@ -643,6 +701,10 @@ _CAPABILITIES: dict[str, AnalysisCapability] = {
     ),
     "household": AnalysisCapability(
         analysis_kind="household",
+        interpretation_guidance=(
+            "Calculate net income or benefit entitlement for described people in "
+            "one synthetic household."
+        ),
         semantic_fields=_COMMON_FIELDS
         | {"year", "people", "benunit", "household"}
         | _REFORM_FIELDS,
@@ -665,6 +727,11 @@ _CAPABILITIES: dict[str, AnalysisCapability] = {
     ),
     "society": AnalysisCapability(
         analysis_kind="society",
+        interpretation_guidance=(
+            "Calculate an aggregate UK population result, including policy cost, "
+            "revenue, spending, distributional effects, caseload, or a model-value "
+            "aggregate."
+        ),
         semantic_fields=_COMMON_FIELDS | _SOCIETY_FIELDS | _REFORM_FIELDS,
         required_fields=("analysis_kind",),
         optional_fields=tuple(
@@ -678,6 +745,10 @@ _CAPABILITIES: dict[str, AnalysisCapability] = {
     ),
     "exploratory": AnalysisCapability(
         analysis_kind="exploratory",
+        interpretation_guidance=(
+            "Perform an open-ended supported population analysis that requires "
+            "bounded analytical operation selection rather than one standard result."
+        ),
         semantic_fields=_COMMON_FIELDS
         | _SOCIETY_FIELDS
         | _REFORM_FIELDS

@@ -33,10 +33,11 @@ from analysis.models import (
 from analysis.persistence import (
     AnalysisBillingIntentRow,
     AnalysisModelUsageRow,
-    AnalysisStateStore,
+    SqlAnalysisStore,
     ensure_analysis_tables,
 )
-from analysis_helpers import NOW, owned_analysis_store
+from analysis.store import BeginTurnCommand, MarkBillingRecordedCommand
+from analysis_helpers import NOW, create_session, owned_analysis_store
 from billing.intents import build_billing_intent
 
 
@@ -181,12 +182,14 @@ def test_finalization_commits_receipt_usage_and_idempotent_billing_intent(tmp_pa
     engine = create_engine(f"sqlite:///{tmp_path / 'finalization.sqlite'}")
     ensure_analysis_tables(engine)
     store = owned_analysis_store(engine)
-    state = store.create_session("session_finalization", at=NOW)
+    state = create_session(store, "session_finalization")
     started = store.begin_turn(
-        session_id=state.session_id,
-        turn_id="turn_finalization",
-        request_content={"message": "question"},
-        state_version=state.state_version,
+        BeginTurnCommand(
+            session_id=state.session_id,
+            turn_id="turn_finalization",
+            request_content={"message": "question"},
+            state_version=state.state_version,
+        )
     )
     transition = LifecycleReducer.reduce(
         state,
@@ -248,8 +251,12 @@ def test_finalization_commits_receipt_usage_and_idempotent_billing_intent(tmp_pa
             }
         ]
         assert persisted_intent["charge_inputs"][0]["cost_gbp"] > 0
-    assert store.mark_billing_recorded(state.session_id, "turn_finalization") is True
-    assert store.mark_billing_recorded(state.session_id, "turn_finalization") is True
+    command = MarkBillingRecordedCommand(
+        session_id=state.session_id,
+        turn_id="turn_finalization",
+    )
+    assert store.mark_billing_recorded(command) is True
+    assert store.mark_billing_recorded(command) is True
     with pytest.raises(AnalysisError):
         finalize_turn(
             store=store,
@@ -264,12 +271,14 @@ def test_conflict_uses_the_common_finalizer_without_changing_session_state(tmp_p
     engine = create_engine(f"sqlite:///{tmp_path / 'conflict-finalization.sqlite'}")
     ensure_analysis_tables(engine)
     store = owned_analysis_store(engine)
-    state = store.create_session("session_finalization", at=NOW)
+    state = create_session(store, "session_finalization")
     started = store.begin_turn(
-        session_id=state.session_id,
-        turn_id="turn_conflict",
-        request_content={"message": "stale update"},
-        state_version=state.state_version,
+        BeginTurnCommand(
+            session_id=state.session_id,
+            turn_id="turn_conflict",
+            request_content={"message": "stale update"},
+            state_version=state.state_version,
+        )
     )
     transition = LifecycleReducer.reduce(state, ConflictObservedEvent())
 

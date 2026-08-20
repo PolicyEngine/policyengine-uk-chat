@@ -8,10 +8,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
-from analysis.binding import BindingFailed, NeedsClarification, Ready, Unsupported, bind_request
+from analysis.binding import (
+    BindingFailed,
+    BindingServices,
+    NeedsClarification,
+    Ready,
+    RequestBinder,
+    Unsupported,
+)
 from analysis.candidate_validation import validate_candidate
 from analysis.common import AnalysisError, RuntimeVersions
-from analysis.compiler import compile_plan
+from analysis.compiler import ExecutionPlanCompiler
 from analysis.executor import authorize_exploratory_call
 from analysis.facts import approved_non_result_values
 from analysis.interpreter import (
@@ -490,15 +497,15 @@ def _run_turn_interpretation(
                 country_package_version="eval-country-v1",
                 dataset_identifier="eval-dataset-v1",
             )
-            binding = bind_request(
-                reduced_revision,
-                default_year=2026,
-                runtime_versions=runtime_versions,
-                reform_validator=lambda reform, _year: {
-                    "valid": True,
-                    "normalized_reform": reform,
-                },
-            )
+            binding = RequestBinder(
+                services=BindingServices(
+                    default_year=2026,
+                    reform_validator=lambda reform, _year: {
+                        "valid": True,
+                        "normalized_reform": reform,
+                    },
+                )
+            ).bind(reduced_revision, runtime_versions=runtime_versions)
             binding_name = (
                 "clarification"
                 if isinstance(binding, NeedsClarification)
@@ -524,7 +531,7 @@ def _run_turn_interpretation(
                     f"{case.expect.binding_outcome!r}, got {binding_name!r}"
                 )
             if isinstance(binding, Ready):
-                plan = compile_plan(binding.bound_request)
+                plan = ExecutionPlanCompiler.compile(binding.bound_request)
                 plan_data = plan.model_dump(mode="json")
                 details["plan"] = plan_data
                 errors.extend(

@@ -1,24 +1,27 @@
-"""Directional orchestration for one stateful policy-analysis turn."""
+"""Application service for one stateful policy-analysis turn."""
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
 import logging
+import secrets
 import threading
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from functools import partial
 from importlib.metadata import PackageNotFoundError, version
-from typing import Any
+from typing import Literal, TypeAlias
 
-from analysis.binding import BindingServices
-from analysis.capabilities import CAPABILITY_REGISTRY, CapabilityRegistry
 from analysis.clarifications import render_clarification
 from analysis.common import AnalysisError, AnalysisErrorCode, RuntimeVersions, stable_identifier
+from analysis.commands import build_plan_claim_command
 from analysis.dependencies import (
+    AsyncCancellationProbe,
     BillingIntentBuilder,
+    ExecutionService,
     NarrationService,
     RequestCompilationService,
     RuntimeVersionProvider,
@@ -46,7 +49,6 @@ from analysis.interpreter import (
     InterpretationUsage,
     InterpreterContext,
     interpret_turn,
-    select_reform_targets,
 )
 from analysis.lifecycle import (
     AttemptOutcomeEvent,
@@ -57,21 +59,27 @@ from analysis.lifecycle import (
     ExplanationOutcomeEvent,
     LifecycleReducer,
     PlanReadyEvent,
+    RecoveryEvent,
     RequestRejectedEvent,
     TurnFailedEvent,
 )
 from analysis.models import (
+    AnalysisSessionState,
     CancelledTurnOutcome,
     ClarificationTurnOutcome,
     CompletedTurnOutcome,
     ConflictTurnOutcome,
     ExecutionCompletion,
+    ExecutionAttempt,
     ExecutionAttemptStatus,
     ExecutionMode,
     FactRegister,
     FailedTurnOutcome,
     ModelUsageEntry,
+    ExecutionPlan,
     SemanticRequestRevision,
+    SessionId,
+    TurnId,
     TurnOutcome,
     TurnReceipt,
     UnsupportedTurnOutcome,
@@ -87,26 +95,25 @@ from analysis.narration import (
     answer_execution_question,
     narrate_execution_result,
 )
-from analysis.persistence import (
+from analysis.store import (
+    AnalysisStore,
+    BeginTurnCommand,
+    DEFAULT_EXECUTION_LEASE_SECONDS,
     DEFAULT_EXECUTION_HEARTBEAT_SECONDS,
     DEFAULT_PROCESSING_RECEIPT_TIMEOUT_SECONDS,
-    SqlAnalysisStore,
+    HeartbeatAttemptCommand,
+    LoadOrCreateSessionCommand,
 )
-from analysis.operations import OperationCatalogue, default_operation_catalogue
 from analysis.request_compiler import (
     CompilationClarification,
     CompilationInput,
     CompiledRequest,
     RequestCompilationFailed,
+    RequestCompilation,
     RequestCompiler,
     RequestUnsupported,
 )
-from analysis.store import AnalysisStore
 from analysis.trace import AnalysisTrace
-from chat.events import ChatUsage
-from chat.projector import ChatEventProjector
-from chat.turn_input import ChatTurnInput
-from tools.context import TurnResultStore
 
 
 logger = logging.getLogger(__name__)
@@ -115,6 +122,83 @@ CONFLICT_RESPONSE_CONTENT = (
     "This request could not be applied because the conversation changed while "
     "it was processing. Retry it using the latest conversation state."
 )
+
+
+@dataclass(frozen=True, slots=True)
+class TextTurnBlock:
+    text: str
+    type: Literal["text"] = field(default="text", init=False)
+
+    def as_mapping(self) -> dict[str, object]:
+        return {"type": self.type, "text": self.text}
+
+
+@dataclass(frozen=True, slots=True)
+class ImageTurnSource:
+    media_type: str
+    data: str
+    type: Literal["base64"] = field(default="base64", init=False)
+
+    def as_mapping(self) -> dict[str, object]:
+        return {
+            "type": self.type,
+            "media_type": self.media_type,
+            "data": self.data,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ImageTurnBlock:
+    source: ImageTurnSource
+    type: Literal["image"] = field(default="image", init=False)
+
+    def as_mapping(self) -> dict[str, object]:
+        return {"type": self.type, "source": self.source.as_mapping()}
+
+
+TurnContentBlock: TypeAlias = TextTurnBlock | ImageTurnBlock
+TurnContent: TypeAlias = str | tuple[TurnContentBlock, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TurnMessage:
+    role: str
+    content: TurnContent
+
+    def as_mapping(self) -> dict[str, object]:
+        content: object = self.content
+        if isinstance(content, tuple):
+            content = [block.as_mapping() for block in content]
+        return {"role": self.role, "content": content}
+
+
+@dataclass(frozen=True, slots=True)
+class TurnCommand:
+    messages: tuple[TurnMessage, ...]
+    session_id: str
+    turn_id: str
+    is_cancelled: AsyncCancellationProbe
+    charts_mode: bool = False
+    billing_user_id: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TurnProgress:
+    execution_id: str
+    progress: ExecutionProgress
+
+
+@dataclass(frozen=True, slots=True)
+class TurnResult:
+    session_id: str
+    turn_id: str
+    outcome: TurnOutcome
+    usage_entries: tuple[ModelUsageEntry, ...] = ()
+    trace: AnalysisTrace | None = None
+    finalization: FinalizationResult | None = None
+
+
+TurnServiceEvent: TypeAlias = TurnProgress | TurnResult
 
 
 def _package_version(name: str) -> str:
@@ -139,24 +223,21 @@ def current_runtime_versions() -> RuntimeVersions:
     )
 
 
-def _latest_user_text(messages: list[dict[str, Any]]) -> str:
+def _latest_user_text(messages: tuple[TurnMessage, ...]) -> str:
     for message in reversed(messages):
-        if message.get("role") != "user":
+        if message.role != "user":
             continue
-        content = message.get("content", "")
+        content = message.content
         if isinstance(content, str):
             return content
-        if isinstance(content, list):
-            return " ".join(
-                str(block.get("text", ""))
-                for block in content
-                if isinstance(block, dict) and block.get("type") == "text"
-            )
+        return " ".join(
+            block.text for block in content if isinstance(block, TextTurnBlock)
+        )
     return ""
 
 
 def _interpretation_usage_entries(
-    turn: ChatTurnInput,
+    turn: TurnCommand,
     result: InterpretationResult,
     *,
     sequence_start: int,
@@ -170,7 +251,7 @@ def _interpretation_usage_entries(
 
 
 def _interpretation_call_usage_entries(
-    turn: ChatTurnInput,
+    turn: TurnCommand,
     calls: tuple[InterpretationUsage, ...],
     *,
     sequence_start: int,
@@ -184,8 +265,8 @@ def _interpretation_call_usage_entries(
                 "interpretation",
                 sequence_start + index,
             ),
-            session_id=turn.session_id,
-            turn_id=turn.turn_id,
+            session_id=SessionId(turn.session_id),
+            turn_id=TurnId(turn.turn_id),
             operation="interpretation",
             model=INTERPRETER_MODEL,
             input_tokens=usage.input_tokens,
@@ -198,7 +279,7 @@ def _interpretation_call_usage_entries(
 
 
 def _narration_usage_entries(
-    turn: ChatTurnInput,
+    turn: TurnCommand,
     result: NarrationResult,
     *,
     sequence_start: int,
@@ -213,7 +294,7 @@ def _narration_usage_entries(
 
 
 def _narration_call_usage_entries(
-    turn: ChatTurnInput,
+    turn: TurnCommand,
     calls: tuple[dict[str, int], ...],
     *,
     model: str,
@@ -228,8 +309,8 @@ def _narration_call_usage_entries(
                 "narration",
                 sequence_start + index,
             ),
-            session_id=turn.session_id,
-            turn_id=turn.turn_id,
+            session_id=SessionId(turn.session_id),
+            turn_id=TurnId(turn.turn_id),
             operation="narration",
             model=model,
             input_tokens=usage.get("input_tokens", 0),
@@ -242,22 +323,13 @@ def _narration_call_usage_entries(
 
 
 @dataclass(frozen=True)
-class CoordinatorDependencies:
-    store: AnalysisStore | None = None
+class TurnServiceDependencies:
+    store: AnalysisStore
     interpreter: TurnInterpreter = interpret_turn
     request_compiler: RequestCompilationService = field(
-        default_factory=RequestCompiler
+        default_factory=RequestCompiler.runtime_default
     )
-    binding_services: BindingServices = field(
-        default_factory=lambda: BindingServices(
-            reform_target_selector=select_reform_targets
-        )
-    )
-    capability_registry: CapabilityRegistry = CAPABILITY_REGISTRY
-    operation_catalogue: OperationCatalogue = field(
-        default_factory=default_operation_catalogue
-    )
-    execution_engine: ExecutionEngine = field(default_factory=ExecutionEngine)
+    execution_engine: ExecutionService = field(default_factory=ExecutionEngine)
     billing_intent_builder: BillingIntentBuilder | None = None
     narrator: NarrationService = narrate_execution_result
     versions: RuntimeVersionProvider = current_runtime_versions
@@ -265,7 +337,7 @@ class CoordinatorDependencies:
 
 def _finalize_analysis_turn(
     *,
-    dependencies: CoordinatorDependencies,
+    dependencies: TurnServiceDependencies,
     store: AnalysisStore,
     receipt: TurnReceipt,
     transition: WorkflowTransition,
@@ -299,7 +371,7 @@ def _finalize_analysis_turn(
 
 async def _attempt_monitor(
     *,
-    external_probe,
+    external_probe: AsyncCancellationProbe,
     store: AnalysisStore,
     execution_id: str,
     token: str,
@@ -316,7 +388,12 @@ async def _attempt_monitor(
                 return
             now = time.monotonic()
             if now - last_heartbeat >= DEFAULT_EXECUTION_HEARTBEAT_SECONDS:
-                store.heartbeat_attempt(execution_id=execution_id, token=token)
+                store.heartbeat_attempt(
+                    HeartbeatAttemptCommand(
+                        execution_id=execution_id,
+                        token=token,
+                    )
+                )
                 last_heartbeat = now
         except AnalysisError as exc:
             if exc.code in {
@@ -329,13 +406,35 @@ async def _attempt_monitor(
         await asyncio.sleep(0.25)
 
 
+def _recover_expired_attempts(store: AnalysisStore, session_id: str) -> tuple[str, ...]:
+    """Reduce and commit recovery transitions outside the persistence boundary."""
+    recovered: list[str] = []
+    recovered_at = datetime.now(timezone.utc)
+    for attempt in store.expired_attempts(at=recovered_at, session_id=session_id):
+        state = store.load_state(attempt.session_id)
+        if state.active_execution_id != attempt.execution_id:
+            continue
+        transition = LifecycleReducer.reduce(
+            state,
+            RecoveryEvent(attempt=attempt, recovered_at=recovered_at),
+        )
+        try:
+            store.commit_transition(transition)
+        except AnalysisError as exc:
+            if exc.code == AnalysisErrorCode.STATE_CONFLICT:
+                continue
+            raise
+        recovered.append(attempt.execution_id)
+    return tuple(recovered)
+
+
 async def _wait_for_replacement_plan(
     *,
     store: AnalysisStore,
     session_id: str,
     plan_id: str,
-    is_cancelled,
-):
+    is_cancelled: AsyncCancellationProbe,
+) -> AnalysisSessionState | None:
     """Keep the replacement request responsible until its plan is claimable."""
 
     deadline = time.monotonic() + REPLACEMENT_WAIT_TIMEOUT_SECONDS
@@ -345,7 +444,7 @@ async def _wait_for_replacement_plan(
             return None
         now = time.monotonic()
         if now - last_recovery >= 1.0:
-            store.recover_expired_attempts(session_id=session_id)
+            _recover_expired_attempts(store, session_id)
             last_recovery = now
         state = store.load_state(session_id)
         if (
@@ -371,22 +470,23 @@ def _trace(
     state_version: int,
     interpretation: InterpretationResult | None = None,
     revision: SemanticRequestRevision | None = None,
-    decision: Any | None = None,
-    plan=None,
+    decision: RequestCompilation | None = None,
+    plan: ExecutionPlan | None = None,
     execution: ExecutionResult | None = None,
     conflicts: int = 0,
     usage_entries: tuple[ModelUsageEntry, ...] = (),
 ) -> AnalysisTrace:
-    usage = ChatUsage()
+    usage = {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "cache_read_input_tokens": 0,
+    }
     for entry in usage_entries:
-        usage = usage.plus(
-            {
-                "input_tokens": entry.input_tokens,
-                "output_tokens": entry.output_tokens,
-                "cache_creation_input_tokens": entry.cache_creation_input_tokens,
-                "cache_read_input_tokens": entry.cache_read_input_tokens,
-            }
-        )
+        usage["input_tokens"] += entry.input_tokens
+        usage["output_tokens"] += entry.output_tokens
+        usage["cache_creation_input_tokens"] += entry.cache_creation_input_tokens
+        usage["cache_read_input_tokens"] += entry.cache_read_input_tokens
     return AnalysisTrace(
         workflow_version=state_version,
         update_kind=(interpretation.validated_update.kind if interpretation else None),
@@ -412,60 +512,90 @@ def _trace(
         ),
         conflict_count=conflicts,
         interpretation_retries=interpretation.retry_count if interpretation else 0,
-        model_usage=usage.as_dict(),
+        model_usage=usage,
     )
 
 
-async def _yield_outcome(
+def _complete_turn(
     *,
-    outcome,
-    turn: ChatTurnInput,
-    usage_entries: tuple[ModelUsageEntry, ...],
-    trace,
-):
-    for event in ChatEventProjector.project_outcome(
-        outcome=outcome,
+    dependencies: TurnServiceDependencies,
+    store: AnalysisStore,
+    turn: TurnCommand,
+    outcome: TurnOutcome,
+    usage_entries: tuple[ModelUsageEntry, ...] = (),
+    trace: AnalysisTrace | None = None,
+    receipt: TurnReceipt | None = None,
+    transition: WorkflowTransition | None = None,
+) -> TurnResult:
+    """Build every final service result and persist it when a receipt exists."""
+
+    if (receipt is None) != (transition is None):
+        raise AnalysisError(
+            AnalysisErrorCode.OUTCOME_INVALID,
+            "turn completion requires both a receipt and lifecycle transition",
+        )
+    finalization = None
+    if receipt is not None and transition is not None:
+        finalization = _finalize_analysis_turn(
+            dependencies=dependencies,
+            store=store,
+            receipt=receipt,
+            transition=transition,
+            outcome=outcome,
+            usage_entries=usage_entries,
+            trace=trace,
+            billing_user_id=turn.billing_user_id,
+        )
+    return TurnResult(
         session_id=turn.session_id,
         turn_id=turn.turn_id,
+        outcome=outcome,
         usage_entries=usage_entries,
         trace=trace,
-    ):
-        yield event
+        finalization=finalization,
+    )
 
 
-async def run_analysis_turn(
-    turn: ChatTurnInput,
+async def _run_turn(
+    turn: TurnCommand,
     *,
-    is_cancelled,
-    dependencies: CoordinatorDependencies | None = None,
-):
+    dependencies: TurnServiceDependencies,
+) -> AsyncIterator[TurnServiceEvent]:
     """Run one user message through all typed analysis stages."""
 
-    dependencies = dependencies or CoordinatorDependencies()
-    store = dependencies.store or SqlAnalysisStore()
+    store = dependencies.store
+    outcome: TurnOutcome
     message = _latest_user_text(turn.messages)
     if not message.strip():
         outcome = FailedTurnOutcome(
             content="Please send a user message to continue.",
             error_code="invalid_request",
         )
-        async for event in _yield_outcome(
-            outcome=outcome,
+        yield _complete_turn(
+            dependencies=dependencies,
+            store=store,
             turn=turn,
+            outcome=outcome,
             usage_entries=(),
             trace=None,
-        ):
-            yield event
+        )
         return
 
     try:
-        store.recover_expired_attempts(session_id=turn.session_id)
-        loaded = store.load_or_create(turn.session_id)
+        _recover_expired_attempts(store, turn.session_id)
+        loaded = store.load_or_create(
+            LoadOrCreateSessionCommand(session_id=turn.session_id)
+        )
         started = store.begin_turn(
-            session_id=turn.session_id,
-            turn_id=turn.turn_id,
-            request_content={"messages": turn.messages, "charts_mode": turn.charts_mode},
-            state_version=loaded.state.state_version,
+            BeginTurnCommand(
+                session_id=turn.session_id,
+                turn_id=turn.turn_id,
+                request_content={
+                    "messages": [message.as_mapping() for message in turn.messages],
+                    "charts_mode": turn.charts_mode,
+                },
+                state_version=loaded.state.state_version,
+            )
         )
     except AnalysisError as exc:
         if exc.code != AnalysisErrorCode.IDEMPOTENCY_CONFLICT:
@@ -477,13 +607,14 @@ async def run_analysis_turn(
             ),
             retryable=True,
         )
-        async for event in _yield_outcome(
-            outcome=outcome,
+        yield _complete_turn(
+            dependencies=dependencies,
+            store=store,
             turn=turn,
+            outcome=outcome,
             usage_entries=(),
             trace=None,
-        ):
-            yield event
+        )
         return
     if started.duplicate:
         receipt_created_at = started.receipt.created_at
@@ -504,28 +635,27 @@ async def run_analysis_turn(
                 ),
                 retryable=True,
             )
-            finalized = _finalize_analysis_turn(
+            yield _complete_turn(
                 dependencies=dependencies,
                 store=store,
+                turn=turn,
                 receipt=started.receipt,
-                billing_user_id=turn.user_id,
                 transition=transition,
                 outcome=outcome,
             )
-            for event in ChatEventProjector.project_finalization(finalized):
-                yield event
             return
         outcome = replay_outcome(started.receipt)
-        async for event in _yield_outcome(
-            outcome=outcome,
+        yield _complete_turn(
+            dependencies=dependencies,
+            store=store,
             turn=turn,
+            outcome=outcome,
             usage_entries=(),
             trace=_trace(state_version=started.receipt.state_version),
-        ):
-            yield event
+        )
         return
 
-    if await is_cancelled():
+    if await turn.is_cancelled():
         transition = LifecycleReducer.reduce(
             loaded.state,
             ConversationAdvancedEvent(occurred_at=datetime.now(timezone.utc)),
@@ -535,22 +665,21 @@ async def run_analysis_turn(
             request_revision_id=loaded.state.active_revision_id,
         )
         # Transport cancellation does not cancel a previously active analysis.
-        finalized = _finalize_analysis_turn(
+        yield _complete_turn(
             dependencies=dependencies,
             store=store,
+            turn=turn,
             receipt=started.receipt,
-            billing_user_id=turn.user_id,
             transition=transition,
             outcome=outcome,
         )
-        for event in ChatEventProjector.project_finalization(finalized):
-            yield event
         return
 
     usage_entries: list[ModelUsageEntry] = []
     conflicts = 0
     runtime_versions = dependencies.versions()
     loop = asyncio.get_running_loop()
+    attempt_claimed = False
 
     for interpretation_attempt in range(2):
         if interpretation_attempt:
@@ -562,10 +691,12 @@ async def run_analysis_turn(
             executions={
                 key: value
                 for key, value in loaded.executions.items()
-                if hasattr(value, "request_revision_id")
+                if isinstance(value, ExecutionAttempt)
             },
             latest_user_message=message,
-            recent_messages=tuple(turn.messages[-5:-1]),
+            recent_messages=tuple(
+                message.as_mapping() for message in turn.messages[-5:-1]
+            ),
         )
         try:
             try:
@@ -590,16 +721,25 @@ async def run_analysis_turn(
             update = interpretation.validated_update
 
             if isinstance(update, ValidatedAskAboutExecution):
-                execution = loaded.executions[str(update.execution_id)]
-                plan = store.load_plan(turn.session_id, str(execution.plan_id))
-                revision = store.load_revision(
-                    turn.session_id, str(execution.request_revision_id)
+                prior_attempt = loaded.executions[str(update.execution_id)]
+                if not isinstance(prior_attempt, ExecutionAttempt):
+                    raise AnalysisError(
+                        AnalysisErrorCode.STATE_PRECONDITION_FAILED,
+                        "execution details are unavailable for this question",
+                    )
+                prior_plan = store.load_plan(
+                    turn.session_id,
+                    str(prior_attempt.plan_id),
+                )
+                prior_revision = store.load_revision(
+                    turn.session_id,
+                    str(prior_attempt.request_revision_id),
                 )
                 content = answer_execution_question(
                     question=update.question,
-                    revision=revision,
-                    plan=plan,
-                    execution=execution,
+                    revision=prior_revision,
+                    plan=prior_plan,
+                    execution=prior_attempt,
                 )
                 transition = LifecycleReducer.reduce(
                     loaded.state,
@@ -616,18 +756,16 @@ async def run_analysis_turn(
                     conflicts=conflicts,
                     usage_entries=tuple(usage_entries),
                 )
-                finalized = _finalize_analysis_turn(
+                yield _complete_turn(
                     dependencies=dependencies,
                     store=store,
+                    turn=turn,
                     receipt=started.receipt,
-                    billing_user_id=turn.user_id,
                     transition=transition,
                     outcome=outcome,
                     usage_entries=tuple(usage_entries),
                     trace=trace,
                 )
-                for event in ChatEventProjector.project_finalization(finalized):
-                    yield event
                 return
 
             if isinstance(update, ValidatedCancelAnalysis):
@@ -651,18 +789,16 @@ async def run_analysis_turn(
                     conflicts=conflicts,
                     usage_entries=tuple(usage_entries),
                 )
-                finalized = _finalize_analysis_turn(
+                yield _complete_turn(
                     dependencies=dependencies,
                     store=store,
+                    turn=turn,
                     receipt=started.receipt,
-                    billing_user_id=turn.user_id,
                     transition=transition,
                     outcome=outcome,
                     usage_entries=tuple(usage_entries),
                     trace=trace,
                 )
-                for event in ChatEventProjector.project_finalization(finalized):
-                    yield event
                 return
 
             decision = await loop.run_in_executor(
@@ -676,9 +812,6 @@ async def run_analysis_turn(
                         active_clarification=loaded.active_clarification,
                         turn_id=turn.turn_id,
                         runtime_versions=runtime_versions,
-                        registry=dependencies.capability_registry,
-                        operation_catalogue=dependencies.operation_catalogue,
-                        binding_services=dependencies.binding_services,
                         bootstrap=(
                             loaded.active_revision is None and len(turn.messages) > 1
                         ),
@@ -689,6 +822,7 @@ async def run_analysis_turn(
             usage_entries.extend(decision.usage_entries)
             revision = decision.revision
             if isinstance(decision, CompilationClarification):
+                revision = decision.revision
                 clarification = decision.clarification
                 transition = LifecycleReducer.reduce(
                     loaded.state,
@@ -717,18 +851,16 @@ async def run_analysis_turn(
                     conflicts=conflicts,
                     usage_entries=tuple(usage_entries),
                 )
-                finalized = _finalize_analysis_turn(
+                yield _complete_turn(
                     dependencies=dependencies,
                     store=store,
+                    turn=turn,
                     receipt=started.receipt,
-                    billing_user_id=turn.user_id,
                     transition=transition,
                     outcome=outcome,
                     usage_entries=tuple(usage_entries),
                     trace=trace,
                 )
-                for event in ChatEventProjector.project_finalization(finalized):
-                    yield event
                 return
 
             if isinstance(
@@ -754,7 +886,7 @@ async def run_analysis_turn(
                             ),
                         ),
                     )
-                if failed:
+                if isinstance(decision, RequestCompilationFailed):
                     outcome = FailedTurnOutcome(
                         content=decision.reason,
                         error_code=decision.error_code.value,
@@ -775,18 +907,16 @@ async def run_analysis_turn(
                     conflicts=conflicts,
                     usage_entries=tuple(usage_entries),
                 )
-                finalized = _finalize_analysis_turn(
+                yield _complete_turn(
                     dependencies=dependencies,
                     store=store,
+                    turn=turn,
                     receipt=started.receipt,
-                    billing_user_id=turn.user_id,
                     transition=transition,
                     outcome=outcome,
                     usage_entries=tuple(usage_entries),
                     trace=trace,
                 )
-                for event in ChatEventProjector.project_finalization(finalized):
-                    yield event
                 return
 
             if not isinstance(decision, CompiledRequest):
@@ -794,6 +924,7 @@ async def run_analysis_turn(
                     AnalysisErrorCode.BINDING_FAILED,
                     "request compiler returned an unknown decision",
                 )
+            revision = decision.revision
             bound_request = decision.bound_request
             plan = decision.plan
             plan_transition = LifecycleReducer.reduce(
@@ -815,7 +946,7 @@ async def run_analysis_turn(
                     store=store,
                     session_id=turn.session_id,
                     plan_id=str(plan.plan_id),
-                    is_cancelled=is_cancelled,
+                    is_cancelled=turn.is_cancelled,
                 )
                 if ready_state is None:
                     current = store.load_state(turn.session_id)
@@ -843,18 +974,16 @@ async def run_analysis_turn(
                         conflicts=conflicts,
                         usage_entries=tuple(usage_entries),
                     )
-                    finalized = _finalize_analysis_turn(
+                    yield _complete_turn(
                         dependencies=dependencies,
                         store=store,
+                        turn=turn,
                         receipt=started.receipt,
-                        billing_user_id=turn.user_id,
                         transition=transition,
                         outcome=outcome,
                         usage_entries=tuple(usage_entries),
                         trace=trace,
                     )
-                    for event in ChatEventProjector.project_finalization(finalized):
-                        yield event
                     return
             else:
                 ready_state = store.commit_transition(plan_transition)
@@ -904,18 +1033,16 @@ async def run_analysis_turn(
                         conflicts=conflicts,
                         usage_entries=tuple(usage_entries),
                     )
-                    finalized = _finalize_analysis_turn(
+                    yield _complete_turn(
                         dependencies=dependencies,
                         store=store,
+                        turn=turn,
                         receipt=started.receipt,
-                        billing_user_id=turn.user_id,
                         transition=final_transition,
                         outcome=outcome,
                         usage_entries=tuple(usage_entries),
                         trace=trace,
                     )
-                    for event in ChatEventProjector.project_finalization(finalized):
-                        yield event
                     return
                 if isinstance(narrated, NarrationResult):
                     content = narrated.content
@@ -952,26 +1079,39 @@ async def run_analysis_turn(
                     conflicts=conflicts,
                     usage_entries=tuple(usage_entries),
                 )
-                finalized = _finalize_analysis_turn(
+                yield _complete_turn(
                     dependencies=dependencies,
                     store=store,
+                    turn=turn,
                     receipt=started.receipt,
-                    billing_user_id=turn.user_id,
                     transition=final_transition,
                     outcome=outcome,
                     usage_entries=tuple(usage_entries),
                     trace=trace,
                 )
-                for event in ChatEventProjector.project_finalization(finalized):
-                    yield event
                 return
 
-            claim = store.claim_plan(
-                session_id=turn.session_id,
-                plan=plan,
-                worker_id=stable_identifier("worker", turn.session_id, turn.turn_id),
-                expected_state_version=ready_state.state_version,
+            claim_token = secrets.token_urlsafe(32)
+            claimed_at = datetime.now(timezone.utc)
+            claim = store.commit_plan_claim(
+                build_plan_claim_command(
+                    state=ready_state,
+                    plan=plan,
+                    execution_id=stable_identifier(
+                        "execution",
+                        turn.session_id,
+                        plan.plan_id,
+                        secrets.token_hex(16),
+                    ),
+                    token=claim_token,
+                    worker_id=stable_identifier(
+                        "worker", turn.session_id, turn.turn_id
+                    ),
+                    claimed_at=claimed_at,
+                    lease_seconds=DEFAULT_EXECUTION_LEASE_SECONDS,
+                )
             )
+            attempt_claimed = True
             event_queue: asyncio.Queue[ExecutionProgress] = asyncio.Queue()
             cancelled = threading.Event()
 
@@ -980,7 +1120,7 @@ async def run_analysis_turn(
 
             monitor = asyncio.create_task(
                 _attempt_monitor(
-                    external_probe=is_cancelled,
+                    external_probe=turn.is_cancelled,
                     store=store,
                     execution_id=str(claim.attempt.execution_id),
                     token=claim.token,
@@ -993,10 +1133,6 @@ async def run_analysis_turn(
                 token=claim.token,
                 revision=revision,
                 bound_request=bound_request,
-                operation_catalogue=dependencies.operation_catalogue,
-                result_store=TurnResultStore(
-                    default_execution_id=str(claim.attempt.execution_id)
-                ),
                 control=CallbackExecutionControl(
                     attempt_verifier=lambda execution_id, token: store.verify_attempt(
                         execution_id=execution_id,
@@ -1022,15 +1158,15 @@ async def run_analysis_turn(
                         )
                     except asyncio.TimeoutError:
                         continue
-                    for public_event in ChatEventProjector.project_progress(
-                        str(claim.attempt.execution_id), operation_event
-                    ):
-                        yield public_event
-                execution = await execution_future
+                    yield TurnProgress(
+                        execution_id=str(claim.attempt.execution_id),
+                        progress=operation_event,
+                    )
+                execution_result = await execution_future
             except Exception as exc:
                 logger.exception("Claimed execution failed before returning an outcome")
                 code = exc.code if isinstance(exc, AnalysisError) else AnalysisErrorCode.EXECUTION_FAILED
-                execution = failed_execution_result(
+                execution_result = failed_execution_result(
                     execution_request,
                     code,
                 )
@@ -1041,8 +1177,8 @@ async def run_analysis_turn(
                 with contextlib.suppress(asyncio.CancelledError):
                     await monitor
 
-            usage_entries.extend(execution.usage_entries)
-            completion = execution.completion
+            usage_entries.extend(execution_result.usage_entries)
+            completion = execution_result.completion
             current_state = store.load_state(turn.session_id)
             current_attempt = store.load_attempt(str(claim.attempt.execution_id))
             if completion.status == "completed" and (
@@ -1068,9 +1204,9 @@ async def run_analysis_turn(
                             dependencies.narrator,
                             revision=revision,
                             plan=plan,
-                            summaries=execution.record.operation_summaries,
-                            facts=execution.record.fact_register,
-                            caveats=execution.record.caveats,
+                            summaries=execution_result.record.operation_summaries,
+                            facts=execution_result.record.fact_register,
+                            caveats=execution_result.record.caveats,
                         ),
                     )
                     if isinstance(narrated, NarrationResult):
@@ -1090,7 +1226,7 @@ async def run_analysis_turn(
                         content=content,
                         route=plan.mode.value,
                         model=response_model,
-                        response_artifacts=execution.record.response_artifacts,
+                        response_artifacts=execution_result.record.response_artifacts,
                     )
                 except Exception as exc:
                     if isinstance(exc, NarrationFailure):
@@ -1151,25 +1287,27 @@ async def run_analysis_turn(
                 revision=revision,
                 decision=decision,
                 plan=plan,
-                execution=execution,
+                execution=execution_result,
                 conflicts=conflicts,
                 usage_entries=tuple(usage_entries),
             )
-            finalized = _finalize_analysis_turn(
+            yield _complete_turn(
                 dependencies=dependencies,
                 store=store,
+                turn=turn,
                 receipt=started.receipt,
-                billing_user_id=turn.user_id,
                 transition=final_transition,
                 outcome=outcome,
                 usage_entries=tuple(usage_entries),
                 trace=trace,
             )
-            for event in ChatEventProjector.project_finalization(finalized):
-                yield event
             return
         except AnalysisError as exc:
-            if exc.code == AnalysisErrorCode.STATE_CONFLICT and interpretation_attempt == 0:
+            if (
+                exc.code == AnalysisErrorCode.STATE_CONFLICT
+                and interpretation_attempt == 0
+                and not attempt_claimed
+            ):
                 conflicts += 1
                 continue
             if exc.code == AnalysisErrorCode.STATE_CONFLICT:
@@ -1197,18 +1335,16 @@ async def run_analysis_turn(
                 conflicts=conflicts,
                 usage_entries=tuple(usage_entries),
             )
-            finalized = _finalize_analysis_turn(
+            yield _complete_turn(
                 dependencies=dependencies,
                 store=store,
+                turn=turn,
                 receipt=started.receipt,
-                billing_user_id=turn.user_id,
                 transition=transition,
                 outcome=outcome,
                 usage_entries=tuple(usage_entries),
                 trace=trace,
             )
-            for event in ChatEventProjector.project_finalization(finalized):
-                yield event
             return
         except Exception:
             logger.exception("Unexpected policy-analysis coordinator failure")
@@ -1228,16 +1364,31 @@ async def run_analysis_turn(
                 conflicts=conflicts,
                 usage_entries=tuple(usage_entries),
             )
-            finalized = _finalize_analysis_turn(
+            yield _complete_turn(
                 dependencies=dependencies,
                 store=store,
+                turn=turn,
                 receipt=started.receipt,
-                billing_user_id=turn.user_id,
                 transition=transition,
                 outcome=outcome,
                 usage_entries=tuple(usage_entries),
                 trace=trace,
             )
-            for event in ChatEventProjector.project_finalization(finalized):
-                yield event
             return
+
+
+class AnalysisTurnService:
+    """Sequence the typed analysis roles for one accepted user message."""
+
+    def __init__(
+        self,
+        dependencies: TurnServiceDependencies,
+    ) -> None:
+        self._dependencies = dependencies
+
+    async def run(
+        self,
+        command: TurnCommand,
+    ) -> AsyncIterator[TurnServiceEvent]:
+        async for event in _run_turn(command, dependencies=self._dependencies):
+            yield event

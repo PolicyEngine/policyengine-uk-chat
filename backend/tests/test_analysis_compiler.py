@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from analysis.common import AnalysisError, AnalysisErrorCode, RuntimeVersions
-from analysis.compiler import ExecutionPlanCompiler, compile_plan, plan_is_stale, validate_plan
+from analysis.compiler import ExecutionPlanCompiler, plan_is_stale, validate_plan
 from analysis.models import ExecutionMode, ExecutionPlan, PlanStep
 from analysis_helpers import VERSIONS, bound_request
 
@@ -63,7 +63,7 @@ from analysis_helpers import VERSIONS, bound_request
 )
 def test_standard_templates_compile_exact_operations(kind, fields, outputs, operations):
     request = bound_request(kind, fields=fields, outputs=outputs)
-    plan = compile_plan(request)
+    plan = ExecutionPlanCompiler.compile(request)
     assert tuple(step.operation for step in plan.steps) == operations
     assert plan.mode == (
         ExecutionMode.EXPLANATION if kind == "explanation" else ExecutionMode.STANDARD
@@ -72,7 +72,7 @@ def test_standard_templates_compile_exact_operations(kind, fields, outputs, oper
 
 
 def test_multi_output_plan_shares_simulation_and_compatible_derivative():
-    plan = compile_plan(
+    plan = ExecutionPlanCompiler.compile(
         bound_request(
             outputs=("budgetary_impact", "tax_revenue", "poverty_impact")
         )
@@ -84,7 +84,7 @@ def test_multi_output_plan_shares_simulation_and_compatible_derivative():
 
 
 def test_chart_compiles_explicit_typed_dependency():
-    plan = compile_plan(
+    plan = ExecutionPlanCompiler.compile(
         bound_request(
             fields={"chart_kind": "budget_waterfall"},
             outputs=("chart",),
@@ -105,7 +105,7 @@ def test_chart_compiles_explicit_typed_dependency():
     ],
 )
 def test_exploratory_plan_has_smallest_server_owned_operation_set(outputs, allowed):
-    plan = compile_plan(
+    plan = ExecutionPlanCompiler.compile(
         bound_request(
             "exploratory",
             fields={"objective": "trace interactions"},
@@ -121,8 +121,8 @@ def test_exploratory_plan_has_smallest_server_owned_operation_set(outputs, allow
 
 def test_compilation_is_canonical_and_deterministic():
     request = bound_request(outputs=("budgetary_impact", "poverty_impact"))
-    first = compile_plan(request)
-    second = compile_plan(request)
+    first = ExecutionPlanCompiler.compile(request)
+    second = ExecutionPlanCompiler.compile(request)
     assert first.plan_id == second.plan_id
     assert first.plan_hash == second.plan_hash
     assert first.model_dump_json() == second.model_dump_json()
@@ -130,7 +130,7 @@ def test_compilation_is_canonical_and_deterministic():
 
 def test_runtime_versions_are_bound_inputs_and_staleness_is_bound_identity_based():
     request = bound_request()
-    plan = compile_plan(request)
+    plan = ExecutionPlanCompiler.compile(request)
     assert not plan_is_stale(
         plan,
         current_bound_request_id=request.bound_request_id,
@@ -150,7 +150,7 @@ def test_runtime_versions_are_bound_inputs_and_staleness_is_bound_identity_based
 
 
 def test_plan_rejects_unknown_dependency():
-    valid = compile_plan(bound_request())
+    valid = ExecutionPlanCompiler.compile(bound_request())
     invalid_step = valid.steps[-1].model_copy(update={"depends_on": ("missing",)})
     invalid = valid.model_copy(update={"steps": (*valid.steps[:-1], invalid_step)})
     with pytest.raises(AnalysisError) as raised:

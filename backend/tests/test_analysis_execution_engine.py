@@ -39,8 +39,6 @@ def _request(*, kind: str = "society", fields=None, outputs=("budgetary_impact",
         token="token",
         revision=semantic,
         bound_request=bound,
-        operation_catalogue=default_operation_catalogue(),
-        result_store=result_store,
         control=CallbackExecutionControl(
             attempt_verifier=lambda _execution_id, _token: attempt,
             cancellation_probe=lambda: False,
@@ -102,6 +100,8 @@ def test_engine_selects_standard_strategy_and_reports_typed_progress():
     result = ExecutionEngine(
         standard_strategy=standard,
         exploratory_strategy=exploratory,
+        operation_catalogue=default_operation_catalogue(),
+        result_store_factory=lambda _execution_id: result_store,
     ).execute(request)
 
     assert isinstance(result, ExecutionCompleted)

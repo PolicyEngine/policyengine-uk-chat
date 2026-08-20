@@ -25,6 +25,9 @@ from tools.definitions import (
     COMPUTE_POVERTY_METRICS_INPUT_SCHEMA,
     COMPUTE_PROGRAM_BREAKDOWN_INPUT_SCHEMA,
     COMPUTE_WINNERS_LOSERS_INPUT_SCHEMA,
+    CHART_EXPLICIT_DATA_KINDS,
+    CHART_GENERIC_KINDS,
+    CHART_PRESET_SOURCES,
     DECILE_IMPACTS_DESCRIPTION,
     DEFAULT_SIMULATION_YEAR,
     DERIVATIVE_DESCRIPTION,
@@ -66,6 +69,7 @@ from tools.registry import (
     ReformValidationOutput,
     SocietySimulationOutput,
     WinnersLosersOutput,
+    parameter_fact_extractor,
     register_tool,
     tool_definitions,
     tool_handlers,
@@ -165,6 +169,7 @@ def search_parameters(query: str = "", limit: int = 25) -> Dict[str, Any]:
     input_schema=GET_PARAMETER_INPUT_SCHEMA,
     output_model=ParameterOutput,
     result_type="parameter",
+    fact_extractor=parameter_fact_extractor,
 )
 def get_parameter(path: str, year: int = DEFAULT_SIMULATION_YEAR) -> Dict[str, Any]:
     return discovery.get_parameter(path=path, year=year)
@@ -559,25 +564,6 @@ def _generic_chart_spec(
     }
 
 
-_PRESET_RESULT_KINDS = {
-    "budget_waterfall": "budgetary_impact",
-    "program_budget_waterfall": "program_breakdown",
-    "decile_absolute_bar": "decile_impacts",
-    "decile_relative_bar": "decile_impacts",
-    "winners_losers_stacked_bar": "winners_losers",
-    "poverty_relative_bar": "poverty_metrics",
-    "inequality_relative_bar": "inequality_metrics",
-}
-
-_EXPLICIT_DATA_PRESETS = {"earnings_variation_line"}
-_GENERIC_CHART_KINDS = {
-    "generic_area",
-    "generic_bar",
-    "generic_line",
-    "generic_scatter",
-}
-
-
 def _preset_chart_data(chart_kind: str, result: dict[str, Any]) -> list[dict[str, Any]]:
     if chart_kind == "budget_waterfall":
         return [
@@ -675,10 +661,12 @@ def generate_chart(
     _context: ToolExecutionContext | None = None,
 ) -> Dict[str, Any]:
     if chart_kind not in (
-        _GENERIC_CHART_KINDS | set(_PRESET_RESULT_KINDS) | _EXPLICIT_DATA_PRESETS
+        set(CHART_GENERIC_KINDS)
+        | set(CHART_PRESET_SOURCES)
+        | set(CHART_EXPLICIT_DATA_KINDS)
     ):
         return {"error": f"Unknown chart kind: {chart_kind}"}
-    if chart_kind in _GENERIC_CHART_KINDS:
+    if chart_kind in CHART_GENERIC_KINDS:
         if result_id:
             stored = _get_stored(
                 _context,
@@ -722,7 +710,8 @@ def generate_chart(
                 arrangement,
             )
         )
-    expected_kind = _PRESET_RESULT_KINDS.get(chart_kind)
+    preset_source = CHART_PRESET_SOURCES.get(chart_kind)
+    expected_kind = preset_source[2] if preset_source is not None else None
     preset_metadata: dict[str, Any] = {}
     if expected_kind is not None:
         if not result_id:

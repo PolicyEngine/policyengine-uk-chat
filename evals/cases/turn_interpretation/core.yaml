@@ -42,6 +42,263 @@ society_revision: &society_revision
   created_at: 2026-08-18T00:00:00Z
 
 cases:
+  - id: turn_parameter_lookup_starter_prompt
+    suite: turn_interpretation
+    description: A natural policy-value question uses the canonical parameter lookup classification without requiring the user to state that internal label.
+    tags: [opening_request, parameter_lookup, starter_prompt]
+    requirements: [policyengine_py]
+    prompt: What's the personal allowance?
+    turn_id: turn-parameter-starter
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind:
+          value: parameter_lookup
+          evidence: {quote: "What's the personal allowance?"}
+        fields:
+          parameter_query:
+            value: personal allowance
+            evidence: {quote: "What's the personal allowance?"}
+    expect:
+      candidate_contains:
+        kind: start_analysis
+        candidate:
+          analysis_kind: {value: parameter_lookup}
+          fields: {parameter_query: {value: personal allowance}}
+      reduced_revision_contains:
+        fields:
+          analysis_kind: {value: parameter_lookup}
+          parameter_query: {value: personal allowance}
+      binding_outcome: ready
+      plan_contains:
+        mode: standard
+        steps:
+          - {operation: get_parameter}
+      permitted_operations: [get_parameter]
+      lifecycle_outcome: plan_ready
+      public_outcome_category: completed
+      response_outcome: ready_standard
+
+  - id: turn_natural_reform_validation
+    suite: turn_interpretation
+    description: A proposed policy change is validated without requiring the user to call it a reform or parameter.
+    tags: [opening_request, reform_binding, natural_language]
+    requirements: [policyengine_py]
+    prompt: Would setting the personal allowance to £15,000 be accepted?
+    turn_id: turn-natural-reform-validation
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind:
+          value: reform_validation
+          evidence: {quote: "Would setting the personal allowance to £15,000 be accepted?"}
+        fields:
+          reform_intent:
+            value: personal allowance
+            evidence: {quote: personal allowance}
+          reform_instruction:
+            value: {kind: set_exact, value: 15000}
+            evidence: {quote: "£15,000"}
+    expect:
+      candidate_contains:
+        kind: start_analysis
+        candidate:
+          analysis_kind: {value: reform_validation}
+          fields:
+            reform_intent: {value: personal allowance}
+            reform_instruction: {value: {kind: set_exact, value: 15000}}
+      reduced_revision_contains:
+        fields:
+          analysis_kind: {value: reform_validation}
+          reform_intent: {value: personal allowance}
+      binding_outcome: ready
+      plan_contains:
+        mode: standard
+        steps:
+          - {operation: validate_reform}
+      permitted_operations: [validate_reform]
+      lifecycle_outcome: plan_ready
+      public_outcome_category: completed
+      response_outcome: ready_standard
+
+  - id: turn_natural_reform_population_cost
+    suite: turn_interpretation
+    description: Ordinary cost wording selects a population calculation and a typed policy change.
+    tags: [opening_request, reform_binding, society, natural_language]
+    requirements: [policyengine_py]
+    prompt: How much would raising the personal allowance by £1,000 cost the government?
+    turn_id: turn-natural-reform-cost
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind:
+          value: society
+          evidence: {quote: "How much would raising the personal allowance by £1,000 cost the government?"}
+        fields:
+          reform_intent:
+            value: personal allowance
+            evidence: {quote: personal allowance}
+          reform_instruction:
+            value: {kind: change_by_amount, amount: 1000}
+            evidence: {quote: "£1,000"}
+        outputs: [budgetary_impact]
+        output_evidence: {quote: cost the government}
+    expect:
+      candidate_contains:
+        kind: start_analysis
+        candidate:
+          analysis_kind: {value: society}
+          fields:
+            reform_intent: {value: personal allowance}
+            reform_instruction: {value: {kind: change_by_amount, amount: 1000}}
+          outputs: [budgetary_impact]
+      reduced_revision_contains:
+        fields:
+          analysis_kind: {value: society}
+          reform_intent: {value: personal allowance}
+        outputs: [budgetary_impact]
+      binding_outcome: ready
+      plan_contains:
+        mode: standard
+        steps:
+          - {operation: validate_reform}
+          - {operation: run_society_simulation}
+          - {operation: compute_budgetary_impact}
+      permitted_operations: [validate_reform, run_society_simulation, compute_budgetary_impact]
+      lifecycle_outcome: plan_ready
+      public_outcome_category: completed
+      response_outcome: ready_standard
+
+  - id: turn_natural_variable_caseload
+    suite: turn_interpretation
+    description: A people-count question resolves the ordinary programme name as a model variable without requiring the word variable.
+    tags: [opening_request, variable_binding, society, natural_language]
+    requirements: [policyengine_py]
+    prompt: How many people receive Universal Credit?
+    turn_id: turn-natural-variable-caseload
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind:
+          value: society
+          evidence: {quote: "How many people receive Universal Credit?"}
+        fields:
+          variable_query:
+            value: Universal Credit
+            evidence: {quote: Universal Credit}
+          aggregate_entity:
+            value: person
+            evidence: {quote: people}
+        outputs: [caseload]
+        output_evidence: {quote: "How many people"}
+    expect:
+      candidate_contains:
+        kind: start_analysis
+        candidate:
+          analysis_kind: {value: society}
+          fields:
+            variable_query: {value: Universal Credit}
+            aggregate_entity: {value: person}
+          outputs: [caseload]
+      reduced_revision_contains:
+        fields:
+          analysis_kind: {value: society}
+          variable_query: {value: Universal Credit}
+        outputs: [caseload]
+      binding_outcome: ready
+      plan_contains:
+        mode: standard
+        steps:
+          - {operation: run_society_simulation}
+          - {operation: aggregate_result}
+      permitted_operations: [run_society_simulation, aggregate_result]
+      lifecycle_outcome: plan_ready
+      public_outcome_category: completed
+      response_outcome: ready_standard
+
+  - id: turn_natural_household_entitlement
+    suite: turn_interpretation
+    description: A family entitlement question selects a synthetic-household calculation without requiring the word household.
+    tags: [opening_request, household, natural_language]
+    requirements: [policyengine_py]
+    prompt: How much Universal Credit would a 35-year-old single parent earning £22,000 with children aged 4 and 9 receive?
+    turn_id: turn-natural-household
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind:
+          value: household
+          evidence: {quote: "How much Universal Credit would a 35-year-old single parent earning £22,000 with children aged 4 and 9 receive?"}
+        fields:
+          people:
+            value:
+              - {age: 35, employment_income: 22000}
+              - {age: 4}
+              - {age: 9}
+            evidence: {quote: "a 35-year-old single parent earning £22,000 with children aged 4 and 9"}
+        outputs: [benefit_entitlement]
+        output_evidence: {quote: "How much Universal Credit"}
+    expect:
+      candidate_contains:
+        kind: start_analysis
+        candidate:
+          analysis_kind: {value: household}
+          fields:
+            people:
+              value:
+                - {age: 35, employment_income: 22000}
+                - {age: 4}
+                - {age: 9}
+          outputs: [benefit_entitlement]
+      reduced_revision_contains:
+        fields: {analysis_kind: {value: household}}
+        outputs: [benefit_entitlement]
+      binding_outcome: ready
+      plan_contains:
+        mode: standard
+        steps:
+          - {operation: validate_household}
+          - {operation: run_household_simulation}
+      permitted_operations: [validate_household, run_household_simulation]
+      lifecycle_outcome: plan_ready
+      public_outcome_category: completed
+      response_outcome: ready_standard
+
+  - id: turn_natural_concept_explanation
+    suite: turn_interpretation
+    description: A conceptual benefit question is an explanation even though it names a programme and no internal category.
+    tags: [opening_request, explanation, natural_language]
+    prompt: Why can earning more reduce someone's Universal Credit?
+    turn_id: turn-natural-explanation
+    initial_state: *idle
+    offline_candidate:
+      kind: start_analysis
+      relationship: new
+      candidate:
+        analysis_kind:
+          value: explanation
+          evidence: {quote: "Why can earning more reduce someone's Universal Credit?"}
+    expect:
+      candidate_contains:
+        kind: start_analysis
+        candidate: {analysis_kind: {value: explanation}}
+      reduced_revision_contains:
+        fields: {analysis_kind: {value: explanation}}
+      binding_outcome: explanation
+      plan_contains: {mode: explanation, steps: []}
+      permitted_operations: []
+      response_outcome: explanation
+
   - id: turn_opening_society_analysis
     suite: turn_interpretation
     description: An opening numerical request becomes a standard plan.
@@ -86,7 +343,7 @@ cases:
   - id: turn_explicit_boolean_reform_value
     suite: turn_interpretation
     description: An explicit boolean reform value keeps its JSON type through deterministic binding.
-    tags: [reform_binding, explicit_value]
+    tags: [reform_binding, explicit_value, permitted_override]
     requirements: [policyengine_py]
     prompt: Set gov.hmrc.income_tax.allowances.personal_allowance.amount to false in a 2026 society simulation and show the budgetary impact.
     turn_id: turn-boolean-reform
@@ -132,6 +389,7 @@ cases:
   - id: turn_completed_society_then_another_simulation
     suite: turn_interpretation
     description: A completed simulation can start a related independent simulation.
+    tags: [later_start]
     prompt: Run another related simulation for 2027 and show poverty impact.
     turn_id: turn-related
     initial_state: *completed
@@ -169,6 +427,7 @@ cases:
   - id: turn_correct_year
     suite: turn_interpretation
     description: A correction changes one field and inherits the remaining request.
+    tags: [later_revision, permitted_override]
     prompt: Use 2027 instead.
     turn_id: turn-correction
     initial_state: *completed
@@ -223,6 +482,7 @@ cases:
   - id: turn_answer_output_clarification
     suite: turn_interpretation
     description: A clarification answer changes only the requested output.
+    tags: [clarification]
     prompt: Use budgetary impact.
     turn_id: turn-answer
     initial_state:
@@ -344,6 +604,7 @@ cases:
   - id: turn_start_unrelated_explanation
     suite: turn_interpretation
     description: Unrelated work does not inherit the completed numerical request.
+    tags: [unrelated_request]
     prompt: "Unrelated question: explain what marginal tax rate means."
     turn_id: turn-unrelated
     initial_state: *completed
@@ -491,6 +752,7 @@ cases:
   - id: turn_reject_stale_revision
     suite: turn_interpretation
     description: A stale revision identifier cannot change the active request.
+    tags: [stale_state]
     prompt: Use 2027 instead.
     turn_id: turn-stale
     initial_state: *completed
@@ -608,6 +870,7 @@ cases:
   - id: turn_reject_unproducible_exploratory_result
     suite: turn_interpretation
     description: Exploratory compilation rejects an operation set that cannot produce a requested result.
+    tags: [exploratory_authority_rejection]
     prompt: Explore the budgetary impact using only a programme breakdown.
     turn_id: turn-unproducible-exploration
     initial_state: *idle
@@ -639,6 +902,7 @@ cases:
   - id: turn_reject_arbitrary_code_operation
     suite: turn_interpretation
     description: Arbitrary code execution cannot enter an exploratory plan.
+    tags: [exploratory_authority_rejection]
     prompt: Explore this with a Python operation.
     turn_id: turn-python
     initial_state: *idle
@@ -668,6 +932,7 @@ cases:
   - id: turn_reject_altered_exploratory_reform
     suite: turn_interpretation
     description: Exploratory execution cannot replace the plan-approved reform.
+    tags: [exploratory_authority_rejection]
     prompt: Explore the budget impact of setting gov.hmrc.income_tax.rates.uk[0].rate to 0.21 using one analytical call.
     turn_id: turn-altered-reform
     initial_state: *idle

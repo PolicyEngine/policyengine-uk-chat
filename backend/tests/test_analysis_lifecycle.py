@@ -10,7 +10,7 @@ from pydantic import ValidationError
 
 import analysis.lifecycle as lifecycle
 from analysis.common import AnalysisError, AnalysisErrorCode
-from analysis.compiler import compile_plan
+from analysis.compiler import ExecutionPlanCompiler
 from analysis.lifecycle import (
     AttemptOutcomeEvent,
     CancellationRequestedEvent,
@@ -19,6 +19,7 @@ from analysis.lifecycle import (
     LifecycleReducer,
     PlanClaimedEvent,
     PlanReadyEvent,
+    RecoveryEvent,
     RequestRejectedEvent,
 )
 from analysis.models import (
@@ -35,7 +36,7 @@ def _ready_transition(state=None):
     state = state or AnalysisSessionState(session_id="session_test", updated_at=NOW)
     semantic = revision()
     bound = bound_request()
-    plan = compile_plan(bound)
+    plan = ExecutionPlanCompiler.compile(bound)
     transition = LifecycleReducer.reduce(
         state,
         PlanReadyEvent(revision=semantic, bound_request=bound, plan=plan),
@@ -367,7 +368,7 @@ def test_complete_clarification_answer_records_answered_resolution_with_ready_pl
         revision_id=answered_revision.revision_id,
         turn_id=answered_revision.turn_id,
     )
-    plan = compile_plan(bound)
+    plan = ExecutionPlanCompiler.compile(bound)
 
     transition = LifecycleReducer.reduce(
         current,
@@ -433,6 +434,7 @@ class LifecycleEventSequenceMachine(RuleBasedStateMachine):
         self.plan = None
         self.pending_plan = None
         self.attempt = None
+        self.clarification = None
         self.sequence = 0
         self.expected_version = 0
 
@@ -447,7 +449,7 @@ class LifecycleEventSequenceMachine(RuleBasedStateMachine):
             revision_id=semantic.revision_id,
             turn_id=semantic.turn_id,
         )
-        return semantic, bound, compile_plan(bound)
+        return semantic, bound, ExecutionPlanCompiler.compile(bound)
 
     def _apply(self, transition):
         assert transition.expected_state_version == self.expected_version
@@ -466,7 +468,10 @@ class LifecycleEventSequenceMachine(RuleBasedStateMachine):
             )
         )
 
-    @precondition(lambda self: self.state.active_execution_id is None)
+    @precondition(
+        lambda self: self.state.active_execution_id is None
+        and self.state.phase != WorkflowPhase.AWAITING_CLARIFICATION
+    )
     @rule()
     def register_ready_plan(self):
         semantic, bound, plan = self._records()
@@ -482,6 +487,7 @@ class LifecycleEventSequenceMachine(RuleBasedStateMachine):
         self.plan = plan
         self.pending_plan = None
         self.attempt = None
+        self.clarification = None
 
     @precondition(
         lambda self: self.state.active_execution_id is None
@@ -508,6 +514,30 @@ class LifecycleEventSequenceMachine(RuleBasedStateMachine):
                 ),
             )
         )
+        self.clarification = clarification
+
+    @precondition(
+        lambda self: self.state.phase == WorkflowPhase.AWAITING_CLARIFICATION
+        and self.clarification is not None
+    )
+    @rule()
+    def answer_clarification(self):
+        semantic, bound, plan = self._records()
+        self._apply(
+            LifecycleReducer.reduce(
+                self.state,
+                PlanReadyEvent(
+                    revision=semantic,
+                    bound_request=bound,
+                    plan=plan,
+                    prior_clarification=self.clarification,
+                    resolving_turn_id=semantic.turn_id,
+                    answer_submitted=True,
+                ),
+            )
+        )
+        self.plan = plan
+        self.clarification = None
 
     @precondition(
         lambda self: self.state.phase == WorkflowPhase.READY
@@ -569,6 +599,66 @@ class LifecycleEventSequenceMachine(RuleBasedStateMachine):
         )
         if self.state.active_execution_id is None:
             self.plan = None
+        self.clarification = None
+
+    @precondition(
+        lambda self: self.state.phase
+        in {
+            WorkflowPhase.READY,
+            WorkflowPhase.AWAITING_CLARIFICATION,
+            WorkflowPhase.EXECUTING,
+        }
+        and self.state.active_revision_id is not None
+    )
+    @rule()
+    def reject_stale_cancellation_identifier(self):
+        before = self.state
+        with pytest.raises(AnalysisError) as raised:
+            LifecycleReducer.reduce(
+                self.state,
+                CancellationRequestedEvent(
+                    request_revision_id="stale_revision",
+                ),
+            )
+        assert raised.value.code == AnalysisErrorCode.LIFECYCLE_PRECONDITION_FAILED
+        assert self.state == before
+
+    @precondition(lambda self: self.state.active_execution_id is not None)
+    @rule()
+    def reject_foreign_recovery_identifier(self):
+        before = self.state
+        foreign_attempt = self.attempt.model_copy(
+            update={"session_id": "foreign_session"}
+        )
+        with pytest.raises(AnalysisError) as raised:
+            LifecycleReducer.reduce(
+                self.state,
+                RecoveryEvent(
+                    attempt=foreign_attempt,
+                    recovered_at=NOW
+                    + timedelta(seconds=self.expected_version + 1),
+                ),
+            )
+        assert raised.value.code == AnalysisErrorCode.LIFECYCLE_PRECONDITION_FAILED
+        assert self.state == before
+
+    @precondition(lambda self: self.state.active_execution_id is not None)
+    @rule()
+    def recover_attempt(self):
+        self._apply(
+            LifecycleReducer.reduce(
+                self.state,
+                RecoveryEvent(
+                    attempt=self.attempt,
+                    recovered_at=NOW
+                    + timedelta(seconds=self.expected_version + 1),
+                ),
+            )
+        )
+        self.attempt = None
+        if self.pending_plan is not None:
+            self.plan = self.pending_plan
+            self.pending_plan = None
 
     @precondition(lambda self: self.state.active_execution_id is not None)
     @rule(status=st.sampled_from(("completed", "failed", "cancelled")))

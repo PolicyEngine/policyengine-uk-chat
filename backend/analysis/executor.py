@@ -523,7 +523,7 @@ def _required_results_present(
     return set(plan.required_result_types).issubset(actual)
 
 
-def execute_standard_plan(
+def _execute_standard_plan(
     *,
     plan: ExecutionPlan,
     attempt: ExecutionAttempt,
@@ -796,7 +796,7 @@ def _response_text(response: Any) -> str:
     ).strip()
 
 
-def execute_exploratory_plan(
+def _execute_exploratory_plan(
     *,
     plan: ExecutionPlan,
     attempt: ExecutionAttempt,

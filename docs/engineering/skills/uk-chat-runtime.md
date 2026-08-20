@@ -5,20 +5,16 @@ operations, lifecycle persistence, or numerical response boundaries.
 
 ## Current integration status
 
-The runtime currently uses the typed `TurnInterpreter` dependency implemented
-by `interpret_turn`, plus `RequestCompiler`, `ExecutionEngine`,
-`FinalizationResult`, `ChatEventProjector`, `AnalysisStore`, and
-`SqlAnalysisStore`. `backend/analysis/coordinator.py::run_analysis_turn` remains
-the application coordinator and the one temporary analysis module that imports
-chat input and projection types. The target `AnalysisTurnService` does not yet
-exist. Do not document or test it as production behavior until the coordinator
-has been reduced to a chat-side adapter.
+The runtime uses five analysis roles: `AnalysisTurnService`, `TurnInterpreter`,
+`RequestCompiler`, `ExecutionEngine`, and `AnalysisStore`. `SqlAnalysisStore`
+implements persistence. `chat.analysis_adapter.run_analysis_turn` converts
+`ChatTurnInput` to `TurnCommand` and projects typed service results through
+`ChatEventProjector`; analysis code imports neither chat nor evaluation code.
 
-Temporary compatibility surfaces also remain: `AnalysisStateStore` aliases
-`SqlAnalysisStore`, direct binder/compiler/executor helpers remain available to
-older tests and callers, and several store mutations still combine lifecycle
-selection with SQL application. New production code should use the typed
-facades and protocol names, not these compatibility surfaces.
+Public binder/compiler compatibility functions, direct execution-strategy entry
+points, and the earlier concrete-store alias have been removed. SQL rows and
+version-one read compatibility live in internal persistence modules, while
+store mutations apply typed commands or reducer-owned transitions.
 
 ## Component ownership
 
@@ -62,8 +58,9 @@ facades and protocol names, not these compatibility surfaces.
   protocol.
 - Billing adapters build immutable per-model charge inputs and process pending
   intents outside analysis finalization and outside the database transaction.
-- `run_analysis_turn` currently sequences these components. Its replacement by
-  `AnalysisTurnService` is unfinished; do not add another orchestration path.
+- `AnalysisTurnService.run(TurnCommand)` is the only application-level analysis
+  sequencer. Its private completion method handles every final result, while the
+  chat-side `run_analysis_turn` function remains a compatibility stream only.
 
 Production analysis code must not import `backend/eval/`. Evaluation code may
 import production boundaries.
@@ -72,11 +69,11 @@ import production boundaries.
 
 ```mermaid
 flowchart TB
-    classDef transitional fill:#fff2cc,stroke:#b8860b,color:#222,stroke-width:2px
     classDef adapter fill:#f2e6ff,stroke:#7455b8,color:#222
 
-    Request["ChatTurnInput"] --> Coordinator["run_analysis_turn<br/>current coordinator"]:::transitional
-    Coordinator --> Load["AnalysisStore.load_or_create"]
+    Request["ChatTurnInput"] --> Adapter["run_analysis_turn<br/>chat compatibility stream"]:::adapter
+    Adapter --> Service["AnalysisTurnService.run<br/>TurnCommand"]
+    Service --> Load["AnalysisStore.load_or_create"]
     Load --> Receipt{"Existing turn receipt?"}
     Receipt -->|yes| Replay["Replay original outcome category or StillProcessing"]
     Receipt -->|no| Interpret["TurnInterpreter: CandidateTurnUpdate"]
@@ -112,13 +109,10 @@ flowchart TB
     Projector --> Public["Public streaming events"]
     FinalResult --> Billing["Billing intent processor"]:::adapter
 
-    Target["Target: AnalysisTurnService"]:::transitional
-    Target -. replaces after remaining refactor .-> Coordinator
 ```
 
-The solid arrows describe the current production pathway. The dotted arrow is
-the unfinished application-service refactor. A later component may reject an
-input but must not rewrite an earlier component's accepted output.
+The arrows describe the current production pathway. A later component may
+reject an input but must not rewrite an earlier component's accepted output.
 
 ## Session lifecycle state versus calculation instructions
 
@@ -149,9 +143,27 @@ dataset identifiers, iteration limits, and operation-call limits are absent.
 
 Exact scalar evidence preserves JSON types. In particular, `false`, `true`, and
 numeric zero are distinct valid values. Controlled values use registered
-synonyms, while structured values use their Pydantic/domain adapters. A stale
-revision, clarification, or execution reference fails validation before
-semantic reduction.
+synonyms, while structured values use their Pydantic/domain adapters. The
+`analysis_kind` value is a canonical member of the closed server enum inferred
+from a quoted part of the current user message; the user does not have to state
+an internal category label such as `parameter_lookup`. A stale revision,
+clarification, or execution reference fails validation before semantic
+reduction.
+
+Classify the requested outcome rather than matching internal vocabulary.
+Ordinary questions about a current rate or allowance can become
+`parameter_lookup`; proposed policy changes can become `reform_validation` or a
+household or society calculation according to the requested result; family
+examples can become `household`; and population costs, counts, or aggregates can
+become `society`. The interpreter schema obtains these distinctions from the
+registered `AnalysisCapability.interpretation_guidance` values.
+
+`parameter_query`, `variable_query`, and `reform_intent` retain ordinary user
+phrases, not internal PolicyEngine identifiers. For aggregate outputs, the
+interpreter separates the shortest named model concept into `variable_query`
+from the counted or aggregated unit in `aggregate_entity` and the natural
+operation in `aggregate_operation`. Registered controlled mappings accept forms
+such as “people,” “households,” “how many,” “total,” and “average.”
 
 The model may author `reform_intent` and a typed `reform_instruction`; it may
 not author the normalized `reform` field. `reform` is a server-derived field
@@ -179,6 +191,13 @@ request while original evidence remains in the semantic revision. Every
 requested output must resolve to a compatible producer with all typed arguments
 before the request is ready.
 
+Catalogue resolution selects a candidate only when one authoritative match has
+a strictly higher score than every other authoritative match. This applies to
+policy-value lookup, variable aggregation, and reform targets. A highest-score
+tie still produces clarification or bounded reform-target selection. Variable
+discovery passes the result limit independently of its optional entity filter;
+an absent user entity does not become an accidental discovery filter.
+
 Reform meaning uses the discriminated `ReformInstruction` variants:
 `set_exact`, `change_by_amount`, `change_by_percent`, `abolish`, `set_toggle`,
 `named_transformation`, and `direction_only`. Amounts and percentages are
@@ -193,7 +212,7 @@ Clarifications declare their target contract and whether choices are open,
 advisory, or closed. An incomplete answer to the same target increments the
 attempt count. A different missing target starts at zero. Answered, rejected,
 unsupported, replaced, superseded, and cancelled resolutions are immutable
-records created by `LifecycleReducer`; the coordinator supplies only the prior
+records created by `LifecycleReducer`; the turn service supplies only the prior
 clarification, resolving turn, and whether the turn submitted an answer.
 
 ## Capability extension procedure
@@ -201,7 +220,8 @@ clarification, resolving turn, and whether the turn submitted an answer.
 When adding a semantic field:
 
 1. Add one `SemanticFieldSpec` with its adapter, legal analysis kinds, evidence
-   policy, set/clear behavior, controlled vocabulary, and clarification contract.
+   policy, model-facing interpretation guidance, set/clear behavior, controlled
+   vocabulary, and clarification contract.
 2. Reference it from the relevant `AnalysisCapability` definitions.
 3. Add candidate validation tests for valid types, wrong types, evidence, clear
    behavior, and illegal analysis kinds.
@@ -383,9 +403,9 @@ claimed, running, or cancellation-requested attempt per session in PostgreSQL;
 the persistence layer performs the same check for test databases.
 
 `AnalysisStore` is the durable application boundary and `SqlAnalysisStore` is
-the current implementation. SQL row definitions and version-one parsing still
-share `persistence.py`, and claim/recovery methods still contain some lifecycle
-selection. Those are known transitional details, not extension patterns.
+the current implementation. SQL row definitions live in `persistence_rows.py`,
+version-one parsing lives in `persistence_compat.py`, and lifecycle policy stays
+in `LifecycleReducer` and `AnalysisTurnService` rather than store mutations.
 
 ## Required verification
 
@@ -394,7 +414,6 @@ concurrency tests. Follow `ai-evals.md` for manual model evaluation fixtures.
 The default automated evaluation remains offline and deterministic. Live model
 and population-data cases require the repository's explicit controls.
 
-Run `make typecheck-backend` for the currently scoped strict connector check.
-The check covers the declared store and dependency protocols, lifecycle core,
-request compiler, and execution engine. It does not yet prove the unfinished
-turn-service or all compatibility modules are strictly typed.
+Run `make typecheck-backend` for the scoped strict connector check. The check
+covers the declared store and dependency protocols, lifecycle core, request
+compiler, execution engine, turn service, and chat compatibility adapter.

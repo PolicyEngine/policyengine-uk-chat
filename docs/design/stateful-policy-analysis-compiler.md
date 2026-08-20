@@ -8,9 +8,8 @@ operation results.
 
 ## Implementation status
 
-The compiler, lifecycle, execution, finalization, projection, billing, and SQL
-storage boundaries described below are implemented. The application-service
-simplification is still in progress:
+The runtime exposes five analysis roles to normal callers, with pure reducers
+and compilers retained behind those roles:
 
 - The typed `TurnInterpreter` dependency is implemented by `interpret_turn`,
   which parses and validates the model-authored candidate before routing.
@@ -19,20 +18,19 @@ simplification is still in progress:
 - `ExecutionEngine` is the normal entry point for standard or exploratory plan
   execution.
 - `AnalysisStore` is the persistence protocol and `SqlAnalysisStore` is its SQL
-  implementation. `AnalysisStateStore` remains as a temporary compatibility
-  alias.
+  implementation. Every mutation accepts a typed command or reducer-owned
+  transition.
+- `AnalysisTurnService.run(TurnCommand)` sequences one message and emits typed
+  progress or a typed turn result.
 - `finalize_turn` returns `FinalizationResult`; `ChatEventProjector` separately
   creates public streaming events, and billing adapters separately create and
   process immutable billing intents.
-- `run_analysis_turn` in `backend/analysis/coordinator.py` still sequences the
-  complete turn and is the one temporary analysis module that imports chat
-  types. It has not yet been replaced by `AnalysisTurnService`.
+- `chat.analysis_adapter.run_analysis_turn` is the compatibility stream. It
+  converts `ChatTurnInput` to `TurnCommand` and projects service results; no
+  analysis module imports chat types.
 
-The remaining design work is to narrow the SQL store methods, introduce
-`AnalysisTurnService`, reduce `run_analysis_turn` to a chat-side compatibility
-adapter, expand the corresponding invariant and evaluation coverage, and then
-remove temporary aliases and direct strategy entry points. The OpenSpec task
-list is the authoritative completion record for that work.
+The OpenSpec task list is the authoritative completion record. Implementation
+and cross-project verification are complete.
 
 ## Directional architecture
 
@@ -43,12 +41,12 @@ flowchart TB
     classDef persisted fill:#e8ddff,stroke:#7455b8,color:#222
     classDef execution fill:#dcecff,stroke:#2867a8,color:#222
 
-    classDef transitional fill:#fff2cc,stroke:#b8860b,color:#222,stroke-width:2px
     classDef adapter fill:#f2e6ff,stroke:#7455b8,color:#222
 
     Chat["Chat adapter<br/>run_chat_turn"]:::adapter
-    Chat --> Coordinator["run_analysis_turn<br/>current application coordinator"]:::transitional
-    Coordinator --> Recover["Recover expired attempts<br/>for this session"]:::deterministic
+    Chat --> Compatibility["run_analysis_turn<br/>chat compatibility stream"]:::adapter
+    Compatibility --> Service["AnalysisTurnService.run<br/>typed TurnCommand"]:::deterministic
+    Service --> Recover["Recover expired attempts<br/>for this session"]:::deterministic
     Recover --> Load["AnalysisStore<br/>load AnalysisSessionState and records"]:::persisted
     Load --> Receipt{"Existing turn receipt?"}
     Receipt -->|yes| Replay["Replay original category<br/>or report still processing"]:::deterministic
@@ -111,14 +109,11 @@ flowchart TB
     FinalResult --> Usage["Persisted per-call usage and<br/>immutable billing intent"]:::persisted
     Usage --> Retry["BillingIntentProcessor<br/>idempotent external retry"]:::adapter
 
-    Target["Target: AnalysisTurnService<br/>replaces coordinator sequencing"]:::transitional
-    Target -. not implemented yet .-> Coordinator
 ```
 
-Each solid arrow is an implemented ownership boundary. The yellow coordinator
-is transitional: it uses the request and execution facades but still assembles
-lifecycle, persistence, narration, finalization, and chat projection itself.
-The dotted arrow marks the intended replacement, not production behavior.
+Each arrow is an implemented ownership boundary. `AnalysisTurnService` owns
+application sequencing, while the chat compatibility stream owns input
+conversion and public event projection.
 
 ## Distinct state and instruction types
 
@@ -154,7 +149,8 @@ one plan, using a stored token hash and a time-limited lease.
 | `ExecutionPlanCompiler` | `BoundRequest`, capability registry | `ExecutionPlan` | Produce deterministic operation instructions and authority limits |
 | `RequestCompiler` | validated semantic update and loaded state | compiled, clarification, unsupported, or failed decision | Invoke semantic reduction, binding, and plan compilation once for one accepted calculation update |
 | `LifecycleReducer` | `AnalysisSessionState`, typed lifecycle event | `WorkflowTransition` | Construct the complete next session state and all related record/status changes |
-| `AnalysisStore` / `SqlAnalysisStore` | typed load, transition, claim, attempt, recovery, and finalization inputs | typed persisted results or conflicts | Retain atomic ownership of related analysis records; some mutating methods still need typed-command cleanup |
+| `AnalysisStore` / `SqlAnalysisStore` | typed load queries and typed mutation commands or transitions | typed persisted results or conflicts | Retain atomic ownership of related analysis records without choosing lifecycle policy |
+| `AnalysisTurnService` | `TurnCommand` plus typed store, interpreter, compiler, execution, narration, billing, and version dependencies | typed progress and `TurnResult` values | Sequence replay, interpretation, compilation, lifecycle changes, execution, narration, and one completion path |
 | `ExecutionEngine` | claimed execution request | typed progress plus completed, failed, or cancelled result | Select standard or exploratory execution and use the shared operation-validation path |
 | `finalize_turn` | typed outcome, transition context, usage, and optional billing intent | `FinalizationResult` | Validate and persist the final analysis result without creating chat events or calculating prices |
 | `ChatEventProjector` | typed execution progress, replay outcome, or finalization result | public streaming events | Translate analysis values into the chat transport contract |

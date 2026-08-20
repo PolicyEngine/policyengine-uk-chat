@@ -2,18 +2,20 @@ from __future__ import annotations
 
 import ast
 import inspect
+from dataclasses import dataclass
 from pathlib import Path
 
 from sqlalchemy.pool import StaticPool
 from sqlmodel import create_engine
 
 from analysis.persistence import ensure_analysis_tables
-from analysis import coordinator
+from analysis import turn_service
 from analysis.store import AnalysisStore
 from analysis_helpers import analysis_store_boundary, typed_clock
 
 
-ANALYSIS_ROOT = Path("backend/analysis")
+REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+ANALYSIS_ROOT = REPOSITORY_ROOT / "backend" / "analysis"
 DOMAIN_MODULES = (
     "common.py",
     "models.py",
@@ -29,50 +31,90 @@ FORBIDDEN_DOMAIN_IMPORTS = {
     "sqlmodel",
     "tools",
 }
-TEMPORARY_CHAT_IMPORTERS = {
-    "coordinator.py",
-}
+TEMPORARY_CHAT_IMPORTERS: set[str] = set()
 
 
-def _import_roots(path: Path) -> set[str]:
+def _import_layers(path: Path) -> frozenset[str]:
     tree = ast.parse(path.read_text(), filename=str(path))
-    roots: set[str] = set()
+    layers: set[str] = set()
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
-            roots.update(alias.name.partition(".")[0] for alias in node.names)
+            layers.update(_import_layer(alias.name) for alias in node.names)
         elif isinstance(node, ast.ImportFrom) and node.module:
-            roots.add(node.module.partition(".")[0])
-    return roots
+            layers.add(_import_layer(node.module))
+    return frozenset(layers)
+
+
+def _import_layer(module: str) -> str:
+    """Return the application layer targeted by an absolute or relative import."""
+    parts = module.split(".")
+    if parts[0] == "backend" and len(parts) > 1:
+        return parts[1]
+    return parts[0]
+
+
+@dataclass(frozen=True)
+class ImportBoundary:
+    """A permitted dependency relationship for a defined source scope."""
+
+    source_root: Path
+    forbidden_layers: frozenset[str]
+    allowed_importers: frozenset[str] = frozenset()
+
+    def importers(self, paths: tuple[Path, ...] | None = None) -> frozenset[str]:
+        source_paths = paths or tuple(self.source_root.glob("*.py"))
+        return frozenset(
+            path.name
+            for path in source_paths
+            if _import_layers(path) & self.forbidden_layers
+        )
+
+    def violations(self, paths: tuple[Path, ...] | None = None) -> dict[str, list[str]]:
+        source_paths = paths or tuple(self.source_root.glob("*.py"))
+        return {
+            path.name: sorted(_import_layers(path) & self.forbidden_layers)
+            for path in source_paths
+            if path.name not in self.allowed_importers
+            and _import_layers(path) & self.forbidden_layers
+        }
+
+
+DOMAIN_BOUNDARY = ImportBoundary(
+    source_root=ANALYSIS_ROOT,
+    forbidden_layers=frozenset(FORBIDDEN_DOMAIN_IMPORTS),
+)
+ANALYSIS_TO_EVALUATION_BOUNDARY = ImportBoundary(
+    source_root=ANALYSIS_ROOT,
+    forbidden_layers=frozenset({"eval"}),
+)
+ANALYSIS_TO_CHAT_BOUNDARY = ImportBoundary(
+    source_root=ANALYSIS_ROOT,
+    forbidden_layers=frozenset({"chat"}),
+    allowed_importers=frozenset(TEMPORARY_CHAT_IMPORTERS),
+)
+
+
+def test_import_layer_recognizes_backend_namespaces():
+    assert _import_layer("backend.chat.projector") == "chat"
+    assert _import_layer("backend.eval.runner") == "eval"
+    assert _import_layer("analysis.lifecycle") == "analysis"
 
 
 def test_domain_modules_do_not_import_external_effect_layers():
-    violations = {
-        filename: sorted(_import_roots(ANALYSIS_ROOT / filename) & FORBIDDEN_DOMAIN_IMPORTS)
-        for filename in DOMAIN_MODULES
-        if _import_roots(ANALYSIS_ROOT / filename) & FORBIDDEN_DOMAIN_IMPORTS
-    }
+    paths = tuple(ANALYSIS_ROOT / filename for filename in DOMAIN_MODULES)
 
-    assert violations == {}
+    assert DOMAIN_BOUNDARY.violations(paths) == {}
 
 
 def test_analysis_never_imports_evaluation_code():
-    violations = [
-        path.name
-        for path in ANALYSIS_ROOT.glob("*.py")
-        if "eval" in _import_roots(path)
-    ]
-
-    assert violations == []
+    assert ANALYSIS_TO_EVALUATION_BOUNDARY.violations() == {}
 
 
-def test_chat_imports_are_limited_to_known_compatibility_modules():
-    importers = {
-        path.name
-        for path in ANALYSIS_ROOT.glob("*.py")
-        if "chat" in _import_roots(path)
-    }
-
-    assert importers == TEMPORARY_CHAT_IMPORTERS
+def test_analysis_does_not_import_chat_modules():
+    assert ANALYSIS_TO_CHAT_BOUNDARY.importers() == frozenset(
+        TEMPORARY_CHAT_IMPORTERS
+    )
+    assert ANALYSIS_TO_CHAT_BOUNDARY.violations() == {}
 
 
 def test_shared_clock_and_persistence_fakes_satisfy_typed_boundaries():
@@ -88,8 +130,8 @@ def test_shared_clock_and_persistence_fakes_satisfy_typed_boundaries():
     assert isinstance(store, AnalysisStore)
 
 
-def test_coordinator_uses_request_compilation_facade_once():
-    source = inspect.getsource(coordinator.run_analysis_turn)
+def test_turn_service_uses_request_compilation_facade_once():
+    source = inspect.getsource(turn_service._run_turn)
 
     assert source.count("dependencies.request_compiler.compile") == 1
     for forbidden in (
@@ -100,14 +142,21 @@ def test_coordinator_uses_request_compilation_facade_once():
         assert forbidden not in source
 
 
-def test_coordinator_uses_execution_facade_once():
-    source = inspect.getsource(coordinator.run_analysis_turn)
+def test_turn_service_uses_execution_facade_once():
+    source = inspect.getsource(turn_service._run_turn)
 
     assert source.count("dependencies.execution_engine.execute") == 1
     for forbidden in (
-        "execute_standard_plan",
-        "execute_exploratory_plan",
+        "_execute_standard_plan",
+        "_execute_exploratory_plan",
         "dependencies.standard_executor",
         "dependencies.exploratory_executor",
     ):
         assert forbidden not in source
+
+
+def test_turn_service_supplies_the_plan_claim_transition_to_the_store():
+    source = inspect.getsource(turn_service._run_turn)
+
+    assert source.count("store.commit_plan_claim") == 1
+    assert "store.claim_plan(" not in source

@@ -102,7 +102,9 @@ def narration_tool_definition() -> dict[str, Any]:
     return {
         "name": "emit_narration",
         "description": "Emit prose with every numerical insertion represented by a reference.",
-        "strict": True,
+        # Anthropic strict tool schemas reject the discriminated segment union's
+        # generated ``oneOf``. The draft remains untrusted until Pydantic and the
+        # numerical-reference validator accept it below.
         "input_schema": NARRATION_DRAFT_ADAPTER.json_schema(),
     }
 
@@ -242,9 +244,10 @@ def _extract_draft(response: Any) -> NarrationDraft:
             getattr(block, "type", None) == "tool_use"
             and getattr(block, "name", None) == "emit_narration"
         ):
-            return NARRATION_DRAFT_ADAPTER.validate_python(
-                getattr(block, "input", None)
-            )
+            value = getattr(block, "input", None)
+            if isinstance(value, str):
+                value = json.loads(value)
+            return NARRATION_DRAFT_ADAPTER.validate_python(value)
     raise AnalysisError(
         AnalysisErrorCode.NARRATION_INVALID,
         "narrator returned no structured narration",
@@ -271,7 +274,11 @@ def narrate_execution_result(
     resolved_client = client or get_sync_client()
     total_usage: dict[str, int] = {}
     call_usages: list[dict[str, int]] = []
+    retry_feedback: dict[str, str] | None = None
     for _attempt in range(2):
+        request_payload = dict(payload)
+        if retry_feedback is not None:
+            request_payload["retry_feedback"] = retry_feedback
         try:
             response = resolved_client.messages.create(
                 model=NARRATION_MODEL,
@@ -283,7 +290,11 @@ def narrate_execution_result(
                 messages=[
                     {
                         "role": "user",
-                        "content": json.dumps(payload, ensure_ascii=False, default=str),
+                        "content": json.dumps(
+                            request_payload,
+                            ensure_ascii=False,
+                            default=str,
+                        ),
                     }
                 ],
             )
@@ -305,7 +316,16 @@ def narrate_execution_result(
                 usage=total_usage,
                 call_usages=tuple(call_usages),
             )
-        except (AnalysisError, ValidationError, TypeError, ValueError):
+        except (AnalysisError, ValidationError, TypeError, ValueError) as exc:
+            retry_feedback = {
+                "validation_error": str(exc),
+                "instruction": (
+                    "Return a different emit_narration draft. Text segments must "
+                    "contain no numerical characters. Insert every result through "
+                    "a fact segment and every permitted structural number through "
+                    "an approved_number segment using only supplied identifiers."
+                ),
+            }
             continue
     return NarrationResult(
         content=deterministic_fact_summary(facts, caveats),

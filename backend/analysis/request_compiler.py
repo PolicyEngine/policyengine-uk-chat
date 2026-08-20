@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal, assert_never
 
@@ -47,11 +47,6 @@ class CompilationInput:
     active_clarification: PendingClarification | None
     turn_id: str
     runtime_versions: RuntimeVersions
-    registry: CapabilityRegistry = CAPABILITY_REGISTRY
-    operation_catalogue: OperationCatalogue = field(
-        default_factory=default_operation_catalogue
-    )
-    binding_services: BindingServices = field(default_factory=BindingServices)
     bootstrap: bool = False
     created_at: datetime | None = None
 
@@ -101,6 +96,31 @@ RequestCompilation = (
 class RequestCompiler:
     """Produce exactly one typed decision from one semantic turn update."""
 
+    def __init__(
+        self,
+        *,
+        registry: CapabilityRegistry = CAPABILITY_REGISTRY,
+        operation_catalogue: OperationCatalogue | None = None,
+        binding_services: BindingServices | None = None,
+    ) -> None:
+        self._registry = registry
+        self._operation_catalogue = (
+            operation_catalogue or default_operation_catalogue()
+        )
+        self._binding_services = binding_services or BindingServices()
+
+    @classmethod
+    def runtime_default(cls) -> "RequestCompiler":
+        """Construct the production facade without exposing internal phases."""
+
+        from analysis.interpreter import select_reform_targets
+
+        return cls(
+            binding_services=BindingServices(
+                reform_target_selector=select_reform_targets,
+            )
+        )
+
     def compile(self, compilation_input: CompilationInput) -> RequestCompilation:
         try:
             revision = SemanticRequestReducer.reduce(
@@ -121,9 +141,9 @@ class RequestCompiler:
             )
 
         binding = RequestBinder(
-            services=compilation_input.binding_services,
-            registry=compilation_input.registry,
-            operation_catalogue=compilation_input.operation_catalogue,
+            services=self._binding_services,
+            registry=self._registry,
+            operation_catalogue=self._operation_catalogue,
         ).bind(
             revision,
             runtime_versions=compilation_input.runtime_versions,
@@ -154,8 +174,8 @@ class RequestCompiler:
             try:
                 plan = ExecutionPlanCompiler.compile(
                     binding.bound_request,
-                    compilation_input.registry,
-                    compilation_input.operation_catalogue,
+                    self._registry,
+                    self._operation_catalogue,
                 )
             except AnalysisError as exc:
                 if exc.code == AnalysisErrorCode.REQUEST_UNSUPPORTED:

@@ -20,6 +20,11 @@ from analysis.models import (
 )
 
 
+DEFAULT_EXECUTION_LEASE_SECONDS = 180
+DEFAULT_EXECUTION_HEARTBEAT_SECONDS = 15
+DEFAULT_PROCESSING_RECEIPT_TIMEOUT_SECONDS = 600
+
+
 @dataclass(frozen=True)
 class LoadedAnalysisState:
     state: AnalysisSessionState
@@ -44,20 +49,78 @@ class ClaimedExecution:
     token: str
 
 
+@dataclass(frozen=True)
+class ClaimPlanCommand:
+    """A precomputed claim transition and its request-local execution token."""
+
+    transition: WorkflowTransition
+    attempt: ExecutionAttempt
+    token: str
+
+
+@dataclass(frozen=True)
+class AttemptCompletionCommand:
+    """A lifecycle-owned transition that closes one token-authorized attempt."""
+
+    transition: WorkflowTransition
+    execution_id: str
+    token: str
+
+
+@dataclass(frozen=True)
+class CreateSessionCommand:
+    session_id: str
+    at: datetime | None = None
+
+
+@dataclass(frozen=True)
+class LoadOrCreateSessionCommand:
+    session_id: str
+
+
+@dataclass(frozen=True)
+class BeginTurnCommand:
+    session_id: str
+    turn_id: str
+    request_content: object
+    state_version: int
+
+
+@dataclass(frozen=True)
+class HeartbeatAttemptCommand:
+    execution_id: str
+    token: str
+    lease_seconds: int = DEFAULT_EXECUTION_LEASE_SECONDS
+
+
+@dataclass(frozen=True)
+class MarkBillingRecordedCommand:
+    session_id: str
+    turn_id: str
+
+
+@dataclass(frozen=True)
+class DeleteAnalysisSessionCommand:
+    session_id: str
+
+
+@dataclass(frozen=True)
+class SessionDeletionResult:
+    session_id: str
+
+
 @runtime_checkable
 class AnalysisStore(Protocol):
     """Atomic persistence operations used while coordinating one turn."""
 
-    def create_session(
-        self,
-        session_id: str,
-        *,
-        at: datetime | None = None,
-    ) -> AnalysisSessionState: ...
+    def create_session(self, command: CreateSessionCommand) -> AnalysisSessionState: ...
 
     def load_state(self, session_id: str) -> AnalysisSessionState: ...
 
-    def load_or_create(self, session_id: str) -> LoadedAnalysisState: ...
+    def load_or_create(
+        self,
+        command: LoadOrCreateSessionCommand,
+    ) -> LoadedAnalysisState: ...
 
     def load(
         self,
@@ -66,29 +129,19 @@ class AnalysisStore(Protocol):
         state: AnalysisSessionState | None = None,
     ) -> LoadedAnalysisState: ...
 
-    def begin_turn(
-        self,
-        *,
-        session_id: str,
-        turn_id: str,
-        request_content: object,
-        state_version: int,
-    ) -> TurnStart: ...
+    def begin_turn(self, command: BeginTurnCommand) -> TurnStart: ...
 
     def commit_transition(
         self,
         transition: WorkflowTransition,
     ) -> AnalysisSessionState: ...
 
-    def claim_plan(
+    def commit_plan_claim(self, command: ClaimPlanCommand) -> ClaimedExecution: ...
+
+    def commit_attempt_completion(
         self,
-        *,
-        session_id: str,
-        plan: ExecutionPlan,
-        worker_id: str,
-        expected_state_version: int,
-        lease_seconds: int = 180,
-    ) -> ClaimedExecution: ...
+        command: AttemptCompletionCommand,
+    ) -> AnalysisSessionState: ...
 
     def verify_attempt(
         self,
@@ -101,10 +154,7 @@ class AnalysisStore(Protocol):
 
     def heartbeat_attempt(
         self,
-        *,
-        execution_id: str,
-        token: str,
-        lease_seconds: int = 180,
+        command: HeartbeatAttemptCommand,
     ) -> ExecutionAttempt: ...
 
     def cancellation_requested(
@@ -114,12 +164,12 @@ class AnalysisStore(Protocol):
         token: str,
     ) -> bool: ...
 
-    def recover_expired_attempts(
+    def expired_attempts(
         self,
         *,
         at: datetime | None = None,
         session_id: str | None = None,
-    ) -> tuple[str, ...]: ...
+    ) -> tuple[ExecutionAttempt, ...]: ...
 
     def load_revision(
         self,
@@ -139,7 +189,7 @@ class AnalysisStore(Protocol):
 
     def load_receipt(self, session_id: str, turn_id: str) -> TurnReceipt: ...
 
-    def mark_billing_recorded(self, session_id: str, turn_id: str) -> bool: ...
+    def mark_billing_recorded(self, command: MarkBillingRecordedCommand) -> bool: ...
 
     def pending_billing_intents(
         self,
@@ -147,3 +197,8 @@ class AnalysisStore(Protocol):
         user_id: str,
         limit: int = 100,
     ) -> tuple[BillingIntent, ...]: ...
+
+    def delete_session(
+        self,
+        command: DeleteAnalysisSessionCommand,
+    ) -> SessionDeletionResult: ...

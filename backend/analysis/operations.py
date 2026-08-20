@@ -14,6 +14,7 @@ from analysis.capabilities import (
     OutputProducer,
 )
 from analysis.common import AnalysisError, AnalysisErrorCode
+from tools.definitions import CHART_PRESET_SOURCES
 from tools.registry import RegisteredTool, tool_specs
 
 
@@ -147,49 +148,9 @@ class OperationCatalogue:
             )
 
 
-_CHART_RECIPES = (
-    ChartRecipe(
-        "budget_waterfall",
-        "budgetary_impact",
-        "compute_budgetary_impact",
-        "budgetary_impact",
-    ),
-    ChartRecipe(
-        "program_budget_waterfall",
-        "program_breakdown",
-        "compute_program_breakdown",
-        "program_breakdown",
-    ),
-    ChartRecipe(
-        "poverty_relative_bar",
-        "poverty_impact",
-        "compute_poverty_metrics",
-        "poverty_metrics",
-    ),
-    ChartRecipe(
-        "inequality_relative_bar",
-        "inequality_impact",
-        "compute_inequality_metrics",
-        "inequality_metrics",
-    ),
-    ChartRecipe(
-        "decile_absolute_bar",
-        "decile_impact",
-        "compute_decile_impacts",
-        "decile_impacts",
-    ),
-    ChartRecipe(
-        "decile_relative_bar",
-        "decile_impact",
-        "compute_decile_impacts",
-        "decile_impacts",
-    ),
-    ChartRecipe(
-        "winners_losers_stacked_bar",
-        "winners_losers",
-        "compute_winners_losers",
-        "winners_losers",
-    ),
+_CHART_RECIPES = tuple(
+    ChartRecipe(chart_kind, *source)
+    for chart_kind, source in CHART_PRESET_SOURCES.items()
 )
 
 

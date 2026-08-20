@@ -38,6 +38,21 @@ class CatalogueResolution:
     def authoritative(self) -> tuple[CatalogueCandidate, ...]:
         return tuple(item for item in self.candidates if item.authoritative)
 
+    @property
+    def unique_best_authoritative(self) -> CatalogueCandidate | None:
+        """Return one strictly best authoritative match, otherwise no decision."""
+
+        candidates = self.authoritative
+        if not candidates:
+            return None
+        highest_score = max(candidate.score for candidate in candidates)
+        best = tuple(
+            candidate
+            for candidate in candidates
+            if candidate.score == highest_score
+        )
+        return best[0] if len(best) == 1 else None
+
 
 def current_catalogue_version() -> str:
     try:
@@ -96,7 +111,7 @@ def resolve_catalogue_term(
     query: str,
     *,
     reform_search: Callable[[str, int], list[dict]] | None = None,
-    variable_search: Callable[[str, int], dict] | None = None,
+    variable_search: Callable[[str, str | None, int], dict] | None = None,
     limit: int = 20,
 ) -> CatalogueResolution:
     """Resolve one bounded term and distinguish absence from lookup failure."""
@@ -125,7 +140,7 @@ def resolve_catalogue_term(
                 from engine.discovery import search_variables
 
                 variable_search = search_variables
-            response = variable_search(query, limit)
+            response = variable_search(query, None, limit)
             candidates = [
                 (
                     row["name"],

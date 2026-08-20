@@ -7,15 +7,16 @@ import pytest
 from pydantic import ValidationError
 
 from analysis.common import AnalysisError, AnalysisErrorCode
+from analysis.facts import build_fact_register
 from analysis.executor import (
     authorize_exploratory_call,
-    execute_exploratory_plan,
-    execute_standard_plan,
+    _execute_exploratory_plan,
+    _execute_standard_plan,
     validate_registered_arguments,
     validate_execution_authority,
 )
 from analysis.models import ResultEnvelope
-from analysis_helpers import plan_and_records
+from analysis_helpers import plan_and_records, revision
 from tools.context import new_tool_context
 from tools.registry import tool_definitions, tool_specs
 
@@ -73,7 +74,7 @@ def _verified(attempt):
 
 def test_standard_execution_validates_outputs_and_typed_dependencies():
     semantic, bound, plan, _state, attempt = plan_and_records()
-    outcome = execute_standard_plan(
+    outcome = _execute_standard_plan(
         plan=plan,
         attempt=attempt,
         token="token",
@@ -91,11 +92,51 @@ def test_standard_execution_validates_outputs_and_typed_dependencies():
     assert all("result_id" not in item["summary"] for item in outcome.record.operation_summaries)
 
 
+def test_parameter_fact_projection_reports_only_current_labelled_amount():
+    spec = {item.name: item for item in tool_specs()}["get_parameter"]
+    projected = spec.fact_extractor(
+        {
+            "status": "success",
+            "parameter": {
+                "path": "gov.hmrc.income_tax.allowances.personal_allowance.amount",
+                "label": "Personal allowance",
+                "unit": "currency-GBP",
+                "inactive_value": 0,
+                "year": 2026,
+                "value": 12_570,
+            },
+        }
+    )
+
+    assert projected == {"personal_allowance_amount": 12_570}
+    facts = build_fact_register(
+        revision=revision(
+            "parameter_lookup",
+            fields={"parameter_query": "personal allowance", "year": 2026},
+            outputs=(),
+        ),
+        operation_summaries=(
+            {
+                "step_id": "parameter",
+                "operation": "get_parameter",
+                "summary": projected,
+            },
+        ),
+    )
+    parameter_facts = [
+        fact for fact in facts.facts if fact.source_step_id == "parameter"
+    ]
+
+    assert len(parameter_facts) == 1
+    assert parameter_facts[0].label == "get parameter: personal allowance amount"
+    assert parameter_facts[0].display_value == "£12,570"
+
+
 def test_standard_execution_resolves_branching_dependencies_from_one_simulation():
     semantic, bound, plan, _state, attempt = plan_and_records(
         outputs=("budgetary_impact", "poverty_impact")
     )
-    outcome = execute_standard_plan(
+    outcome = _execute_standard_plan(
         plan=plan,
         attempt=attempt,
         token="token",
@@ -129,7 +170,7 @@ def test_malformed_success_object_fails_before_result_or_fact_creation():
             return {"result_id": "missing_status"}
         return _dispatch(operation, arguments, context)
 
-    outcome = execute_standard_plan(
+    outcome = _execute_standard_plan(
         plan=plan,
         attempt=attempt,
         token="token",
@@ -152,7 +193,7 @@ def test_unregistered_output_field_fails_before_result_or_fact_creation():
             return {**result, "internal_secret": "must not be persisted"}
         return result
 
-    outcome = execute_standard_plan(
+    outcome = _execute_standard_plan(
         plan=plan,
         attempt=attempt,
         token="token",
@@ -175,7 +216,7 @@ def test_unregistered_output_field_fails_before_result_or_fact_creation():
             "result_id": "household_baseline",
             "year": 2026,
             "reform_applied": False,
-            "person": {"0": {"income_tax": 100}},
+            "person": [{"person_id": 0, "income_tax": 100}],
             "benunit": {"universal_credit": 50},
             "household": {"household_net_income": 1000},
         },
@@ -185,12 +226,12 @@ def test_unregistered_output_field_fails_before_result_or_fact_creation():
             "year": 2026,
             "reform_applied": True,
             "baseline": {
-                "person": {"0": {"income_tax": 100}},
+                "person": [{"person_id": 0, "income_tax": 100}],
                 "benunit": {"universal_credit": 50},
                 "household": {"household_net_income": 1000},
             },
             "reform": {
-                "person": {"0": {"income_tax": 90}},
+                "person": [{"person_id": 0, "income_tax": 90}],
                 "benunit": {"universal_credit": 50},
                 "household": {"household_net_income": 1010},
             },
@@ -217,7 +258,7 @@ def test_household_output_contract_rejects_unknown_top_level_fields():
         "result_id": "household_baseline",
         "year": 2026,
         "reform_applied": False,
-        "person": {"0": {"income_tax": 100}},
+        "person": [{"person_id": 0, "income_tax": 100}],
         "benunit": {"universal_credit": 50},
         "household": {"household_net_income": 1000},
         "secret_internal_field": "must not be exposed",
@@ -237,7 +278,7 @@ def test_household_output_contract_rejects_non_boolean_reform_flags(value):
         "result_id": "household_baseline",
         "year": 2026,
         "reform_applied": value,
-        "person": {"0": {"income_tax": 100}},
+        "person": [{"person_id": 0, "income_tax": 100}],
         "benunit": {"universal_credit": 50},
         "household": {"household_net_income": 1000},
     }
@@ -271,7 +312,7 @@ def test_registered_input_adapters_enforce_complete_json_schema_constraints():
 def test_cancellation_is_polled_before_each_operation():
     semantic, bound, plan, _state, attempt = plan_and_records()
     calls = []
-    outcome = execute_standard_plan(
+    outcome = _execute_standard_plan(
         plan=plan,
         attempt=attempt,
         token="token",
@@ -298,7 +339,7 @@ def test_cancellation_between_operations_preserves_only_completed_results():
             cancelled = True
         return result
 
-    outcome = execute_standard_plan(
+    outcome = _execute_standard_plan(
         plan=plan,
         attempt=attempt,
         token="token",
@@ -377,7 +418,7 @@ def test_exploratory_execution_uses_restricted_tools_and_actual_results():
         fields={"objective": "trace effects"},
     )
     messages = _Messages()
-    outcome = execute_exploratory_plan(
+    outcome = _execute_exploratory_plan(
         plan=plan,
         attempt=attempt,
         token="token",
@@ -425,7 +466,7 @@ def test_exploratory_execution_checks_cancellation_between_tool_blocks():
         content=[Block("call_1"), Block("call_2")],
         usage=SimpleNamespace(input_tokens=1, output_tokens=1),
     )
-    outcome = execute_exploratory_plan(
+    outcome = _execute_exploratory_plan(
         plan=plan,
         attempt=attempt,
         token="token",
@@ -501,7 +542,7 @@ def test_exploratory_chart_consumes_program_breakdown_from_same_execution():
             usage=SimpleNamespace(input_tokens=1, output_tokens=1),
         )
     )
-    outcome = execute_exploratory_plan(
+    outcome = _execute_exploratory_plan(
         plan=plan,
         attempt=attempt,
         token="token",
@@ -551,7 +592,7 @@ def test_exploratory_model_cannot_call_operation_outside_plan():
         content=[BadBlock()],
         usage=SimpleNamespace(input_tokens=1, output_tokens=1),
     )
-    outcome = execute_exploratory_plan(
+    outcome = _execute_exploratory_plan(
         plan=plan,
         attempt=attempt,
         token="token",
@@ -573,7 +614,7 @@ def test_declared_plan_result_type_cannot_override_registered_actual_type():
         else spec
         for spec in tool_specs()
     )
-    outcome = execute_standard_plan(
+    outcome = _execute_standard_plan(
         plan=plan,
         attempt=attempt,
         token="token",

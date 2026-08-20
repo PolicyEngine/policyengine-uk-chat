@@ -12,9 +12,16 @@ from sqlalchemy import update
 from sqlalchemy.pool import StaticPool
 
 from analysis.binding import BindingServices
-from analysis.compiler import compile_plan
-from analysis.coordinator import CoordinatorDependencies, run_analysis_turn
-from analysis.execution_engine import ExecutionEngine
+from analysis.common import AnalysisError, AnalysisErrorCode
+from analysis.compiler import ExecutionPlanCompiler
+from analysis.turn_service import (
+    AnalysisTurnService,
+    TurnCommand,
+    TurnMessage,
+    TurnResult,
+    TurnServiceDependencies,
+)
+from analysis.execution_engine import ExecutionEngine, ExecutionRequest, ExecutionResult
 from analysis.executor import ExecutionOutcome
 from analysis.interpreter import InterpretationResult, InterpretationUsage
 from analysis.models import (
@@ -55,12 +62,25 @@ from analysis.persistence import (
     AnalysisModelUsageRow,
     AnalysisPlanRow,
     AnalysisRequestRevisionRow,
-    AnalysisStateStore,
+    SqlAnalysisStore,
     AnalysisTurnReceiptRow,
     AnalysisWorkflowRow,
     ensure_analysis_tables,
 )
-from analysis_helpers import bound_request, owned_analysis_store, revision
+from analysis.request_compiler import (
+    CompilationInput,
+    RequestCompilation,
+    RequestCompiler,
+)
+from analysis.store import BeginTurnCommand, LoadOrCreateSessionCommand
+from analysis_helpers import (
+    bound_request,
+    claim_plan,
+    create_session,
+    finish_attempt,
+    owned_analysis_store,
+    revision,
+)
 from chat.events import (
     CancellationAccepted,
     ClarificationRequired,
@@ -69,10 +89,11 @@ from chat.events import (
     TurnConflict,
     TurnFailed,
 )
+from chat.analysis_adapter import run_analysis_turn
 from chat.turn_input import ChatTurnInput
 
 
-def _store() -> AnalysisStateStore:
+def _store() -> SqlAnalysisStore:
     engine = create_engine(
         "sqlite://",
         connect_args={"check_same_thread": False},
@@ -202,15 +223,34 @@ async def _not_cancelled() -> bool:
     return False
 
 
+class CountingRequestCompiler:
+    def __init__(self, delegate: RequestCompiler) -> None:
+        self._delegate = delegate
+        self.calls = 0
+
+    def compile(self, compilation_input: CompilationInput) -> RequestCompilation:
+        self.calls += 1
+        return self._delegate.compile(compilation_input)
+
+
+class CountingExecutionService:
+    def __init__(self, delegate: ExecutionEngine) -> None:
+        self._delegate = delegate
+        self.calls = 0
+
+    def execute(self, request: ExecutionRequest) -> ExecutionResult:
+        self.calls += 1
+        return self._delegate.execute(request)
+
+
 async def _run(turn, *, store, interpreter, **overrides):
-    dependencies = CoordinatorDependencies(
+    request_compiler = overrides.get("request_compiler") or RequestCompiler(
+        binding_services=overrides.get("binding_services", BindingServices())
+    )
+    dependencies = TurnServiceDependencies(
         store=store,
         interpreter=interpreter,
-        request_compiler=overrides.get(
-            "request_compiler",
-            CoordinatorDependencies().request_compiler,
-        ),
-        binding_services=overrides.get("binding_services", BindingServices()),
+        request_compiler=request_compiler,
         execution_engine=overrides.get(
             "execution_engine",
             ExecutionEngine(
@@ -433,6 +473,100 @@ def test_standard_calculation_claims_executes_narrates_then_finalizes():
     assert state.latest_execution_id is not None
 
 
+def test_turn_service_compiles_once_and_executes_at_most_once():
+    store = _store()
+    compiler = CountingRequestCompiler(
+        RequestCompiler(binding_services=BindingServices())
+    )
+    execution = CountingExecutionService(
+        ExecutionEngine(standard_strategy=_executor)
+    )
+    service = AnalysisTurnService(
+        TurnServiceDependencies(
+            store=store,
+            interpreter=lambda _context: _interpretation(
+                "society",
+                outputs=("budgetary_impact",),
+            ),
+            request_compiler=compiler,
+            execution_engine=execution,
+            narrator=_narrator,
+        )
+    )
+    command = TurnCommand(
+        messages=(TurnMessage(role="user", content="society outputs"),),
+        session_id="service_session",
+        turn_id="service_turn",
+        is_cancelled=_not_cancelled,
+    )
+
+    async def collect():
+        return [result async for result in service.run(command)]
+
+    results = asyncio.run(collect())
+    final = next(result for result in results if isinstance(result, TurnResult))
+
+    assert compiler.calls == 1
+    assert execution.calls == 1
+    assert final.outcome.kind == "completed"
+    assert final.finalization is not None
+
+
+def test_turn_service_does_not_retry_after_execution_finalization_conflict():
+    store = _store()
+    compiler = CountingRequestCompiler(
+        RequestCompiler(binding_services=BindingServices())
+    )
+    execution = CountingExecutionService(
+        ExecutionEngine(standard_strategy=_executor)
+    )
+    original_commit = store.commit_transition
+    completion_conflicts = 0
+
+    def conflict_on_first_completion(transition):
+        nonlocal completion_conflicts
+        if transition.execution_completions and completion_conflicts == 0:
+            completion_conflicts += 1
+            raise AnalysisError(
+                AnalysisErrorCode.STATE_CONFLICT,
+                "concurrent completion",
+                retryable=True,
+            )
+        return original_commit(transition)
+
+    store.commit_transition = conflict_on_first_completion
+    service = AnalysisTurnService(
+        TurnServiceDependencies(
+            store=store,
+            interpreter=lambda _context: _interpretation(
+                "society",
+                outputs=("budgetary_impact",),
+            ),
+            request_compiler=compiler,
+            execution_engine=execution,
+            narrator=_narrator,
+        )
+    )
+    command = TurnCommand(
+        messages=(TurnMessage(role="user", content="society outputs"),),
+        session_id="conflict_session",
+        turn_id="conflict_turn",
+        is_cancelled=_not_cancelled,
+    )
+
+    async def collect():
+        return [result async for result in service.run(command)]
+
+    results = asyncio.run(collect())
+    final = next(result for result in results if isinstance(result, TurnResult))
+
+    assert completion_conflicts == 1
+    assert compiler.calls == 1
+    assert execution.calls == 1
+    assert final.outcome.kind == "conflict"
+    assert final.finalization is not None
+
+
 def test_execution_question_preserves_another_active_calculation():
     store = _store()
     asyncio.run(
@@ -461,18 +595,18 @@ def test_execution_question_preserves_another_active_calculation():
         revision_id=semantic.revision_id,
         turn_id="turn_active",
     )
-    plan = compile_plan(bound)
+    plan = ExecutionPlanCompiler.compile(bound)
     ready = store.commit_transition(
         LifecycleReducer.reduce(
             store.load_state("session"),
             PlanReadyEvent(revision=semantic, bound_request=bound, plan=plan),
         )
     )
-    claim = store.claim_plan(
-        session_id="session",
+    claim = claim_plan(
+        store,
+        state=ready,
         plan=plan,
         worker_id="worker_active",
-        expected_state_version=ready.state_version,
     )
 
     evidence_claim = EvidenceClaim(quote="Which dataset did it use?")
@@ -526,18 +660,20 @@ def test_replacement_turn_waits_for_old_attempt_then_executes_promoted_plan():
         revision_id=semantic.revision_id,
         turn_id="turn_active",
     )
-    plan = compile_plan(bound)
+    plan = ExecutionPlanCompiler.compile(bound)
     ready = store.commit_transition(
         LifecycleReducer.reduce(
-            store.load_or_create("session").state,
+            store.load_or_create(
+                LoadOrCreateSessionCommand(session_id="session")
+            ).state,
             PlanReadyEvent(revision=semantic, bound_request=bound, plan=plan),
         )
     )
-    claim = store.claim_plan(
-        session_id="session",
+    claim = claim_plan(
+        store,
+        state=ready,
         plan=plan,
         worker_id="worker_active",
-        expected_state_version=ready.state_version,
     )
     execution_calls = []
     pending_recorded = threading.Event()
@@ -587,7 +723,8 @@ def test_replacement_turn_waits_for_old_attempt_then_executes_promoted_plan():
             store.load_attempt(str(claim.attempt.execution_id)).status.value
             == "cancellation_requested"
         )
-        store.finish_attempt(
+        finish_attempt(
+            store,
             state=queued,
             attempt=claim.attempt,
             token=claim.token,
@@ -849,17 +986,19 @@ def test_related_follow_up_starts_a_new_linked_simulation_revision():
 
 def test_duplicate_processing_performs_no_model_or_execution_work():
     store = _store()
-    state = store.create_session("session")
+    state = create_session(store, "session")
     turn = ChatTurnInput(
         messages=[{"role": "user", "content": "explanation"}],
         session_id="session",
         turn_id="turn",
     )
     store.begin_turn(
-        session_id="session",
-        turn_id="turn",
-        request_content={"messages": turn.messages, "charts_mode": False},
-        state_version=state.state_version,
+        BeginTurnCommand(
+            session_id="session",
+            turn_id="turn",
+            request_content={"messages": turn.messages, "charts_mode": False},
+            state_version=state.state_version,
+        )
     )
 
     def should_not_run(_context):
@@ -873,17 +1012,19 @@ def test_duplicate_processing_performs_no_model_or_execution_work():
 
 def test_stale_processing_receipt_is_closed_as_retryable_conflict():
     store = _store()
-    state = store.create_session("session")
+    state = create_session(store, "session")
     turn = ChatTurnInput(
         messages=[{"role": "user", "content": "explanation"}],
         session_id="session",
         turn_id="turn",
     )
     store.begin_turn(
-        session_id="session",
-        turn_id="turn",
-        request_content={"messages": turn.messages, "charts_mode": False},
-        state_version=state.state_version,
+        BeginTurnCommand(
+            session_id="session",
+            turn_id="turn",
+            request_content={"messages": turn.messages, "charts_mode": False},
+            state_version=state.state_version,
+        )
     )
     with Session(store.engine) as database:
         database.exec(
@@ -910,15 +1051,17 @@ def test_stale_processing_receipt_is_closed_as_retryable_conflict():
 
 def test_turn_identifier_content_mismatch_is_a_public_conflict():
     store = _store()
-    state = store.create_session("session")
+    state = create_session(store, "session")
     store.begin_turn(
-        session_id="session",
-        turn_id="turn",
-        request_content={
-            "messages": [{"role": "user", "content": "first request"}],
-            "charts_mode": False,
-        },
-        state_version=state.state_version,
+        BeginTurnCommand(
+            session_id="session",
+            turn_id="turn",
+            request_content={
+                "messages": [{"role": "user", "content": "first request"}],
+                "charts_mode": False,
+            },
+            state_version=state.state_version,
+        )
     )
     turn = ChatTurnInput(
         messages=[{"role": "user", "content": "different request"}],
@@ -1071,10 +1214,10 @@ def test_cancellation_recorded_during_final_operation_prevents_narration(tmp_pat
     assert store.load_state("session").phase.value == "cancelled"
 
 
-def test_coordinator_contains_no_direct_session_state_construction():
+def test_turn_service_contains_no_direct_session_state_construction():
     from pathlib import Path
 
-    source = Path("backend/analysis/coordinator.py").read_text()
+    source = Path("backend/analysis/turn_service.py").read_text()
     assert "AnalysisSessionState(" not in source
     assert ".model_copy(" not in source
     assert "append_and_advance" not in source

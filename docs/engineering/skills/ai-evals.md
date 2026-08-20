@@ -41,9 +41,9 @@ separately:
 - `response_outcome`: the expected processing path or typed rejection.
 
 This suite ends at interpretation, request compilation, and the expected
-lifecycle/public category. It does not execute a claimed plan or validate the
-unfinished `AnalysisTurnService`. Cover store, execution, finalization, and chat
-projection behavior in their deterministic backend and frontend tests.
+lifecycle/public category. It does not execute a claimed plan. Cover the
+implemented `AnalysisTurnService`, store, execution, finalization, and chat
+projection behavior in deterministic backend and frontend tests.
 
 Offline turn-interpretation cases must include `offline_candidate`. Live mode
 replaces that fixture with the production structured interpreter, while the
@@ -69,6 +69,10 @@ same deterministic reduction and compilation assertions remain in force.
   rejection cases for invented evidence, stale revisions, resolved questions,
   cross-session execution identifiers, concurrent-state changes, and unsafe
   exploratory operation requests.
+- Tag the deterministic continuation cases for later starts, later revisions,
+  clarification answers, unrelated requests, stale state, permitted overrides,
+  and exploratory authority rejection so the coverage test can enforce the
+  complete category set.
 - For numerical follow-ups, assert a new or revised compiled request. Do not
   represent discarded result payloads or prior assistant prose as calculation
   authority.

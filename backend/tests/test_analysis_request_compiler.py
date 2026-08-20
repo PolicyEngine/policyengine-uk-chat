@@ -100,7 +100,7 @@ def _services(**changes) -> BindingServices:
     return BindingServices(**values)
 
 
-def _input(update, *, current=None, services=None) -> CompilationInput:
+def _input(update, *, current=None) -> CompilationInput:
     return CompilationInput(
         update=update,
         state=_state(current=current),
@@ -108,13 +108,16 @@ def _input(update, *, current=None, services=None) -> CompilationInput:
         active_clarification=None,
         turn_id="turn_next",
         runtime_versions=VERSIONS,
-        binding_services=services or _services(),
         created_at=NOW,
     )
 
 
+def _compiler(services=None) -> RequestCompiler:
+    return RequestCompiler(binding_services=services or _services())
+
+
 def test_compiler_returns_complete_compiled_decision():
-    decision = RequestCompiler().compile(_input(_start()))
+    decision = _compiler().compile(_input(_start()))
 
     assert isinstance(decision, CompiledRequest)
     assert decision.revision.turn_id == "turn_next"
@@ -126,14 +129,14 @@ def test_compiler_returns_complete_compiled_decision():
 
 
 def test_compiler_returns_clarification_decision():
-    decision = RequestCompiler().compile(_input(_start(outputs=())))
+    decision = _compiler().compile(_input(_start(outputs=())))
 
     assert isinstance(decision, CompilationClarification)
     assert decision.clarification.target_field == "outputs"
 
 
 def test_compiler_returns_unsupported_decision():
-    decision = RequestCompiler().compile(
+    decision = _compiler().compile(
         _input(_start(fields={"jurisdiction": "us"}))
     )
 
@@ -148,7 +151,7 @@ def test_stale_revision_fails_before_creating_another_revision():
         relationship=RevisionRelationship.CORRECTION,
     )
 
-    decision = RequestCompiler().compile(_input(update, current=current))
+    decision = _compiler().compile(_input(update, current=current))
 
     assert isinstance(decision, RequestCompilationFailed)
     assert decision.revision is None
@@ -158,8 +161,8 @@ def test_stale_revision_fails_before_creating_another_revision():
 def test_same_input_and_versions_produce_same_bound_request_and_plan_hash():
     compilation_input = _input(_start())
 
-    first = RequestCompiler().compile(compilation_input)
-    second = RequestCompiler().compile(compilation_input)
+    first = _compiler().compile(compilation_input)
+    second = _compiler().compile(compilation_input)
 
     assert isinstance(first, CompiledRequest)
     assert isinstance(second, CompiledRequest)
@@ -168,7 +171,7 @@ def test_same_input_and_versions_produce_same_bound_request_and_plan_hash():
 
 
 def test_explicit_false_reform_value_survives_reduction_and_binding():
-    decision = RequestCompiler().compile(
+    decision = _compiler().compile(
         _input(
             _start(
                 fields={
@@ -193,14 +196,13 @@ def test_expected_binding_dependency_failure_is_typed():
             "authoritative catalogue is unavailable",
         )
 
-    decision = RequestCompiler().compile(
+    decision = _compiler(_services(catalogue_resolver=unavailable)).compile(
         _input(
             _start(
                 "parameter_lookup",
                 fields={"parameter_query": "income tax"},
                 outputs=("parameter_lookup",),
             ),
-            services=_services(catalogue_resolver=unavailable),
         )
     )
 
@@ -224,7 +226,7 @@ def test_target_selection_can_only_choose_from_authoritative_candidates():
             identifier="parameter.second",
             label="Second parameter",
             match_type="keyword",
-            score=0.8,
+            score=0.9,
         ),
     )
 
@@ -243,7 +245,7 @@ def test_target_selection_can_only_choose_from_authoritative_candidates():
         catalogue_resolver=ambiguous,
         reform_target_selector=select,
     )
-    decision = RequestCompiler().compile(
+    decision = _compiler(services).compile(
         _input(
             _start(
                 fields={
@@ -251,7 +253,6 @@ def test_target_selection_can_only_choose_from_authoritative_candidates():
                     "reform_instruction": SetExactReform(value=0.25),
                 }
             ),
-            services=services,
         )
     )
 
@@ -265,13 +266,12 @@ def test_unexpected_binding_programming_error_is_not_relabelled():
         raise RuntimeError("broken resolver implementation")
 
     with pytest.raises(RuntimeError, match="broken resolver implementation"):
-        RequestCompiler().compile(
+        _compiler(_services(catalogue_resolver=broken)).compile(
             _input(
                 _start(
                     "parameter_lookup",
                     fields={"parameter_query": "income tax"},
                     outputs=("parameter_lookup",),
                 ),
-                services=_services(catalogue_resolver=broken),
             )
         )

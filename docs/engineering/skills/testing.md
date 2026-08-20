@@ -29,6 +29,10 @@ Use this skill whenever adding, moving, or reviewing tests.
   execution references, and invalid evidence. Keep examples deterministic
   under pytest's recorded seed output and isolate database concurrency tests
   from shared developer data.
+- Keep analysis contract tests aligned with their public boundaries:
+  `test_analysis_lifecycle.py`, `test_analysis_request_compiler.py`,
+  `test_analysis_execution_engine.py`, `test_analysis_store.py`,
+  `test_analysis_turn_service.py`, and `test_chat_projector.py`.
 
 ## Commands
 
@@ -54,11 +58,10 @@ make typecheck-backend
 ```
 
 This target checks `analysis.store`, `analysis.dependencies`,
-`analysis.lifecycle`, `analysis.request_compiler`, and
-`analysis.execution_engine`. It is intentionally narrower than the complete
-backend while older imported modules are migrated. Expand the target when a new
-public analysis connector, including `AnalysisTurnService`, is added; do not
-claim that the complete analysis package is strictly checked yet.
+`analysis.lifecycle`, `analysis.request_compiler`, `analysis.execution_engine`,
+`analysis.turn_service`, and `chat.analysis_adapter`. It is intentionally
+narrower than the complete backend; do not claim that every backend module is
+strictly checked.
 
 Before handing off frontend changes, run:
 
@@ -82,9 +85,10 @@ ANALYSIS_TEST_POSTGRES_URL=postgresql://postgres:postgres@localhost:5432/analysi
 ```
 
 The test target applies migration 006 twice to verify repeatability and uses
-explicit thread synchronization for claim-versus-claim, claim-versus-cancel,
-revision-versus-completion, recovery-versus-completion, and pending-plan
-promotion. The pull-request backend job runs the same file against its
+explicit thread synchronization for the common store contract,
+claim-versus-claim, claim-versus-cancel, revision-versus-completion,
+recovery-versus-completion, and pending-plan promotion. The pull-request backend
+job runs the same file against its
 dedicated PostgreSQL 16 service. Never point this target at production.
 
 `make test-backend` writes branch-aware Python coverage to `coverage.xml` and

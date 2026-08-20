@@ -14,6 +14,7 @@ from billing import config
 from billing import routes
 from billing import stripe_integration
 from analysis.models import ModelUsageEntry
+from analysis.store import MarkBillingRecordedCommand
 
 
 class FakeQuery:
@@ -208,8 +209,8 @@ def test_billing_processor_reuses_stored_charge_after_pricing_changes():
         def pending_billing_intents(self, *, user_id):
             return (intent,)
 
-        def mark_billing_recorded(self, session_id, turn_id):
-            self.marked.append((session_id, turn_id))
+        def mark_billing_recorded(self, command: MarkBillingRecordedCommand):
+            self.marked.append((command.session_id, command.turn_id))
             return True
 
     def record(stored_intent):
@@ -251,8 +252,8 @@ def test_failed_billing_record_remains_pending():
         def pending_billing_intents(self, *, user_id):
             return (intent,)
 
-        def mark_billing_recorded(self, session_id, turn_id):
-            self.marked.append((session_id, turn_id))
+        def mark_billing_recorded(self, command: MarkBillingRecordedCommand):
+            self.marked.append((command.session_id, command.turn_id))
             return True
 
     store = Store()

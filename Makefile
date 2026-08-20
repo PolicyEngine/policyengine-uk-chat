@@ -50,7 +50,14 @@ test-backend:
 	PYTHONPATH=backend python -m pytest backend/tests --cov --cov-config=.coveragerc --cov-report=term-missing --cov-report=xml --cov-fail-under=80
 
 typecheck-backend:
-	PYTHONPATH=backend python -m mypy --config-file=mypy.ini backend/analysis/store.py backend/analysis/dependencies.py backend/analysis/lifecycle.py backend/analysis/request_compiler.py backend/analysis/execution_engine.py
+	PYTHONPATH=backend python -m mypy --config-file=mypy.ini \
+		backend/analysis/store.py \
+		backend/analysis/dependencies.py \
+		backend/analysis/lifecycle.py \
+		backend/analysis/request_compiler.py \
+		backend/analysis/execution_engine.py \
+		backend/analysis/turn_service.py \
+		backend/chat/analysis_adapter.py
 
 test-analysis-postgres:
 	@test -n "$$ANALYSIS_TEST_POSTGRES_URL" || (echo "ANALYSIS_TEST_POSTGRES_URL is required" && exit 1)

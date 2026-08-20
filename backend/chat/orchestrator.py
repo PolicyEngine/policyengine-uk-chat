@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
-from analysis.coordinator import CoordinatorDependencies, run_analysis_turn
+from analysis.persistence import SqlAnalysisStore
+from analysis.turn_service import TurnServiceDependencies
 from billing.intents import build_billing_intent
+from chat.analysis_adapter import run_analysis_turn
 from chat.events import TurnCompleted
 from chat.suggestions import generate_followup_suggestions
 from chat.turn_input import ChatTurnInput
 
 
 async def run_chat_turn(turn: ChatTurnInput, *, is_cancelled):
-    dependencies = CoordinatorDependencies(
+    dependencies = TurnServiceDependencies(
+        store=SqlAnalysisStore(),
         billing_intent_builder=build_billing_intent,
     )
     async for event in run_analysis_turn(
