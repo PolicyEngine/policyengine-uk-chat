@@ -154,6 +154,28 @@ interface Message {
   suggestions?: string[];
 }
 
+interface ApiMessage {
+  role: string;
+  content: string;
+  tool_results?: Array<{ tool_name: string; result: string; tool_input?: Record<string, unknown> }>;
+}
+
+/**
+ * Build the request transcript. Tool results computed in earlier turns travel
+ * as a typed field rather than appended to the assistant text, so the backend
+ * can present them to the model as established results instead of prose the
+ * model cannot tell apart from its own words.
+ */
+const toApiMessages = (msgs: Message[]): ApiMessage[] =>
+  msgs.map((msg) => {
+    const apiMessage: ApiMessage = { role: msg.role, content: msg.content };
+    const toolResults = (msg.role === "assistant" ? msg.events ?? [] : [])
+      .filter((e): e is { type: "tool"; data: ToolData } => e.type === "tool" && !!e.data.result_summary)
+      .map((e) => ({ tool_name: e.data.tool_name, result: e.data.result_summary as string, tool_input: e.data.input }));
+    if (toolResults.length) apiMessage.tool_results = toolResults;
+    return apiMessage;
+  });
+
 interface MessageAttachment {
   name: string;
   mediaType: string;
@@ -677,14 +699,7 @@ export default function ChatPage() {
     setIsStreaming(true);
     setIsWaiting(true);
 
-    const apiMessages = allMessages.map((msg) => {
-      let content = msg.content;
-      if (msg.role === "assistant" && msg.events) {
-        const toolResults = msg.events.filter((e): e is { type: "tool"; data: ToolData } => e.type === "tool" && !!e.data.result_summary).map((e) => `[Tool: ${e.data.tool_name}] ${e.data.result_summary}`).join("\n\n");
-        if (toolResults) content += "\n\n---\nTool results:\n" + toolResults;
-      }
-      return { role: msg.role, content };
-    });
+    const apiMessages = toApiMessages(allMessages);
 
     let events: StreamEvent[] = [];
     let currentText = "";
@@ -954,14 +969,7 @@ export default function ChatPage() {
     if (target.events?.some((e) => e.type === "tool" && e.data.status === "pending")) return;
 
     const priorMessages = messages.slice(0, idx + 1);
-    const apiMessages = priorMessages.map((msg) => {
-      let content = msg.content;
-      if (msg.role === "assistant" && msg.events) {
-        const toolResults = msg.events.filter((e): e is { type: "tool"; data: ToolData } => e.type === "tool" && !!e.data.result_summary).map((e) => `[Tool: ${e.data.tool_name}] ${e.data.result_summary}`).join("\n\n");
-        if (toolResults) content += "\n\n---\nTool results:\n" + toolResults;
-      }
-      return { role: msg.role, content };
-    });
+    const apiMessages = toApiMessages(priorMessages);
 
     // The partial turn is sent as the final message so the model continues it
     // (assistant prefill). Anthropic rejects a prefill that is empty or ends

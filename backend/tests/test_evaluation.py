@@ -159,14 +159,18 @@ def test_offline_eval_runs_seed_trajectory_and_answer_cases_without_reports():
         mode="offline",
         write_reports=False,
     )
-    expected_cases = (
-        len(load_case_file(REPO_ROOT / "evals" / "cases" / "trajectory" / "core.yaml"))
-        + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answer" / "core.yaml"))
+    # Count every case file in the two suites, so adding one does not silently
+    # leave it outside the offline run this test guards.
+    case_files = sorted(
+        path
+        for suite in ("trajectory", "answer")
+        for path in (REPO_ROOT / "evals" / "cases" / suite).glob("*.yaml")
     )
-    live_only_cases = (
-        len(load_case_file(REPO_ROOT / "evals" / "cases" / "trajectory" / "live.yaml"))
-        + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answer" / "live.yaml"))
+    live_only_files = [path for path in case_files if path.name == "live.yaml"]
+    expected_cases = sum(
+        len(load_case_file(path)) for path in case_files if path not in live_only_files
     )
+    live_only_cases = sum(len(load_case_file(path)) for path in live_only_files)
 
     assert report.failed == 0
     assert report.passed + report.skipped == expected_cases + live_only_cases

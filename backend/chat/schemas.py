@@ -1,13 +1,27 @@
 """Request/response models for the chat endpoints."""
 
-from typing import List
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel
+
+
+class PriorToolResult(BaseModel):
+    """One tool result computed in an earlier turn of this conversation.
+
+    Clients send these alongside the assistant message that produced them.
+    Earlier clients folded the same information into the message text, which
+    the model could not tell apart from prose; both forms are accepted.
+    """
+
+    tool_name: str
+    result: str
+    tool_input: Optional[Dict[str, Any]] = None
 
 
 class ChatMessage(BaseModel):
     role: str
     content: str
+    tool_results: Optional[List[PriorToolResult]] = None
 
 
 class ChatRequest(BaseModel):

@@ -969,3 +969,40 @@ cases:
                 current_education: POST_SECONDARY
             benunit: {}
             household: {}
+  - id: trajectory_established_results_do_not_replace_computing
+    suite: trajectory
+    description: >
+      Earlier results constrain what prose may claim; they are not a source to
+      calculate from, so a new figure still requires a tool call.
+    prompt: What about at 20000 instead?
+    messages:
+      - role: user
+        content: What is the net income of a single person earning 9000 in 2026?
+      - role: assistant
+        content: That illustrative household has net income of £10,102.50.
+      - role: user
+        content: What about at 20000 instead?
+    prior_tool_results:
+      - tool_name: run_household_simulation
+        tool_input:
+          year: 2026
+          people:
+            - age: 35
+              employment_income: 9000
+        result: >-
+          {"status": "success", "year": 2026, "household":
+          {"household_net_income": 10102.5}}
+    expected_tools:
+      - name: run_household_simulation
+        input_contains:
+          year: 2026
+    offline_response:
+      tool_calls:
+        - name: run_household_simulation
+          input:
+            year: 2026
+            people:
+              - age: 35
+                employment_income: 20000
+            benunit: {}
+            household: {}

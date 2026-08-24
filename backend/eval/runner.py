@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
+from chat.prior_results import PriorToolResult, render_established_results_block
 from prompts import CHARTS_MODE_DIRECTIVE, SYSTEM_PROMPT
 from tools.context import new_tool_context
 from tools.definitions import TOOL_DEFINITIONS
@@ -145,10 +146,30 @@ def _messages_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, An
     return [{"role": "user", "content": case.prompt}]
 
 
+def _established_results_block(
+    case: AnswerCase | ToolLoopCase | TrajectoryCase,
+) -> str | None:
+    """Render a case's earlier-turn results the way the orchestrator does."""
+
+    return render_established_results_block(
+        [
+            PriorToolResult(
+                tool_name=item.tool_name,
+                result=item.result,
+                tool_input=item.tool_input,
+            )
+            for item in getattr(case, "prior_tool_results", [])
+        ]
+    )
+
+
 def _system_for_case(case: TrajectoryCase | ToolLoopCase) -> str:
     sections = [SYSTEM_PROMPT]
     if case.charts_mode:
         sections.append(CHARTS_MODE_DIRECTIVE)
+    established = _established_results_block(case)
+    if established:
+        sections.append(established)
     return "\n\n".join(sections)
 
 
@@ -210,6 +231,11 @@ def _tool_result_text(case: AnswerCase) -> str:
     return "\n\n".join(chunks)
 
 
+def _answer_system(case: AnswerCase) -> str:
+    established = _established_results_block(case)
+    return "\n\n".join([SYSTEM_PROMPT, established]) if established else SYSTEM_PROMPT
+
+
 def _run_answer(case: AnswerCase, client: ModelClient) -> CaseResult:
     try:
         turn = client.generate(
@@ -218,7 +244,7 @@ def _run_answer(case: AnswerCase, client: ModelClient) -> CaseResult:
                 {"role": "user", "content": case.prompt},
                 {"role": "user", "content": _tool_result_text(case)},
             ],
-            system=SYSTEM_PROMPT,
+            system=_answer_system(case),
             tools=None,
         )
     except Exception as exc:

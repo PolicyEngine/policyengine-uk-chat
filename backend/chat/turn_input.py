@@ -4,6 +4,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Any
 
+from chat.prior_results import PriorToolResult, bound_prior_results
 from chat.schemas import ChatRequest
 
 
@@ -19,6 +20,7 @@ class ChatTurnInput:
     messages: list[dict[str, Any]]
     session_id: str
     charts_mode: bool = False
+    prior_tool_results: tuple[PriorToolResult, ...] = ()
 
 
 def prepare_turn_input(chat_request: ChatRequest) -> ChatTurnInput:
@@ -28,6 +30,17 @@ def prepare_turn_input(chat_request: ChatRequest) -> ChatTurnInput:
         {"role": message.role, "content": message.content}
         for message in chat_request.messages
     ]
+    prior_tool_results = bound_prior_results(
+        [
+            PriorToolResult(
+                tool_name=result.tool_name,
+                result=result.result,
+                tool_input=result.tool_input,
+            )
+            for message in chat_request.messages
+            for result in (message.tool_results or [])
+        ]
+    )
     deduplicated: list[dict[str, Any]] = []
     for message in messages:
         if not deduplicated or deduplicated[-1]["role"] != message["role"]:
@@ -67,4 +80,5 @@ def prepare_turn_input(chat_request: ChatRequest) -> ChatTurnInput:
         messages=deduplicated,
         session_id=chat_request.session_id or str(uuid.uuid4()),
         charts_mode=chat_request.charts_mode,
+        prior_tool_results=tuple(prior_tool_results),
     )

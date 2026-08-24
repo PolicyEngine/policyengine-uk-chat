@@ -9,8 +9,9 @@ The backend is organized by topic — one package per concern:
 
 - `backend/chat/` owns the chat turn: `orchestrator.py` (request parsing, SSE
   streaming, the tool loop), `system_blocks.py` (system-block assembly),
-  `model_selection.py`, `schemas.py`, `titles.py`,
-  `suggestions.py`, and `routes.py` (the `/chat` router).
+  `prior_results.py` (earlier-turn tool results), `model_selection.py`,
+  `schemas.py`, `titles.py`, `suggestions.py`, and `routes.py` (the `/chat`
+  router).
 - `backend/gateway/` owns the opening-turn pre-pass: `runtime.py` (the
   forced-tool classifier), `catalogue.py` (the server-side PolicyEngine
   catalogue resolver), `intent.py` (bounded wording extraction),
@@ -136,12 +137,42 @@ names through `extra_variables` under the entity reported by discovery.
 expressions, aliases, filters, or derived variables. Use `aggregate_result`'s
 official policyengine.py filter arguments for conditional weighted aggregates.
 
+## Cross-turn Tool Results
+
+The runtime keeps no server-side turn state. A turn's `ToolExecutionContext`
+and result handles die with it, and the client resends the transcript on every
+turn, so earlier tool output only reaches a later turn if the request carries
+it.
+
+Clients send it as `tool_results` on the assistant message that produced it:
+`tool_name`, the serialised `result`, and the `tool_input` that produced it.
+Do not fold this information back into message text. Unlabelled in prose, the
+model cannot tell an earlier tool result from its own earlier words, which is
+what allowed later prose to contradict an established figure.
+
+`chat/prior_results.py` bounds the carry-over deterministically — most recent
+`MAX_PRIOR_RESULTS` entries, each truncated to `MAX_RESULT_CHARS`, whole block
+capped at `MAX_BLOCK_CHARS` — and renders it as the
+`ESTABLISHED TOOL RESULTS FROM EARLIER TURNS` system block, appended after the
+cache breakpoint so it does not invalidate the cached prompt.
+
+The block constrains prose; it does not license skipping computation. An answer
+must not state a number contradicting an established result, and must state the
+difference when a recomputed value disagrees. A turn that needs a number still
+calls the tool. The content is client-supplied and is not evidence that a tool
+ever ran, so it is never treated as a calculation source.
+
+Eval cases carry the same field: `prior_tool_results` on `answer`, `trajectory`,
+and `tool_loop` cases renders the identical block through the shared function,
+so cross-turn consistency is graded against what the runtime actually builds.
+
 ## Deterministic And Non-Deterministic Segments
 
 - Non-deterministic: the opening classifier, catalogue-backed reform
   construction and confidence assessment, compute-model tool use, prose
   generation, follow-up suggestions, and title generation.
-- Deterministic: request validation, the gateway gate (criticality + outcome),
+- Deterministic: request validation, prior-result bounding and block rendering,
+  the gateway gate (criticality + outcome),
   bounded output/reform wording extraction, server slot ownership/defaults,
   execution-plan construction, clarification rendering, proposal signing and
   verification, lightweight-route tool omission, approved-reform enforcement,

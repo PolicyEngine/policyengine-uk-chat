@@ -52,6 +52,7 @@ from chat.events import (
     TurnFailed,
 )
 from chat.suggestions import generate_followup_suggestions
+from chat.prior_results import render_established_results_block
 from chat.system_blocks import (
     build_lightweight_system_blocks,
     build_system_blocks,
@@ -391,6 +392,9 @@ async def run_chat_turn(
                     system_blocks = build_system_blocks(
                         charts_mode=turn.charts_mode,
                         gateway_plan=gateway_plan,
+                        established_results=render_established_results_block(
+                            list(turn.prior_tool_results)
+                        ),
                     )
             annotate(model=model)
 

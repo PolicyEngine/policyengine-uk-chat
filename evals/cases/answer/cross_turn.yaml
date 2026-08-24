@@ -1,0 +1,111 @@
+# Cross-turn numerical consistency.
+#
+# Transcript-derived from the 17 August 2025 testing session: the chat's own
+# tool output showed Universal Credit entitlement at £9,000 of employment
+# income, and its later prose claimed entitlement ended around £6,000–£7,000.
+# The failure is prose contradicting a figure the conversation had already
+# established, so each case pins the established figure into the turn and
+# grades what the answer may say about it.
+cases:
+  - id: answer_cross_turn_uc_entitlement_not_contradicted
+    suite: answer
+    description: >
+      Later prose must not place the end of Universal Credit entitlement below
+      an income at which an earlier turn's tool output showed entitlement.
+    prompt: At what income does Universal Credit run out for this household?
+    prior_tool_results:
+      - tool_name: run_household_simulation
+        tool_input:
+          year: 2026
+          people:
+            - age: 35
+              employment_income: 9000
+        result: >-
+          {"status": "success", "year": 2026, "person": [{"employment_income":
+          9000.0, "universal_credit": 1102.5}], "household":
+          {"household_net_income": 10102.5}}
+    tool_calls:
+      - name: run_household_simulation
+        input:
+          year: 2026
+          people:
+            - age: 35
+              employment_income: 14000
+        output:
+          status: success
+          year: 2026
+          person:
+            - employment_income: 14000.0
+              universal_credit: 0.0
+          household:
+            household_net_income: 13320.0
+    expect:
+      required:
+        - "9,000"
+        - illustrative
+      forbidden_regex:
+        # The observed failure: naming a cut-off below an income at which the
+        # established result still showed entitlement. Comma optional.
+        - "£\\s?6,?[05]00"
+        - "£\\s?7,?000"
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+      grounded_numbers: true
+      allowed_numbers: [2026, 9000, 1102.5, 10102.5, 14000, 0, 13320]
+      number_tolerance: 0.01
+    offline_response:
+      text: >
+        This illustrative 2026 household still receives £1,102.50 of Universal
+        Credit at £9,000 of employment income, and receives none at £14,000. So
+        entitlement ends somewhere between those two incomes; I would need to
+        run intermediate points to pin down the exact threshold.
+
+  - id: answer_cross_turn_recomputed_value_change_is_stated
+    suite: answer
+    description: >
+      When a recomputed figure differs from an established one, the answer must
+      say the value changed rather than silently replacing it.
+    prompt: What is the cost of the reform again?
+    prior_tool_results:
+      - tool_name: compute_budgetary_impact
+        tool_input:
+          simulation_id: society_earlier
+        result: '{"budgetary_impact": -1200000000.0, "year": 2026}'
+    tool_calls:
+      - name: compute_budgetary_impact
+        input:
+          simulation_id: society_now
+        output:
+          budgetary_impact: -1500000000.0
+          year: 2027
+    expect:
+      required:
+        - "1.5"
+        - "1.2"
+        - "2027"
+        - "2026"
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+      grounded_numbers: true
+      allowed_numbers: [1.2, 1.5, 2026, 2027, 1200000000, 1500000000]
+      number_tolerance: 0.01
+    offline_response:
+      text: >
+        Recomputed for 2027, the reform costs £1.5bn. That differs from the
+        £1.2bn figure established earlier in this conversation, which was for
+        2026; the change is the simulation year, not a revision of the earlier
+        result.
