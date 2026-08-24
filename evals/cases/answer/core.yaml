@@ -749,3 +749,50 @@ cases:
         income is £25119.60 and reform net income is £25584.70, a change of
         £465.10. Income tax changes from £3486 to £2994.20, and National
         Insurance changes from £1394.40 to £1392.08.
+
+  - id: answer_household_decile_not_national
+    suite: answer
+    description: >
+      A household simulation cannot place a household in a national decile, so
+      the answer must decline to give one rather than infer a position.
+    prompt: Which income decile is this household in?
+    tool_calls:
+      - name: run_household_simulation
+        input:
+          year: 2026
+          people:
+            - age: 40
+              employment_income: 6000
+          benunit: {}
+          household: {}
+        output:
+          status: success
+          year: 2026
+          reform_applied: false
+          household:
+            household_net_income: 7618.75
+            household_market_income: 6000
+          omitted_population_ranked_variables:
+            household_income_decile: >
+              Income deciles rank a household against the rest of the simulated
+              population. A one-household illustrative simulation always returns
+              decile 10. Use compute_decile_impacts on a society simulation for
+              a national decile position.
+    expect:
+      required:
+        - illustrative
+        - decile
+      forbidden:
+        - decile 10
+        - top decile
+        - tenth decile
+        - highest decile
+      grounded_numbers: true
+      allowed_numbers: [2026, 6000, 7618.75]
+      number_tolerance: 0.01
+    offline_response:
+      text: >
+        This illustrative 2026 household has employment income of £6000 and net
+        income of £7618.75. A household simulation covers only this one
+        household, so it cannot place it in a national income decile. I can run
+        a society-wide simulation if you want the national decile distribution.

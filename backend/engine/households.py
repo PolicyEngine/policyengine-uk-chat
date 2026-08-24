@@ -5,7 +5,10 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any, Dict, Optional
 
-from engine.constants import HOUSEHOLD_COUNTRY_IDS
+from engine.constants import (
+    HOUSEHOLD_COUNTRY_IDS,
+    POPULATION_RANKED_HOUSEHOLD_VARIABLES,
+)
 from engine.py_runtime import calculate_household_py, uk_model_version
 from engine.reforms import (
     ReformValidationError,
@@ -91,6 +94,30 @@ def validate_household_dict(
     }
 
 
+def _drop_population_ranked_variables(payload: Any) -> set[str]:
+    """Remove population-ranked variables in place, returning the names dropped.
+
+    Entity blocks arrive either as a mapping of variable name to value or as a
+    list of such mappings, so both shapes are walked.
+    """
+
+    dropped: set[str] = set()
+    if isinstance(payload, list):
+        for item in payload:
+            dropped |= _drop_population_ranked_variables(item)
+        return dropped
+    if not isinstance(payload, dict):
+        return dropped
+    for name in POPULATION_RANKED_HOUSEHOLD_VARIABLES:
+        if name in payload:
+            del payload[name]
+            dropped.add(name)
+    for value in payload.values():
+        if isinstance(value, (dict, list)):
+            dropped |= _drop_population_ranked_variables(value)
+    return dropped
+
+
 def calculate_household(
     *,
     people: list[dict[str, Any]],
@@ -136,6 +163,8 @@ def calculate_household(
 
     baseline_safe = json_safe(baseline)
     reform_safe = json_safe(reformed)
+    dropped = _drop_population_ranked_variables(baseline_safe)
+    dropped |= _drop_population_ranked_variables(reform_safe)
     response: Dict[str, Any] = {
         "status": "success",
         "year": year,
@@ -146,4 +175,9 @@ def calculate_household(
     else:
         response["baseline"] = baseline_safe
         response["reform"] = reform_safe
+    if dropped:
+        response["omitted_population_ranked_variables"] = {
+            name: POPULATION_RANKED_HOUSEHOLD_VARIABLES[name]
+            for name in sorted(dropped)
+        }
     return response

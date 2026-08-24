@@ -38,3 +38,38 @@ HOUSEHOLD_COUNTRY_IDS = (
     "SCOTLAND",
     "WALES",
 )
+
+# Variables whose value is defined by the household's position within the
+# simulated population. An illustrative household simulation contains exactly
+# one household, so each of these ranks that household against itself and is
+# constant regardless of the inputs: both decile variables always return 10 and
+# both relative poverty flags always return 0. They are removed from
+# illustrative household results so the value cannot be reported as a national
+# position. Society-wide tools are unaffected: they simulate the full weighted
+# population, where these variables carry their intended meaning.
+POPULATION_RANKED_HOUSEHOLD_VARIABLES = {
+    "household_income_decile": (
+        "Income deciles rank a household against the rest of the simulated "
+        "population. A one-household illustrative simulation always returns "
+        "decile 10. Use compute_decile_impacts on a society simulation for a "
+        "national decile position."
+    ),
+    "household_wealth_decile": (
+        "Wealth deciles rank a household against the rest of the simulated "
+        "population. A one-household illustrative simulation always returns "
+        "decile 10. Use compute_decile_impacts on a society simulation for a "
+        "national decile position."
+    ),
+    "in_relative_poverty_bhc": (
+        "Relative poverty compares income to the median of the simulated "
+        "population. A one-household illustrative simulation is its own "
+        "median, so this flag is always 0. Use compute_poverty_metrics on a "
+        "society simulation for relative poverty."
+    ),
+    "in_relative_poverty_ahc": (
+        "Relative poverty compares income to the median of the simulated "
+        "population. A one-household illustrative simulation is its own "
+        "median, so this flag is always 0. Use compute_poverty_metrics on a "
+        "society simulation for relative poverty."
+    ),
+}
