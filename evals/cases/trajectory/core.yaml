@@ -969,3 +969,22 @@ cases:
                 current_education: POST_SECONDARY
             benunit: {}
             household: {}
+  - id: trajectory_variable_meaning_uses_definition_tool
+    suite: trajectory
+    description: >
+      A question about what a variable measures should look the definition up
+      rather than run a simulation or answer from memory.
+    prompt: What does household_net_income actually measure?
+    expected_tools:
+      - name: get_variable_definition
+        input_contains:
+          query: household_net_income
+    forbidden_tools:
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+    offline_response:
+      tool_calls:
+        - name: get_variable_definition
+          input:
+            query: household_net_income

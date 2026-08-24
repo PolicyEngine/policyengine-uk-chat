@@ -70,3 +70,84 @@ cases:
         query: universal credit standard allowance
       required_paths:
         - parameters.0.path
+
+  - id: variable_definition_exact_name_with_formula
+    suite: tool_contract
+    description: >
+      An exact variable name resolves to one definition, and a model-defined
+      composition is reported as an available formula.
+    requirements: [policyengine_py]
+    tool_name: get_variable_definition
+    input:
+      query: household_net_income
+    expect:
+      contains:
+        status: success
+        matched_on: exact_name
+      required_paths:
+        - variable.name
+        - variable.label
+        - variable.entity
+        - variable.definition_period
+        - variable.formula.available
+        - variable.formula.statement
+        - source.model
+        - source.package
+
+  - id: variable_definition_reports_missing_formula
+    suite: tool_contract
+    description: >
+      A variable with no machine-readable formula must say so rather than
+      leaving the field open to reconstruction.
+    requirements: [policyengine_py]
+    tool_name: get_variable_definition
+    input:
+      query: universal_credit
+    expect:
+      contains:
+        status: success
+        variable:
+          name: universal_credit
+          formula:
+            available: false
+            kind: null
+            statement: null
+      required_paths:
+        - variable.formula.note
+
+  - id: variable_definition_ambiguous_query_asks
+    suite: tool_contract
+    description: An ambiguous description returns ranked options and no definition.
+    requirements: [policyengine_py]
+    tool_name: get_variable_definition
+    input:
+      query: net income
+      limit: 3
+    expect:
+      contains:
+        status: needs_confirmation
+      required_paths:
+        - options.0.name
+        - options.0.label
+        - options.0.matched_on
+        - option_count
+        - reason
+      absent_paths:
+        - variable
+
+  - id: variable_definition_unknown_query_suggests
+    suite: tool_contract
+    description: An unmatched query errors with ranked close variable names.
+    requirements: [policyengine_py]
+    tool_name: get_variable_definition
+    input:
+      query: what does universal credit include
+    expect:
+      contains:
+        status: error
+        suggestions:
+          - universal_credit
+      required_paths:
+        - hint
+      absent_paths:
+        - variable

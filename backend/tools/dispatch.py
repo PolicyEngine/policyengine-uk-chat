@@ -7,6 +7,7 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
+from engine import definitions as variable_definitions
 from engine import derivatives, discovery
 from engine.decile_concepts import DEFAULT_DECILE_CONCEPT
 from engine.households import calculate_household, validate_household_dict
@@ -32,6 +33,8 @@ from tools.definitions import (
     GENERATE_CHART_DESCRIPTION,
     GENERATE_CHART_INPUT_SCHEMA,
     GET_PARAMETER_INPUT_SCHEMA,
+    GET_VARIABLE_DEFINITION_DESCRIPTION,
+    GET_VARIABLE_DEFINITION_INPUT_SCHEMA,
     GET_VARIABLE_DESCRIPTION,
     GET_VARIABLE_INPUT_SCHEMA,
     LIST_ENTITIES_INPUT_SCHEMA,
@@ -73,6 +76,7 @@ __all__ = [
     "generate_chart",
     "get_parameter",
     "get_variable",
+    "get_variable_definition",
     "list_entities",
     "list_household_input_variables",
     "list_reform_targets",
@@ -125,6 +129,15 @@ def search_variables(query: str = "", entity: str | None = None, limit: int = 25
 )
 def get_variable(name: str) -> Dict[str, Any]:
     return discovery.get_variable(name)
+
+
+@register_tool(
+    name="get_variable_definition",
+    description=GET_VARIABLE_DEFINITION_DESCRIPTION,
+    input_schema=GET_VARIABLE_DEFINITION_INPUT_SCHEMA,
+)
+def get_variable_definition(query: str, limit: int = 5) -> Dict[str, Any]:
+    return variable_definitions.get_variable_definition(query=query, limit=limit)
 
 
 @register_tool(name="search_parameters", description=DISCOVERY_DESCRIPTION, input_schema=SEARCH_PARAMETERS_INPUT_SCHEMA)

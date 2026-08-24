@@ -749,3 +749,117 @@ cases:
         income is £25119.60 and reform net income is £25584.70, a change of
         £465.10. Income tax changes from £3486 to £2994.20, and National
         Insurance changes from £1394.40 to £1392.08.
+
+  - id: answer_variable_definition_no_formula_overclaim
+    suite: answer
+    description: >
+      When the model exposes no machine-readable formula, the answer must say
+      so instead of describing a calculation it cannot source.
+    prompt: How is Universal Credit calculated?
+    tool_calls:
+      - name: get_variable_definition
+        input:
+          query: universal_credit
+        output:
+          status: success
+          query: universal_credit
+          matched_on: exact_name
+          variable:
+            name: universal_credit
+            label: Universal Credit
+            entity: benunit
+            definition_period: year
+            formula:
+              available: false
+              kind: null
+              adds: []
+              subtracts: []
+              statement: null
+              note: >
+                The compiled model exposes no machine-readable formula for this
+                variable. The label and description are documentation, not a
+                formula.
+          source:
+            model: policyengine-uk@2.89.2
+            package: policyengine-uk
+    expect:
+      required:
+        - universal_credit
+        - benunit
+        - not available
+      forbidden:
+        - the formula is
+        - calculated as
+        - equals the sum of
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+      grounded_numbers: true
+      allowed_numbers: [2.89, 2]
+      number_tolerance: 0.01
+    offline_response:
+      text: >
+        universal_credit is defined on the benunit entity in
+        policyengine-uk. The model does not expose a machine-readable formula
+        for it, so the exact definition is not available to quote here. I can
+        run an illustrative household simulation, or look up the underlying
+        Universal Credit parameters, if you want the components.
+
+  - id: answer_variable_definition_states_composition
+    suite: answer
+    description: >
+      An available composition should be reported exactly, with the model
+      version it came from.
+    prompt: What goes into household_net_income?
+    tool_calls:
+      - name: get_variable_definition
+        input:
+          query: household_net_income
+        output:
+          status: success
+          query: household_net_income
+          matched_on: exact_name
+          variable:
+            name: household_net_income
+            label: Household net income
+            entity: household
+            definition_period: year
+            formula:
+              available: true
+              kind: composition
+              adds: [household_market_income, household_benefits]
+              subtracts: [household_tax, pension_contributions]
+              statement: >-
+                household_net_income = household_market_income +
+                household_benefits - household_tax - pension_contributions
+          source:
+            model: policyengine-uk@2.89.2
+            package: policyengine-uk
+    expect:
+      required:
+        - household_market_income
+        - household_benefits
+        - household_tax
+        - pension_contributions
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+      grounded_numbers: true
+      allowed_numbers: [2.89, 2]
+      number_tolerance: 0.01
+    offline_response:
+      text: >
+        In policyengine-uk, household_net_income is defined as
+        household_market_income plus household_benefits, minus household_tax
+        and pension_contributions.
