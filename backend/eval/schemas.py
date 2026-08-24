@@ -73,6 +73,14 @@ class FrozenToolCall(StrictModel):
     output: Optional[Dict[str, Any]] = None
 
 
+class PriorToolResultCase(StrictModel):
+    """A tool result an earlier turn of the conversation established."""
+
+    tool_name: str
+    result: str
+    tool_input: Optional[Dict[str, Any]] = None
+
+
 class CaseBase(StrictModel):
     id: str
     suite: str
@@ -100,6 +108,7 @@ class TrajectoryCase(CaseBase):
     suite: Literal["trajectory"] = "trajectory"
     prompt: str
     messages: List[Dict[str, Any]] = Field(default_factory=list)
+    prior_tool_results: List[PriorToolResultCase] = Field(default_factory=list)
     charts_mode: bool = False
     expected_tools: List[ToolCallExpectation] = Field(default_factory=list)
     forbidden_tools: List[str] = Field(default_factory=list)
@@ -110,6 +119,7 @@ class AnswerCase(CaseBase):
     suite: Literal["answer"] = "answer"
     prompt: str
     tool_calls: List[FrozenToolCall] = Field(default_factory=list)
+    prior_tool_results: List[PriorToolResultCase] = Field(default_factory=list)
     expect: TextExpectation = Field(default_factory=TextExpectation)
     offline_response: Optional[ModelTurn] = None
 
@@ -132,6 +142,7 @@ class ToolLoopCase(CaseBase):
     suite: Literal["tool_loop"] = "tool_loop"
     prompt: str
     messages: List[Dict[str, Any]] = Field(default_factory=list)
+    prior_tool_results: List[PriorToolResultCase] = Field(default_factory=list)
     charts_mode: bool = False
     expected_tools: List[ToolCallExpectation] = Field(default_factory=list)
     forbidden_tools: List[str] = Field(default_factory=list)

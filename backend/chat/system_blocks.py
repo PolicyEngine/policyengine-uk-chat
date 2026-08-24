@@ -40,6 +40,7 @@ def serialise_tool_result(result: Any) -> str:
 def build_system_blocks(
     charts_mode: bool = False,
     gateway_plan: str | None = None,
+    established_results: str | None = None,
 ) -> List[dict]:
     """System prompt + optional per-turn directives.
 
@@ -56,6 +57,8 @@ def build_system_blocks(
         blocks.append({"type": "text", "text": CHARTS_MODE_DIRECTIVE})
     if gateway_plan:
         blocks.append({"type": "text", "text": gateway_plan})
+    if established_results:
+        blocks.append({"type": "text", "text": established_results})
     return blocks
 
 

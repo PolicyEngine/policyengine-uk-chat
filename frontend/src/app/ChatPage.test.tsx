@@ -186,4 +186,66 @@ describe("ChatPage", () => {
 
     unmount();
   });
+  it("sends earlier tool results as a typed field rather than inside assistant prose", async () => {
+    const bodies: string[] = [];
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+    vi.mocked(fetch).mockImplementation((input, init) => {
+      if (!String(input).includes("chat/message")) return new Promise<Response>(() => {});
+      bodies.push(String((init as RequestInit).body));
+      return Promise.resolve(new Response(stream, { status: 200 }));
+    });
+
+    render(<ChatPage />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask a question" }), {
+      target: { value: "What is the cost?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await act(async () => {
+      streamController?.enqueue(encodeStreamEvent({
+        type: "tool_start",
+        tool_name: "compute_budgetary_impact",
+        tool_id: "tool-1",
+      }));
+      streamController?.enqueue(encodeStreamEvent({
+        type: "tool_use",
+        tool_name: "compute_budgetary_impact",
+        tool_id: "tool-1",
+        tool_input: { simulation_id: "society_1" },
+      }));
+      streamController?.enqueue(encodeStreamEvent({
+        type: "tool_result",
+        tool_name: "compute_budgetary_impact",
+        tool_id: "tool-1",
+        status: "success",
+        result_summary: '{"budgetary_impact": -1200000000}',
+      }));
+      streamController?.enqueue(encodeStreamEvent({ type: "chunk", content: "It costs £1.2bn." }));
+      streamController?.enqueue(encodeStreamEvent({ type: "done" }));
+      streamController?.close();
+    });
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask a question" }), {
+      target: { value: "And by decile?" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    const followUp = JSON.parse(bodies[bodies.length - 1]);
+    const assistant = followUp.messages.find((m: { role: string }) => m.role === "assistant");
+    expect(assistant.tool_results).toEqual([
+      {
+        tool_name: "compute_budgetary_impact",
+        result: '{"budgetary_impact": -1200000000}',
+        tool_input: { simulation_id: "society_1" },
+      },
+    ]);
+    // The transcript itself must stay prose: results travel beside it.
+    expect(assistant.content).not.toContain("Tool results:");
+    expect(assistant.content).not.toContain("budgetary_impact");
+  });
 });
