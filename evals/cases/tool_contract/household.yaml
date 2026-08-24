@@ -187,3 +187,33 @@ cases:
       required_paths:
         - person.0.income_tax
         - household.household_net_income
+
+  - id: household_omits_population_ranked_variables
+    suite: tool_contract
+    description: >
+      Illustrative household results omit deciles and relative poverty, which
+      rank one household against itself, and explain the omission instead.
+    requirements: [policyengine_py]
+    tool_name: run_household_simulation
+    input:
+      year: 2026
+      people:
+        - age: 40
+          employment_income: 6000
+      benunit: {}
+      household: {}
+    expect:
+      contains:
+        status: success
+      required_paths:
+        - household.household_net_income
+        - household.in_poverty_bhc
+        - omitted_population_ranked_variables.household_income_decile
+        - omitted_population_ranked_variables.household_wealth_decile
+        - omitted_population_ranked_variables.in_relative_poverty_bhc
+        - omitted_population_ranked_variables.in_relative_poverty_ahc
+      absent_paths:
+        - household.household_income_decile
+        - household.household_wealth_decile
+        - household.in_relative_poverty_bhc
+        - household.in_relative_poverty_ahc

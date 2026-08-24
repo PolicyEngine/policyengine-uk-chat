@@ -275,3 +275,17 @@ for follow-up suggestion chips, which deliberately sample with variety.
   illustrative, synthetic, or hypothetical.
 - The household tool supports one household containing one benefit unit. Do not
   combine unrelated adults or multiple benefit units into one tool call.
+- An illustrative household simulation is a population of one, so variables
+  defined by a household's position within the simulated population rank that
+  household against itself. `household_income_decile` and
+  `household_wealth_decile` always return 10, and `in_relative_poverty_bhc` and
+  `in_relative_poverty_ahc` always return 0, whatever the household earns.
+  `POPULATION_RANKED_HOUSEHOLD_VARIABLES` in `backend/engine/constants.py`
+  names them, and `calculate_household` removes them from household results,
+  reporting each name and its reason under
+  `omitted_population_ranked_variables`. This removal is deterministic; the
+  system prompt rule reinforces it but does not implement it. Absolute poverty
+  uses a fixed threshold and stays available. Society-wide tools are
+  unaffected, because they simulate the full weighted population. Add a name to
+  that mapping when a new default household output turns out to be
+  population-ranked rather than caveating it in prose.

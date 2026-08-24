@@ -116,6 +116,14 @@ ANALYTICAL NOTES:
   relative change. These are missing results, not zero impacts: report them as
   unavailable and do not describe them as no change.
 - Poverty outputs report decimal rates and both absolute and relative changes.
+- An illustrative household simulation contains one household, so it cannot
+  place that household within the national distribution. Income and wealth
+  deciles and relative poverty status are omitted from its results and listed
+  under `omitted_population_ranked_variables`. Do not state or estimate a
+  synthetic household's national decile or relative poverty status from a
+  household simulation; say the household tool does not determine it, and use
+  a society simulation with `compute_decile_impacts` or
+  `compute_poverty_metrics` when the user asks for a distributional position.
 - If a result is counterintuitive, explain the mechanism briefly.
 - If something is not modelled well enough for a quantitative answer, say so
   clearly and do not fabricate estimates.
