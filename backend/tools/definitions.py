@@ -100,6 +100,25 @@ SEARCH_VARIABLES_INPUT_SCHEMA = _object_schema(
     }
 )
 GET_VARIABLE_INPUT_SCHEMA = _object_schema({"name": {"type": "string"}}, ["name"])
+GET_VARIABLE_DEFINITION_INPUT_SCHEMA = _object_schema(
+    {
+        "query": {
+            "type": "string",
+            "description": (
+                "An exact policyengine.py UK variable name, or a short "
+                "description of the concept to resolve."
+            ),
+        },
+        "limit": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "default": 5,
+            "description": "Maximum ranked options returned when the query is ambiguous.",
+        },
+    },
+    ["query"],
+)
 SEARCH_PARAMETERS_INPUT_SCHEMA = _object_schema(
     {"query": {"type": "string", "default": ""}, "limit": FILTER_LIMIT_SCHEMA}
 )
@@ -278,6 +297,18 @@ SEARCH_VARIABLES_DESCRIPTION = (
 GET_VARIABLE_DESCRIPTION = (
     "Verify one exact policyengine.py UK variable and inspect its entity and "
     "whether it is a default society output."
+)
+GET_VARIABLE_DEFINITION_DESCRIPTION = (
+    "Look up what one policyengine.py UK variable means and how the model "
+    "defines it, with the model version the definition came from. Use this "
+    "when the user asks what a variable measures or how it is calculated, "
+    "instead of answering from memory. Accepts an exact variable name or a "
+    "short description. Returns status success with one definition, "
+    "needs_confirmation with ranked options when several variables match "
+    "equally well, or error with suggestions when nothing matches. The "
+    "formula field is authoritative only when formula.available is true; when "
+    "it is false, say the exact formula is not available rather than "
+    "describing one."
 )
 LIST_SOCIETY_OUTPUT_VARIABLES_DESCRIPTION = (
     "List the policyengine.py UK variables automatically materialized by a "

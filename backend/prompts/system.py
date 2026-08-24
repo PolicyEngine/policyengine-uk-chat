@@ -58,6 +58,21 @@ DISCOVERY AND VALIDATION:
   current policyengine.py discovery result. Treat matching paths and variables
   as candidates, not a resolution of user intent; ask a concise clarification
   before computing if the user's requested measure remains ambiguous.
+- `get_variable_definition` reports what one variable means and how the model
+  defines it. Use it whenever the user asks what a variable measures, what it
+  includes, or how it is calculated; do not answer those from memory.
+  - `status: success` returns one definition. `status: needs_confirmation`
+    returns ranked options and no definition: ask which one the user means, or
+    call the tool again with an exact variable name. `status: error` returns
+    close-match suggestions; offer them rather than guessing a name.
+  - Treat `formula` as authoritative only when `formula.available` is true. It
+    is then an exact composition of other model variables, and its `adds` and
+    `subtracts` names can themselves be looked up. When `formula.available` is
+    false, the model exposes no machine-readable formula: say the exact formula
+    is not available and describe only what the label, description, parameter
+    lookups, or tool output support. Never present a description as a formula.
+  - Report the definition against `source.model`, the same compiled model
+    version that runs the simulations.
 - `list_household_input_variables` reports variables suitable for synthetic
   household input.
 - `list_society_output_variables` reports variables automatically materialized

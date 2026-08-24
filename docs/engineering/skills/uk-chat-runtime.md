@@ -56,8 +56,8 @@ Only tools registered with `@register_tool` are exposed to the model and
 dispatched by `execute_tool()`. At present, the exposed tools are:
 
 - Discovery: `list_entities`, `search_variables`,
-  `get_variable`, `search_parameters`, `get_parameter`,
-  `list_reform_targets`, `list_household_input_variables`,
+  `get_variable`, `get_variable_definition`, `search_parameters`,
+  `get_parameter`, `list_reform_targets`, `list_household_input_variables`,
   `list_society_output_variables`, and `list_supported_outputs`.
 - Validation: `validate_reform` and `validate_household`.
 - Simulation: `run_household_simulation` for illustrative synthetic households
@@ -106,6 +106,28 @@ render no bar and display a dash for the missing value, never a zero-valued bar.
 Decile chart metadata must carry both the measured income concept and grouping
 concept so household-net-income, equivalised-HBAI, and wealth axes cannot be
 mislabelled.
+
+`get_variable_definition` is the authoritative answer to what a variable means
+and how the model defines it. `backend/engine/definitions.py` owns it, separate
+from `engine/discovery.py`, which answers only whether a variable exists and
+where it lives. Resolution is deterministic and has exactly four outcomes:
+`success` with one definition, `needs_confirmation` with ranked options when
+several variables tie at the best matching tier, `error` with ranked
+suggestions when nothing matches, and `error` for a query with no word
+characters. Matching walks fixed tiers — exact name, exact label, phrase, all
+tokens, description — and ties break on shorter canonical name then alphabetical
+order, so the result never depends on registry iteration order.
+
+The definition source is the same compiled model version that runs the
+simulations, so definitions cannot diverge from calculations. This is the
+constraint that blocked issue #140: do not source formulas from a package other
+than the one performing the calculation.
+
+`formula` is authoritative only when `formula.available` is true. It is then the
+model's own `adds`/`subtracts` composition, reported as an exact statement over
+other model variables. Most variables have no machine-readable formula; those
+report `available: false` with a note. Never turn a label or description into a
+formula, in the tool or in prose.
 
 Helper functions in `backend/engine/` are implementation details unless they
 are exposed through `@register_tool`.

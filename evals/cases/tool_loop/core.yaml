@@ -363,3 +363,51 @@ cases:
       - text: >
           I could not calculate the household because household_net_income is
           a household variable and cannot be supplied on a person.
+
+  - id: tool_loop_variable_definition_disambiguates_then_defines
+    suite: tool_loop
+    description: >
+      An ambiguous concept must be narrowed through the tool rather than
+      guessed, and the resolved definition must carry its model version.
+    requirements: [policyengine_py]
+    prompt: What does the net income variable include?
+    expected_tools:
+      - name: get_variable_definition
+        input_contains:
+          query: net income
+      - name: get_variable_definition
+        input_contains:
+          query: household_net_income
+    forbidden_tools:
+      - run_household_simulation
+      - run_society_simulation
+      - aggregate_result
+      - generate_chart
+    expect:
+      required:
+        - household_net_income
+        - household_market_income
+        - household_benefits
+        - household_tax
+      forbidden:
+        - good
+        - bad
+        - fair
+        - unfair
+        - regressive
+        - progressive
+        - generous
+        - punitive
+    offline_responses:
+      - tool_calls:
+          - name: get_variable_definition
+            input:
+              query: net income
+      - tool_calls:
+          - name: get_variable_definition
+            input:
+              query: household_net_income
+      - text: >
+          Several net income variables exist, so I used the household-level one.
+          household_net_income is defined as household_market_income plus
+          household_benefits, minus household_tax and pension_contributions.
