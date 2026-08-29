@@ -1,9 +1,10 @@
 fastapi
 uvicorn[standard]
+alembic
 sqlmodel
 psycopg2-binary
-anthropic
-policyengine[uk]==5.0.1
+anthropic==0.125.0
+policyengine[uk]==5.2.0
 pandas
 pyyaml
 httpx

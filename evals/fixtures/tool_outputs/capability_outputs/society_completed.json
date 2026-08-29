@@ -1,0 +1,91 @@
+{
+  "status": "completed",
+  "value": {
+    "result": {
+      "artifact_id": "society-result-1",
+      "provenance": {
+        "conversation_id": "eval-conversation",
+        "turn_id": "eval-turn",
+        "capability_id": "society_analysis",
+        "capability_version": "1",
+        "invocation_id": "society-invocation",
+        "sources": ["scenario-1", "enhanced_frs_2024_25"]
+      },
+      "year": 2026,
+      "policy_scenario_artifact_id": "scenario-1",
+      "scenario_revision": "reform-2026",
+      "catalogue_version": "5.0.1",
+      "dataset_version": "2024-25",
+      "calculation_engine_version": "5.0.1",
+      "default_profile_version": "1",
+      "calculated_output_ids": [
+        "budgetary_impact",
+        "winners_losers",
+        "decile_impacts",
+        "poverty"
+      ],
+      "outputs": [
+        {
+          "output_id": "budgetary_impact",
+          "metric_id": "net_budgetary_impact",
+          "label": "Net budgetary impact",
+          "value": 1200000000,
+          "unit": "GBP/year"
+        },
+        {
+          "output_id": "winners_losers",
+          "metric_id": "winners",
+          "label": "Winners",
+          "value": 8400000,
+          "unit": "people"
+        },
+        {
+          "output_id": "winners_losers",
+          "metric_id": "losers",
+          "label": "Losers",
+          "value": 2100000,
+          "unit": "people"
+        },
+        {
+          "output_id": "decile_impacts",
+          "metric_id": "absolute_change",
+          "label": "Income decile 1 change",
+          "value": 45,
+          "unit": "GBP/year",
+          "dimensions": [{"name": "decile", "value": "1"}]
+        },
+        {
+          "output_id": "decile_impacts",
+          "metric_id": "absolute_change",
+          "label": "Income decile 10 change",
+          "value": 120,
+          "unit": "GBP/year",
+          "dimensions": [{"name": "decile", "value": "10"}]
+        },
+        {
+          "output_id": "poverty",
+          "metric_id": "relative_poverty_rate",
+          "label": "Relative poverty rate",
+          "value": 0.18,
+          "unit": "ratio"
+        }
+      ],
+      "requested_output_issues": [
+        {
+          "request": "regional results",
+          "kind": "unsupported",
+          "guidance": "No registered society output matches this request."
+        }
+      ]
+    },
+    "year_source": "server_default",
+    "narration_facts": [
+      {"label": "Net budgetary impact", "value": 1200000000, "unit": "GBP/year"},
+      {"label": "Winners", "value": 8400000, "unit": "people"},
+      {"label": "Losers", "value": 2100000, "unit": "people"},
+      {"label": "Income decile 1 change", "value": 45, "unit": "GBP/year"},
+      {"label": "Income decile 10 change", "value": 120, "unit": "GBP/year"},
+      {"label": "Relative poverty rate", "value": 0.18, "unit": "ratio"}
+    ]
+  }
+}

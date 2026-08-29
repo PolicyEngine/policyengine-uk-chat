@@ -18,6 +18,9 @@ the UK chat pathway.
 - `answer`: frozen tool output to final prose.
 - `tool_loop`: user prompt through one or more model/tool turns to final prose.
 
+Trajectory, answer, and tool-loop cases receive the public capability schemas
+and required-use system contract. There is no per-case runtime selector.
+
 Keep cases focused on one boundary. If a case needs to check both tool choice
 and final prose, split it into one trajectory case and one answer case.
 Use `tool_loop` only when the seam being tested requires deterministic tool
@@ -31,6 +34,12 @@ validate-then-calculate flows.
   output shape is the contract being tested.
 - Put frozen tool outputs in `evals/fixtures/tool_outputs/` when more than one
   case may use them.
+- Capability tool-loop cases declare ordered `capability_outputs`. Each entry
+  uses the existing frozen-output shape and may reference a fixture under
+  `evals/fixtures/tool_outputs/capability_outputs/`. The offline harness
+  validates each frozen `Completed`, `NeedsInput`, `Unsupported`, or `Failed`
+  outcome against the registered capability output model before returning it
+  to the fake model.
 - Mark cases requiring local microdata with `requirements: [data]`.
 - Mark cases requiring the policyengine.py UK packages with
   `requirements: [policyengine_py]`.
@@ -80,7 +89,7 @@ make eval-ai-offline
 
 Runs schema validation, deterministic tool-contract evals, fake-provider
 trajectory/answer cases, and fake-provider tool-loop cases with deterministic
-tool execution.
+tool execution or frozen typed capability outcomes.
 
 ```bash
 ANTHROPIC_API_KEY=... make eval-ai-live
@@ -89,10 +98,6 @@ ANTHROPIC_API_KEY=... make eval-ai-live
 Runs the same suite through the live provider and writes reports under
 `evals/reports/`.
 
-```bash
-ANTHROPIC_API_KEY=... make eval-ai-live-uk-population
-```
-
-Runs the manual, data-backed UK population microsimulation tool-loop cases
-against the live provider. These cases are gated by `RUN_DATA_EVALS=1` in the
-Make target and are not part of PR CI.
+Run data-backed population cases through `make eval-ai-deployed-uk-population`.
+That adapter exercises the complete deployed chat runtime and returns its
+structured invocation trace for grading.

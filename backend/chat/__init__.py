@@ -1,7 +1,20 @@
-"""The chat turn: orchestration, system-block assembly, model selection,
-titles, and follow-up suggestions. Re-exports the router for app wiring.
-"""
+"""Chat package with a lazily imported FastAPI adapter."""
 
-from chat.routes import router
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from fastapi import APIRouter
+
+    router: APIRouter
+
+
+def __getattr__(name: str):
+    if name != "router":
+        raise AttributeError(name)
+    from chat.routes import router
+
+    return router
+
 
 __all__ = ["router"]

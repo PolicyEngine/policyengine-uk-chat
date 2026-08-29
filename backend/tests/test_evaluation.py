@@ -33,41 +33,36 @@ from eval.tool_loop_grading import (
     expectation_with_trace_numbers,
     numbers_from_value,
 )
-from gateway.execution import analysis_tool_for_output
-from gateway.intent import output_from_prompt
-from tools.definitions import DEFAULT_SIMULATION_YEAR, TOOL_DEFINITIONS
+from tools.definitions import TOOL_DEFINITIONS
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_loads_yaml_cases_with_typed_schemas():
-    cases = load_case_file(REPO_ROOT / "evals" / "cases" / "trajectory" / "core.yaml")
+    cases = load_case_file(
+        REPO_ROOT / "evals" / "cases" / "trajectory" / "capability_runtime.yaml"
+    )
 
     assert cases
     assert {case.suite for case in cases} == {"trajectory"}
-    assert cases[0].expected_tools[0].name == "run_household_simulation"
+    assert any(
+        expected.name == "household_analysis"
+        for case in cases
+        for expected in case.expected_tools
+    )
 
 
-def test_population_cases_declare_gateway_expectations_and_derivative_targets():
+def test_population_cases_declare_capability_tool_expectations():
     cases = load_case_file(
         REPO_ROOT / "evals" / "cases" / "tool_loop" / "uk_population_live.yaml"
     )
 
     assert len(cases) == 20
     for case in cases:
-        assert case.gateway_expect.route == "compute"
-        assert case.gateway_expect.outcome == "ready"
-        assert case.gateway_expect.defaults_contains == {"year": 2026}
-        assert case.gateway_expect.defaults_contains["year"] == DEFAULT_SIMULATION_YEAR
-        assert case.gateway_expect.min_reform_confidence == 80
-        assert case.gateway_expect.require_parameter_binding is True
-        output = output_from_prompt(case.prompt)
-        assert output is not None
-        assert (
-            analysis_tool_for_output("run_society_simulation", output.value)
-            == case.expected_tools[-1].name
-        )
+        names = [expected.name for expected in case.expected_tools]
+        assert names[0] == "run_society_simulation"
+        assert len(names) >= 2
 
 
 def test_grade_output_supports_partial_paths_and_numeric_tolerance():
@@ -159,18 +154,14 @@ def test_offline_eval_runs_seed_trajectory_and_answer_cases_without_reports():
         mode="offline",
         write_reports=False,
     )
-    expected_cases = (
-        len(load_case_file(REPO_ROOT / "evals" / "cases" / "trajectory" / "core.yaml"))
-        + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answer" / "core.yaml"))
-    )
-    live_only_cases = (
-        len(load_case_file(REPO_ROOT / "evals" / "cases" / "trajectory" / "live.yaml"))
-        + len(load_case_file(REPO_ROOT / "evals" / "cases" / "answer" / "live.yaml"))
+    expected_cases = sum(
+        len(load_case_file(path))
+        for suite in ("trajectory", "answer")
+        for path in (REPO_ROOT / "evals" / "cases" / suite).glob("*.yaml")
     )
 
     assert report.failed == 0
-    assert report.passed + report.skipped == expected_cases + live_only_cases
-    assert report.skipped >= live_only_cases
+    assert report.passed + report.skipped == expected_cases
 
 
 def test_offline_eval_runs_tool_loop_cases_without_reports():
@@ -188,7 +179,7 @@ def test_offline_eval_runs_tool_loop_cases_without_reports():
     assert report.passed + report.skipped == expected_cases
 
 
-def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
+def test_tool_loop_returns_typed_capability_outputs_between_model_turns(tmp_path, monkeypatch):
     case_file = tmp_path / "tool_loop.yaml"
     case_file.write_text(
         yaml.safe_dump(
@@ -197,28 +188,34 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
                     {
                         "id": "loop_case",
                         "suite": "tool_loop",
-                        "description": "Tool loop executes a tool before grading final text.",
+                        "description": "Tool loop returns a capability result before grading final text.",
                         "prompt": "Calculate, then answer.",
                         "expected_tools": [
                             {
-                                "name": "run_household_simulation",
-                                "input_contains": {"year": 2025},
+                                "name": "household_analysis",
+                                "input_contains": {"year": 2026},
                             }
                         ],
                         "expect": {
-                            "required": ["done", "£42"],
+                            "required": ["done", "£25,119.60"],
                             "grounded_numbers": True,
                         },
+                        "capability_outputs": [
+                            {
+                                "name": "household_analysis",
+                                "output_fixture": "capability_outputs/household_completed.json",
+                            }
+                        ],
                         "offline_responses": [
                             {
                                 "tool_calls": [
                                     {
-                                        "name": "run_household_simulation",
-                                        "input": {"year": 2025},
+                                        "name": "household_analysis",
+                                        "input": {"description": "One adult", "year": 2026},
                                     }
                                 ]
                             },
-                            {"text": "done £42"},
+                            {"text": "done £25,119.60"},
                         ],
                     }
                 ]
@@ -226,15 +223,7 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
             sort_keys=False,
         )
     )
-    calls = []
-
-    def record_tool_call(tool_name, tool_input, context=None):
-        assert context is not None
-        calls.append((tool_name, tool_input))
-        return {"value": 42}
-
     monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
-    monkeypatch.setattr(runner, "execute_tool", record_tool_call)
 
     report = runner.run_eval(
         suites=["tool_loop"],
@@ -244,7 +233,7 @@ def test_tool_loop_executes_tools_between_model_turns(tmp_path, monkeypatch):
 
     assert report.failed == 0
     assert report.passed == 1
-    assert calls == [("run_household_simulation", {"year": 2025})]
+    assert report.results[0].details["tool_outputs"][0]["status"] == "completed"
 
 
 def test_tool_loop_cases_can_declare_live_trial_thresholds():
@@ -337,11 +326,17 @@ def test_live_tool_loop_trials_score_against_threshold(tmp_path, monkeypatch):
                         "pass_threshold": 0.66,
                         "expected_tools": [
                             {
-                                "name": "run_household_simulation",
+                                "name": "household_analysis",
                                 "input_contains": {"year": 2026},
                             }
                         ],
                         "expect": {"required": ["completed"]},
+                        "capability_outputs": [
+                            {
+                                "name": "household_analysis",
+                                "output_fixture": "capability_outputs/household_completed.json",
+                            }
+                        ],
                     }
                 ]
             },
@@ -351,24 +346,17 @@ def test_live_tool_loop_trials_score_against_threshold(tmp_path, monkeypatch):
     fake_client = runner.FakeModelClient(
         {
             "live_loop_case": [
-                ModelTurn(tool_calls=[ModelToolCall(name="run_household_simulation", input={"year": 2026})]),
+                ModelTurn(tool_calls=[ModelToolCall(name="household_analysis", input={"description": "One adult", "year": 2026})]),
                 ModelTurn(text="completed"),
-                ModelTurn(tool_calls=[ModelToolCall(name="run_household_simulation", input={"year": 2026})]),
+                ModelTurn(tool_calls=[ModelToolCall(name="household_analysis", input={"description": "One adult", "year": 2026})]),
                 ModelTurn(text="completed"),
-                ModelTurn(tool_calls=[ModelToolCall(name="run_household_simulation", input={"year": 2026})]),
+                ModelTurn(tool_calls=[ModelToolCall(name="household_analysis", input={"description": "One adult", "year": 2026})]),
                 ModelTurn(text="missing required text"),
             ]
         }
     )
-    calls = []
-
     monkeypatch.setattr(runner, "_case_paths", lambda _suites: [case_file])
     monkeypatch.setattr(runner, "AnthropicModelClient", lambda model=None: fake_client)
-    monkeypatch.setattr(
-        runner,
-        "execute_tool",
-        lambda tool_name, tool_input, context=None: calls.append((tool_name, tool_input)) or {"status": "success"},
-    )
 
     report = runner.run_eval(
         suites=["tool_loop"],
@@ -384,11 +372,6 @@ def test_live_tool_loop_trials_score_against_threshold(tmp_path, monkeypatch):
     assert result.details["passed_trials"] == 2
     assert result.details["failed_trials"] == 1
     assert len(result.details["trials"]) == 3
-    assert calls == [
-        ("run_household_simulation", {"year": 2026}),
-        ("run_household_simulation", {"year": 2026}),
-        ("run_household_simulation", {"year": 2026}),
-    ]
 
 
 def test_issue_229_live_population_cases_are_manual_live_tool_loops():
@@ -411,14 +394,14 @@ def test_charts_mode_trajectory_adds_directive_and_keeps_tools():
 
         def generate(self, **kwargs):
             self.calls.append(kwargs)
-            return ModelTurn(tool_calls=[ModelToolCall(name="generate_chart", input={})])
+            return ModelTurn(tool_calls=[ModelToolCall(name="society_chart", input={})])
 
     case = TrajectoryCase(
         id="charts_case",
         description="Charts mode keeps tools available.",
         prompt="Chart supplied data.",
         charts_mode=True,
-        expected_tools=[ToolCallExpectation(name="generate_chart")],
+        expected_tools=[ToolCallExpectation(name="society_chart")],
     )
     client = RecordingClient()
 
@@ -426,7 +409,7 @@ def test_charts_mode_trajectory_adds_directive_and_keeps_tools():
 
     assert result.status == "passed"
     assert client.calls[0]["tools"]
-    assert "chart mode" in client.calls[0]["system"]
+    assert "chart presentation" in client.calls[0]["system"]
 
 
 def test_multiturn_trajectory_uses_case_messages():
@@ -581,12 +564,23 @@ def test_policyengine_uk_generated_cases_validate():
 
 
 def test_all_eval_tool_calls_match_current_tool_schemas():
-    schemas = {tool["name"]: tool["input_schema"] for tool in TOOL_DEFINITIONS}
+    deterministic_tool_schemas = {
+        tool["name"]: tool["input_schema"] for tool in TOOL_DEFINITIONS
+    }
+    capability_schemas = {
+        operation["name"]: operation["input_schema"]
+        for operation in runner._capability_specs_for_model()
+    }
     errors = []
 
     for suite, case_dir in runner.SUITE_DIRS.items():
         for path in sorted(case_dir.glob("*.yaml")):
             for case in load_case_file(path):
+                schemas = (
+                    deterministic_tool_schemas
+                    if isinstance(case, ToolContractCase)
+                    else {**deterministic_tool_schemas, **capability_schemas}
+                )
                 calls = []
                 if isinstance(case, ToolContractCase):
                     if "schema_negative" in case.tags:

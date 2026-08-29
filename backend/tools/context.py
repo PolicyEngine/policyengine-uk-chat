@@ -48,8 +48,6 @@ class TurnResultStore:
 class ToolExecutionContext:
     turn_id: str
     result_store: TurnResultStore
-    approved_reform: dict[str, Any] | None = None
-    require_approved_reform: bool = False
 
 
 def new_tool_context(turn_id: str | None = None) -> ToolExecutionContext:

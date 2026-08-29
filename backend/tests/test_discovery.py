@@ -22,6 +22,17 @@ def fake_model():
             entity="person",
             description="Annual earnings",
             definition_period="year",
+            unit="currency-GBP",
+            quantity_type="flow",
+            reference=[
+                "Example Act 2026",
+                {"title": "Example guidance", "href": "https://example.test"},
+            ],
+            defined_for="is_adult",
+            min_value=0,
+            max_value=1_000_000,
+            is_period_size_independent=False,
+            metadata={"source": "example"},
             value_type=float,
             default_value=0,
             possible_values=None,
@@ -31,6 +42,14 @@ def fake_model():
             entity="household",
             description=None,
             definition_period="month",
+            unit="currency-GBP",
+            quantity_type="flow",
+            reference=None,
+            defined_for=None,
+            min_value=None,
+            max_value=None,
+            is_period_size_independent=False,
+            metadata={},
             value_type=None,
             default_value=0,
             possible_values=[0, 1],
@@ -74,6 +93,18 @@ def test_match_and_variable_discovery(monkeypatch):
     result = discovery.search_variables("earn", entity="person", limit=1)
     assert result["variables"][0]["name"] == "employment_income"
     assert result["variables"][0]["value_type"] == "float"
+    assert result["variables"][0]["definition_period"] == "year"
+    assert result["variables"][0]["unit"] == "currency-GBP"
+    assert result["variables"][0]["quantity_type"] == "flow"
+    assert result["variables"][0]["reference"][1] == {
+        "title": "Example guidance",
+        "href": "https://example.test",
+    }
+    assert result["variables"][0]["defined_for"] == "is_adult"
+    assert result["variables"][0]["min_value"] == 0
+    assert result["variables"][0]["max_value"] == 1_000_000
+    assert result["variables"][0]["is_period_size_independent"] is False
+    assert result["variables"][0]["metadata"] == {"source": "example"}
     assert result["variables"][0]["is_default_society_output"] is True
     rent = discovery.search_variables(entity="household")["variables"][0]
     assert rent["name"] == "rent"
@@ -88,6 +119,27 @@ def test_get_variable_reports_details_and_suggestions(monkeypatch):
     missing = discovery.get_variable("employment_incom")
     assert missing["status"] == "error"
     assert "employment_income" in missing["suggestions"]
+
+
+def test_variable_search_ranks_exact_label_before_description_matches(monkeypatch):
+    model = fake_model()
+    model.variables_by_name = {
+        "property_value": SimpleNamespace(
+            label="Property value",
+            entity="household",
+            description="Used when calculating Universal Credit",
+        ),
+        "universal_credit": SimpleNamespace(
+            label="Universal Credit",
+            entity="benunit",
+            description="Calculated entitlement",
+        ),
+    }
+    monkeypatch.setattr(discovery, "uk_model_version", lambda: model)
+
+    result = discovery.search_variables("Universal Credit", limit=1)
+
+    assert result["variables"][0]["name"] == "universal_credit"
 
 
 def test_list_society_output_variables_uses_model_version_defaults(monkeypatch):

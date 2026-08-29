@@ -1,76 +1,76 @@
 import asyncio
-from datetime import date
+from datetime import datetime, timezone
 import json
 
 from fastapi.testclient import TestClient
 
 from api.main import app
+from capabilities.tracing import InvocationKind, InvocationRecord, InvocationStatus
 from chat.events import (
     ChatUsage,
+    InvocationActivity,
     SuggestionsGenerated,
-    ToolCompleted,
-    ToolUsed,
     TurnCancelled,
     TurnCompleted,
     TurnFailed,
 )
 from chat.schemas import ChatRequest
 from eval.schemas import EvalChatResponse
-from gateway.trace import GatewayTrace, GatewayTraceReason
+from tools.contracts import Visibility
 
 
 async def connected():
     return False
 
 
-TRACE = GatewayTrace(
-    selected_tool="run_society_simulation",
-    target_tool="compute_budgetary_impact",
-    gating_reasons=(GatewayTraceReason("missing_output", "output"),),
-    defaults_applied={"year": 2026},
-    catalogue_recovery_used=False,
-)
+def invocation_record(*, status=InvocationStatus.COMPLETED):
+    return InvocationRecord(
+        conversation_id="eval-session",
+        turn_id="turn-1",
+        invocation_id="invocation-1",
+        sequence=1,
+        kind=InvocationKind.TOOL,
+        identifier="run_society_simulation",
+        version="1",
+        visibility=Visibility.PRIVATE,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        duration_ms=4,
+        status=status,
+        summary="Society simulation completed.",
+        debug_input={"year": 2026, "reform": {"rate": 0.19}},
+        debug_output={"budgetary_impact": -1_000_000_000},
+    )
 
 
-def test_eval_service_collects_complete_trace_and_stops_at_completion(monkeypatch):
+def test_eval_service_collects_complete_invocation_trace_and_stops_at_completion(monkeypatch):
     from eval import service
 
     advanced_after_completion = False
 
     async def fake_turn(*_args, **_kwargs):
         nonlocal advanced_after_completion
-        yield ToolUsed(
-            "run_society_simulation",
-            "tool-1",
-            {"year": 2026, "reform": {"rate": 0.19}},
-        )
-        yield ToolCompleted(
-            "run_society_simulation",
-            "tool-1",
-            "success",
-            {date(2026, 1, 1): {"budgetary_impact": -1_000_000_000}},
-        )
+        yield InvocationActivity("finished", invocation_record())
         yield TurnCompleted(
             content="The reform costs £1bn annually.",
             session_id="eval-session",
             model="claude-sonnet",
-            route="compute",
+            route="capability",
             outcome="ready",
             stop_reason="end_turn",
             usage=ChatUsage(input_tokens=20, output_tokens=5),
-            gateway_trace=TRACE,
+            turn_id="turn-1",
         )
         advanced_after_completion = True
         yield SuggestionsGenerated(["Another question?"])
 
-    monkeypatch.setattr(service, "run_chat_turn", fake_turn)
+    monkeypatch.setattr(service, "run_capability_chat_turn", fake_turn)
 
     response = asyncio.run(
         service.run_eval_chat(
             ChatRequest(
                 messages=[{"role": "user", "content": "Calculate it"}],
                 session_id="eval-session",
-                user_id="must-not-be-billed",
             ),
             is_cancelled=connected,
         )
@@ -79,31 +79,32 @@ def test_eval_service_collects_complete_trace_and_stops_at_completion(monkeypatc
     assert response.status == "completed"
     assert response.content == "The reform costs £1bn annually."
     assert response.usage.input_tokens == 20
-    assert response.tool_trace[0].input["reform"]["rate"] == 0.19
-    assert response.tool_trace[0].output == {
-        "2026-01-01": {"budgetary_impact": -1_000_000_000}
+    assert response.invocation_trace[0].name == "run_society_simulation"
+    assert response.invocation_trace[0].input["reform"]["rate"] == 0.19
+    assert response.invocation_trace[0].output == {
+        "budgetary_impact": -1_000_000_000
     }
     assert advanced_after_completion is False
-    assert response.gateway_trace.selected_tool == "run_society_simulation"
-    assert response.gateway_trace.target_tool == "compute_budgetary_impact"
-    assert response.gateway_trace.defaults_applied == {"year": 2026}
-    assert response.gateway_trace.gating_reasons[0].code == "missing_output"
 
 
-def test_eval_service_returns_structured_terminal_failure(monkeypatch):
+def test_eval_service_returns_structured_failure_with_invocation_trace(monkeypatch):
     from eval import service
 
     async def fake_turn(*_args, **_kwargs):
+        yield InvocationActivity(
+            "finished",
+            invocation_record(status=InvocationStatus.FAILED),
+        )
         yield TurnFailed(
-            content="Agent appears to be stuck in a loop.",
+            content="The capability could not complete.",
             session_id="eval-session",
-            stop_reason="loop_detected",
+            stop_reason="capability_failed",
             usage=ChatUsage(input_tokens=30),
             billable=True,
-            gateway_trace=TRACE,
+            turn_id="turn-1",
         )
 
-    monkeypatch.setattr(service, "run_chat_turn", fake_turn)
+    monkeypatch.setattr(service, "run_capability_chat_turn", fake_turn)
 
     response = asyncio.run(
         service.run_eval_chat(
@@ -116,24 +117,25 @@ def test_eval_service_returns_structured_terminal_failure(monkeypatch):
     )
 
     assert response.status == "failed"
-    assert response.stop_reason == "loop_detected"
+    assert response.stop_reason == "capability_failed"
     assert response.usage.input_tokens == 30
-    assert response.gateway_trace.defaults_applied["year"] == 2026
+    assert response.invocation_trace[0].status == "failed"
 
 
 def test_eval_service_retains_trace_on_cancellation(monkeypatch):
     from eval import service
 
     async def fake_turn(*_args, **_kwargs):
+        yield InvocationActivity("finished", invocation_record())
         yield TurnCancelled(
             session_id="eval-session",
             model=None,
-            route="lightweight",
+            route="capability",
             usage=ChatUsage(input_tokens=4),
-            gateway_trace=TRACE,
+            turn_id="turn-1",
         )
 
-    monkeypatch.setattr(service, "run_chat_turn", fake_turn)
+    monkeypatch.setattr(service, "run_capability_chat_turn", fake_turn)
 
     response = asyncio.run(
         service.run_eval_chat(
@@ -147,7 +149,7 @@ def test_eval_service_retains_trace_on_cancellation(monkeypatch):
 
     assert response.status == "failed"
     assert response.stop_reason == "client_disconnected"
-    assert response.gateway_trace.target_tool == "compute_budgetary_impact"
+    assert response.invocation_trace[0].name == "run_society_simulation"
 
 
 def test_public_and_eval_adapters_preserve_turn_parity(monkeypatch):
@@ -155,29 +157,21 @@ def test_public_and_eval_adapters_preserve_turn_parity(monkeypatch):
     from chat import public_service
     from eval import service
 
-    def event_stream():
-        async def generate():
-            yield ToolUsed("run_society_simulation", "tool-1", {"year": 2026})
-            yield ToolCompleted(
-                "run_society_simulation",
-                "tool-1",
-                "success",
-                {"budgetary_impact": -100},
-            )
-            yield TurnCompleted(
-                content="Annual impact: £100.",
-                session_id="parity-session",
-                model="claude",
-                route="compute",
-                outcome="ready",
-                stop_reason="end_turn",
-                usage=ChatUsage(input_tokens=10, output_tokens=2),
-            )
+    async def event_stream(*_args, **_kwargs):
+        yield InvocationActivity("finished", invocation_record())
+        yield TurnCompleted(
+            content="Annual impact: £1bn.",
+            session_id="eval-session",
+            model="claude",
+            route="capability",
+            outcome="ready",
+            stop_reason="end_turn",
+            usage=ChatUsage(input_tokens=10, output_tokens=2),
+            turn_id="turn-1",
+        )
 
-        return generate()
-
-    monkeypatch.setattr(public_service, "run_chat_turn", lambda *_a, **_k: event_stream())
-    monkeypatch.setattr(service, "run_chat_turn", lambda *_a, **_k: event_stream())
+    monkeypatch.setattr(public_service, "run_capability_chat_turn", event_stream)
+    monkeypatch.setattr(service, "run_capability_chat_turn", event_stream)
     monkeypatch.setattr(
         billing,
         "record_usage",
@@ -185,7 +179,7 @@ def test_public_and_eval_adapters_preserve_turn_parity(monkeypatch):
     )
     request = ChatRequest(
         messages=[{"role": "user", "content": "Calculate"}],
-        session_id="parity-session",
+        session_id="eval-session",
     )
 
     async def collect_public():
@@ -203,10 +197,10 @@ def test_public_and_eval_adapters_preserve_turn_parity(monkeypatch):
         service.run_eval_chat(request, is_cancelled=connected)
     )
     public_done = next(event for event in public_events if event["type"] == "done")
-    public_tools = [
-        event["tool_name"]
+    public_invocations = [
+        event["invocation"]["identifier"]
         for event in public_events
-        if event["type"] == "tool_use"
+        if event["type"] == "invocation_activity"
     ]
 
     assert public_done["content"] == eval_response.content
@@ -215,12 +209,12 @@ def test_public_and_eval_adapters_preserve_turn_parity(monkeypatch):
     assert public_done["outcome"] == eval_response.outcome
     assert public_done["stop_reason"] == eval_response.stop_reason
     assert public_done["usage"] == eval_response.usage.model_dump()
-    assert public_tools == [trace.name for trace in eval_response.tool_trace]
+    assert public_invocations == [
+        trace.name for trace in eval_response.invocation_trace
+    ]
 
 
-def test_eval_route_fails_closed_and_accepts_only_the_configured_token(
-    monkeypatch,
-):
+def test_eval_route_fails_closed_and_accepts_only_the_configured_token(monkeypatch):
     import eval.routes as routes
 
     client = TestClient(app)
@@ -246,7 +240,7 @@ def test_eval_route_fails_closed_and_accepts_only_the_configured_token(
             content="Answer",
             session_id="eval-session",
             model="claude",
-            route="compute",
+            route="capability",
             outcome="ready",
             stop_reason="end_turn",
         )

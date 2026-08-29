@@ -1,0 +1,299 @@
+cases:
+  - id: capability_tool_loop_reform_clarification
+    suite: tool_loop
+    description: Reform resolution can return a focused clarification without blocking conversation.
+    prompt: Raise Universal Credit.
+    expected_tools:
+      - name: policy_reform
+        required_input_paths: [instruction]
+    forbidden_tools: [society_analysis]
+    expect:
+      required: [amount, clarify]
+    capability_outputs:
+      - name: policy_reform
+        output:
+          status: needs_input
+          prompt: Please clarify the amount and which Universal Credit parameter should change.
+          missing_fields: [instruction]
+          partial_input:
+            instruction: Raise Universal Credit.
+            year: 2026
+    offline_responses:
+      - tool_calls:
+          - name: policy_reform
+            input:
+              instruction: Raise Universal Credit.
+              year: 2026
+      - text: Please clarify the amount and the Universal Credit value you want to change.
+
+  - id: capability_tool_loop_household_correction
+    suite: tool_loop
+    description: A later correction is passed to household analysis and produces an explicit assumption list.
+    prompt: >
+      Recalculate it: I am 35, not 45, and I still live alone earning GBP 30,000 with no rent or Council Tax.
+    messages:
+      - role: user
+        content: I am 45, live alone, earn GBP 30,000, and pay no rent or Council Tax. What is my benefit position?
+      - role: assistant
+        content: I calculated an illustrative household result.
+      - role: user
+        content: >
+          Recalculate it: I am 35, not 45, and I still live alone earning GBP 30,000 with no rent or Council Tax.
+    expected_tools:
+      - name: household_analysis
+        required_input_paths: [description]
+    expect:
+      required: ["£25,119.60", Assumptions used, no children, current policy]
+      grounded_numbers: true
+      allowed_numbers: [25119.60, 2026, 1]
+    capability_outputs:
+      - name: household_analysis
+        output_fixture: capability_outputs/household_completed.json
+    offline_responses:
+      - tool_calls:
+          - name: household_analysis
+            input:
+              description: I am 35, live alone, earn GBP 30,000, and pay no rent or Council Tax.
+      - text: |
+          The recalculated net income is £25,119.60.
+
+          ### Assumptions used
+
+          - Policy year: 2026.
+          - Policy scenario: current policy.
+          - No self-employment income.
+          - No pension income.
+          - The household has no children.
+          - The household has no partner or spouse.
+          - The household has no childcare expenses.
+          - The household lives in England.
+
+  - id: capability_tool_loop_household_comprehensive_clarification
+    suite: tool_loop
+    description: Household analysis owns intake and returns all currently knowable consequential questions without enumerating unapplied defaults.
+    prompt: We are two adults and one of us earns GBP 50,000. What benefits would we receive?
+    expected_tools:
+      - name: household_analysis
+        required_input_paths: [description]
+    forbidden_tools: [policy_information, society_analysis]
+    expect:
+      required: [ages, couple, income, weekly, monthly, annual, rent, Council Tax]
+    capability_outputs:
+      - name: household_analysis
+        output:
+          status: needs_input
+          prompt: >
+            What are both adults' ages? Do the adults form one couple or civil
+            partnership? Which person receives the GBP 50,000, and is that amount
+            weekly, monthly, or annual? Does the household pay rent or Council Tax?
+            For each that applies, please give the amount and frequency; otherwise
+            say that it does not apply.
+          missing_fields:
+            - people[0].age
+            - people[1].age
+            - benunit.is_married
+            - income.owner
+            - income.frequency
+            - household.rent
+            - household.council_tax
+          partial_input:
+            description: We are two adults and one of us earns GBP 50,000.
+    offline_responses:
+      - tool_calls:
+          - name: household_analysis
+            input:
+              description: We are two adults and one of us earns GBP 50,000.
+      - text: >
+          What are both adults' ages? Do you form one couple or civil partnership?
+          Which person receives the income, and is it weekly, monthly, or annual?
+          Does the household pay rent or Council Tax? For each that applies, please
+          give the amount and frequency; otherwise say that it does not apply.
+
+  - id: capability_tool_loop_household_typed_resumption
+    suite: tool_loop
+    description: A clarification answer resumes the identified typed household draft without another informal intake.
+    prompt: We are 40 and 38, we are a couple, the first adult earns it annually, and we pay no rent or Council Tax.
+    messages:
+      - role: user
+        content: We are two adults and one of us earns GBP 50,000. What benefits would we receive?
+      - role: assistant
+        content: Please give both ages, whether you are a couple, who receives the income and its frequency, and whether you pay rent or Council Tax.
+      - role: user
+        content: We are 40 and 38, we are a couple, the first adult earns it annually, and we pay no rent or Council Tax.
+    expected_tools:
+      - name: household_analysis
+        input_contains:
+          description: We are 40 and 38, we are a couple, the first adult earns it annually, and we pay no rent or Council Tax.
+        required_input_paths: [description]
+    forbidden_tools: [policy_information, society_analysis]
+    expect:
+      required: ["£25,119.60", Assumptions used, current policy]
+      grounded_numbers: true
+      allowed_numbers: [25119.60, 2026, 1]
+    capability_outputs:
+      - name: household_analysis
+        output_fixture: capability_outputs/household_completed.json
+    offline_responses:
+      - tool_calls:
+          - name: household_analysis
+            input:
+              description: We are 40 and 38, we are a couple, the first adult earns it annually, and we pay no rent or Council Tax.
+      - text: |
+          The completed household calculation is £25,119.60.
+
+          ### Assumptions used
+
+          - Policy year: 2026.
+          - Policy scenario: current policy.
+          - No self-employment income.
+          - No pension income.
+          - The household has no children.
+          - The household has no childcare expenses.
+          - The household lives in England.
+
+  - id: capability_tool_loop_household_direct_pending_age
+    suite: tool_loop
+    description: A direct age answer resumes the pending household invocation without repeating intake or exposing internal instructions.
+    prompt: I SAID 33
+    messages:
+      - role: user
+        content: I am 35, my spouse earns GBP 20,000 annually, and I earn GBP 50,000 annually. How much tax would we pay?
+      - role: assistant
+        content: What is the age of person 2?
+      - role: user
+        content: I SAID 33
+    expected_tools:
+      - name: household_analysis
+        input_contains:
+          description: The missing age is 33.
+        required_input_paths: [description]
+    forbidden_tools: [policy_information, society_analysis]
+    expect:
+      required: ["£25,119.60", Assumptions used]
+      forbidden: [capability_repeated_without_new_user_evidence, "already requested clarification"]
+      grounded_numbers: true
+      allowed_numbers: [25119.60, 2026, 1]
+    capability_outputs:
+      - name: household_analysis
+        output_fixture: capability_outputs/household_completed.json
+    offline_responses:
+      - tool_calls:
+          - name: household_analysis
+            input:
+              description: The missing age is 33.
+      - text: |
+          The recalculated result is £25,119.60.
+
+          ### Assumptions used
+
+          - Policy year: 2026.
+          - Policy scenario: current policy.
+          - No self-employment income.
+          - No pension income.
+          - The household has no children.
+          - The household has no childcare expenses.
+          - The household lives in England.
+
+  - id: capability_tool_loop_society_defaults_and_addition
+    suite: tool_loop
+    description: Society analysis calculates the default profile plus a requested poverty output.
+    prompt: Calculate UK-wide effects of a GBP 15,000 personal allowance, including poverty and regional results.
+    expected_tools:
+      - name: society_analysis
+        input_contains:
+          year: 2026
+          requested_outputs: [poverty, regional results]
+    expect:
+      required: [budget, winners, losers, decile, poverty, regional results, unsupported]
+    capability_outputs:
+      - name: society_analysis
+        output_fixture: capability_outputs/society_completed.json
+    offline_responses:
+      - tool_calls:
+          - name: society_analysis
+            input:
+              reform_instruction: Set the personal allowance to GBP 15,000.
+              year: 2026
+              requested_outputs: [poverty, regional results]
+      - text: >
+          The result includes the budget, winners and losers, income-decile
+          impacts, and poverty. Regional results are unsupported.
+
+  - id: capability_tool_loop_follow_up_reuses_aggregate
+    suite: tool_loop
+    description: A follow-up reads a retained aggregate artifact without using prior prose.
+    prompt: Remind me of the budgetary impact from society-result-1.
+    expected_tools:
+      - name: analysis_follow_up
+        input_contains:
+          referenced_result_id: society-result-1
+    forbidden_tools: [society_analysis]
+    expect:
+      required: [£1.2 billion, retained aggregate]
+      grounded_numbers: true
+      allowed_numbers: [1.2]
+    capability_outputs:
+      - name: analysis_follow_up
+        output_fixture: capability_outputs/follow_up_reused.json
+    offline_responses:
+      - tool_calls:
+          - name: analysis_follow_up
+            input:
+              question: What was the budgetary impact?
+              referenced_result_id: society-result-1
+      - text: The retained aggregate shows a £1.2 billion budgetary impact.
+
+  - id: capability_tool_loop_follow_up_verified_rerun
+    suite: tool_loop
+    description: A missing requested aggregate can be obtained by a verified provider rerun.
+    prompt: Add the Gini coefficient to society-result-1.
+    expected_tools:
+      - name: analysis_follow_up
+        input_contains:
+          referenced_result_id: society-result-1
+          requested_outputs: [inequality]
+    expect:
+      required: [reran, Gini, "0.31"]
+      grounded_numbers: true
+      allowed_numbers: [0.31]
+    capability_outputs:
+      - name: analysis_follow_up
+        output_fixture: capability_outputs/follow_up_rerun.json
+    offline_responses:
+      - tool_calls:
+          - name: analysis_follow_up
+            input:
+              question: Add the Gini coefficient.
+              referenced_result_id: society-result-1
+              requested_outputs: [inequality]
+      - text: I reran the verified scenario and the Gini coefficient is 0.31.
+
+  - id: capability_tool_loop_calculate_then_chart
+    suite: tool_loop
+    description: A chart request calculates society results before invoking the dependent chart capability.
+    prompt: Calculate a GBP 15,000 personal allowance and chart the income-decile effects.
+    expected_tools:
+      - name: society_analysis
+      - name: society_chart
+        input_contains:
+          referenced_result_id: society-result-1
+          requested_output: decile_impacts
+    expect:
+      required: [chart, income-decile]
+    capability_outputs:
+      - name: society_analysis
+        output_fixture: capability_outputs/society_completed.json
+      - name: society_chart
+        output_fixture: capability_outputs/chart_completed.json
+    offline_responses:
+      - tool_calls:
+          - name: society_analysis
+            input:
+              reform_instruction: Set the personal allowance to GBP 15,000.
+              year: 2026
+      - tool_calls:
+          - name: society_chart
+            input:
+              referenced_result_id: society-result-1
+              requested_output: decile_impacts
+      - text: I calculated the result and produced the income-decile chart.

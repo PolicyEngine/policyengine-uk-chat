@@ -22,6 +22,7 @@ services:
 
   backend:
     container_name: backend-microsim-public
+    image: policyengine-uk-chat-backend
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -51,7 +52,23 @@ services:
       - DATABASE_URL=postgresql://${DB_USERNAME:-postgres}:${DB_PASSWORD:-postgres}@db-microsim-public:5432/${DB_NAME:-microsim}
       - HOSTNAMES=http://localhost:3006,http://frontend-microsim-public:3000
     depends_on:
-      - db
+      migrate:
+        condition: service_completed_successfully
+
+  migrate:
+    container_name: migration-microsim-public
+    image: policyengine-uk-chat-backend
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    volumes:
+      - ./backend:/app
+    command: ["alembic", "-c", "alembic.ini", "upgrade", "head"]
+    environment:
+      - ALEMBIC_DATABASE_URL=postgresql://${DB_USERNAME:-postgres}:${DB_PASSWORD:-postgres}@db-microsim-public:5432/${DB_NAME:-microsim}
+    depends_on:
+      db:
+        condition: service_healthy
 
   db:
     container_name: db-microsim-public
@@ -63,6 +80,11 @@ services:
       POSTGRES_DB: ${DB_NAME:-microsim}
     ports:
       - "5433:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-postgres} -d ${DB_NAME:-microsim}"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
     volumes:
       - postgres-data-microsim-public:/var/lib/postgresql/data
 

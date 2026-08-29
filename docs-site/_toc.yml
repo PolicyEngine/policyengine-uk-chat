@@ -12,7 +12,6 @@ parts:
       - file: backend/overview
       - file: backend/api
       - file: backend/chat
-      - file: backend/gateway
       - file: backend/tools
       - file: backend/engine
       - file: backend/billing
@@ -22,6 +21,3 @@ parts:
   - caption: Operations
     chapters:
       - file: deployment
-  - caption: Design notes
-    chapters:
-      - file: design/conversation-memory-layer

@@ -1,9 +1,9 @@
 source:
   generated_from: evals/sources/policyengine_uk.yaml
   package: policyengine-uk
-  version: 2.89.2
+  version: 2.90.2
   runtime_package: policyengine
-  runtime_version: 5.0.1
+  runtime_version: 5.2.0
 cases:
 - id: policyengine_uk_tax_no_income
   suite: tool_contract
@@ -16,7 +16,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/integration/tax.yaml
     name: No income
   tool_name: run_household_simulation
@@ -48,7 +48,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/integration/tax.yaml
     name: Some employed income
   tool_name: run_household_simulation
@@ -80,7 +80,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
     name: Income Tax for earner
   tool_name: run_household_simulation
@@ -108,7 +108,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/gov/hmrc/income_tax/income_tax.yaml
     name: Income Tax for earner with pension contributions
   tool_name: run_household_simulation
@@ -137,7 +137,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
     name: NI Class 1 employee contributions - below PT
   tool_name: run_household_simulation
@@ -165,7 +165,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
     name: NI Class 1 employee contributions - between PT and UEL
   tool_name: run_household_simulation
@@ -193,7 +193,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/gov/hmrc/national_insurance/class_1/ni_class_1_employee.yaml
     name: NI Class 1 employee contributions - above UEL
   tool_name: run_household_simulation
@@ -221,7 +221,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/gov/hmrc/national_insurance/national_insurance.yaml
     name: National Insurance sums non-employer-side contributions.
   tool_name: run_household_simulation
@@ -252,7 +252,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
     name: Child Benefit with no children
   tool_name: run_household_simulation
@@ -281,7 +281,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
     name: Child Benefit with one child
   tool_name: run_household_simulation
@@ -312,7 +312,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/finance/benefit/family/child_benefit.yaml
     name: Child Benefit with two children, one over 16
   tool_name: run_household_simulation
@@ -345,7 +345,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
     name: Income reduction applies
   tool_name: run_household_simulation
@@ -377,7 +377,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/finance/benefit/family/universal_credit/universal_credit.yaml
     name: Capital above the upper limit removes Universal Credit entitlement
   tool_name: run_household_simulation
@@ -410,7 +410,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml
     name: "\xA3445k first-time buyer"
   tool_name: run_household_simulation
@@ -440,7 +440,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/gov/hmrc/stamp_duty/stamp_duty_land_tax.yaml
     name: "\xA3350k second home"
   tool_name: run_household_simulation
@@ -469,12 +469,12 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
     name: Basic rate capital gains tax
   tool_name: run_household_simulation
   input:
-    year: 2024
+    year: 2025
     people:
     - adjusted_net_income: 20000
       capital_gains: 23000
@@ -485,7 +485,7 @@ cases:
   expect:
     numeric:
     - path: person[].capital_gains_tax
-      equals: 2000.0
+      equals: 3600.0
       tolerance: 1.0
 - id: policyengine_uk_capital_gains_higher_rate
   suite: tool_contract
@@ -498,12 +498,12 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/gov/hmrc/capital_gains_tax/capital_gains_tax.yaml
     name: Higher rate capital gains tax
   tool_name: run_household_simulation
   input:
-    year: 2024
+    year: 2025
     people:
     - adjusted_net_income: 50000
       capital_gains: 50000
@@ -514,8 +514,8 @@ cases:
   expect:
     numeric:
     - path: person[].capital_gains_tax
-      equals: 9373.0
-      tolerance: 1.0
+      equals: 11263.8
+      tolerance: 0.01
 - id: policyengine_uk_high_value_council_tax_surcharge
   suite: tool_contract
   description: 'Imported from policyengine-uk: tests/policy/baseline/gov/hmrc/council_tax/high_value_council_tax_surcharge.yaml
@@ -527,7 +527,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/gov/hmrc/council_tax/high_value_council_tax_surcharge.yaml
     name: High value council tax surcharge applies in England and flows into aggregates
   tool_name: run_household_simulation
@@ -570,7 +570,7 @@ cases:
   - policyengine_py
   source:
     package: policyengine-uk
-    version: 2.89.2
+    version: 2.90.2
     path: tests/policy/baseline/gov/treasury/energy_bills_rebate/council_tax_rebate.yaml
     name: CT bands A-D get full rebate, others don't.
   tool_name: run_household_simulation

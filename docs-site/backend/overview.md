@@ -22,8 +22,9 @@ It hosts the chat agent and persists conversations. In production it runs as a
   (see the Observability section below).
 - **Rate limiting** uses `slowapi`; the handler in `api/errors.py` returns `429`
   with a `Retry-After` header.
-- On **startup**, `conversations.ensure_table()` creates/migrates the chat
-  history table; on **shutdown**, observability is flushed.
+- On **startup**, `verify_database_schema()` confirms that PostgreSQL is at the
+  repository's Alembic revision without changing schema; on **shutdown**,
+  observability is flushed.
 
 ## Operational endpoints
 
@@ -41,15 +42,15 @@ It hosts the chat agent and persists conversations. In production it runs as a
 The `/version` endpoint confirms which policyengine.py and UK package versions a
 deployment is serving.
 
-## Model catalog and scope
+## Model catalogue and scope
 
-The compute agent discovers the live model through typed tools. Variable,
+Capabilities discover the live model through typed tools. Variable,
 parameter, entity, reform-target, household-input, and output discovery are
 separate calls so the model retrieves only the catalog area it needs.
 
-The lightweight gateway uses the curated scope descriptor in
-`backend/prompts/gateway.py`. No generated engine reference or scope file is
-required at image-build time.
+A private relevance capability performs a bounded scope assessment on every
+turn. It can identify a clearly unsupported jurisdiction or unrelated request,
+but cannot choose another capability or construct calculation input.
 
 ## Rate limits
 
@@ -71,11 +72,10 @@ process by default; point `slowapi` at Redis for cross-container accuracy.
 - `init_observability(app, service_role="api")` (`observability/fastapi.py`)
   configures tracing, spans (prefix `uk_chat`, service `policyengine-uk-chat`),
   and metrics, and instruments FastAPI and `httpx`.
-- `observability/segments.py` defines a `SegmentName` catalogue —
-  `GATEWAY_CLASSIFY`, `MODEL_SELECT`, `SYSTEM_BUILD`, `MODEL_STREAM`,
-  `TOOL_EXECUTE`, `BILLING_RECORD_USAGE`, `SUGGESTIONS`, `TITLE_GENERATE`, and
-  more — used as `segment(...)` context managers across the orchestrator so each
-  phase of a chat turn is traced and timed.
+- `observability/segments.py` defines a `SegmentName` catalogue including
+  `MODEL_STREAM`, `TOOL_EXECUTE`, `BILLING_RECORD_USAGE`, `SUGGESTIONS`, and
+  `TITLE_GENERATE`, used as `segment(...)` context managers around external and
+  deterministic operations.
 
-Gateway outcome/route/tool are recorded as metric attributes, so routing
-behaviour is observable in aggregate.
+Every registered capability and tool call also produces a sanitized,
+parent-aware invocation record.

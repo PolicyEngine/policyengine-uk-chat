@@ -10,6 +10,7 @@ import modal
 
 APP_NAME = os.environ.get("POLICYENGINE_UK_CHAT_MODAL_APP_NAME", "policyengine-uk-chat")
 SECRET_NAME = os.environ.get("POLICYENGINE_UK_CHAT_MODAL_SECRET_NAME", "policyengine-uk-chat-secrets")
+WEB_MEMORY_MIB = 16_384
 
 app = modal.App(APP_NAME)
 
@@ -26,8 +27,27 @@ chat_secrets = modal.Secret.from_name(SECRET_NAME)
 @app.function(
     image=image,
     secrets=[chat_secrets],
+    timeout=600,
+    region="eu",
+)
+def migrate():
+    """Upgrade the configured PostgreSQL database before API deployment."""
+    import sys
+
+    sys.path.insert(0, "/app/backend")
+    os.chdir("/app/backend")
+
+    from alembic import command
+    from alembic.config import Config
+
+    command.upgrade(Config("/app/backend/alembic.ini"), "head")
+
+
+@app.function(
+    image=image,
+    secrets=[chat_secrets],
     cpu=2.0,
-    memory=4096,
+    memory=WEB_MEMORY_MIB,
     timeout=600,
     max_containers=10,
     region="eu",

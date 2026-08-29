@@ -73,56 +73,6 @@ def test_simulation_schema_uses_current_year_and_fixed_dataset():
     ).parameters
 
 
-def test_society_simulation_rejects_reform_different_from_gateway_approval(monkeypatch):
-    approved = {"gov.hmrc.income_tax.rates.uk[0].rate": 0.21}
-    context = new_tool_context("guarded-simulation")
-    context.require_approved_reform = True
-    context.approved_reform = approved
-    called = False
-
-    def build(**_kwargs):
-        nonlocal called
-        called = True
-        raise AssertionError("simulation must not run")
-
-    monkeypatch.setattr(agent_tools, "build_society_simulation", build)
-
-    result = agent_tools.run_society_simulation(
-        year=2026,
-        reform={"gov.hmrc.income_tax.rates.uk[0].rate": 0.22},
-        _context=context,
-    )
-
-    assert result["error"] == "Gateway-approved reform mismatch"
-    assert called is False
-
-
-def test_society_simulation_accepts_exact_gateway_approved_reform(monkeypatch):
-    approved = {"gov.hmrc.income_tax.rates.uk[0].rate": 0.21}
-    context = new_tool_context("guarded-simulation")
-    context.require_approved_reform = True
-    context.approved_reform = approved
-
-    class Payload:
-        def metadata(self):
-            return {"status": "success"}
-
-    monkeypatch.setattr(
-        agent_tools,
-        "build_society_simulation",
-        lambda **_kwargs: Payload(),
-    )
-
-    result = agent_tools.run_society_simulation(
-        year=2026,
-        reform=dict(approved),
-        _context=context,
-    )
-
-    assert result["status"] == "success"
-    assert result["result_id"].startswith("society_simulation_")
-
-
 def test_current_simulation_year_tracks_the_calendar(monkeypatch):
     class FutureDate(date):
         @classmethod
@@ -680,7 +630,6 @@ def test_runtime_files_do_not_reference_compiled_package():
         root / "api",
         root / "chat",
         root / "engine",
-        root / "gateway",
         root / "prompts",
         root / "tools",
         root / "Dockerfile",

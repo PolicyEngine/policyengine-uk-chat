@@ -2,7 +2,7 @@
 
 import os
 
-# Fast model: the default chat model under the token threshold, plus the gateway
+# Fast model: the default chat model under the token threshold, plus capability
 # classifier, titling, and follow-up suggestions.
 DEFAULT_FAST_MODEL = os.environ.get("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5")
 

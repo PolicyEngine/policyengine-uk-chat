@@ -8,9 +8,18 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
-from prompts import CHARTS_MODE_DIRECTIVE, SYSTEM_PROMPT
+from capabilities.chart import SocietyChartCapability
+from capabilities.contracts import Completed, Failed, NeedsInput, Unsupported
+from capabilities.follow_up import AnalysisFollowUpCapability
+from capabilities.household import HouseholdAnalysisCapability
+from capabilities.policy_information import PolicyInformationCapability
+from capabilities.policy_reform import PolicyReformCapability
+from capabilities.society import SocietyAnalysisCapability
+from chat.capability_service import (
+    MANDATORY_CAPABILITY_CONTRACT,
+    capability_result_for_model,
+)
 from tools.context import new_tool_context
-from tools.definitions import TOOL_DEFINITIONS
 from tools.dispatch import execute_tool
 
 from eval.graders import grade_output, grade_text, grade_tool_calls
@@ -22,7 +31,6 @@ from eval.schemas import (
     CaseResult,
     EvalCase,
     EvalReport,
-    GatewayCase,
     ModelTurn,
     ToolContractCase,
     ToolLoopCase,
@@ -43,8 +51,12 @@ SUITE_DIRS = {
     "trajectory": CASE_ROOT / "trajectory",
     "answer": CASE_ROOT / "answer",
     "tool_loop": CASE_ROOT / "tool_loop",
-    "gateway": CASE_ROOT / "gateway",
 }
+
+CAPABILITY_CHARTS_MODE_DIRECTIVE = (
+    "The user enabled chart presentation. Use society_chart when a chart is "
+    "requested and its typed prerequisites can be satisfied."
+)
 
 
 def _utc_now() -> str:
@@ -128,15 +140,34 @@ def _build_offline_client(cases: List[EvalCase]) -> FakeModelClient:
     return FakeModelClient(turns)
 
 
-def _tool_specs_for_model() -> List[Dict[str, Any]]:
+def _public_capabilities():
+    return (
+        PolicyInformationCapability(),
+        PolicyReformCapability(),
+        HouseholdAnalysisCapability(),
+        SocietyAnalysisCapability(),
+        AnalysisFollowUpCapability(),
+        SocietyChartCapability(),
+    )
+
+
+def _capability_specs_for_model() -> List[Dict[str, Any]]:
     return [
         {
-            "name": tool["name"],
-            "description": tool["description"],
-            "input_schema": tool["input_schema"],
+            "name": capability.spec.identifier,
+            "description": (
+                f"{capability.spec.description} Required-use rule: "
+                f"{capability.spec.required_use}"
+            ),
+            "input_schema": capability.spec.input_model.model_json_schema(),
         }
-        for tool in TOOL_DEFINITIONS
+        for capability in _public_capabilities()
     ]
+
+
+def _operations_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, Any]]:
+    del case
+    return _capability_specs_for_model()
 
 
 def _messages_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, Any]]:
@@ -146,9 +177,12 @@ def _messages_for_case(case: TrajectoryCase | ToolLoopCase) -> List[Dict[str, An
 
 
 def _system_for_case(case: TrajectoryCase | ToolLoopCase) -> str:
-    sections = [SYSTEM_PROMPT]
+    sections = [
+        "You are PolicyEngine UK Chat. Continue naturally using the supplied "
+        "conversation history.\n\n" + MANDATORY_CAPABILITY_CONTRACT
+    ]
     if case.charts_mode:
-        sections.append(CHARTS_MODE_DIRECTIVE)
+        sections.append(CAPABILITY_CHARTS_MODE_DIRECTIVE)
     return "\n\n".join(sections)
 
 
@@ -177,7 +211,7 @@ def _run_trajectory(case: TrajectoryCase, client: ModelClient) -> CaseResult:
             case_id=case.id,
             messages=_messages_for_case(case),
             system=_system_for_case(case),
-            tools=_tool_specs_for_model(),
+            tools=_operations_for_case(case),
         )
     except Exception as exc:
         return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
@@ -197,12 +231,14 @@ def _tool_result_text(case: AnswerCase) -> str:
         output = call.output
         if call.output_fixture:
             output = _load_fixture(call.output_fixture)
+        _validate_capability_output(call.name, output or {})
+        model_output = capability_result_for_model(output or {})
         chunks.append(
             "\n".join(
                 [
                     f"{index}. {call.name}",
                     f"Input: {json.dumps(call.input, sort_keys=True)}",
-                    f"Output: {json.dumps(output or {}, sort_keys=True)}",
+                    f"Output: {json.dumps(model_output, sort_keys=True)}",
                 ]
             )
         )
@@ -218,7 +254,11 @@ def _run_answer(case: AnswerCase, client: ModelClient) -> CaseResult:
                 {"role": "user", "content": case.prompt},
                 {"role": "user", "content": _tool_result_text(case)},
             ],
-            system=SYSTEM_PROMPT,
+            system=(
+                "You are PolicyEngine UK Chat. Use validated capability output as "
+                "authoritative facts while writing natural prose.\n\n"
+                + MANDATORY_CAPABILITY_CONTRACT
+            ),
             tools=None,
         )
     except Exception as exc:
@@ -237,13 +277,43 @@ def _tool_use_id(case: ToolLoopCase, iteration: int, index: int, call_id: str) -
     return call_id or f"{case.id}-{iteration}-{index}"
 
 
+def _load_frozen_output(call) -> Dict[str, Any]:
+    if call.output_fixture:
+        return _load_fixture(call.output_fixture)
+    return call.output or {}
+
+
+def _validate_capability_output(name: str, output: Dict[str, Any]) -> None:
+    capability = next(
+        (
+            item
+            for item in _public_capabilities()
+            if item.spec.identifier == name
+        ),
+        None,
+    )
+    if capability is None:
+        raise ValueError(f"Unknown capability output fixture: {name}")
+    status = output.get("status")
+    if status == "completed":
+        Completed[capability.spec.output_model].model_validate(output)
+    elif status == "needs_input":
+        NeedsInput.model_validate(output)
+    elif status == "unsupported":
+        Unsupported.model_validate(output)
+    elif status == "failed":
+        Failed.model_validate(output)
+    else:
+        raise ValueError(f"Invalid capability outcome status for {name}: {status!r}")
+
+
 def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
     messages: List[Dict[str, Any]] = _messages_for_case(case)
-    tool_context = new_tool_context(turn_id=case.id)
     tool_calls = []
     tool_outputs: List[Dict[str, Any]] = []
     final_text = ""
     errors: List[str] = []
+    frozen_capability_outputs = list(case.capability_outputs)
 
     for iteration in range(1, case.max_iterations + 1):
         try:
@@ -251,7 +321,7 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
                 case_id=case.id,
                 messages=messages,
                 system=_system_for_case(case),
-                tools=_tool_specs_for_model(),
+                tools=_operations_for_case(case),
             )
         except Exception as exc:
             return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
@@ -278,7 +348,17 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
                 }
             )
             try:
-                output = execute_tool(call.name, call.input, context=tool_context)
+                if not frozen_capability_outputs:
+                    raise ValueError(
+                        f"No frozen capability output remains for {call.name}."
+                    )
+                frozen = frozen_capability_outputs.pop(0)
+                if frozen.name != call.name:
+                    raise ValueError(
+                        f"Expected frozen output for {frozen.name}, got {call.name}."
+                    )
+                output = _load_frozen_output(frozen)
+                _validate_capability_output(call.name, output)
             except Exception as exc:
                 return _result(
                     case,
@@ -288,11 +368,16 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
                     {"text": final_text, "tool_calls": [call.model_dump() for call in tool_calls]},
                 )
             tool_outputs.append(output)
+            model_output = capability_result_for_model(output)
             tool_results.append(
                 {
                     "type": "tool_result",
                     "tool_use_id": tool_use_id,
-                    "content": json.dumps(output, ensure_ascii=False, default=str),
+                    "content": json.dumps(
+                        model_output,
+                        ensure_ascii=False,
+                        default=str,
+                    ),
                 }
             )
 
@@ -313,55 +398,6 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
 def _run_tool_loop_trials(case: ToolLoopCase, client: ModelClient) -> CaseResult:
     trial_results = [_run_tool_loop(case, client) for _ in range(case.trials)]
     return aggregate_tool_loop_trials(case, trial_results)
-
-
-def _run_gateway(case: GatewayCase) -> CaseResult:
-    """Live-only: run the gateway pre-pass and grade the verdict. Outcome is the
-    primary assertion; tool/forbidden_tool and per-slot expectations are
-    secondary (graded only when the case declares them). Binary 0/1 score to
-    match the other suites, with the full plan stashed in details for tuning."""
-    from gateway import run_gateway
-
-    try:
-        verdict = run_gateway(case.prompt)
-    except Exception as exc:
-        return _result(case, "failed", 0.0, [f"{type(exc).__name__}: {exc}"])
-
-    errors: List[str] = []
-    if verdict.outcome != case.expected_outcome:
-        errors.append(f"expected outcome {case.expected_outcome!r}, got {verdict.outcome!r}")
-    if case.expected_tool and verdict.tool != case.expected_tool:
-        errors.append(f"expected tool {case.expected_tool!r}, got {verdict.tool!r}")
-    if case.forbidden_tool and verdict.tool == case.forbidden_tool:
-        errors.append(f"forbidden tool {case.forbidden_tool!r} was selected")
-    if case.expected_gating_slots:
-        got = set(verdict.gating_slots)
-        want = set(case.expected_gating_slots)
-        if got != want:
-            errors.append(f"gating slots: expected {sorted(want)}, got {sorted(got)}")
-
-    by_name = {s.name: s for s in verdict.slots}
-    for exp in case.expected_slots:
-        got_slot = by_name.get(exp.slot)
-        if got_slot is None:
-            errors.append(f"slot {exp.slot!r} missing from plan")
-            continue
-        if exp.source is not None and got_slot.source != exp.source:
-            errors.append(f"slot {exp.slot!r} source: expected {exp.source!r}, got {got_slot.source!r}")
-        if exp.gates is not None and (exp.slot in verdict.gating_slots) != exp.gates:
-            errors.append(f"slot {exp.slot!r} gates: expected {exp.gates}, got {exp.slot in verdict.gating_slots}")
-
-    details = {
-        "outcome": verdict.outcome,
-        "tool": verdict.tool,
-        "gating_slots": verdict.gating_slots,
-        "unmodellable_outputs": verdict.unmodellable_outputs,
-        "slots": [
-            {"name": s.name, "kind": s.kind, "source": s.source, "value": s.value}
-            for s in verdict.slots
-        ],
-    }
-    return _result(case, "failed" if errors else "passed", 0.0 if errors else 1.0, errors, details)
 
 
 def run_eval(
@@ -412,9 +448,6 @@ def run_eval(
                 results.append(_run_tool_loop_trials(case, client))
             else:
                 results.append(_run_tool_loop(case, client))
-        elif isinstance(case, GatewayCase):
-            results.append(_run_gateway(case))
-
     report = EvalReport(
         mode=mode,
         suites=selected_suites,

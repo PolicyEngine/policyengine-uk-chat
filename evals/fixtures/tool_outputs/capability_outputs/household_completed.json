@@ -1,0 +1,107 @@
+{
+  "status": "completed",
+  "value": {
+    "result": {
+      "artifact_id": "household-result-1",
+      "provenance": {
+        "conversation_id": "eval-conversation",
+        "turn_id": "eval-turn",
+        "capability_id": "household_analysis",
+        "capability_version": "1",
+        "invocation_id": "household-invocation",
+        "sources": ["validated household", "deterministic simulation"]
+      },
+      "year": 2026,
+      "household_artifact_id": "household-1",
+      "policy_scenario_artifact_id": "scenario-baseline",
+      "scenario_revision": "baseline-2026",
+      "calculation_engine_version": "5.0.1",
+      "outputs": [
+        {
+          "output_id": "household_net_income",
+          "metric_id": "household_net_income",
+          "label": "Household net income",
+          "value": 25119.6,
+          "unit": "GBP/year"
+        }
+      ]
+    },
+    "assumptions": [
+      {
+        "field_id": "policy.year",
+        "label": "Policy year",
+        "assumed_value": 2026,
+        "plain_statement": "Policy year: 2026.",
+        "label_source": "system_default"
+      },
+      {
+        "field_id": "policy.scenario",
+        "label": "Policy scenario",
+        "assumed_value": "current_policy",
+        "plain_statement": "Policy scenario: current policy.",
+        "label_source": "system_default"
+      },
+      {
+        "field_id": "people[0].self_employment_income",
+        "label": "Self-employment income",
+        "assumed_value": 0,
+        "plain_statement": "No self-employment income.",
+        "label_source": "catalogue"
+      },
+      {
+        "field_id": "people[0].pension_income",
+        "label": "Pension income",
+        "assumed_value": 0,
+        "plain_statement": "No pension income.",
+        "label_source": "catalogue"
+      },
+      {
+        "field_id": "household.children",
+        "label": "Children",
+        "assumed_value": 0,
+        "plain_statement": "The household has no children.",
+        "label_source": "household_contract"
+      },
+      {
+        "field_id": "benunit.is_married",
+        "label": "Married or in a civil partnership",
+        "assumed_value": false,
+        "plain_statement": "The household has no partner or spouse.",
+        "label_source": "catalogue"
+      },
+      {
+        "field_id": "people[0].childcare_expenses",
+        "label": "Childcare expenses",
+        "assumed_value": 0,
+        "plain_statement": "The household has no childcare expenses.",
+        "label_source": "catalogue"
+      },
+      {
+        "field_id": "household.country",
+        "label": "Country",
+        "assumed_value": "ENGLAND",
+        "plain_statement": "The household lives in England.",
+        "label_source": "household_contract"
+      }
+    ],
+    "year_source": "server_default",
+    "narration_facts": [
+      {
+        "label": "Household net income",
+        "value": 25119.6,
+        "unit": "GBP/year"
+      }
+    ],
+    "assumption_statements": [
+      "Policy year: 2026.",
+      "Policy scenario: current policy.",
+      "No self-employment income.",
+      "No pension income.",
+      "The household has no children.",
+      "The household has no partner or spouse.",
+      "The household has no childcare expenses.",
+      "The household lives in England."
+    ],
+    "narration_fallback": "The calculation gives household net income of £25,119.60 per year.\n\n### Assumptions used\n\n- Policy year: 2026.\n- Policy scenario: current policy.\n- No self-employment income.\n- No pension income.\n- The household has no children.\n- The household has no partner or spouse.\n- The household has no childcare expenses.\n- The household lives in England."
+  }
+}

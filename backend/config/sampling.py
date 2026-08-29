@@ -2,7 +2,7 @@
 
 import os
 
-# 0 = deterministic, which is what the compute loop, titling, the gateway
+# 0 = deterministic, which is what the compute loop, titling, capability
 # classifier, and the evals all want.
 DEFAULT_TEMPERATURE = float(os.environ.get("ANTHROPIC_TEMPERATURE", "0"))
 

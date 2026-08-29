@@ -8,7 +8,7 @@ describe("resolveBackendUrl", () => {
       resolveBackendUrl({
         VERCEL_ENV: "preview",
         VERCEL_GIT_PULL_REQUEST_ID: "233",
-        VERCEL_GIT_COMMIT_REF: "agent/gateway-catalogue-confirmation",
+        VERCEL_GIT_COMMIT_REF: "agent/first-name",
         POLICYENGINE_UK_CHAT_BACKEND_URL:
           "https://policyengine--policyengine-uk-chat-web.modal.run",
       }),
@@ -29,7 +29,7 @@ describe("resolveBackendUrl", () => {
     expect(() =>
       resolveBackendUrl({
         VERCEL_ENV: "preview",
-        VERCEL_GIT_COMMIT_REF: "agent/gateway-catalogue-confirmation",
+        VERCEL_GIT_COMMIT_REF: "agent/first-name",
         POLICYENGINE_UK_CHAT_BACKEND_URL:
           "https://production-backend.example",
       }),
