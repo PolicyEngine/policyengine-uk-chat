@@ -11,6 +11,7 @@ from alembic.script import ScriptDirectory
 from sqlalchemy.engine import Engine
 
 from conversations.models import get_engine
+from persistence.database_namespace import configured_database_schema
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +39,10 @@ def expected_schema_revision(
 def current_schema_revision(engine: Engine) -> str | None:
     """Read the database's current Alembic revision without changing schema."""
     with engine.connect() as connection:
-        return MigrationContext.configure(connection).get_current_revision()
+        return MigrationContext.configure(
+            connection,
+            opts={"version_table_schema": configured_database_schema()},
+        ).get_current_revision()
 
 
 def verify_database_schema(engine: Engine | None = None) -> str | None:

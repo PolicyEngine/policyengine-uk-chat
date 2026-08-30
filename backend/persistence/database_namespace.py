@@ -5,8 +5,8 @@ from __future__ import annotations
 import os
 import re
 
-from sqlalchemy import create_engine
-from sqlalchemy.engine import Engine, make_url
+from sqlalchemy import create_engine, text
+from sqlalchemy.engine import Connection, Engine, make_url
 from sqlalchemy.schema import CreateSchema, DropSchema
 
 
@@ -35,16 +35,34 @@ def configured_database_schema() -> str | None:
     return validate_database_schema(value) if value else None
 
 
-def postgres_connect_args(database_url: str, schema: str | None) -> dict[str, str]:
-    """Build connection arguments that select one isolated PostgreSQL schema."""
-    if schema is None:
-        return {}
-    validate_database_schema(schema)
+def _require_postgresql(database_url: str) -> None:
     if make_url(database_url).get_backend_name() != "postgresql":
         raise DatabaseNamespaceError(
             "DATABASE_SCHEMA is supported only for PostgreSQL connections"
         )
-    return {"options": f"-csearch_path={schema}"}
+
+
+def postgres_execution_options(
+    database_url: str,
+    schema: str | None,
+) -> dict[str, object]:
+    """Qualify unscoped SQLAlchemy tables with one PostgreSQL schema."""
+    if schema is None:
+        return {}
+    validate_database_schema(schema)
+    _require_postgresql(database_url)
+    return {"schema_translate_map": {None: schema}}
+
+
+def activate_database_schema(connection: Connection, schema: str | None) -> None:
+    """Select a validated schema for unqualified Alembic operations."""
+    if schema is None:
+        return
+    validate_database_schema(schema)
+    connection.execute(
+        text("SELECT set_config('search_path', :schema, true)"),
+        {"schema": schema},
+    )
 
 
 def ensure_database_schema(database_url: str, schema: str | None) -> None:
@@ -52,6 +70,7 @@ def ensure_database_schema(database_url: str, schema: str | None) -> None:
     if schema is None:
         return
     validate_database_schema(schema)
+    _require_postgresql(database_url)
     engine = create_engine(database_url)
     try:
         with engine.begin() as connection:
@@ -66,6 +85,7 @@ def drop_preview_schema(database_url: str, schema: str) -> None:
         raise DatabaseNamespaceError(
             f"Refusing to remove non-preview database schema {schema!r}"
         )
+    _require_postgresql(database_url)
     engine = create_engine(database_url)
     try:
         with engine.begin() as connection:
@@ -79,5 +99,8 @@ def namespaced_engine(database_url: str, schema: str | None = None) -> Engine:
     selected_schema = schema if schema is not None else configured_database_schema()
     return create_engine(
         database_url,
-        connect_args=postgres_connect_args(database_url, selected_schema),
+        execution_options=postgres_execution_options(
+            database_url,
+            selected_schema,
+        ),
     )

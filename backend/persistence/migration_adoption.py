@@ -77,9 +77,9 @@ class DatabaseAdoptionError(RuntimeError):
     """Raised when an unversioned database is not the exact baseline."""
 
 
-def _baseline_metadata() -> MetaData:
+def _baseline_metadata(schema: str | None = None) -> MetaData:
     metadata = MetaData()
-    ChatConversation.__table__.to_metadata(metadata)
+    ChatConversation.__table__.to_metadata(metadata, schema=schema)
     return metadata
 
 
@@ -97,14 +97,27 @@ def _format_difference(difference: Any) -> str:
     return str(difference)
 
 
-def _baseline_differences(connection: Connection, schema: str) -> tuple[str, ...]:
-    database_inspector = inspect(connection)
-    if database_inspector.default_schema_name != schema:
-        return (
-            "configured schema is not the connection's default schema: "
-            f"{database_inspector.default_schema_name}",
-        )
-    baseline = _baseline_metadata()
+def _baseline_differences(
+    connection: Connection,
+    schema: str | None,
+) -> tuple[str, ...]:
+    baseline = _baseline_metadata(schema)
+
+    def include_name(
+        name: str | None,
+        type_: str,
+        parent_names: dict[str, str | None],
+    ) -> bool:
+        if schema is None:
+            return type_ != "table" or name == BASELINE_TABLE
+        if type_ == "schema":
+            return name == schema
+        if type_ == "table":
+            return (
+                parent_names.get("schema_name") == schema
+                and name == BASELINE_TABLE
+            )
+        return True
 
     def include_object(
         object_: Any,
@@ -113,17 +126,20 @@ def _baseline_differences(connection: Connection, schema: str) -> tuple[str, ...
         reflected: bool,
         compare_to: Any,
     ) -> bool:
-        del object_, reflected, compare_to
-        if type_ == "table":
-            return name == BASELINE_TABLE
-        return True
+        del reflected, compare_to
+        table = object_ if type_ == "table" else getattr(object_, "table", None)
+        if table is None:
+            return True
+        return table.name == BASELINE_TABLE and table.schema == schema
 
+    comparison_connection = connection.execution_options(schema_translate_map={})
     context = MigrationContext.configure(
-        connection,
+        comparison_connection,
         opts={
             "target_metadata": baseline,
+            "include_name": include_name,
             "include_object": include_object,
-            "include_schemas": False,
+            "include_schemas": schema is not None,
             "compare_type": True,
             "compare_server_default": True,
             "version_table_schema": schema,
@@ -172,7 +188,7 @@ def inspect_database_for_adoption(
                     "unversioned managed tables do not equal the baseline table set",
                 ),
             )
-        differences = _baseline_differences(connection, selected_schema)
+        differences = _baseline_differences(connection, schema)
         return AdoptionInspection(
             kind=(
                 AdoptionKind.EXACT_BASELINE

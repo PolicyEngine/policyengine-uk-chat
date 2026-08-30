@@ -4,7 +4,7 @@ import os
 from logging.config import fileConfig
 
 from alembic import context
-from sqlalchemy import create_engine, pool
+from sqlalchemy import MetaData, create_engine, pool
 from sqlalchemy.engine import make_url
 from sqlmodel import SQLModel
 from sqlmodel.sql.sqltypes import AutoString
@@ -12,8 +12,9 @@ from sqlmodel.sql.sqltypes import AutoString
 from conversations.models import ChatConversation  # noqa: F401
 import persistence.rows  # noqa: F401,E402
 from persistence.database_namespace import (  # noqa: E402
+    activate_database_schema,
     configured_database_schema,
-    postgres_connect_args,
+    postgres_execution_options,
 )
 
 config = context.config
@@ -22,7 +23,9 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 target_metadata = SQLModel.metadata
-managed_table_names = frozenset(target_metadata.tables)
+managed_table_names = frozenset(
+    table.name for table in target_metadata.tables.values()
+)
 
 
 def _database_url() -> str:
@@ -38,14 +41,31 @@ def _database_url() -> str:
     return url
 
 
-def _include_object(
-    object_, name: str | None, type_: str, reflected: bool, compare_to
-) -> bool:
-    del compare_to
-    if type_ == "table":
-        return name in managed_table_names
-    table = getattr(object_, "table", None)
-    return table is None or table.name in managed_table_names
+def _metadata_for_schema(schema: str | None) -> MetaData:
+    if schema is None:
+        return target_metadata
+    metadata = MetaData()
+    for table in target_metadata.sorted_tables:
+        table.to_metadata(metadata, schema=schema)
+    return metadata
+
+
+def _include_object_for_schema(schema: str | None):
+    def include_object(
+        object_, name: str | None, type_: str, reflected: bool, compare_to
+    ) -> bool:
+        del reflected, compare_to
+        if type_ == "table":
+            table = object_
+        else:
+            table = getattr(object_, "table", None)
+        if table is None:
+            return True
+        if table.name not in managed_table_names:
+            return False
+        return table.schema == schema
+
+    return include_object
 
 
 def _render_item(type_: str, object_, _autogen_context):
@@ -57,8 +77,9 @@ def _render_item(type_: str, object_, _autogen_context):
 def _configure(**kwargs) -> None:
     schema = configured_database_schema()
     context.configure(
-        target_metadata=target_metadata,
-        include_object=_include_object,
+        target_metadata=_metadata_for_schema(schema),
+        include_object=_include_object_for_schema(schema),
+        include_schemas=schema is not None,
         render_item=_render_item,
         compare_type=True,
         compare_server_default=True,
@@ -82,12 +103,13 @@ def run_migrations_offline() -> None:
 def run_migrations_online() -> None:
     """Run migrations against the configured PostgreSQL database."""
     database_url = _database_url()
+    schema = configured_database_schema()
     connectable = create_engine(
         database_url,
         poolclass=pool.NullPool,
-        connect_args=postgres_connect_args(
+        execution_options=postgres_execution_options(
             database_url,
-            configured_database_schema(),
+            schema,
         ),
     )
 
@@ -95,6 +117,7 @@ def run_migrations_online() -> None:
         _configure(connection=connection)
 
         with context.begin_transaction():
+            activate_database_schema(connection, schema)
             context.run_migrations()
 
     connectable.dispose()

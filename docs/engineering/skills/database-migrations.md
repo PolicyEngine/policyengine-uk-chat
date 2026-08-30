@@ -88,11 +88,14 @@ baseline exactly. An empty managed schema is upgraded normally. Any mismatch or
 partial later schema fails before stamping.
 
 Pull-request previews set `DATABASE_SCHEMA=uk_chat_pr_<number>`. Migration and
-runtime connections set PostgreSQL's search path to only that validated schema,
-so preview tables and rows cannot read or modify application tables in the
+runtime engines use SQLAlchemy schema translation to qualify every unscoped
+SQLModel or Alembic table with that validated schema. This does not rely on a
+connection pool or database proxy honoring PostgreSQL startup options. Preview
+tables and rows therefore cannot read or modify application tables in the
 production schema even when the current infrastructure supplies the same server
-credential. PostgreSQL's system catalog remains implicitly available. Cleanup
-may remove only names matching that strict prefix. Production and local
-development leave `DATABASE_SCHEMA` unset and continue to use their configured
-default schema. A separately credentialed preview database remains preferable
-when one is provisioned.
+credential. The Alembic connection also selects the same schema after connecting
+because some generated alteration operations use unqualified table names.
+Cleanup may remove only names matching that strict prefix.
+Production and local development leave `DATABASE_SCHEMA` unset and continue to
+use their configured default schema. A separately credentialed preview database
+remains preferable when one is provisioned.

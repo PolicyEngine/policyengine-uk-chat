@@ -26,6 +26,7 @@ from persistence.database_namespace import (
     drop_preview_schema,
     ensure_database_schema,
     namespaced_engine,
+    postgres_execution_options,
     validate_database_schema,
 )
 from persistence.migration_adoption import (
@@ -96,9 +97,15 @@ def test_sqlite_is_reserved_for_isolated_fixture_schema():
 
 def test_database_schema_names_are_strictly_validated():
     assert validate_database_schema("uk_chat_pr_261") == "uk_chat_pr_261"
+    assert postgres_execution_options(
+        "postgresql://unused",
+        "uk_chat_pr_261",
+    ) == {"schema_translate_map": {None: "uk_chat_pr_261"}}
     for invalid in ("public;drop schema public", "PR-261", "", "9preview"):
         with pytest.raises(DatabaseNamespaceError):
             validate_database_schema(invalid)
+    with pytest.raises(DatabaseNamespaceError, match="only for PostgreSQL"):
+        postgres_execution_options("sqlite://", "uk_chat_pr_261")
 
 
 def test_preview_cleanup_rejects_non_preview_schema():
@@ -139,7 +146,7 @@ def test_postgres_fresh_upgrade_check_downgrade_and_unmanaged_exclusion(
         with engine.begin() as connection:
             connection.execute(
                 text(
-                    f"CREATE TABLE {unmanaged_table} "
+                    f"CREATE TABLE {schema}.{unmanaged_table} "
                     "(sentinel_id INTEGER PRIMARY KEY)"
                 )
             )
@@ -148,19 +155,27 @@ def test_postgres_fresh_upgrade_check_downgrade_and_unmanaged_exclusion(
         command.check(config)
 
         database_inspector = inspect(engine)
-        assert MANAGED_TABLES <= set(database_inspector.get_table_names())
-        assert unmanaged_table in database_inspector.get_table_names()
+        assert MANAGED_TABLES <= set(
+            database_inspector.get_table_names(schema=schema)
+        )
+        assert unmanaged_table in database_inspector.get_table_names(
+            schema=schema
+        )
         assert verify_database_schema(engine) == HEAD_REVISION
         trace_columns = {
             column["name"]
             for column in database_inspector.get_columns(
-                "capability_invocation_traces"
+                "capability_invocation_traces",
+                schema=schema,
             )
         }
         assert {"debug_input_json", "debug_output_json"} <= trace_columns
         context_columns = {
             column["name"]
-            for column in database_inspector.get_columns("conversation_contexts")
+            for column in database_inspector.get_columns(
+                "conversation_contexts",
+                schema=schema,
+            )
         }
         assert {
             "conversation_id",
@@ -172,10 +187,13 @@ def test_postgres_fresh_upgrade_check_downgrade_and_unmanaged_exclusion(
         } == context_columns
 
         for table_name in MANAGED_TABLES - {"chat_conversations"}:
-            assert database_inspector.get_foreign_keys(table_name) == []
+            assert database_inspector.get_foreign_keys(
+                table_name,
+                schema=schema,
+            ) == []
 
         command.downgrade(config, "0001")
-        baseline_tables = set(inspect(engine).get_table_names())
+        baseline_tables = set(inspect(engine).get_table_names(schema=schema))
         assert "chat_conversations" in baseline_tables
         assert unmanaged_table in baseline_tables
         assert not (
@@ -258,7 +276,10 @@ def test_postgres_rejects_unversioned_schema_drift_before_stamping(monkeypatch):
         ChatConversation.__table__.create(engine)
         with engine.begin() as connection:
             connection.execute(
-                text("ALTER TABLE chat_conversations ADD COLUMN unexpected TEXT")
+                text(
+                    f"ALTER TABLE {schema}.chat_conversations "
+                    "ADD COLUMN unexpected TEXT"
+                )
             )
 
         inspection = inspect_database_for_adoption(engine, schema=schema)
@@ -292,6 +313,7 @@ def test_postgres_preview_schema_is_isolated_and_removable(monkeypatch):
                 engine,
                 schema=schema,
             ).revision == HEAD_REVISION
+            assert verify_database_schema(engine) == HEAD_REVISION
         finally:
             engine.dispose()
 
