@@ -188,7 +188,7 @@ def test_database_migrations_run_before_local_and_modal_backends():
     assert "condition: service_completed_successfully" in compose
     assert "ALEMBIC_DATABASE_URL=" in compose
     assert "def migrate():" in modal_app
-    assert 'command.upgrade(Config("/app/backend/alembic.ini"), "head")' in modal_app
+    assert 'upgrade_deployed_database("/app/backend/alembic.ini")' in modal_app
     assert production.index(".github/scripts/run-modal-migration.sh") < production.index(
         "modal deploy modal_app.py"
     )
@@ -196,6 +196,7 @@ def test_database_migrations_run_before_local_and_modal_backends():
         ".github/scripts/deploy-modal-preview.sh"
     )
     assert '"ALEMBIC_DATABASE_URL=$ALEMBIC_DATABASE_URL"' in sync_script
+    assert '"DATABASE_SCHEMA=$DATABASE_SCHEMA"' in sync_script
 
 
 def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
@@ -214,6 +215,7 @@ def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
         "MODAL_PREVIEW_SECRET_NAME: "
         "pe-uk-chat-${{ github.event.pull_request.number }}-secrets" in workflow
     )
+    assert "DATABASE_SCHEMA: uk_chat_pr_${{ github.event.pull_request.number }}" in workflow
     assert "peukchat-$branch_slug" not in workflow
     assert (
         'modal.Function.from_name(os.environ["MODAL_APP_NAME"], "web")' in deploy_script
@@ -246,6 +248,7 @@ def _run_modal_preview_cleanup(
     *,
     list_exit_code=0,
     stop_exit_code=0,
+    database_schema=None,
 ):
     calls_path = tmp_path / "modal-calls"
     fake_modal = tmp_path / "modal"
@@ -271,6 +274,8 @@ def _run_modal_preview_cleanup(
         "MODAL_STOP_EXIT_CODE": str(stop_exit_code),
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
     }
+    if database_schema is not None:
+        environment["DATABASE_SCHEMA"] = database_schema
 
     result = subprocess.run(
         [REPO_ROOT / ".github/scripts/cleanup-modal-preview.sh"],
@@ -291,6 +296,22 @@ def test_modal_preview_cleanup_stops_app_before_deleting_secret(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert calls == [
+        "app list --json",
+        "app stop pe-uk-chat-123 --yes",
+        "secret delete pe-uk-chat-123-secrets --yes --allow-missing",
+    ]
+
+
+def test_modal_preview_cleanup_removes_only_configured_preview_schema(tmp_path):
+    result, calls = _run_modal_preview_cleanup(
+        tmp_path,
+        '[{"description":"pe-uk-chat-123","state":"deployed"}]',
+        database_schema="uk_chat_pr_123",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls == [
+        "run --name pe-uk-chat-123-schema-cleanup modal_app.py::remove_preview_database_schema",
         "app list --json",
         "app stop pe-uk-chat-123 --yes",
         "secret delete pe-uk-chat-123-secrets --yes --allow-missing",

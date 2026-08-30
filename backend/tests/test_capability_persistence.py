@@ -32,6 +32,11 @@ from persistence.capability_repository import (
 )
 from persistence.deletion import delete_capability_records
 from persistence.context_repository import SQLConversationContextRepository
+from persistence.database_namespace import (
+    drop_preview_schema,
+    ensure_database_schema,
+    namespaced_engine,
+)
 from persistence.idempotency import (
     IdempotencyDecision,
     ReceiptStatus,
@@ -75,7 +80,7 @@ def _engine(tmp_path):
             ChatConversation(
                 session_id="conversation-1",
                 title="Test",
-                messages="[]",
+                messages=[],
                 created_at=datetime.now(timezone.utc),
                 updated_at=datetime.now(timezone.utc),
             )
@@ -445,7 +450,11 @@ POSTGRES_URL = os.environ.get("CAPABILITY_TEST_POSTGRES_URL")
 )
 def test_disposable_postgres_uses_the_same_typed_repository_contract(tmp_path):
     del tmp_path
-    engine = create_engine(POSTGRES_URL)
+    assert POSTGRES_URL is not None
+    schema = f"uk_chat_pr_{os.getpid()}"
+    drop_preview_schema(POSTGRES_URL, schema)
+    ensure_database_schema(POSTGRES_URL, schema)
+    engine = namespaced_engine(POSTGRES_URL, schema)
     SQLModel.metadata.create_all(engine)
     conversation_id = f"capability-postgres-{os.getpid()}"
     try:
@@ -454,7 +463,7 @@ def test_disposable_postgres_uses_the_same_typed_repository_contract(tmp_path):
                 ChatConversation(
                     session_id=conversation_id,
                     title="Disposable test",
-                    messages="[]",
+                    messages=[],
                     created_at=datetime.now(timezone.utc),
                     updated_at=datetime.now(timezone.utc),
                 )
@@ -483,3 +492,4 @@ def test_disposable_postgres_uses_the_same_typed_repository_contract(tmp_path):
                 session.delete(row)
             session.commit()
         engine.dispose()
+        drop_preview_schema(POSTGRES_URL, schema)

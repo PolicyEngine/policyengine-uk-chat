@@ -230,7 +230,7 @@ def test_activity_endpoint_authorizes_and_supports_late_debug_enablement(
             ChatConversation(
                 session_id="conversation-1",
                 title="Trace test",
-                messages="[]",
+                messages=[],
                 user_id="owner-1",
                 created_at=now,
                 updated_at=now,

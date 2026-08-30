@@ -32,6 +32,10 @@ secret_args=(
   "PUBLIC_BASE_URL=$PUBLIC_BASE_URL"
 )
 
+if [[ -n "${DATABASE_SCHEMA:-}" ]]; then
+  secret_args+=("DATABASE_SCHEMA=$DATABASE_SCHEMA")
+fi
+
 if [[ "$billing_enabled" == "true" ]]; then
   : "${SUPABASE_URL:?SUPABASE_URL is required when billing is enabled}"
   : "${SUPABASE_SERVICE_ROLE_KEY:?SUPABASE_SERVICE_ROLE_KEY is required when billing is enabled}"

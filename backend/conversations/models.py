@@ -2,10 +2,12 @@
 
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
-from sqlalchemy import Index
-from sqlmodel import Field, SQLModel, create_engine
+from sqlalchemy import JSON, Index, Text
+from sqlmodel import Field, SQLModel
+
+from persistence.database_namespace import namespaced_engine
 
 
 class ChatConversation(SQLModel, table=True):
@@ -17,15 +19,18 @@ class ChatConversation(SQLModel, table=True):
             unique=True,
         ),
         Index("idx_chat_conversations_share_token", "share_token"),
+        Index("ix_conversations_session", "session_id"),
+        Index("ix_conversations_user", "user_id"),
+        Index("ix_conversations_updated", "updated_at"),
     )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     session_id: str
     title: str
-    messages: str  # JSON string
+    messages: list[dict[str, Any]] = Field(sa_type=JSON)
     user_id: Optional[str] = None
-    user_email: Optional[str] = None
-    share_token: Optional[str] = None
+    user_email: Optional[str] = Field(default=None, sa_type=Text)
+    share_token: Optional[str] = Field(default=None, sa_type=Text)
     created_at: datetime
     updated_at: datetime
 
@@ -39,5 +44,5 @@ def get_engine():
         url = os.environ.get("DATABASE_URL", "")
         if not url:
             raise RuntimeError("DATABASE_URL not set")
-        _engine = create_engine(url)
+        _engine = namespaced_engine(url)
     return _engine

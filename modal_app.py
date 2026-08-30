@@ -31,16 +31,73 @@ chat_secrets = modal.Secret.from_name(SECRET_NAME)
     region="eu",
 )
 def migrate():
-    """Upgrade the configured PostgreSQL database before API deployment."""
+    """Adopt an exact legacy baseline when needed, then upgrade to head."""
     import sys
 
     sys.path.insert(0, "/app/backend")
     os.chdir("/app/backend")
 
-    from alembic import command
-    from alembic.config import Config
+    from persistence.migration_adoption import upgrade_deployed_database
 
-    command.upgrade(Config("/app/backend/alembic.ini"), "head")
+    return upgrade_deployed_database("/app/backend/alembic.ini").debug_summary()
+
+
+@app.function(
+    image=image,
+    secrets=[chat_secrets],
+    timeout=600,
+    region="eu",
+)
+def inspect_migration_state():
+    """Return structural migration state without querying application rows."""
+    import sys
+
+    sys.path.insert(0, "/app/backend")
+    os.chdir("/app/backend")
+
+    from persistence.database_namespace import (
+        configured_database_schema,
+        namespaced_engine,
+    )
+    from persistence.migration_adoption import inspect_database_for_adoption
+
+    database_url = os.environ["ALEMBIC_DATABASE_URL"]
+    schema = configured_database_schema()
+    engine = namespaced_engine(database_url, schema)
+    try:
+        summary = inspect_database_for_adoption(
+            engine,
+            schema=schema,
+        ).debug_summary()
+        print(summary)
+        return summary
+    finally:
+        engine.dispose()
+
+
+@app.function(
+    image=image,
+    secrets=[chat_secrets],
+    timeout=600,
+    region="eu",
+)
+def remove_preview_database_schema():
+    """Remove only the configured PR-preview PostgreSQL schema."""
+    import sys
+
+    sys.path.insert(0, "/app/backend")
+    os.chdir("/app/backend")
+
+    from persistence.database_namespace import (
+        configured_database_schema,
+        drop_preview_schema,
+    )
+
+    schema = configured_database_schema()
+    if schema is None:
+        raise RuntimeError("DATABASE_SCHEMA is required for preview cleanup")
+    drop_preview_schema(os.environ["ALEMBIC_DATABASE_URL"], schema)
+    return {"removed_schema": schema}
 
 
 @app.function(

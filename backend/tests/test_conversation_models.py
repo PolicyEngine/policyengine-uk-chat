@@ -34,7 +34,7 @@ def test_get_engine_creates_and_caches_engine(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite:///test.sqlite")
     monkeypatch.setattr(
         models,
-        "create_engine",
+        "namespaced_engine",
         lambda url: calls.append(url) or engine,
     )
 
@@ -50,4 +50,7 @@ def test_conversation_model_declares_stable_migration_indexes():
     assert indexes == {
         "idx_chat_conversations_session_id_unique": (("session_id",), True),
         "idx_chat_conversations_share_token": (("share_token",), False),
+        "ix_conversations_session": (("session_id",), False),
+        "ix_conversations_updated": (("updated_at",), False),
+        "ix_conversations_user": (("user_id",), False),
     }

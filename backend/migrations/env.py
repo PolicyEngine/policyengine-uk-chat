@@ -11,6 +11,10 @@ from sqlmodel.sql.sqltypes import AutoString
 
 from conversations.models import ChatConversation  # noqa: F401
 import persistence.rows  # noqa: F401,E402
+from persistence.database_namespace import (  # noqa: E402
+    configured_database_schema,
+    postgres_connect_args,
+)
 
 config = context.config
 
@@ -51,12 +55,14 @@ def _render_item(type_: str, object_, _autogen_context):
 
 
 def _configure(**kwargs) -> None:
+    schema = configured_database_schema()
     context.configure(
         target_metadata=target_metadata,
         include_object=_include_object,
         render_item=_render_item,
         compare_type=True,
         compare_server_default=True,
+        version_table_schema=schema,
         **kwargs,
     )
 
@@ -75,7 +81,15 @@ def run_migrations_offline() -> None:
 
 def run_migrations_online() -> None:
     """Run migrations against the configured PostgreSQL database."""
-    connectable = create_engine(_database_url(), poolclass=pool.NullPool)
+    database_url = _database_url()
+    connectable = create_engine(
+        database_url,
+        poolclass=pool.NullPool,
+        connect_args=postgres_connect_args(
+            database_url,
+            configured_database_schema(),
+        ),
+    )
 
     with connectable.connect() as connection:
         _configure(connection=connection)

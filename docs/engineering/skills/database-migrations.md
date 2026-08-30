@@ -78,3 +78,21 @@ columns, indexes, constraints, and current row counts. Reconcile only the
 SQLModel-owned objects to the exact baseline schema. Then stamp the matching
 revision and upgrade normally. Never stamp merely to suppress a mismatch, and
 never alter separately managed or historical objects as part of adoption.
+
+Deployed migration orchestration may automate only the exact pre-branch
+adoption case. When no Alembic revision is recorded, it compares the
+SQLModel-owned structure with revision `0001` without reading conversation row
+values. It stamps `0001` only when `chat_conversations` is the sole managed
+table and its columns, types, nullability, primary key, and indexes match the
+baseline exactly. An empty managed schema is upgraded normally. Any mismatch or
+partial later schema fails before stamping.
+
+Pull-request previews set `DATABASE_SCHEMA=uk_chat_pr_<number>`. Migration and
+runtime connections set PostgreSQL's search path to only that validated schema,
+so preview tables and rows cannot read or modify application tables in the
+production schema even when the current infrastructure supplies the same server
+credential. PostgreSQL's system catalog remains implicitly available. Cleanup
+may remove only names matching that strict prefix. Production and local
+development leave `DATABASE_SCHEMA` unset and continue to use their configured
+default schema. A separately credentialed preview database remains preferable
+when one is provisioned.

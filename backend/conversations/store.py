@@ -24,7 +24,7 @@ def _upsert_conversation(session, request, now):
     values = {
         "session_id": request.session_id,
         "title": request.title,
-        "messages": json.dumps(request.messages),
+        "messages": request.messages,
         "user_id": request.user_id,
         "user_email": request.user_email,
         "created_at": now,

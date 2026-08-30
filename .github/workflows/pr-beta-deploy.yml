@@ -24,6 +24,7 @@ env:
   # short and stable rather than using branch names that Modal may truncate.
   MODAL_PREVIEW_APP_NAME: pe-uk-chat-${{ github.event.pull_request.number }}
   MODAL_PREVIEW_SECRET_NAME: pe-uk-chat-${{ github.event.pull_request.number }}-secrets
+  DATABASE_SCHEMA: uk_chat_pr_${{ github.event.pull_request.number }}
 
 jobs:
   deploy:
@@ -184,6 +185,7 @@ jobs:
         env:
           MODAL_APP_NAME: ${{ env.MODAL_PREVIEW_APP_NAME }}
           MODAL_SECRET_NAME: ${{ env.MODAL_PREVIEW_SECRET_NAME }}
+          DATABASE_SCHEMA: ${{ env.DATABASE_SCHEMA }}
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: .github/scripts/cleanup-modal-preview.sh
