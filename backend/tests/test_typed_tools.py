@@ -19,6 +19,95 @@ from tools.typed_dispatch import build_dispatch_tools
 from tools.typed_models import SafeToolOutput
 
 
+VALID_RETAINED_OUTPUTS = {
+    "list_entities": {"status": "success", "entities": []},
+    "search_variables": {"status": "success", "variables": []},
+    "get_variable": {"status": "success", "variable": {"name": "age"}},
+    "search_parameters": {"status": "success", "parameters": []},
+    "get_parameter": {"status": "success", "parameter": {"path": "gov.test"}},
+    "list_reform_targets": {"status": "success", "targets": []},
+    "list_household_input_variables": {
+        "status": "success",
+        "query": "",
+        "entity": None,
+        "variables": [],
+        "input_contract": "typed household input",
+    },
+    "list_society_output_variables": {
+        "status": "success",
+        "entity": None,
+        "default_variables_by_entity": {},
+        "default_variable_count": 0,
+        "extra_variables_contract": "typed extra variables",
+    },
+    "list_supported_outputs": {"status": "success", "scope": None, "outputs": []},
+    "validate_reform": {"valid": True},
+    "validate_household": {"valid": True},
+    "run_household_simulation": {
+        "status": "success",
+        "year": 2026,
+        "reform_applied": False,
+        "result_id": "household-result",
+    },
+    "run_society_simulation": {
+        "status": "success",
+        "year": 2026,
+        "result_id": "society-result",
+    },
+    "compute_budgetary_impact": {
+        "status": "success",
+        "simulation_id": "simulation",
+        "net_cost": 1.0,
+        "result_id": "budget-result",
+    },
+    "compute_program_breakdown": {
+        "status": "success",
+        "simulation_id": "simulation",
+        "programs": [],
+        "result_id": "program-result",
+    },
+    "compute_decile_impacts": {
+        "status": "success",
+        "simulation_id": "simulation",
+        "deciles": [],
+        "result_id": "decile-result",
+    },
+    "compute_winners_losers": {
+        "status": "success",
+        "simulation_id": "simulation",
+        "winners": 1.0,
+        "losers": 1.0,
+        "unchanged": 1.0,
+        "result_id": "incidence-result",
+    },
+    "compute_poverty_metrics": {
+        "status": "success",
+        "simulation_id": "simulation",
+        "overall_rate": 0.2,
+        "change": 0.01,
+        "result_id": "poverty-result",
+    },
+    "compute_inequality_metrics": {
+        "status": "success",
+        "simulation_id": "simulation",
+        "gini": 0.3,
+        "result_id": "inequality-result",
+    },
+    "aggregate_result": {
+        "status": "success",
+        "simulation_id": "simulation",
+        "result": {},
+        "privacy": "aggregate-only",
+        "result_id": "aggregate-result",
+    },
+    "generate_chart": {
+        "status": "success",
+        "chart_markdown": "```chart\n{}\n```",
+        "spec": {},
+    },
+}
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -98,6 +187,47 @@ def test_retained_inventory_has_strict_typed_contracts_and_explicit_visibility()
         schema = tool.spec.input_model.model_json_schema()
         assert schema["additionalProperties"] is False
         assert issubclass(tool.spec.output_model, BaseModel)
+    assert len({tool.spec.output_model for tool in tools}) == len(tools)
+
+
+def test_retained_output_models_reject_another_operation_result_shape():
+    tools = {tool.spec.identifier: tool for tool in build_dispatch_tools()}
+
+    with pytest.raises(ValidationError, match="missing required fields"):
+        tools["list_entities"].spec.output_model.model_validate(
+            {
+                "status": "success",
+                "query": "income",
+                "variables": [],
+            }
+        )
+
+
+def test_every_retained_output_contract_accepts_its_shape_and_rejects_another():
+    tools = {tool.spec.identifier: tool for tool in build_dispatch_tools()}
+
+    assert set(tools) == set(VALID_RETAINED_OUTPUTS)
+    for identifier, tool in tools.items():
+        tool.spec.output_model.model_validate(VALID_RETAINED_OUTPUTS[identifier])
+        wrong_shapes_rejected = 0
+        for other_identifier, payload in VALID_RETAINED_OUTPUTS.items():
+            if other_identifier == identifier:
+                continue
+            try:
+                tool.spec.output_model.model_validate(payload)
+            except ValidationError:
+                wrong_shapes_rejected += 1
+        assert wrong_shapes_rejected > 0, identifier
+
+    with pytest.raises(ValidationError, match="unexpected fields"):
+        tools["run_society_simulation"].spec.output_model.model_validate(
+            {
+                "status": "success",
+                "year": 2026,
+                "result_id": "result-1",
+                "programs": [],
+            }
+        )
 
 
 def test_dispatch_adapter_validates_input_and_keeps_provider_payload_request_local(

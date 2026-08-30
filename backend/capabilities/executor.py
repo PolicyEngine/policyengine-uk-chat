@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from contextvars import ContextVar
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -167,7 +168,7 @@ class InvocationExecutor:
                 "output",
             )
             await self._check_cancelled(context)
-        except InvocationCancelled:
+        except (InvocationCancelled, asyncio.CancelledError):
             self._tracer.finish(
                 record.invocation_id,
                 status=InvocationStatus.CANCELLED,
@@ -241,7 +242,7 @@ class InvocationExecutor:
             validated = self._validate_outcome(capability, outcome)
             await self._check_cancelled(context)
             trace_status = self._outcome_status(validated)
-        except InvocationCancelled:
+        except (InvocationCancelled, asyncio.CancelledError):
             self._tracer.finish(
                 record.invocation_id,
                 status=InvocationStatus.CANCELLED,

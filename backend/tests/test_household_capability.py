@@ -11,14 +11,20 @@ from capabilities.household import (
     AmountFrequency,
     AssembleHouseholdCandidateTool,
     HouseholdAnalysisCapability,
+    HouseholdAnalysisDraft,
+    HouseholdAnalysisInput,
+    HouseholdEvidenceCoordinator,
     HouseholdEvidence,
     HouseholdEvidenceAmbiguity,
     HouseholdEvidenceAmbiguityKind,
     HouseholdEvidenceResult,
     HouseholdInputResolver,
+    HouseholdInvocationCoordinator,
+    HouseholdResultPresenter,
     PeriodicAmount,
     PersonEvidence,
 )
+from capabilities.input_resolution import InputSource
 from capabilities.policy_reform import (
     PolicyReformCapability,
     ReformResolutionDecision,
@@ -88,6 +94,93 @@ class MemoryArtifacts:
         self.waiting = [
             item for item in self.waiting if item.invocation_id != invocation_id
         ]
+
+
+def test_household_evidence_coordinator_merges_current_values_over_retained_values():
+    coordinator = HouseholdEvidenceCoordinator()
+    retained = HouseholdEvidence(
+        people=(
+            PersonEvidence(
+                age=35,
+                employment_income=PeriodicAmount(
+                    amount=50_000,
+                    frequency=AmountFrequency.ANNUAL,
+                ),
+                sources={"age": "user", "employment_income": "user"},
+            ),
+        ),
+        country="ENGLAND",
+        sources={"country": "default"},
+    )
+    current = HouseholdEvidence(
+        people=(
+            PersonEvidence(age=36, sources={"age": "user"}),
+        ),
+    )
+
+    merged = coordinator.merge(retained, current)
+
+    assert merged.people[0].age == 36
+    assert merged.people[0].employment_income.amount == 50_000
+    assert merged.country == "ENGLAND"
+
+
+def test_household_result_presenter_builds_scenario_outputs_and_defaults():
+    presenter = HouseholdResultPresenter()
+
+    outputs = presenter.extract_outputs(
+        {
+            "status": "success",
+            "year": 2026,
+            "reform_applied": True,
+            "result_id": "result-1",
+            "baseline": {"income_tax": 7_000},
+            "reform": {"income_tax": 7_500},
+        },
+        ("income_tax",),
+    )
+    assumptions = presenter.completed_assumptions(
+        (),
+        year=2026,
+        year_source=InputSource.SERVER_DEFAULT,
+        defaulted_to_current_policy=True,
+    )
+
+    assert [(item.metric_id, item.value) for item in outputs] == [
+        ("baseline", 7_000),
+        ("reform", 7_500),
+        ("change", 500),
+    ]
+    assert [item.field_id for item in assumptions] == [
+        "policy.year",
+        "policy.scenario",
+    ]
+
+
+def test_household_invocation_coordinator_merges_only_resumable_input():
+    coordinator = HouseholdInvocationCoordinator(
+        capability_id="household_analysis",
+        capability_version="1",
+    )
+    retained = HouseholdAnalysisDraft(
+        description="Original request",
+        year=2026,
+        requested_outputs=("income_tax",),
+        reform_instruction="current law",
+    )
+
+    merged = coordinator.merge_input(
+        retained,
+        HouseholdAnalysisInput(
+            description="I am 35",
+            requested_outputs=("universal_credit",),
+        ),
+    )
+
+    assert merged.description == "I am 35"
+    assert merged.year == 2026
+    assert merged.reform_instruction == "current law"
+    assert merged.requested_outputs == ("income_tax",)
 
 
 class FakeAssembler:
@@ -226,7 +319,14 @@ def _runtime(
         if identifier == "validate_household":
             return validation
         if identifier == "run_household_simulation":
-            return simulation
+            result = dict(simulation)
+            if result.get("status") == "success" and "result_id" not in result:
+                result["result_id"] = context.result_store.put(
+                    "household_simulation",
+                    object(),
+                    result,
+                )
+            return result
         raise AssertionError(f"Unexpected retained tool: {identifier}")
 
     monkeypatch.setattr(typed_dispatch, "execute_tool", execute)

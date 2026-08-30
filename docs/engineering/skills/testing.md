@@ -83,17 +83,6 @@ detectable issue rather than stopping after a response, entity, or fact error.
 Provider-format retries and the one proposal-repair opportunity are distinct,
 and repair tests must assert that the exact rejected proposal and complete issue
 set are supplied to the configured complex model.
-Context validation tests must cover the independent semantic reviewer as well
-as deterministic checks. Require exactly one verdict per opaque claim
-identifier; reject missing, duplicate, and unknown identifiers; ensure the
-reviewer prompt contains no retained fact values; accept hypothetical values as
-active-scenario facts; allow an unresolved multi-entity relationship; and reject
-a direct single-person assignment when the current message supplied only a
-multi-person total. A validation result must include every independently
-detectable issue rather than stopping after a response, entity, or fact error.
-Provider-format retries and the one proposal-repair opportunity are distinct,
-and repair tests must assert that the exact rejected proposal and complete issue
-set are supplied to the configured complex model.
 Catalogue-backed value resolution lives in `test_fact_resolution.py`.
 It covers model selection of an exact authoritative catalogue result,
 deterministic verification of that selection, deterministic time-period
@@ -178,10 +167,14 @@ Service tests must also prove that an invalid current-message context proposal
 causes calculation capabilities to be omitted for that request and that a model
 cannot execute a capability identifier that was not offered. This prevents a
 rejected update from producing a calculation against the prior context revision.
-Service tests must also prove that an invalid current-message context proposal
-causes calculation capabilities to be omitted for that request and that a model
-cannot execute a capability identifier that was not offered. This prevents a
-rejected update from producing a calculation against the prior context revision.
+Each retained deterministic operation must declare a distinct output model.
+Contract tests must reject a successful result shaped for a different operation
+and reject unknown success fields, while permitting the operation's documented
+error form. Cancellation tests must cancel an active `asyncio.Task`, await its
+cleanup, and assert that every started invocation has a final `cancelled` trace
+with a completion timestamp. Extracted coordinators and result builders require
+focused unit tests in addition to the integration tests that exercise their
+composition.
 The disposable PostgreSQL contract test runs only when
 `CAPABILITY_TEST_POSTGRES_URL` is set; SQLite coverage remains part of the
 default suite. The configured PostgreSQL database must contain no valuable data:

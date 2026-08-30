@@ -4,7 +4,7 @@ import asyncio
 import json
 
 from pydantic import BaseModel, ConfigDict
-from sqlmodel import SQLModel, create_engine
+from sqlmodel import Session, SQLModel, create_engine
 
 from capabilities.composition import compose_runtime
 from capabilities.contracts import Capability, CapabilitySpec, Completed, NeedsInput
@@ -28,7 +28,8 @@ from chat.model_port import (
     ModelUsage,
 )
 from chat.turn_input import ChatTurnInput
-from persistence.idempotency import SQLIdempotencyRepository
+from persistence.idempotency import ReceiptStatus, SQLIdempotencyRepository
+from persistence.rows import CapabilityCallReceiptRow, TurnReceiptRow
 from tools.analysis_support import NumericalFact, VerifyNumericalResponseTool
 from tools.contracts import CallerType, Visibility
 
@@ -120,6 +121,20 @@ class FailingCapability(Capability[EchoInput, EchoOutput]):
         raise RuntimeError("private provider failure")
 
 
+class SlowCapability(Capability[EchoInput, EchoOutput]):
+    spec = EchoCapability.spec.model_copy(
+        update={
+            "identifier": "slow_capability",
+            "description": "Wait until a cancellation test interrupts the call.",
+        }
+    )
+
+    async def run(self, capability_input, context):
+        del capability_input, context
+        await asyncio.Event().wait()
+        return Completed(value=EchoOutput(text="unreachable"))
+
+
 class FakeRelevanceAssessor:
     def __init__(self, result=RelevanceResult.RELEVANT):
         self.result = result
@@ -164,15 +179,18 @@ async def not_cancelled() -> bool:
     return False
 
 
-def _runtime(model, assessor, *, idempotency=None):
+def _runtime(model, assessor, *, idempotency=None, include_slow=False):
+    capabilities = [
+        ConversationRelevanceCapability(),
+        EchoCapability(),
+        ClarifyCapability(),
+        FailingCapability(),
+    ]
+    if include_slow:
+        capabilities.append(SlowCapability())
     composition = compose_runtime(
         tools=[AssessRelevanceTool(assessor), VerifyNumericalResponseTool()],
-        capabilities=[
-            ConversationRelevanceCapability(),
-            EchoCapability(),
-            ClarifyCapability(),
-            FailingCapability(),
-        ],
+        capabilities=capabilities,
     )
     service = ChatTurnService(
         executor=composition.executor,
@@ -823,6 +841,59 @@ def test_request_cancellation_stops_before_relevance_or_model():
     assert isinstance(events[0], TurnCancelled)
     assert assessor.requests == []
     assert model.requests == []
+
+
+def test_request_cancellation_awaits_an_active_capability_and_finishes_its_trace(
+    tmp_path,
+):
+    assessor = FakeRelevanceAssessor()
+    model = FakeConversationModel(
+        [
+            ConversationModelResponse(
+                capability_calls=(
+                    ModelCapabilityCall(
+                        capability_id="slow_capability",
+                        call_id="slow-call",
+                        input={"text": "wait"},
+                    ),
+                ),
+                model="fake-model",
+            )
+        ]
+    )
+    engine = create_engine(f"sqlite:///{tmp_path / 'cancellation.sqlite'}")
+    SQLModel.metadata.create_all(engine)
+    composition, service, context = _runtime(
+        model,
+        assessor,
+        idempotency=SQLIdempotencyRepository(engine=engine),
+        include_slow=True,
+    )
+    checks = 0
+
+    async def cancel_during_capability() -> bool:
+        nonlocal checks
+        checks += 1
+        return checks >= 3
+
+    events = _collect(service, _turn(), context, cancel_during_capability)
+
+    assert isinstance(events[-1], TurnCancelled)
+    records = composition.tracer.records(
+        "conversation-1",
+        include_private=True,
+    )
+    slow = next(record for record in records if record.identifier == "slow_capability")
+    assert slow.status.value == "cancelled"
+    assert slow.completed_at is not None
+    assert all(record.status.value != "running" for record in records)
+    with Session(engine) as session:
+        turn_receipt = session.get(TurnReceiptRow, "turn-1")
+        call_receipt = session.get(CapabilityCallReceiptRow, "slow-call")
+    assert turn_receipt is not None
+    assert call_receipt is not None
+    assert turn_receipt.status == ReceiptStatus.FAILED.value
+    assert call_receipt.status == ReceiptStatus.FAILED.value
 
 
 def test_turn_idempotency_replays_and_rejects_conflicting_input(tmp_path):

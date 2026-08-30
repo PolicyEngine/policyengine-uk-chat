@@ -219,6 +219,60 @@ def test_failed_and_cancelled_calls_record_generic_status_without_exception_text
     assert cancelled_record.status is InvocationStatus.CANCELLED
 
 
+def test_async_task_cancellation_finishes_the_running_invocation_trace(tmp_path):
+    started = asyncio.Event()
+
+    class SlowTool(PrivateSecretTool):
+        spec = PrivateSecretTool.spec.model_copy(
+            update={
+                "identifier": "slow_tool",
+                "allowed_callers": frozenset({CallerType.RUNTIME}),
+            }
+        )
+
+        async def run(self, tool_input, context):
+            del tool_input, context
+            started.set()
+            await asyncio.Event().wait()
+            return SecretOutput(accepted=True)
+
+    repository = SQLInvocationTraceRepository(engine=_engine(tmp_path))
+    composition = compose_runtime(
+        tools=[SlowTool()],
+        capabilities=[],
+        tracer=InvocationTracer(sink=repository),
+    )
+    context = composition.executor.context(
+        request_id="request-1",
+        conversation_id="conversation-1",
+        turn_id="turn-1",
+        is_cancelled=_not_cancelled,
+    )
+
+    async def cancel_after_start() -> None:
+        task = asyncio.create_task(
+            composition.executor.invoke_tool(
+                "slow_tool",
+                _secret_input(),
+                caller=CallerType.RUNTIME,
+                context=context,
+            )
+        )
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(cancel_after_start())
+
+    record = repository.list_for_conversation(
+        "conversation-1", include_private=True
+    )[0]
+    assert record.status is InvocationStatus.CANCELLED
+    assert record.completed_at is not None
+    assert record.debug_output == {"status": "cancelled"}
+
+
 def test_activity_endpoint_authorizes_and_supports_late_debug_enablement(
     tmp_path,
     monkeypatch,

@@ -187,9 +187,11 @@ class AssembleHouseholdCandidateTool(
         self,
         assembler: HouseholdEvidenceAssembler | None = None,
         resolver: HouseholdInputResolver | None = None,
+        evidence_coordinator: HouseholdEvidenceCoordinator | None = None,
     ) -> None:
         self._assembler = assembler
         self._resolver = resolver or HouseholdInputResolver()
+        self._evidence = evidence_coordinator or HouseholdEvidenceCoordinator()
 
     async def run(self, tool_input: AssembleHouseholdInput, context: ToolCallContext):
         assembled = (
@@ -202,21 +204,23 @@ class AssembleHouseholdCandidateTool(
             else HouseholdEvidenceResult(evidence=HouseholdEvidence())
         )
         context.record_model_usage(**assembled.usage.model_dump())
-        artifact_evidence = self._evidence_from_values(tool_input.existing_values)
-        defaulted_evidence = self._merge_evidence(
+        artifact_evidence = self._evidence.evidence_from_values(
+            tool_input.existing_values
+        )
+        defaulted_evidence = self._evidence.merge(
             tool_input.invocation_defaults.evidence,
             artifact_evidence,
         )
-        retained_evidence = self._merge_evidence(
+        retained_evidence = self._evidence.merge(
             defaulted_evidence,
             tool_input.retained_evidence,
         )
-        current_evidence = self._as_current_user_evidence(
+        current_evidence = self._evidence.as_current_user_evidence(
             assembled.evidence,
             assembled.ambiguities,
         )
-        evidence = self._merge_evidence(retained_evidence, current_evidence)
-        ambiguities = self._merge_ambiguities(
+        evidence = self._evidence.merge(retained_evidence, current_evidence)
+        ambiguities = self._evidence.merge_ambiguities(
             tool_input.retained_ambiguities,
             assembled.ambiguities,
             current_evidence,
@@ -228,9 +232,9 @@ class AssembleHouseholdCandidateTool(
             requirements=tool_input.requirements,
         )
         invocation_defaults = HouseholdInvocationDefaults(
-            evidence=self._merge_evidence(
+            evidence=self._evidence.merge(
                 tool_input.invocation_defaults.evidence,
-                self._default_only_evidence(evidence),
+                self._evidence.default_only(evidence),
             )
         )
         resolution = self._resolver.resolve(
@@ -249,7 +253,7 @@ class AssembleHouseholdCandidateTool(
                 fact_requirements=resolution.fact_requirements,
             )
 
-        labels = await self._catalogue_labels(context)
+        labels = await self._evidence.catalogue_labels(context)
         if labels is None:
             return AssembleHouseholdOutput(
                 status=HouseholdAssemblyStatus.FAILED,
@@ -333,7 +337,7 @@ class AssembleHouseholdCandidateTool(
                                 f"No {labels[field].casefold()}."
                                 if len(evidence.people) == 1
                                 else (
-                                    f"{self._person_subject(person, index)} has no "
+                                    f"{self._evidence.person_subject(person)} has no "
                                     f"{labels[field].casefold()}."
                                 )
                             ),
@@ -344,7 +348,7 @@ class AssembleHouseholdCandidateTool(
                 else:
                     annual_value = periodic_value.annual_value()
                     input_facts.extend(
-                        self._periodic_amount_facts(
+                        self._evidence.periodic_amount_facts(
                             labels[field],
                             periodic_value,
                         )
@@ -434,7 +438,7 @@ class AssembleHouseholdCandidateTool(
         else:
             annual_childcare_expenses = childcare_expenses.annual_value()
             input_facts.extend(
-                self._periodic_amount_facts(
+                self._evidence.periodic_amount_facts(
                     labels["childcare_expenses"],
                     childcare_expenses,
                 )
@@ -477,7 +481,9 @@ class AssembleHouseholdCandidateTool(
             source = evidence.sources.get(field, "default")
             if source != "default":
                 input_facts.extend(
-                    self._periodic_amount_facts(labels[field], periodic_value)
+                    self._evidence.periodic_amount_facts(
+                        labels[field], periodic_value
+                    )
                 )
             target[field] = annual_value
             values.append(
@@ -539,8 +545,11 @@ class AssembleHouseholdCandidateTool(
             assumptions=tuple(assumptions),
         )
 
+class HouseholdEvidenceCoordinator:
+    """Merge household evidence and resolve its presentation metadata."""
+
     @classmethod
-    def _evidence_from_values(
+    def evidence_from_values(
         cls,
         values: tuple[HouseholdValue, ...],
     ) -> HouseholdEvidence:
@@ -626,7 +635,7 @@ class AssembleHouseholdCandidateTool(
         return None
 
     @staticmethod
-    def _default_only_evidence(evidence: HouseholdEvidence) -> HouseholdEvidence:
+    def default_only(evidence: HouseholdEvidence) -> HouseholdEvidence:
         people: list[PersonEvidence] = []
         last_default_index = -1
         for index, person in enumerate(evidence.people):
@@ -674,7 +683,7 @@ class AssembleHouseholdCandidateTool(
         )
 
     @classmethod
-    def _merge_evidence(
+    def merge(
         cls,
         retained: HouseholdEvidence,
         current: HouseholdEvidence,
@@ -733,7 +742,7 @@ class AssembleHouseholdCandidateTool(
         return retained.model_copy(update=household_updates)
 
     @staticmethod
-    def _as_current_user_evidence(
+    def as_current_user_evidence(
         evidence: HouseholdEvidence,
         ambiguities: tuple[HouseholdEvidenceAmbiguity, ...],
     ) -> HouseholdEvidence:
@@ -792,7 +801,7 @@ class AssembleHouseholdCandidateTool(
         )
 
     @classmethod
-    def _merge_ambiguities(
+    def merge_ambiguities(
         cls,
         retained: tuple[HouseholdEvidenceAmbiguity, ...],
         current: tuple[HouseholdEvidenceAmbiguity, ...],
@@ -847,7 +856,7 @@ class AssembleHouseholdCandidateTool(
         )
 
     @staticmethod
-    def _periodic_amount_facts(
+    def periodic_amount_facts(
         label: str,
         value: PeriodicAmount,
     ) -> tuple[NumericalFact, ...]:
@@ -868,7 +877,7 @@ class AssembleHouseholdCandidateTool(
             )
         return tuple(facts)
 
-    async def _catalogue_labels(self, context):
+    async def catalogue_labels(self, context):
         labels = {}
         for field, fallback in _CATALOGUE_FIELDS.items():
             result = await context.invoke_tool("get_variable", {"name": field})
@@ -884,12 +893,11 @@ class AssembleHouseholdCandidateTool(
         return labels
 
     @staticmethod
-    def _person_subject(person: PersonEvidence, index: int) -> str:
+    def person_subject(person: PersonEvidence) -> str:
         if person.display_label:
             return person.display_label[:1].upper() + person.display_label[1:]
         if person.relationship_to_user == "self":
             return "You"
-        del index
         return "Another household member"
 
 
@@ -962,6 +970,438 @@ class HouseholdAnalysisOutput(StrictModel):
     narration_fallback: str
 
 
+class HouseholdResultPresenter:
+    """Build validated household outputs and user-facing numerical facts."""
+
+    @staticmethod
+    def narration_facts(finding) -> tuple[NumericalFact, ...]:
+        facts = [
+            NumericalFact(
+                label=finding.label,
+                value=finding.value,
+                unit=finding.unit,
+            )
+        ]
+        if finding.unit == "GBP/year":
+            facts.extend(
+                (
+                    NumericalFact(
+                        label=f"Monthly {finding.label.casefold()}",
+                        value=finding.value / 12,
+                        unit="GBP/month",
+                    ),
+                    NumericalFact(
+                        label=f"Weekly {finding.label.casefold()}",
+                        value=finding.value / 52,
+                        unit="GBP/week",
+                    ),
+                )
+            )
+        return tuple(facts)
+
+    @staticmethod
+    def fallback(
+        outputs: tuple[AggregateValue, ...],
+        assumptions: tuple[HouseholdAssumption, ...],
+        issues: tuple[HouseholdOutputIssue, ...],
+    ) -> str:
+        result_lines = []
+        for output in outputs:
+            if output.value is None:
+                result_lines.append(f"- {output.label}: unavailable")
+            elif output.unit == "GBP/year":
+                result_lines.append(
+                    f"- {output.label}: £{output.value:,.2f} per year"
+                )
+            else:
+                result_lines.append(
+                    f"- {output.label}: {output.value:g} {output.unit}"
+                )
+        paragraphs = (
+            ["### Results\n\n" + "\n".join(result_lines)]
+            if result_lines
+            else ["The calculation did not return a supported household output."]
+        )
+        if assumptions:
+            statements = "\n".join(
+                f"- {item.plain_statement}" for item in assumptions
+            )
+            paragraphs.append(f"### Assumptions used\n\n{statements}")
+        if issues:
+            paragraphs.append(
+                " ".join(
+                    f"I could not calculate {item.request}: {item.guidance}"
+                    for item in issues
+                )
+            )
+        return "\n\n".join(paragraphs)
+
+    @staticmethod
+    def completed_assumptions(
+        household_assumptions: tuple[HouseholdAssumption, ...],
+        *,
+        year: int,
+        year_source: InputSource,
+        defaulted_to_current_policy: bool,
+    ) -> tuple[HouseholdAssumption, ...]:
+        assumptions = list(household_assumptions)
+        if year_source is InputSource.SERVER_DEFAULT:
+            assumptions.insert(
+                0,
+                HouseholdAssumption(
+                    field_id="policy.year",
+                    label="Policy year",
+                    assumed_value=year,
+                    plain_statement=f"Policy year: {year}.",
+                    label_source="system_default",
+                ),
+            )
+        if defaulted_to_current_policy:
+            assumptions.insert(
+                1 if year_source is InputSource.SERVER_DEFAULT else 0,
+                HouseholdAssumption(
+                    field_id="policy.scenario",
+                    label="Policy scenario",
+                    assumed_value="current_policy",
+                    plain_statement="Policy scenario: current policy.",
+                    label_source="system_default",
+                ),
+            )
+        return tuple(assumptions)
+
+    def extract_outputs(
+        self,
+        payload: dict[str, JsonValue],
+        requested: tuple[str, ...],
+    ) -> tuple[AggregateValue, ...]:
+        reform_applied = payload.get("reform_applied") is True
+        outputs = []
+        for variable in requested:
+            if reform_applied:
+                baseline = self._find_number(payload.get("baseline"), variable)
+                reform = self._find_number(payload.get("reform"), variable)
+                for metric, value in (
+                    ("baseline", baseline),
+                    ("reform", reform),
+                    (
+                        "change",
+                        reform - baseline
+                        if reform is not None and baseline is not None
+                        else None,
+                    ),
+                ):
+                    outputs.append(
+                        AggregateValue(
+                            output_id=variable,
+                            metric_id=metric,
+                            label=variable.replace("_", " ").title(),
+                            value=value,
+                            unit="GBP/year",
+                            dimensions=(
+                                AggregateDimension(name="scenario", value=metric),
+                            ),
+                        )
+                    )
+            else:
+                outputs.append(
+                    AggregateValue(
+                        output_id=variable,
+                        metric_id="current_law",
+                        label=variable.replace("_", " ").title(),
+                        value=self._find_number(payload, variable),
+                        unit="GBP/year",
+                    )
+                )
+        return tuple(outputs)
+
+    @classmethod
+    def _find_number(cls, value: JsonValue, key: str) -> float | int | None:
+        if isinstance(value, dict):
+            if key in value and isinstance(value[key], (int, float)):
+                return value[key]
+            for nested in value.values():
+                found = cls._find_number(nested, key)
+                if found is not None:
+                    return found
+        if isinstance(value, list):
+            for nested in value:
+                found = cls._find_number(nested, key)
+                if found is not None:
+                    return found
+        return None
+
+    @staticmethod
+    def validation_prompt(payload: dict[str, JsonValue]) -> str:
+        errors = payload.get("errors")
+        if isinstance(errors, list) and errors:
+            messages = tuple(
+                error["message"]
+                for error in errors
+                if isinstance(error, dict)
+                and isinstance(error.get("message"), str)
+                and error["message"].strip()
+            )
+            if messages:
+                return " ".join(dict.fromkeys(messages))
+        return "Please correct the household details before calculation."
+
+    @staticmethod
+    def validation_fields(payload: dict[str, JsonValue]) -> tuple[str, ...]:
+        errors = payload.get("errors")
+        if not isinstance(errors, list):
+            return ("household",)
+        fields = tuple(
+            error["path"]
+            for error in errors
+            if isinstance(error, dict)
+            and isinstance(error.get("path"), str)
+            and error["path"].strip()
+        )
+        return tuple(dict.fromkeys(fields)) or ("household",)
+
+
+class HouseholdInvocationCoordinator:
+    """Select and persist the typed state for a resumed household invocation."""
+
+    def __init__(self, *, capability_id: str, capability_version: str) -> None:
+        self._capability_id = capability_id
+        self._capability_version = capability_version
+
+    async def select(self, capability_input: HouseholdAnalysisInput, context):
+        waiting = await context.waiting_invocations(self._capability_id)
+        if capability_input.start_new_invocation:
+            return None, None
+        active_scope_id = (
+            context.conversation_context.focus.scope_id
+            if context.conversation_context is not None
+            else None
+        )
+        compatible = tuple(
+            item
+            for item in waiting
+            if self._waiting_scope_id(item) in {None, active_scope_id}
+        )
+        pending_questions = (
+            tuple(
+                question
+                for question in context.conversation_context.pending_questions
+                if question.capability_id == self._capability_id
+                and question.capability_invocation is not None
+                and question.capability_invocation.context_scope_id
+                in {active_scope_id, None}
+            )
+            if context.conversation_context is not None
+            else ()
+        )
+        compatible_by_id = {item.invocation_id: item for item in compatible}
+        linked = tuple(
+            compatible_by_id[question.capability_invocation.invocation_id]
+            for question in pending_questions
+            if question.capability_invocation is not None
+            and question.capability_invocation.invocation_id in compatible_by_id
+        )
+        if len(linked) == 1:
+            return linked[0], None
+        if len(linked) > 1 and context.conversation_context is not None:
+            answered = tuple(
+                compatible_by_id[question.capability_invocation.invocation_id]
+                for question in pending_questions
+                if question.capability_invocation is not None
+                and question.capability_invocation.invocation_id in compatible_by_id
+                and (
+                    question.status is PendingQuestionStatus.ANSWER_RECEIVED
+                    or self._requirements_satisfied(
+                        context.conversation_context,
+                        question.requirements,
+                    )
+                )
+            )
+            if len(answered) == 1:
+                return answered[0], None
+        if not linked and len(compatible) == 1:
+            return compatible[0], None
+        candidates = linked or compatible
+        if len(candidates) > 1:
+            choices = "; ".join(
+                getattr(item.partial_input, "description", "household calculation")
+                for item in candidates
+            )
+            return None, NeedsInput(
+                prompt=(
+                    "More than one household calculation is waiting for information. "
+                    f"Which one do you want to continue? {choices}"
+                ),
+                missing_fields=("pending_household_selection",),
+                partial_input={},
+            )
+        return None, None
+
+    @staticmethod
+    def merge_input(
+        retained_draft: HouseholdAnalysisDraft | None,
+        current: HouseholdAnalysisInput,
+    ) -> HouseholdAnalysisInput:
+        if retained_draft is None:
+            return current
+        return HouseholdAnalysisInput(
+            description=current.description,
+            year=current.year if current.year is not None else retained_draft.year,
+            referenced_household_id=(
+                current.referenced_household_id
+                if current.referenced_household_id is not None
+                else retained_draft.referenced_household_id
+            ),
+            referenced_policy_scenario_id=(
+                current.referenced_policy_scenario_id
+                if current.referenced_policy_scenario_id is not None
+                else retained_draft.referenced_policy_scenario_id
+            ),
+            reform_instruction=(
+                current.reform_instruction
+                if current.reform_instruction is not None
+                else retained_draft.reform_instruction
+            ),
+            requested_outputs=retained_draft.requested_outputs,
+            start_new_invocation=False,
+        )
+
+    @staticmethod
+    async def persist(
+        draft: HouseholdAnalysisDraft,
+        waiting,
+        context,
+    ) -> HouseholdAnalysisDraft:
+        invocation_id = (
+            waiting.invocation_id
+            if waiting is not None
+            else context.capability_invocation_id
+        )
+        stored_draft = draft.model_copy(
+            update={
+                "invocation_id": invocation_id,
+                "context_scope_id": (
+                    context.conversation_context.focus.scope_id
+                    if context.conversation_context is not None
+                    else draft.context_scope_id
+                ),
+                "context_revision": (
+                    context.conversation_context.revision
+                    if context.conversation_context is not None
+                    else draft.context_revision
+                ),
+                "start_new_invocation": False,
+            }
+        )
+        if context.conversation_context is not None:
+            stored_draft = stored_draft.model_copy(
+                update={"evidence": HouseholdEvidence(), "ambiguities": ()}
+            )
+        if waiting is None:
+            await context.persist_waiting(stored_draft)
+        else:
+            await context.update_waiting(invocation_id, stored_draft)
+        return stored_draft
+
+    def reference(
+        self,
+        draft: HouseholdAnalysisDraft,
+    ) -> CapabilityInvocationReference | None:
+        if (
+            draft.invocation_id is None
+            or draft.context_scope_id is None
+            or draft.context_revision is None
+        ):
+            return None
+        return CapabilityInvocationReference(
+            invocation_id=draft.invocation_id,
+            capability_id=self._capability_id,
+            capability_version=self._capability_version,
+            context_scope_id=draft.context_scope_id,
+            context_revision=draft.context_revision,
+        )
+
+    @staticmethod
+    def public_partial(
+        draft: HouseholdAnalysisDraft,
+        *,
+        exclude_defaults: bool = False,
+    ) -> dict[str, JsonValue]:
+        return draft.model_dump(
+            mode="json",
+            exclude={
+                "invocation_id",
+                "context_scope_id",
+                "context_revision",
+                "fact_requirements",
+                "evidence",
+                "invocation_defaults",
+                "ambiguities",
+                "pending_fields",
+                "authoritative_messages",
+                "unresolved_sterling_mentions",
+            },
+            exclude_none=True,
+            exclude_defaults=exclude_defaults,
+        )
+
+    @staticmethod
+    def authoritative_messages(
+        retained_draft: HouseholdAnalysisDraft | None,
+        current_message: str | None,
+    ) -> tuple[str, ...]:
+        retained = (
+            retained_draft.authoritative_messages
+            if retained_draft is not None
+            else ()
+        )
+        if not current_message or current_message in retained:
+            return retained
+        return (*retained, current_message)
+
+    @staticmethod
+    def _waiting_scope_id(waiting) -> str | None:
+        return getattr(waiting.partial_input, "context_scope_id", None)
+
+    @staticmethod
+    def _requirements_satisfied(context, requirements) -> bool:
+        if not requirements:
+            return False
+        for requirement in requirements:
+            if requirement.subject_entity_id is not None:
+                subject_ids = (requirement.subject_entity_id,)
+            elif requirement.subject_kind is not None:
+                subject_ids = tuple(
+                    entity.entity_id
+                    for entity in context.entities
+                    if entity.kind is requirement.subject_kind
+                )
+            else:
+                return False
+            matching = tuple(
+                fact
+                for subject_id in subject_ids
+                if (
+                    fact := context.active_fact(
+                        requirement.fact_key,
+                        subject_id,
+                        requirement.scope_id,
+                    )
+                )
+                is not None
+            )
+            if not matching:
+                return False
+            if (
+                not requirement.allow_explicit_absence
+                and all(
+                    isinstance(fact.assertion, ExplicitAbsenceAssertion)
+                    for fact in matching
+                )
+            ):
+                return False
+        return True
+
+
 class HouseholdAnalysisCapability(
     Capability[HouseholdAnalysisInput, HouseholdAnalysisOutput]
 ):
@@ -1012,12 +1452,18 @@ class HouseholdAnalysisCapability(
     def __init__(
         self,
         engine_fact_projector: HouseholdEngineFactProjector | None = None,
+        result_presenter: HouseholdResultPresenter | None = None,
     ) -> None:
         self._engine_fact_projector = engine_fact_projector
         self._input_completeness = HouseholdInputCompleteness()
+        self._results = result_presenter or HouseholdResultPresenter()
+        self._invocations = HouseholdInvocationCoordinator(
+            capability_id=self.spec.identifier,
+            capability_version=self.spec.version,
+        )
 
     async def run(self, capability_input: HouseholdAnalysisInput, context):
-        waiting, selection_outcome = await self._select_waiting(
+        waiting, selection_outcome = await self._invocations.select(
             capability_input,
             context,
         )
@@ -1028,7 +1474,7 @@ class HouseholdAnalysisCapability(
             if waiting is not None
             else None
         )
-        effective_input = self._merge_capability_input(
+        effective_input = self._invocations.merge_input(
             retained_draft,
             capability_input,
         )
@@ -1052,7 +1498,7 @@ class HouseholdAnalysisCapability(
                     for item in pending_resolutions
                 ),
                 partial_input=(
-                    self._public_partial_input(retained_draft)
+                    self._invocations.public_partial(retained_draft)
                     if retained_draft is not None
                     else effective_input.model_dump(mode="json", exclude_none=True)
                 ),
@@ -1142,7 +1588,7 @@ class HouseholdAnalysisCapability(
                     "invocation_defaults": assembly.invocation_defaults.model_dump(
                         mode="json"
                     ),
-                    "authoritative_messages": self._authoritative_messages(
+                    "authoritative_messages": self._invocations.authoritative_messages(
                         retained_draft,
                         context.current_user_message,
                     ),
@@ -1157,13 +1603,13 @@ class HouseholdAnalysisCapability(
                     ],
                 }
             )
-            draft = await self._persist_draft(draft, waiting, context)
+            draft = await self._invocations.persist(draft, waiting, context)
             return NeedsInput(
                 prompt=self._clarification_prompt(assembly.questions),
                 missing_fields=assembly.missing_fields,
-                partial_input=self._public_partial_input(draft),
+                partial_input=self._invocations.public_partial(draft),
                 fact_requirements=assembly.fact_requirements,
-                capability_invocation=self._capability_invocation(draft),
+                capability_invocation=self._invocations.reference(draft),
             )
         if assembly.status is HouseholdAssemblyStatus.FAILED or assembly.candidate is None:
             return Failed(
@@ -1179,7 +1625,7 @@ class HouseholdAnalysisCapability(
                 "invocation_defaults": assembly.invocation_defaults.model_dump(
                     mode="json"
                 ),
-                "authoritative_messages": self._authoritative_messages(
+                "authoritative_messages": self._invocations.authoritative_messages(
                     retained_draft,
                     context.current_user_message,
                 ),
@@ -1218,7 +1664,7 @@ class HouseholdAnalysisCapability(
                     ),
                 }
             )
-            draft = await self._persist_draft(draft, waiting, context)
+            draft = await self._invocations.persist(draft, waiting, context)
             return NeedsInput(
                 prompt=(
                     f"I could not connect {mention_text} to a validated household "
@@ -1226,7 +1672,7 @@ class HouseholdAnalysisCapability(
                     "or pays it, and whether it is weekly, monthly, or annual."
                 ),
                 missing_fields=tuple(draft.pending_fields),
-                partial_input=self._public_partial_input(draft),
+                partial_input=self._invocations.public_partial(draft),
             )
 
         if effective_input.reform_instruction:
@@ -1298,15 +1744,15 @@ class HouseholdAnalysisCapability(
         if not isinstance(validation, SafeToolOutput):
             raise TypeError("Household validation returned an incompatible output.")
         if validation.root.get("valid") is not True:
-            missing_fields = self._validation_fields(validation.root)
+            missing_fields = self._results.validation_fields(validation.root)
             draft = draft.model_copy(update={"pending_fields": missing_fields})
-            draft = await self._persist_draft(draft, waiting, context)
+            draft = await self._invocations.persist(draft, waiting, context)
             return NeedsInput(
                 prompt=self._clarification_prompt(
-                    (self._validation_prompt(validation.root),),
+                    (self._results.validation_prompt(validation.root),),
                 ),
                 missing_fields=missing_fields,
-                partial_input=self._public_partial_input(draft),
+                partial_input=self._invocations.public_partial(draft),
             )
         if waiting is not None:
             await context.remove_waiting(waiting.invocation_id)
@@ -1338,7 +1784,7 @@ class HouseholdAnalysisCapability(
                 safe_message="The deterministic household calculation failed.",
                 error_code="household_simulation_failed",
             )
-        outputs = self._extract_outputs(simulation.root, requested)
+        outputs = self._results.extract_outputs(simulation.root, requested)
         result = HouseholdResultRef(
             provenance=self._provenance(context, "household simulation"),
             year=resolved_year.year,
@@ -1361,7 +1807,7 @@ class HouseholdAnalysisCapability(
             fact
             for finding in extracted.findings
             if finding.value is not None
-            for fact in self._output_narration_facts(finding)
+            for fact in self._results.narration_facts(finding)
         )
         facts = (
             *candidate.input_narration_facts,
@@ -1372,7 +1818,7 @@ class HouseholdAnalysisCapability(
             ),
             *output_facts,
         )
-        completed_assumptions = self._completed_assumptions(
+        completed_assumptions = self._results.completed_assumptions(
             assembly.assumptions,
             year=resolved_year.year,
             year_source=resolved_year.source,
@@ -1389,7 +1835,7 @@ class HouseholdAnalysisCapability(
                     assumption.plain_statement
                     for assumption in completed_assumptions
                 ),
-                narration_fallback=self._narration_fallback(
+                narration_fallback=self._results.fallback(
                     outputs,
                     completed_assumptions,
                     issues,
@@ -1430,96 +1876,6 @@ class HouseholdAnalysisCapability(
             }
         )
 
-    @staticmethod
-    def _output_narration_facts(finding) -> tuple[NumericalFact, ...]:
-        facts = [
-            NumericalFact(
-                label=finding.label,
-                value=finding.value,
-                unit=finding.unit,
-            )
-        ]
-        if finding.unit == "GBP/year":
-            facts.extend(
-                (
-                    NumericalFact(
-                        label=f"Monthly {finding.label.casefold()}",
-                        value=finding.value / 12,
-                        unit="GBP/month",
-                    ),
-                    NumericalFact(
-                        label=f"Weekly {finding.label.casefold()}",
-                        value=finding.value / 52,
-                        unit="GBP/week",
-                    ),
-                )
-            )
-        return tuple(facts)
-
-    @staticmethod
-    def _narration_fallback(outputs, assumptions, issues) -> str:
-        result_lines = []
-        for output in outputs:
-            if output.value is None:
-                result_lines.append(f"- {output.label}: unavailable")
-            elif output.unit == "GBP/year":
-                result_lines.append(
-                    f"- {output.label}: £{output.value:,.2f} per year"
-                )
-            else:
-                result_lines.append(
-                    f"- {output.label}: {output.value:g} {output.unit}"
-                )
-        if result_lines:
-            paragraphs = ["### Results\n\n" + "\n".join(result_lines)]
-        else:
-            paragraphs = ["The calculation did not return a supported household output."]
-        if assumptions:
-            statements = "\n".join(
-                f"- {item.plain_statement}" for item in assumptions
-            )
-            paragraphs.append(f"### Assumptions used\n\n{statements}")
-        if issues:
-            issue_text = " ".join(
-                f"I could not calculate {item.request}: {item.guidance}"
-                for item in issues
-            )
-            paragraphs.append(issue_text)
-        return "\n\n".join(paragraphs)
-
-    @staticmethod
-    def _completed_assumptions(
-        household_assumptions,
-        *,
-        year,
-        year_source,
-        defaulted_to_current_policy,
-    ):
-        assumptions = list(household_assumptions)
-        if year_source is InputSource.SERVER_DEFAULT:
-            assumptions.insert(
-                0,
-                HouseholdAssumption(
-                    field_id="policy.year",
-                    label="Policy year",
-                    assumed_value=year,
-                    plain_statement=f"Policy year: {year}.",
-                    label_source="system_default",
-                ),
-            )
-        if defaulted_to_current_policy:
-            assumptions.insert(
-                1 if year_source is InputSource.SERVER_DEFAULT else 0,
-                HouseholdAssumption(
-                    field_id="policy.scenario",
-                    label="Policy scenario",
-                    assumed_value="current_policy",
-                    plain_statement="Policy scenario: current policy.",
-                    label_source="system_default",
-                ),
-            )
-        return tuple(assumptions)
-
     async def _forward_reform_outcome(
         self,
         outcome,
@@ -1530,244 +1886,15 @@ class HouseholdAnalysisCapability(
         if not isinstance(outcome, NeedsInput):
             return outcome
         draft = draft.model_copy(update={"pending_fields": ("reform_instruction",)})
-        draft = await self._persist_draft(draft, waiting, context)
+        draft = await self._invocations.persist(draft, waiting, context)
         return NeedsInput(
             prompt=outcome.prompt,
             missing_fields=("reform_instruction",),
-            partial_input=self._public_partial_input(
+            partial_input=self._invocations.public_partial(
                 draft,
                 exclude_defaults=True,
             ),
         )
-
-    @classmethod
-    async def _select_waiting(cls, capability_input, context):
-        waiting = await context.waiting_invocations(cls.spec.identifier)
-        if capability_input.start_new_invocation:
-            return None, None
-        active_scope_id = (
-            context.conversation_context.focus.scope_id
-            if context.conversation_context is not None
-            else None
-        )
-        compatible = tuple(
-            item
-            for item in waiting
-            if cls._waiting_scope_id(item) in {None, active_scope_id}
-        )
-        pending_questions = (
-            tuple(
-                question
-                for question in context.conversation_context.pending_questions
-                if question.capability_id == cls.spec.identifier
-                and question.capability_invocation is not None
-                and question.capability_invocation.context_scope_id
-                in {active_scope_id, None}
-            )
-            if context.conversation_context is not None
-            else ()
-        )
-        compatible_by_id = {item.invocation_id: item for item in compatible}
-        linked = tuple(
-            compatible_by_id[question.capability_invocation.invocation_id]
-            for question in pending_questions
-            if question.capability_invocation is not None
-            and question.capability_invocation.invocation_id in compatible_by_id
-        )
-        if len(linked) == 1:
-            return linked[0], None
-        if len(linked) > 1 and context.conversation_context is not None:
-            answered = tuple(
-                compatible_by_id[question.capability_invocation.invocation_id]
-                for question in pending_questions
-                if question.capability_invocation is not None
-                and question.capability_invocation.invocation_id in compatible_by_id
-                and (
-                    question.status is PendingQuestionStatus.ANSWER_RECEIVED
-                    or cls._requirements_satisfied(
-                        context.conversation_context,
-                        question.requirements,
-                    )
-                )
-            )
-            if len(answered) == 1:
-                return answered[0], None
-        if not linked and len(compatible) == 1:
-            # Repair compatibility for version-one contexts that lost or never
-            # stored the pending-question link.
-            return compatible[0], None
-        candidates = linked or compatible
-        if len(candidates) > 1:
-            choices = "; ".join(
-                getattr(item.partial_input, "description", "household calculation")
-                for item in candidates
-            )
-            return None, NeedsInput(
-                prompt=(
-                    "More than one household calculation is waiting for information. "
-                    f"Which one do you want to continue? {choices}"
-                ),
-                missing_fields=("pending_household_selection",),
-                partial_input={},
-            )
-        return None, None
-
-    @staticmethod
-    def _waiting_scope_id(waiting) -> str | None:
-        return getattr(waiting.partial_input, "context_scope_id", None)
-
-    @staticmethod
-    def _requirements_satisfied(context, requirements) -> bool:
-        if not requirements:
-            return False
-        for requirement in requirements:
-            subject_ids: tuple[str, ...]
-            if requirement.subject_entity_id is not None:
-                subject_ids = (requirement.subject_entity_id,)
-            elif requirement.subject_kind is not None:
-                subject_ids = tuple(
-                    entity.entity_id
-                    for entity in context.entities
-                    if entity.kind is requirement.subject_kind
-                )
-            else:
-                return False
-            matching = tuple(
-                fact
-                for subject_id in subject_ids
-                if (
-                    fact := context.active_fact(
-                        requirement.fact_key,
-                        subject_id,
-                        requirement.scope_id,
-                    )
-                )
-                is not None
-            )
-            if not matching:
-                return False
-            if (
-                not requirement.allow_explicit_absence
-                and all(
-                    isinstance(fact.assertion, ExplicitAbsenceAssertion)
-                    for fact in matching
-                )
-            ):
-                return False
-        return True
-
-    @staticmethod
-    def _merge_capability_input(retained_draft, current):
-        if retained_draft is None:
-            return current
-        return HouseholdAnalysisInput(
-            description=current.description,
-            year=current.year if current.year is not None else retained_draft.year,
-            referenced_household_id=(
-                current.referenced_household_id
-                if current.referenced_household_id is not None
-                else retained_draft.referenced_household_id
-            ),
-            referenced_policy_scenario_id=(
-                current.referenced_policy_scenario_id
-                if current.referenced_policy_scenario_id is not None
-                else retained_draft.referenced_policy_scenario_id
-            ),
-            reform_instruction=(
-                current.reform_instruction
-                if current.reform_instruction is not None
-                else retained_draft.reform_instruction
-            ),
-            requested_outputs=(
-                retained_draft.requested_outputs
-            ),
-            start_new_invocation=False,
-        )
-
-    @staticmethod
-    async def _persist_draft(draft, waiting, context):
-        invocation_id = (
-            waiting.invocation_id
-            if waiting is not None
-            else context.capability_invocation_id
-        )
-        stored_draft = draft.model_copy(
-            update={
-                "invocation_id": invocation_id,
-                "context_scope_id": (
-                    context.conversation_context.focus.scope_id
-                    if context.conversation_context is not None
-                    else draft.context_scope_id
-                ),
-                "context_revision": (
-                    context.conversation_context.revision
-                    if context.conversation_context is not None
-                    else draft.context_revision
-                ),
-                "start_new_invocation": False,
-            }
-        )
-        if context.conversation_context is not None:
-            stored_draft = stored_draft.model_copy(
-                update={
-                    "evidence": HouseholdEvidence(),
-                    "ambiguities": (),
-                }
-            )
-        if waiting is None:
-            await context.persist_waiting(stored_draft)
-        else:
-            await context.update_waiting(invocation_id, stored_draft)
-        return stored_draft
-
-    @staticmethod
-    def _capability_invocation(
-        draft: HouseholdAnalysisDraft,
-    ) -> CapabilityInvocationReference | None:
-        if (
-            draft.invocation_id is None
-            or draft.context_scope_id is None
-            or draft.context_revision is None
-        ):
-            return None
-        return CapabilityInvocationReference(
-            invocation_id=draft.invocation_id,
-            capability_id=HouseholdAnalysisCapability.spec.identifier,
-            capability_version=HouseholdAnalysisCapability.spec.version,
-            context_scope_id=draft.context_scope_id,
-            context_revision=draft.context_revision,
-        )
-
-    @staticmethod
-    def _public_partial_input(draft, *, exclude_defaults=False):
-        return draft.model_dump(
-            mode="json",
-            exclude={
-                "invocation_id",
-                "context_scope_id",
-                "context_revision",
-                "fact_requirements",
-                "evidence",
-                "invocation_defaults",
-                "ambiguities",
-                "pending_fields",
-                "authoritative_messages",
-                "unresolved_sterling_mentions",
-            },
-            exclude_none=True,
-            exclude_defaults=exclude_defaults,
-        )
-
-    @staticmethod
-    def _authoritative_messages(retained_draft, current_message):
-        retained = (
-            retained_draft.authoritative_messages
-            if retained_draft is not None
-            else ()
-        )
-        if not current_message or current_message in retained:
-            return retained
-        return (*retained, current_message)
 
     @staticmethod
     def _natural_list(items):
@@ -2008,93 +2135,6 @@ class HouseholdAnalysisCapability(
             requested_output_ids=requested_output_ids,
             require_housing_costs=not tax_only,
         )
-
-    @classmethod
-    def _extract_outputs(cls, payload, requested):
-        reform_applied = payload.get("reform_applied") is True
-        outputs = []
-        for variable in requested:
-            if reform_applied:
-                baseline = cls._find_number(payload.get("baseline"), variable)
-                reform = cls._find_number(payload.get("reform"), variable)
-                for metric, value in (
-                    ("baseline", baseline),
-                    ("reform", reform),
-                    (
-                        "change",
-                        reform - baseline
-                        if reform is not None and baseline is not None
-                        else None,
-                    ),
-                ):
-                    outputs.append(
-                        AggregateValue(
-                            output_id=variable,
-                            metric_id=metric,
-                            label=variable.replace("_", " ").title(),
-                            value=value,
-                            unit="GBP/year",
-                            dimensions=(
-                                AggregateDimension(name="scenario", value=metric),
-                            ),
-                        )
-                    )
-            else:
-                outputs.append(
-                    AggregateValue(
-                        output_id=variable,
-                        metric_id="current_law",
-                        label=variable.replace("_", " ").title(),
-                        value=cls._find_number(payload, variable),
-                        unit="GBP/year",
-                    )
-                )
-        return tuple(outputs)
-
-    @classmethod
-    def _find_number(cls, value, key):
-        if isinstance(value, dict):
-            if key in value and isinstance(value[key], (int, float)):
-                return value[key]
-            for nested in value.values():
-                found = cls._find_number(nested, key)
-                if found is not None:
-                    return found
-        if isinstance(value, list):
-            for nested in value:
-                found = cls._find_number(nested, key)
-                if found is not None:
-                    return found
-        return None
-
-    @staticmethod
-    def _validation_prompt(payload):
-        errors = payload.get("errors")
-        if isinstance(errors, list) and errors:
-            messages = tuple(
-                error["message"]
-                for error in errors
-                if isinstance(error, dict)
-                and isinstance(error.get("message"), str)
-                and error["message"].strip()
-            )
-            if messages:
-                return " ".join(dict.fromkeys(messages))
-        return "Please correct the household details before calculation."
-
-    @staticmethod
-    def _validation_fields(payload):
-        errors = payload.get("errors")
-        if not isinstance(errors, list):
-            return ("household",)
-        fields = tuple(
-            error["path"]
-            for error in errors
-            if isinstance(error, dict)
-            and isinstance(error.get("path"), str)
-            and error["path"].strip()
-        )
-        return tuple(dict.fromkeys(fields)) or ("household",)
 
     @staticmethod
     def _household_revision(candidate):

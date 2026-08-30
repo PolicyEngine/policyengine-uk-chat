@@ -28,37 +28,20 @@ from capabilities.relevance import (
     RelevanceAssessment,
     RelevanceResult,
 )
-from conversation_context.models import (
-    CapabilityInvocationReference,
-    ContextPatch,
-    ContextReduction,
-    ConversationContext,
-    FactRequirement,
-    PendingQuestion,
-    PendingQuestionStatus,
-    ReplacePendingQuestionsOperation,
-)
+from conversation_context.models import ConversationContext
 from conversation_context.change_pipeline import (
-    ContextChangeProposal,
     ContextValidationOutcome,
     ContextValidationStatus,
     ContextValidationIssue,
-    ValidateContextChangeInput,
 )
 from conversation_context.projection import ContextProjection, project_context
 from conversation_context.registry import FactDefinitionRegistry
 from conversation_context.repository import ConversationContextRepository
-from conversation_context.tools import (
-    ApplyContextChangeInput,
-    ContextProposalStatus,
-    ProposeContextChangeInput,
-    ProposeContextChangeOutput,
-    ContextConversationExcerpt,
-    ReduceContextPatchInput,
-)
-from conversation_context.variable_resolution import (
-    ResolveContextChangeInput,
-    ResolveContextChangeOutput,
+from conversation_context.tools import ContextConversationExcerpt
+from chat.context_coordination import (
+    ContextChangeCoordinator,
+    ContextChangeTurn,
+    PendingQuestionCoordinator,
 )
 from chat.events import (
     CancellationProbe,
@@ -148,6 +131,20 @@ safe message or reason and do not substitute model-estimated facts or numbers.
 
 ArtifactSummarySource = Callable[[str], Awaitable[tuple[dict[str, object], ...]]]
 ActivityTaskResult = TypeVar("ActivityTaskResult")
+
+
+class InvocationTaskController:
+    """Cancel a running invocation and wait for its cleanup to finish."""
+
+    @staticmethod
+    async def cancel_and_wait(task: asyncio.Task[object]) -> None:
+        if task.done():
+            return
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
 
 
 async def _no_artifact_summaries(
@@ -266,7 +263,24 @@ class ChatTurnService:
         self._artifact_summaries = artifact_summaries
         self._context_repository = context_repository
         self._fact_registry = fact_registry
+        self._context_changes = (
+            ContextChangeCoordinator(
+                executor=executor,
+                fact_registry=fact_registry,
+            )
+            if context_repository is not None and fact_registry is not None
+            else None
+        )
+        self._pending_questions = (
+            PendingQuestionCoordinator(
+                executor=executor,
+                repository=context_repository,
+            )
+            if context_repository is not None
+            else None
+        )
         self._max_iterations = max_iterations
+        self._invocation_tasks = InvocationTaskController()
         self._narration = NumericalNarrationVerifier(executor)
         self._clarification_narration = ClarificationNarrationGuard()
 
@@ -386,9 +400,21 @@ class ChatTurnService:
                 yield completed
                 return
 
-            if self._context_repository is not None and self._fact_registry is not None:
+            if self._context_changes is not None:
                 context_change_task = asyncio.create_task(
-                    self._process_context_change(turn, context)
+                    self._context_changes.process(
+                        ContextChangeTurn(
+                            current_message=self._last_user_text(turn.messages),
+                            conversation=tuple(
+                                ContextConversationExcerpt(
+                                    role=str(message.get("role", "")),
+                                    content=self._content_text(message.get("content")),
+                                )
+                                for message in turn.messages
+                            ),
+                        ),
+                        context,
+                    )
                 )
                 async for event, trace_cursor in self._activity_while_running(
                     context_change_task,
@@ -551,10 +577,14 @@ class ChatTurnService:
                         if event is not None:
                             yield event
                     result, _status = await invocation_task
-                    updated_context = await self._sync_pending_context(
-                        capability_id=call.capability_id,
-                        result=result,
-                        context=context,
+                    updated_context = (
+                        await self._pending_questions.synchronize(
+                            capability_id=call.capability_id,
+                            result=result,
+                            context=context,
+                        )
+                        if self._pending_questions is not None
+                        else None
                     )
                     if updated_context is not None:
                         context = context.with_conversation_context(updated_context)
@@ -606,6 +636,10 @@ class ChatTurnService:
                 usage=usage,
                 turn_id=turn_id,
             )
+        except asyncio.CancelledError:
+            if self._idempotency is not None:
+                self._idempotency.fail_turn(turn_id=turn_id, fingerprint=fingerprint)
+            raise
         except Exception:
             logger.exception("Chat turn processing failed")
             activity, trace_cursor = self._activity_since(
@@ -638,25 +672,29 @@ class ChatTurnService:
     ) -> AsyncIterator[tuple[InvocationActivity | None, int]]:
         """Emit invocation updates while an operation is still executing."""
 
-        while True:
-            await asyncio.wait((task,), timeout=0.05)
-            activity, next_cursor = self._activity_since(
-                context,
-                cursor,
-                include_private=include_private,
-            )
-            if activity:
-                for event in activity:
-                    yield event, next_cursor
-            elif next_cursor != cursor:
-                # Advance across private records omitted from the projection.
-                yield None, next_cursor
-            cursor = next_cursor
-            if task.done():
-                return
-            if await is_cancelled():
-                task.cancel()
-                raise InvocationCancelled
+        try:
+            while True:
+                await asyncio.wait((task,), timeout=0.05)
+                activity, next_cursor = self._activity_since(
+                    context,
+                    cursor,
+                    include_private=include_private,
+                )
+                if activity:
+                    for event in activity:
+                        yield event, next_cursor
+                elif next_cursor != cursor:
+                    # Advance across private records omitted from the projection.
+                    yield None, next_cursor
+                cursor = next_cursor
+                if task.done():
+                    return
+                if await is_cancelled():
+                    await self._invocation_tasks.cancel_and_wait(task)
+                    raise InvocationCancelled
+        except asyncio.CancelledError:
+            await self._invocation_tasks.cancel_and_wait(task)
+            raise
 
     def _activity_since(
         self,
@@ -723,299 +761,6 @@ class ChatTurnService:
             raise TypeError("Conversation relevance returned an incompatible outcome.")
         return outcome.value
 
-    async def _process_context_change(
-        self,
-        turn: ChatTurnInput,
-        context: CapabilityContext,
-    ) -> ContextValidationOutcome:
-        if (
-            self._context_repository is None
-            or self._fact_registry is None
-            or context.conversation_context is None
-        ):
-            raise RuntimeError("Conversation context processing is not configured.")
-        current = self._last_user_text(turn.messages)
-        excerpts = tuple(
-            ContextConversationExcerpt(
-                role=str(message.get("role", "")),
-                content=self._content_text(message.get("content")),
-            )
-            for message in turn.messages
-        )
-        prior = context.conversation_context
-        repair_issues: tuple[ContextValidationIssue, ...] = ()
-        previous_proposal: ContextChangeProposal | None = None
-        for proposal_attempt in range(2):
-            raw_proposal = await self._executor.invoke_tool(
-                "propose_context_change",
-                ProposeContextChangeInput(
-                    current_message=current,
-                    conversation=excerpts,
-                    context=project_context(prior),
-                    fact_definitions=self._fact_registry.definitions(),
-                    previous_proposal=previous_proposal,
-                    repair_issues=repair_issues,
-                ),
-                caller=CallerType.RUNTIME,
-                context=context,
-            )
-            if not isinstance(raw_proposal, ProposeContextChangeOutput):
-                raise TypeError("Context interpretation returned an incompatible output.")
-            if raw_proposal.status is ContextProposalStatus.NEEDS_CLARIFICATION:
-                return self._context_issue_outcome(prior, raw_proposal.issues)
-
-            proposal = ContextChangeProposal(
-                expected_revision=raw_proposal.expected_revision,
-                candidate_entities=raw_proposal.candidate_entities,
-                changes=raw_proposal.changes,
-                focus=raw_proposal.focus,
-            )
-            validation = await self._executor.invoke_tool(
-                "validate_context_change",
-                ValidateContextChangeInput(
-                    context=prior,
-                    proposal=proposal,
-                    claims_resolved=False,
-                    turn_id=context.turn_id,
-                    evidence=current,
-                ),
-                caller=CallerType.RUNTIME,
-                context=context,
-            )
-            if not isinstance(validation, ContextValidationOutcome):
-                raise TypeError("Context validation returned an incompatible output.")
-            if validation.status is ContextValidationStatus.NEEDS_CLARIFICATION:
-                if proposal_attempt == 0:
-                    previous_proposal = proposal
-                    repair_issues = validation.issues
-                    continue
-                return validation
-
-            validated = validation
-            if validation.claims_to_resolve:
-                try:
-                    raw_resolution = await self._executor.invoke_tool(
-                        "resolve_context_change",
-                        ResolveContextChangeInput(
-                            context=validation.context,
-                            proposal=proposal,
-                            validation_issues=validation.issues,
-                            claims=validation.claims_to_resolve,
-                            turn_id=context.turn_id,
-                            evidence=current,
-                        ),
-                        caller=CallerType.RUNTIME,
-                        context=context,
-                    )
-                except (TypeError, ValueError, RuntimeError):
-                    issues = (
-                        ContextValidationIssue(
-                            code="fact_resolution_failed",
-                            path=("claims",),
-                            message=(
-                                "The current-message fact claim could not be "
-                                "validated against an authoritative variable."
-                            ),
-                            evidence=current,
-                        ),
-                    )
-                    if proposal_attempt == 0:
-                        previous_proposal = proposal
-                        repair_issues = issues
-                        continue
-                    return self._context_issue_outcome(prior, issues)
-                if not isinstance(raw_resolution, ResolveContextChangeOutput):
-                    raise TypeError("Fact-claim resolution returned an incompatible output.")
-                raw_validated = await self._executor.invoke_tool(
-                    "validate_context_change",
-                    ValidateContextChangeInput(
-                        context=prior,
-                        proposal=proposal,
-                        resolution_patch=raw_resolution.patch,
-                        claims_resolved=True,
-                        turn_id=context.turn_id,
-                        evidence=current,
-                    ),
-                    caller=CallerType.RUNTIME,
-                    context=context,
-                )
-                if not isinstance(raw_validated, ContextValidationOutcome):
-                    raise TypeError("Context validation returned an incompatible output.")
-                validated = raw_validated
-                if validated.status is ContextValidationStatus.NEEDS_CLARIFICATION:
-                    if proposal_attempt == 0:
-                        previous_proposal = proposal
-                        repair_issues = validated.issues
-                        continue
-                    return validated
-
-            if validated.committable:
-                applied = await self._executor.invoke_tool(
-                    "apply_context_change",
-                    ApplyContextChangeInput(outcome=validated),
-                    caller=CallerType.RUNTIME,
-                    context=context,
-                )
-                if not isinstance(applied, ConversationContext):
-                    raise TypeError("Context application returned an incompatible output.")
-                validated = validated.model_copy(update={"context": applied})
-            return validated
-        return self._context_issue_outcome(prior, repair_issues)
-
-    @staticmethod
-    def _context_issue_outcome(
-        prior: ConversationContext,
-        issues: tuple[ContextValidationIssue, ...],
-    ) -> ContextValidationOutcome:
-        return ContextValidationOutcome(
-            status=ContextValidationStatus.NEEDS_CLARIFICATION,
-            previous_revision=prior.revision,
-            context=prior,
-            issues=issues,
-        )
-
-    async def _sync_pending_context(
-        self,
-        *,
-        capability_id: str,
-        result: dict[str, object],
-        context: CapabilityContext,
-    ) -> ConversationContext | None:
-        if (
-            self._context_repository is None
-            or context.conversation_context is None
-        ):
-            return None
-        current = context.conversation_context
-        next_questions = current.pending_questions
-        if result.get("status") == "needs_input":
-            raw_reference = result.get("capability_invocation")
-            try:
-                reference = CapabilityInvocationReference.model_validate(raw_reference)
-            except Exception:
-                # Outcomes without a durable continuation must not clear an earlier
-                # valid pending question.
-                return None
-            if reference.capability_id != capability_id:
-                raise TypeError(
-                    "Pending capability reference does not match the invoked capability."
-                )
-            raw_requirements = result.get("fact_requirements")
-            requirements: list[FactRequirement] = []
-            if isinstance(raw_requirements, list):
-                for item in raw_requirements:
-                    try:
-                        requirements.append(FactRequirement.model_validate(item))
-                    except Exception:
-                        continue
-            prompt = result.get("prompt")
-            if requirements and isinstance(prompt, str) and prompt.strip():
-                waiting = await context.waiting_invocations(capability_id)
-                matched = next(
-                    (
-                        item
-                        for item in waiting
-                        if item.invocation_id == reference.invocation_id
-                    ),
-                    None,
-                )
-                if matched is None:
-                    raise RuntimeError(
-                        "A pending question cannot reference a missing waiting invocation."
-                    )
-                if matched.reference() != reference:
-                    raise RuntimeError(
-                        "Pending context and waiting invocation metadata do not match."
-                    )
-                if matched.requirements != tuple(requirements):
-                    raise RuntimeError(
-                        "Pending context and waiting invocation requirements do not match."
-                    )
-                existing = next(
-                    (
-                        question
-                        for question in current.pending_questions
-                        if question.capability_invocation is not None
-                        and question.capability_invocation.invocation_id
-                        == reference.invocation_id
-                    ),
-                    None,
-                )
-                retained = tuple(
-                    question
-                    for question in current.pending_questions
-                    if question is not existing
-                    and not (
-                        question.capability_id == capability_id
-                        and question.capability_invocation is None
-                        and question.requirements == tuple(requirements)
-                    )
-                )
-                next_questions = (
-                    *retained,
-                    PendingQuestion(
-                        question_id=(
-                            existing.question_id if existing is not None else uuid4().hex
-                        ),
-                        capability_id=capability_id,
-                        capability_invocation=reference,
-                        prompt=prompt,
-                        requirements=tuple(requirements),
-                        created_turn_id=context.turn_id,
-                        status=PendingQuestionStatus.AWAITING_ANSWER,
-                    ),
-                )
-        elif result.get("status") == "completed":
-            waiting_ids = {
-                item.invocation_id
-                for item in await context.waiting_invocations(capability_id)
-            }
-            next_questions = tuple(
-                question
-                for question in current.pending_questions
-                if not (
-                    question.capability_id == capability_id
-                    and (
-                        (
-                            question.capability_invocation is not None
-                            and question.capability_invocation.invocation_id
-                            not in waiting_ids
-                        )
-                        or (
-                            question.capability_invocation is None
-                            and not waiting_ids
-                        )
-                    )
-                )
-            )
-        if next_questions == current.pending_questions:
-            return None
-        raw_reduction = await self._executor.invoke_tool(
-            "reduce_context_patch",
-            ReduceContextPatchInput(
-                context=current,
-                patch=ContextPatch(
-                    expected_revision=current.revision,
-                    operations=(
-                        ReplacePendingQuestionsOperation(
-                            questions=next_questions,
-                        ),
-                    ),
-                ),
-                turn_id=context.turn_id,
-                evidence="Capability requirement update.",
-            ),
-            caller=CallerType.RUNTIME,
-            context=context,
-        )
-        if not isinstance(raw_reduction, ContextReduction):
-            raise TypeError("Pending context reduction returned an incompatible output.")
-        self._context_repository.save(
-            raw_reduction.context,
-            expected_revision=raw_reduction.previous_revision,
-        )
-        return raw_reduction.context
-
     async def _invoke_model_capability(
         self,
         call: ModelCapabilityCall,
@@ -1057,7 +802,12 @@ class ChatTurnService:
                 context=context,
                 trace_values=_MODEL_CAPABILITY_TRACE_VALUES,
             )
-        except InvocationCancelled:
+        except (InvocationCancelled, asyncio.CancelledError):
+            if self._idempotency is not None:
+                self._idempotency.fail_call(
+                    call_id=call.call_id,
+                    fingerprint=fingerprint,
+                )
             raise
         except Exception:
             result = _model_capability_failure()

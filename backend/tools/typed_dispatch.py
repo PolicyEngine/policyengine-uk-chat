@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -12,24 +13,45 @@ from tools.contracts import CallerType, Tool, ToolCallContext, ToolSpec, Visibil
 from tools.dispatch import execute_tool
 from tools.registry import tool_specs
 from tools.typed_models import (
+    AggregateResultOutput,
     AggregateResultInput,
+    BudgetaryImpactOutput,
     DecileImpactsInput,
+    DecileImpactsOutput,
     EmptyInput,
     GenerateChartInput,
+    GenerateChartOutput,
     GetParameterInput,
+    GetParameterOutput,
     GetVariableInput,
+    GetVariableOutput,
     HouseholdInput,
+    HouseholdSimulationOutput,
+    InequalityMetricsOutput,
+    ListEntitiesOutput,
     ListHouseholdVariablesInput,
+    ListHouseholdVariablesOutput,
     ListReformTargetsInput,
+    ListReformTargetsOutput,
     ListSocietyVariablesInput,
+    ListSocietyVariablesOutput,
     ListSupportedOutputsInput,
+    ListSupportedOutputsOutput,
+    PovertyMetricsOutput,
     ProgramBreakdownInput,
+    ProgramBreakdownOutput,
     SafeToolOutput,
     SearchParametersInput,
+    SearchParametersOutput,
     SearchVariablesInput,
+    SearchVariablesOutput,
     SimulationRefInput,
     SocietySimulationInput,
+    SocietySimulationOutput,
+    ValidateHouseholdOutput,
     ValidateReformInput,
+    ValidateReformOutput,
+    WinnersLosersOutput,
     WinnersLosersInput,
 )
 
@@ -60,6 +82,30 @@ _INPUT_MODELS: dict[str, type[BaseModel]] = {
 
 _PRIVATE_TOOLS = frozenset({"validate_reform", "validate_household"})
 
+_OUTPUT_MODELS: dict[str, type[SafeToolOutput]] = {
+    "list_entities": ListEntitiesOutput,
+    "search_variables": SearchVariablesOutput,
+    "get_variable": GetVariableOutput,
+    "search_parameters": SearchParametersOutput,
+    "get_parameter": GetParameterOutput,
+    "list_reform_targets": ListReformTargetsOutput,
+    "list_household_input_variables": ListHouseholdVariablesOutput,
+    "list_society_output_variables": ListSocietyVariablesOutput,
+    "list_supported_outputs": ListSupportedOutputsOutput,
+    "validate_reform": ValidateReformOutput,
+    "validate_household": ValidateHouseholdOutput,
+    "run_household_simulation": HouseholdSimulationOutput,
+    "run_society_simulation": SocietySimulationOutput,
+    "compute_budgetary_impact": BudgetaryImpactOutput,
+    "compute_program_breakdown": ProgramBreakdownOutput,
+    "compute_decile_impacts": DecileImpactsOutput,
+    "compute_winners_losers": WinnersLosersOutput,
+    "compute_poverty_metrics": PovertyMetricsOutput,
+    "compute_inequality_metrics": InequalityMetricsOutput,
+    "aggregate_result": AggregateResultOutput,
+    "generate_chart": GenerateChartOutput,
+}
+
 
 class DispatchTool(Tool[BaseModel, SafeToolOutput]):
     """One typed object around one retained deterministic dispatcher function."""
@@ -83,7 +129,10 @@ class DispatchTool(Tool[BaseModel, SafeToolOutput]):
             payload,
             context=execution_context,
         )
-        return SafeToolOutput.model_validate(result)
+        return cast(
+            SafeToolOutput,
+            self.spec.output_model.model_validate(result),
+        )
 
 
 def build_dispatch_tools() -> tuple[DispatchTool, ...]:
@@ -107,7 +156,7 @@ def build_dispatch_tools() -> tuple[DispatchTool, ...]:
                     visibility=(Visibility.PRIVATE if private else Visibility.PUBLIC),
                     allowed_callers=allowed_callers,
                     input_model=input_model,
-                    output_model=SafeToolOutput,
+                    output_model=_OUTPUT_MODELS[identifier],
                 )
             )
         )

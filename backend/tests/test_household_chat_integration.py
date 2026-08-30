@@ -699,7 +699,7 @@ def test_two_turn_tax_clarification_uses_typed_context_invocation_link(
         if identifier == "validate_household":
             return {"valid": True, "year": 2026}
         if identifier == "run_household_simulation":
-            return {
+            result = {
                 "status": "success",
                 "year": 2026,
                 "reform_applied": False,
@@ -707,6 +707,12 @@ def test_two_turn_tax_clarification_uses_typed_context_invocation_link(
                 "national_insurance": 2_994.40,
                 "household_tax": 10_660.45,
             }
+            result["result_id"] = context.result_store.put(
+                "household_simulation",
+                object(),
+                result,
+            )
+            return result
         raise AssertionError(f"Unexpected retained tool call: {identifier}")
 
     monkeypatch.setattr(typed_dispatch, "execute_tool", execute)
@@ -837,7 +843,7 @@ def test_two_turn_tax_clarification_uses_typed_context_invocation_link(
     # A later malformed or unrelated NeedsInput outcome must not erase the valid
     # pending calculation represented by ConversationContext.
     unchanged = asyncio.run(
-        service._sync_pending_context(
+        service._pending_questions.synchronize(
             capability_id="household_analysis",
             result={
                 "status": "needs_input",
@@ -860,7 +866,7 @@ def test_two_turn_tax_clarification_uses_typed_context_invocation_link(
         match="cannot reference a missing waiting invocation",
     ):
         asyncio.run(
-            service._sync_pending_context(
+            service._pending_questions.synchronize(
                 capability_id="household_analysis",
                 result={
                     "status": "needs_input",
@@ -893,7 +899,7 @@ def test_two_turn_tax_clarification_uses_typed_context_invocation_link(
         expected_revision=first_persisted.revision,
     )
     repaired = asyncio.run(
-        service._sync_pending_context(
+        service._pending_questions.synchronize(
             capability_id="household_analysis",
             result={
                 "status": "needs_input",
@@ -1045,7 +1051,7 @@ def test_ten_user_turns_preserve_people_facts_and_collective_income_resolution(
             employment_income = sum(
                 person.get("employment_income", 0) for person in payload["people"]
             )
-            return {
+            result = {
                 "status": "success",
                 "year": 2026,
                 "reform_applied": False,
@@ -1053,6 +1059,12 @@ def test_ten_user_turns_preserve_people_facts_and_collective_income_resolution(
                 "national_insurance": employment_income * 0.08,
                 "household_tax": employment_income * 0.28,
             }
+            result["result_id"] = context.result_store.put(
+                "household_simulation",
+                object(),
+                result,
+            )
+            return result
         raise AssertionError(f"Unexpected retained tool call: {identifier}")
 
     monkeypatch.setattr(typed_dispatch, "execute_tool", execute)
@@ -1433,7 +1445,6 @@ def _run_pending_supplement_ten_turn_path(
     simulation_inputs = []
 
     def execute(identifier, payload, context=None):
-        del context
         if identifier == "get_variable":
             return {
                 "status": "success",
@@ -1466,7 +1477,7 @@ def _run_pending_supplement_ten_turn_path(
             employment_income = sum(
                 person.get("employment_income", 0) for person in payload["people"]
             )
-            return {
+            result = {
                 "status": "success",
                 "year": 2026,
                 "reform_applied": False,
@@ -1474,6 +1485,12 @@ def _run_pending_supplement_ten_turn_path(
                 "national_insurance": employment_income * 0.08,
                 "household_tax": employment_income * 0.28,
             }
+            result["result_id"] = context.result_store.put(
+                "household_simulation",
+                object(),
+                result,
+            )
+            return result
         raise AssertionError(f"Unexpected retained tool call: {identifier}")
 
     monkeypatch.setattr(typed_dispatch, "execute_tool", execute)

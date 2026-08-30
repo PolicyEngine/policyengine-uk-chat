@@ -188,6 +188,20 @@ class SQLIdempotencyRepository:
             session.add(row)
             session.commit()
 
+    def fail_call(self, *, call_id: str, fingerprint: str) -> None:
+        """Finish an interrupted call receipt without storing a replay result."""
+
+        with Session(self._engine) as session:
+            row = session.get(CapabilityCallReceiptRow, call_id)
+            if row is None:
+                raise KeyError(f"Unknown capability call receipt: {call_id}")
+            if row.request_fingerprint != fingerprint:
+                raise ValueError("Capability call fingerprint conflict.")
+            row.status = ReceiptStatus.FAILED.value
+            row.updated_at = datetime.now(timezone.utc)
+            session.add(row)
+            session.commit()
+
     @staticmethod
     def _turn_result(
         row: TurnReceiptRow,

@@ -25,10 +25,12 @@ The central object relationships are deliberately shallow:
 ChatTurnService
   -> ConversationContextRepository
   -> FactDefinitionRegistry
-  -> ContextInterpreter (`propose_context_change`)
-  -> ContextProposalReviewer + ContextChangeValidator (`validate_context_change`)
-  -> ContextChangeResolver (`resolve_context_change`, when validation requires it)
-  -> ContextChangeApplier (`apply_context_change`)
+  -> ContextChangeCoordinator
+       -> ContextInterpreter (`propose_context_change`)
+       -> ContextProposalReviewer + ContextChangeValidator (`validate_context_change`)
+       -> ContextChangeResolver (`resolve_context_change`, when validation requires it)
+       -> ContextChangeApplier (`apply_context_change`)
+  -> PendingQuestionCoordinator
   -> ConversationModel
   -> CapabilityRegistry
   -> InvocationExecutor
@@ -46,6 +48,9 @@ ChatTurnService
 caller permission, input and output models, declared dependencies, cancellation,
 parent invocation identity, and trace status. Capability implementations do not
 select global intent and the executor does not resolve conversational input.
+Cancelling a running asynchronous invocation must be awaited. Both explicit
+request cancellation and `asyncio.Task.cancel()` finish the invocation trace as
+`cancelled`; they must not leave a `running` record or unfinished cleanup.
 
 Core ownership:
 
@@ -59,6 +64,8 @@ Core ownership:
 - `backend/capabilities/application.py`: concrete startup composition.
 - `backend/chat/capability_service.py`: full-history model loop and response
   finalization.
+- `backend/chat/context_coordination.py`: one context-change transaction and
+  synchronization of capability clarification requirements into typed context.
 - `backend/chat/model_port.py`: provider-specific model adapter.
 - `backend/conversation_context/`: stable entities, immutable facts, fact
   definitions and registry, context projections, model-assisted interpretation,
@@ -69,10 +76,15 @@ Core ownership:
 - `backend/capabilities/household_input.py`: household calculation
   requirements, invocation-local defaults, typed assumption input, and the
   deterministic `HouseholdInputResolver`.
+- `HouseholdEvidenceCoordinator`, `HouseholdInvocationCoordinator`, and
+  `HouseholdResultPresenter` in `backend/capabilities/household.py`: household
+  evidence merging, cross-turn invocation resumption, and result construction,
+  respectively; the tool and capability coordinate these objects.
 - `backend/persistence/`: SQL context, artifact, waiting-input, trace,
   deletion, and idempotency repositories.
 - `backend/tools/typed_dispatch.py`: typed objects around the retained 21
-  deterministic tool functions.
+  deterministic tool functions. Every function has its own success-result model;
+  a generic JSON result is not a valid substitute for an operation contract.
 - `backend/engine/`: PolicyEngine calculation and catalogue implementations.
 
 Keep prompt and provider behavior at the chat or capability edge. Keep policy
