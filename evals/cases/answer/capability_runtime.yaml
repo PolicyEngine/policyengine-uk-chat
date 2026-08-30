@@ -1,0 +1,83 @@
+cases:
+  - id: capability_answer_household_assumptions
+    suite: answer
+    description: Household narration remains free-form while enumerating every material assumption as concise Markdown bullets.
+    prompt: Explain this household result and every assumption you made.
+    tool_calls:
+      - name: household_analysis
+        input:
+          description: A single adult earning GBP 30,000 who lives alone and pays no rent or Council Tax.
+        output_fixture: capability_outputs/household_completed.json
+    expect:
+      required:
+        - Assumptions used
+        - no self-employment income
+        - no children
+        - current policy
+        - "2026"
+        - £25,119.60
+      forbidden:
+        - people[0].self_employment_income
+        - household.children
+        - household.rent
+      grounded_numbers: true
+      allowed_numbers: [25119.60, 2026, 1]
+    offline_response:
+      text: |
+        The illustrative household has annual net income of £25,119.60.
+
+        ### Assumptions used
+
+        - Policy year: 2026.
+        - Policy scenario: current policy.
+        - No self-employment income.
+        - No pension income.
+        - The household has no children.
+        - The household has no partner or spouse.
+        - The household has no childcare expenses.
+        - The household lives in England.
+
+  - id: capability_answer_society_defaults_and_requested
+    suite: answer
+    description: Society narration includes all defaults, the requested poverty result, and an unsupported-output caveat.
+    prompt: Summarise all calculated population results and limitations.
+    tool_calls:
+      - name: society_analysis
+        output_fixture: capability_outputs/society_completed.json
+    expect:
+      required:
+        - £1.2 billion
+        - 8.4 million winners
+        - 2.1 million losers
+        - decile 1
+        - decile 10
+        - poverty
+        - regional results are unsupported
+      grounded_numbers: true
+      allowed_numbers: [2026, 1.2, 8.4, 2.1, 1, 10, 45, 120, 18]
+    offline_response:
+      text: >
+        In 2026, the budgetary impact is £1.2 billion. There are 8.4 million
+        winners and 2.1 million losers. Annual income changes are £45 in decile
+        1 and £120 in decile 10. The relative poverty rate is 18%. Regional
+        results are unsupported by the registered outputs.
+
+  - id: capability_answer_unsupported_number_fallback
+    suite: answer
+    description: When a draft cannot be supported, the deterministic fact summary remains acceptable without a fixed layout.
+    prompt: State only the verified population facts.
+    tool_calls:
+      - name: society_analysis
+        output_fixture: capability_outputs/society_completed.json
+    expect:
+      required:
+        - Net budgetary impact
+        - 1200000000 GBP/year
+        - Winners
+        - 8400000 people
+      forbidden:
+        - £9 billion
+      grounded_numbers: true
+      allowed_numbers: [1200000000, 8400000]
+    offline_response:
+      text: 'Net budgetary impact: 1200000000 GBP/year; Winners: 8400000 people.'

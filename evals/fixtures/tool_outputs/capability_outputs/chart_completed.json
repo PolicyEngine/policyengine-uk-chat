@@ -1,0 +1,53 @@
+{
+  "status": "completed",
+  "value": {
+    "chart": {
+      "artifact_id": "chart-1",
+      "provenance": {
+        "conversation_id": "eval-conversation",
+        "turn_id": "eval-turn",
+        "capability_id": "society_chart",
+        "capability_version": "1",
+        "invocation_id": "chart-invocation"
+      },
+      "source_result_artifact_id": "society-result-1",
+      "source_result_schema_version": "1",
+      "year": 2026,
+      "scenario_revision": "reform-2026",
+      "calculation_engine_version": "5.0.1",
+      "presentation": {
+        "chart_type": "generic_bar",
+        "title": "Income-decile impacts",
+        "serialized_spec": "{\"type\":\"bar\",\"title\":\"Income-decile impacts\"}"
+      }
+    },
+    "source_result": {
+      "artifact_id": "society-result-1",
+      "provenance": {
+        "conversation_id": "eval-conversation",
+        "turn_id": "eval-turn",
+        "capability_id": "society_analysis",
+        "capability_version": "1",
+        "invocation_id": "society-invocation"
+      },
+      "year": 2026,
+      "policy_scenario_artifact_id": "scenario-1",
+      "scenario_revision": "reform-2026",
+      "catalogue_version": "5.0.1",
+      "dataset_version": "2024-25",
+      "calculation_engine_version": "5.0.1",
+      "default_profile_version": "1",
+      "calculated_output_ids": ["budgetary_impact", "winners_losers", "decile_impacts"],
+      "outputs": [
+        {
+          "output_id": "decile_impacts",
+          "metric_id": "absolute_change",
+          "label": "Income decile 1 change",
+          "value": 45,
+          "unit": "GBP/year",
+          "dimensions": [{"name": "decile", "value": "1"}]
+        }
+      ]
+    }
+  }
+}

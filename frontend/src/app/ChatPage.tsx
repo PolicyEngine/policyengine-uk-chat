@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback, useMemo, type CSSProperties } from "react";
 import { Loader } from "@mantine/core";
-import { IconX, IconTrash, IconChevronDown, IconUser, IconShare, IconBug, IconArrowUp, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip, IconDots, IconSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from "@tabler/icons-react";
+import { IconX, IconTrash, IconUser, IconShare, IconBug, IconArrowUp, IconMessage, IconEdit, IconCopy, IconDownload, IconChartBar, IconPaperclip, IconDots, IconSearch, IconLayoutSidebarLeftCollapse, IconLayoutSidebarLeftExpand } from "@tabler/icons-react";
 import { useAuth } from "@/utils/AuthContext";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -13,8 +13,15 @@ import { THEME } from "@/components/theme";
 import AccountMenu from "@/components/AccountMenu";
 import AuthDialog from "@/components/AuthDialog";
 import ChatSearchDialog, { type ChatSearchResult } from "@/components/ChatSearchDialog";
+import DebugSetting from "@/components/DebugSetting";
+import InvocationActivity, {
+  mergeInvocationActivity,
+  type ConversationActivityResponse,
+  type InvocationActivityItem,
+} from "@/components/InvocationActivity";
 import ThemeSelector from "@/components/ThemeSelector";
 import { APP_BASE_PATH, getAppBaseUrl, getBackendEndpoint } from "@/utils/backend";
+import { useLocalStorage } from "@/utils/useLocalStorage";
 import { enqueueSerial } from "@/utils/serialQueue";
 import { useThemePreference } from "@/utils/theme";
 import { STARTER_PROMPTS } from "./chat-prompts";
@@ -51,7 +58,7 @@ interface ConversationSummary {
 }
 
 interface ConversationDetail extends ConversationSummary {
-  messages: Array<{ role: string; content: string; events?: StreamEvent[]; attachment?: MessageAttachment }>;
+  messages: Array<{ role: string; content: string; attachment?: MessageAttachment }>;
 }
 
 interface ReportConversationResponse {
@@ -81,6 +88,8 @@ const SLASH_COMMANDS: SlashCommand[] = [
 const PLACEHOLDER_TYPE_DELAY_MS = 50;
 const PLACEHOLDER_HOLD_DELAY_MS = 2000;
 const PLACEHOLDER_DELETE_DELAY_MS = 30;
+const DEBUG_STORAGE_KEY = "policyengine-uk-chat:debug";
+const isBoolean = (value: unknown): value is boolean => typeof value === "boolean";
 
 function useAnimatedPlaceholder(queries: string[], enabled: boolean) {
   const [queryIndex, setQueryIndex] = useState(0);
@@ -129,21 +138,10 @@ function useAnimatedPlaceholder(queries: string[], enabled: boolean) {
   return enabled ? currentQuery.slice(0, charIndex) : "";
 }
 
-interface ToolData {
-  tool_name: string;
-  tool_id: string;
-  status: "pending" | "success" | "error";
-  input?: Record<string, unknown>;
-  result_summary?: string;
-}
-
-type StreamEvent = { type: "text"; content: string } | { type: "tool"; data: ToolData };
-
 interface Message {
   role: "user" | "assistant";
   content: string;
   attachment?: MessageAttachment;
-  events?: StreamEvent[];
   isComplete?: boolean;
   cost_gbp?: number;
   /** Anthropic stop_reason on the final iteration. "max_tokens" means truncated. */
@@ -164,61 +162,15 @@ interface MessageAttachment {
 const stripChartPlaceholders = (text: string): string =>
   text.replace(/\[CHART_PLACEHOLDER_\d+\]/g, "[Chart]").replace(/\[CHART_LOADING\]/g, "[Chart]");
 
-/** Check if a text event is transitional CoT that shouldn't appear in final output. */
-const isTransitionalText = (text: string): boolean => {
-  const trimmed = text.trim();
-  if (!trimmed || trimmed.length > 200) return false;
-  // Short sentences starting with transitional phrases
-  return /^(let me|now I|I'll|I need to|I can|I should|I want to|good\.|great\.|ok\b|alright|perfect|right|so |now let|let's)/i.test(trimmed);
-};
-
-/**
- * Text events the user actually sees as the final answer, matching renderAssistantMessage's
- * split: no-tool messages keep all text; tool-using messages keep only post-last-tool text
- * with transitional filler dropped. Single source of truth for render, copy, and export.
- */
-const visibleFinalEvents = (msg: Message): { type: "text"; content: string }[] => {
-  if (!msg.events?.length) return [];
-  const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
-  const textEvents = (evs: StreamEvent[]) =>
-    evs.filter((e): e is { type: "text"; content: string } => e.type === "text");
-  if (lastToolIdx < 0) return textEvents(msg.events);
-  return textEvents(msg.events.slice(lastToolIdx + 1)).filter((e) => !isTransitionalText(e.content));
-};
-
 /** Final user-facing prose of an assistant message — what the user reads, charts as [Chart]. */
 const extractFinalProse = (msg: Message): string => {
-  if (msg.role === "user") return msg.content;
-  if (!msg.events?.length) return stripChartPlaceholders(msg.content);
-  return stripChartPlaceholders(visibleFinalEvents(msg).map((e) => e.content).join(""));
+  return msg.role === "user" ? msg.content : stripChartPlaceholders(msg.content);
 };
 
-/** Full record of a single message — includes working section and tool blocks for assistants. */
+/** Full user-visible record of a single message. */
 const messageToMarkdown = (msg: Message): string => {
   if (msg.role === "user") return `## You\n\n${msg.content}`;
-  const parts: string[] = ["## Assistant\n"];
-  if (msg.events?.length) {
-    const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
-    if (lastToolIdx >= 0) {
-      parts.push("\n<details>\n<summary>Worked through the problem</summary>\n");
-      for (const event of msg.events.slice(0, lastToolIdx + 1)) {
-        if (event.type === "text" && event.content.trim()) {
-          parts.push(`\n${stripChartPlaceholders(event.content)}\n`);
-        } else if (event.type === "tool") {
-          const t = event.data;
-          const inputStr = t.input ? JSON.stringify(t.input, null, 2) : "";
-          if (inputStr) parts.push(`\n**${t.tool_name} input**\n\`\`\`json\n${inputStr}\n\`\`\`\n`);
-          if (t.result_summary) parts.push(`\n**${t.tool_name} output**\n\`\`\`\n${t.result_summary}\n\`\`\`\n`);
-        }
-      }
-      parts.push("\n</details>\n");
-    }
-    const finalText = visibleFinalEvents(msg).map((e) => e.content).join("");
-    if (finalText.trim()) parts.push(`\n${stripChartPlaceholders(finalText)}\n`);
-  } else if (msg.content) {
-    parts.push(`\n${stripChartPlaceholders(msg.content)}\n`);
-  }
-  return parts.join("");
+  return `## Assistant\n\n${stripChartPlaceholders(msg.content)}\n`;
 };
 
 const conversationToMarkdown = (msgs: Message[], title?: string): string => {
@@ -237,12 +189,6 @@ function parseRetryAfterSeconds(header: string | null): number {
   const parsed = header ? parseInt(header, 10) : NaN;
   return Number.isFinite(parsed) && parsed > 0 ? parsed : 60;
 }
-
-/** Describe tool-backed work as complete only after final output is visible. */
-const getWorkingSummaryLabel = (finalEvents: readonly StreamEvent[]): string =>
-  finalEvents.some((event) => event.type === "text" && event.content.trim())
-    ? "Worked through the problem"
-    : "Working through the problem";
 
 async function apiRequest<T>(method: string, endpoint: string, params?: Record<string, string>, body?: unknown): Promise<T> {
   const url = new URL(getBackendEndpoint(endpoint), window.location.origin);
@@ -266,9 +212,6 @@ export default function ChatPage() {
   const [isInputFocused, setIsInputFocused] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [isWaiting, setIsWaiting] = useState(false);
-  const [collapsedWorking, setCollapsedWorking] = useState<Set<number>>(new Set());
-  const [expandedTools, setExpandedTools] = useState<Set<string>>(new Set());
-  const [copiedSnippetId, setCopiedSnippetId] = useState<string | null>(null);
   const [copiedMessageIdx, setCopiedMessageIdx] = useState<number | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatSearchOpen, setChatSearchOpen] = useState(false);
@@ -281,6 +224,12 @@ export default function ChatPage() {
   const [reportError, setReportError] = useState<string | null>(null);
   const [reportSubmitting, setReportSubmitting] = useState(false);
   const [chartsMode, setChartsMode] = useState(false);
+  const [debugMode, setDebugMode] = useLocalStorage(
+    DEBUG_STORAGE_KEY,
+    false,
+    isBoolean,
+  );
+  const [invocationActivity, setInvocationActivity] = useState<InvocationActivityItem[]>([]);
   const [slashIndex, setSlashIndex] = useState(0);
   const slashMenuRef = useRef<HTMLDivElement>(null);
   // Image attachment for the next user message. Stored as the full data URL
@@ -374,6 +323,30 @@ export default function ChatPage() {
     }
   }, [user, authLoading]);
 
+  const retrieveInvocationActivity = useCallback(async (sid: string, debug: boolean) => {
+    try {
+      const params: Record<string, string> = { debug: String(debug) };
+      if (user?.id) params.user_id = user.id;
+      const response = await apiRequest<ConversationActivityResponse>(
+        "GET",
+        `chat/${sid}/activity`,
+        params,
+      );
+      setInvocationActivity(response.invocations);
+    } catch (error) {
+      console.error("Failed to load invocation activity", error);
+    }
+  }, [user]);
+
+  useEffect(() => {
+    if (!debugMode) {
+      setInvocationActivity((current) => current.filter((item) => item.visibility === "public"));
+    }
+    if (sessionId.current) {
+      void retrieveInvocationActivity(sessionId.current, debugMode);
+    }
+  }, [debugMode, retrieveInvocationActivity]);
+
   // The conversation scrolls with the document while only the rounded composer
   // floats above it. Only follow new content when the user is already near the
   // bottom — never fight someone reading earlier messages mid-stream.
@@ -448,24 +421,23 @@ export default function ChatPage() {
       if (streamGeneration.current !== generation) return;
       if (!data?.messages?.length) { console.error("No messages in conversation", data); return; }
       const loaded: Message[] = data.messages.map((m) => {
-        const raw = m as { role: string; content: string; events?: StreamEvent[]; attachment?: MessageAttachment; stop_reason?: string; stopped?: boolean; cost_gbp?: number; suggestions?: string[] };
+        const raw = m as { role: string; content: string; attachment?: MessageAttachment; stop_reason?: string; stopped?: boolean; cost_gbp?: number; suggestions?: string[] };
         return {
           role: raw.role as "user" | "assistant",
           content: raw.content || "",
           attachment: raw.attachment,
           isComplete: true,
-          events: raw.events,
           stop_reason: raw.stop_reason,
           stopped: raw.stopped,
           cost_gbp: raw.cost_gbp,
           suggestions: Array.isArray(raw.suggestions) ? raw.suggestions : undefined,
         };
       });
-      const collapsed = new Set(loaded.map((m, i) => (m.role === "assistant" && m.events?.some((e) => e.type === "tool") ? i : -1)).filter((i) => i >= 0));
       sessionId.current = data.session_id;
+      setInvocationActivity([]);
+      void retrieveInvocationActivity(data.session_id, debugMode);
       conversationTitleRef.current = data.title || conv.title || null;
       setActiveConversationId(data.id);
-      setCollapsedWorking(collapsed);
       setMessages(loaded);
       setSidebarOpen(true);
     } catch (e) {
@@ -540,7 +512,7 @@ export default function ChatPage() {
         setMessages([]);
         sessionId.current = null;
         setActiveConversationId(null);
-        setCollapsedWorking(new Set());
+        setInvocationActivity([]);
       }
     } catch (e) { console.error(e); }
   };
@@ -551,12 +523,7 @@ export default function ChatPage() {
       const firstUserMsg = msgs.find((m) => m.role === "user");
       if (!firstUserMsg) return null;
       const firstAssistantMsg = msgs.find((m) => m.role === "assistant");
-      const firstAssistantContent = (() => {
-        if (!firstAssistantMsg?.isComplete || !firstAssistantMsg.events?.length) return firstAssistantMsg?.content;
-        const lastToolIdx = firstAssistantMsg.events.reduce((acc, e, i) => e.type === "tool" ? i : acc, -1);
-        if (lastToolIdx >= 0) return firstAssistantMsg.events.slice(lastToolIdx + 1).filter((e): e is { type: "text"; content: string } => e.type === "text").map((e) => e.content).join("") || firstAssistantMsg.content;
-        return firstAssistantMsg.content;
-      })();
+      const firstAssistantContent = firstAssistantMsg?.content;
 
       // Generate a title only when the conversation doesn't already have one.
       let title = conversationTitleRef.current;
@@ -575,7 +542,6 @@ export default function ChatPage() {
         const base: Record<string, unknown> = { role: m.role, content: m.content };
         if (m.attachment) base.attachment = m.attachment;
         if (m.role === "assistant") {
-          if (m.isComplete && m.events?.length) base.events = m.events;
           if (m.cost_gbp !== undefined) base.cost_gbp = m.cost_gbp;
           if (m.stop_reason) base.stop_reason = m.stop_reason;
           if (m.stopped) base.stopped = true;
@@ -642,7 +608,7 @@ export default function ChatPage() {
     setMessages([]);
     sessionId.current = null;
     setActiveConversationId(null);
-    setCollapsedWorking(new Set());
+    setInvocationActivity([]);
     setSidebarOpen(false);
     setTimeout(() => inputRef.current?.focus(), 0);
   };
@@ -677,20 +643,14 @@ export default function ChatPage() {
     setIsStreaming(true);
     setIsWaiting(true);
 
-    const apiMessages = allMessages.map((msg) => {
-      let content = msg.content;
-      if (msg.role === "assistant" && msg.events) {
-        const toolResults = msg.events.filter((e): e is { type: "tool"; data: ToolData } => e.type === "tool" && !!e.data.result_summary).map((e) => `[Tool: ${e.data.tool_name}] ${e.data.result_summary}`).join("\n\n");
-        if (toolResults) content += "\n\n---\nTool results:\n" + toolResults;
-      }
-      return { role: msg.role, content };
-    });
+    const apiMessages = allMessages.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+    }));
 
-    let events: StreamEvent[] = [];
     let currentText = "";
     let displayedText = "";
     let drainTimer: ReturnType<typeof setInterval> | null = null;
-    const toolsMap = new Map<string, ToolData>();
     // Turn metadata from the `done` event, hoisted so the later `suggestions`
     // save persists the same cost/truncation flags as the on-screen message.
     let msgCost: number | undefined;
@@ -701,8 +661,8 @@ export default function ChatPage() {
       setMessages((prev) => {
         const newMsgs = [...prev];
         const lastIdx = newMsgs.length - 1;
-        if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { role: "assistant", content: displayedText, events: [...events] };
-        else newMsgs.push({ role: "assistant", content: displayedText, events: [...events] });
+        if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { role: "assistant", content: displayedText };
+        else newMsgs.push({ role: "assistant", content: displayedText });
         return newMsgs;
       });
     };
@@ -722,20 +682,11 @@ export default function ChatPage() {
         const match = remaining.match(/^(\s*\S+|\s+)/);
         const chunk = match ? match[0] : remaining[0];
         displayedText += chunk;
-        // Rebuild displayed events: split displayedText across text events
-        let charBudget = displayedText.length;
-        const displayEvents: StreamEvent[] = events.map((e) => {
-          if (e.type !== "text") return e;
-          if (charBudget <= 0) return { ...e, content: "" };
-          const shown = e.content.slice(0, charBudget);
-          charBudget -= e.content.length;
-          return { ...e, content: shown };
-        }).filter((e) => e.type !== "text" || (e as { content: string }).content.length > 0);
         setMessages((prev) => {
           const newMsgs = [...prev];
           const lastIdx = newMsgs.length - 1;
-          if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { role: "assistant", content: displayedText, events: [...displayEvents] };
-          else newMsgs.push({ role: "assistant", content: displayedText, events: [...displayEvents] });
+          if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { role: "assistant", content: displayedText };
+          else newMsgs.push({ role: "assistant", content: displayedText });
           return newMsgs;
         });
       }, 20);
@@ -756,10 +707,11 @@ export default function ChatPage() {
             image_media_type: sendingImage.mediaType,
           }
         : {};
+      const turnId = crypto.randomUUID();
       const response = await fetch(getBackendEndpoint("chat/message"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, charts_mode: chartsMode, ...imagePayload }),
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, turn_id: turnId, user_id: user?.id || null, charts_mode: chartsMode, debug: debugMode, ...imagePayload }),
         signal: controller.signal,
       });
       if (response.status === 402) {
@@ -792,30 +744,11 @@ export default function ChatPage() {
             const data = JSON.parse(line.slice(6));
             if (data.type === "chunk") {
               setIsWaiting(false);
-              const lastEvent = events[events.length - 1];
-              if (lastEvent?.type === "text") lastEvent.content += data.content;
-              else events.push({ type: "text", content: data.content });
               currentText += data.content;
               startDrain();
-            } else if (data.type === "tool_start") {
-              setIsWaiting(false);
-              // Flush any pending text before showing tool
-              if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
-              displayedText = currentText;
-              const toolData: ToolData = { tool_name: data.tool_name, tool_id: data.tool_id, status: "pending" };
-              toolsMap.set(data.tool_id, toolData);
-              events.push({ type: "tool", data: toolData });
-              updateMessage();
-            } else if (data.type === "tool_use") {
-              const existing = toolsMap.get(data.tool_id);
-              if (existing) existing.input = data.tool_input;
-              else { const td: ToolData = { tool_name: data.tool_name, tool_id: data.tool_id, status: "pending", input: data.tool_input }; toolsMap.set(data.tool_id, td); events.push({ type: "tool", data: td }); }
-              updateMessage();
-            } else if (data.type === "tool_result") {
-              const tool = toolsMap.get(data.tool_id);
-              if (tool) { tool.status = data.status; tool.result_summary = data.result_summary; }
-              updateMessage();
-              setIsWaiting(true);
+            } else if (data.type === "invocation_activity" && data.invocation) {
+              const invocation = data.invocation as InvocationActivityItem;
+              setInvocationActivity((current) => mergeInvocationActivity(current, invocation));
             } else if (data.type === "done") {
               setIsWaiting(false);
               // Flush remaining text
@@ -825,28 +758,17 @@ export default function ChatPage() {
               if (data.session_id) sessionId.current = data.session_id;
               msgCost = typeof data.cost_gbp === "number" ? data.cost_gbp : undefined;
               stopReason = typeof data.stop_reason === "string" ? data.stop_reason : undefined;
-              const hasTools = events.some((e) => e.type === "tool");
-              if (hasTools) {
-                setMessages((prev) => {
-                  const newMsgs = [...prev];
-                  const lastIdx = newMsgs.length - 1;
-                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true, cost_gbp: msgCost, stop_reason: stopReason };
-                  setCollapsedWorking((c) => new Set(c).add(lastIdx));
-                  return newMsgs;
-                });
-              } else {
-                setMessages((prev) => {
-                  const newMsgs = [...prev];
-                  const lastIdx = newMsgs.length - 1;
-                  if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true, cost_gbp: msgCost, stop_reason: stopReason };
-                  return newMsgs;
-                });
-              }
+              setMessages((prev) => {
+                const newMsgs = [...prev];
+                const lastIdx = newMsgs.length - 1;
+                if (newMsgs[lastIdx]?.role === "assistant") newMsgs[lastIdx] = { ...newMsgs[lastIdx], isComplete: true, cost_gbp: msgCost, stop_reason: stopReason };
+                return newMsgs;
+              });
               if (data.session_id) {
                 // Save the same metadata the on-screen message carries so a
                 // reload keeps the cost line and the Continue affordance for
                 // max_tokens-truncated turns.
-                const finalMsgs = [...allMessages, { role: "assistant" as const, content: currentText, isComplete: true, events: [...events], cost_gbp: msgCost, stop_reason: stopReason }];
+                const finalMsgs = [...allMessages, { role: "assistant" as const, content: currentText, isComplete: true, cost_gbp: msgCost, stop_reason: stopReason }];
                 saveConversation(finalMsgs, data.session_id);
               }
               setTimeout(() => {
@@ -872,16 +794,13 @@ export default function ChatPage() {
                 if (sessionId.current) {
                   const finalMsgs = [
                     ...allMessages,
-                    { role: "assistant" as const, content: currentText, isComplete: true, events: [...events], cost_gbp: msgCost, stop_reason: stopReason, suggestions: cleaned },
+                    { role: "assistant" as const, content: currentText, isComplete: true, cost_gbp: msgCost, stop_reason: stopReason, suggestions: cleaned },
                   ];
                   saveConversation(finalMsgs, sessionId.current);
                 }
               }
             } else if (data.type === "error") {
               const errorText = `Error: ${data.content || "Something went wrong"}`;
-              const lastEvent = events[events.length - 1];
-              if (lastEvent?.type === "text") lastEvent.content += "\n\n" + errorText;
-              else events.push({ type: "text", content: errorText });
               currentText += errorText;
               if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
               displayedText = currentText;
@@ -895,7 +814,7 @@ export default function ChatPage() {
         if (drainTimer) { clearInterval(drainTimer); drainTimer = null; }
         if (!isStale()) {
           displayedText = currentText;
-          const hasContent = currentText.trim().length > 0 || events.some((e) => e.type === "tool");
+          const hasContent = currentText.trim().length > 0;
           if (hasContent) {
             // User stopped the stream — flush what we have, mark `stopped`
             // so the UI shows a Continue affordance.
@@ -911,7 +830,7 @@ export default function ChatPage() {
             // from, so drop the empty assistant bubble if one was created.
             setMessages((prev) => {
               const last = prev[prev.length - 1];
-              if (last?.role === "assistant" && !last.content && !last.events?.some((e) => e.type === "tool")) return prev.slice(0, -1);
+              if (last?.role === "assistant" && !last.content) return prev.slice(0, -1);
               return prev;
             });
           }
@@ -938,7 +857,7 @@ export default function ChatPage() {
    * The conversation up to and including the partial assistant message is
    * sent to /chat/message; the model continues from there via Anthropic's
    * assistant-prefill behaviour (no extra user nudge needed). New text and
-   * events are appended into the SAME message bubble so the user sees one
+   * text is appended into the SAME message bubble so the user sees one
    * continuous answer.
    */
   const continueMessage = async (idx: number) => {
@@ -949,19 +868,11 @@ export default function ChatPage() {
     const isStale = () => streamGeneration.current !== generation;
     const target = messages[idx];
     if (!target || target.role !== "assistant" || !target.isComplete) return;
-    // Refuse if a tool is still pending in this message — re-triggering
-    // would orphan the partial tool call.
-    if (target.events?.some((e) => e.type === "tool" && e.data.status === "pending")) return;
-
     const priorMessages = messages.slice(0, idx + 1);
-    const apiMessages = priorMessages.map((msg) => {
-      let content = msg.content;
-      if (msg.role === "assistant" && msg.events) {
-        const toolResults = msg.events.filter((e): e is { type: "tool"; data: ToolData } => e.type === "tool" && !!e.data.result_summary).map((e) => `[Tool: ${e.data.tool_name}] ${e.data.result_summary}`).join("\n\n");
-        if (toolResults) content += "\n\n---\nTool results:\n" + toolResults;
-      }
-      return { role: msg.role, content };
-    });
+    const apiMessages = priorMessages.map((msg) => ({
+      role: msg.role,
+      content: msg.content,
+    }));
 
     // The partial turn is sent as the final message so the model continues it
     // (assistant prefill). Anthropic rejects a prefill that is empty or ends
@@ -987,10 +898,7 @@ export default function ChatPage() {
     abortRef.current = controller;
 
     let appendedText = "";
-    const newEvents: StreamEvent[] = [];
-    const toolsMap = new Map<string, ToolData>();
     const baseContent = target.content;
-    const baseEvents = target.events ? [...target.events] : [];
     const baseCost = target.cost_gbp || 0;
 
     const flushTarget = () => {
@@ -998,17 +906,17 @@ export default function ChatPage() {
       setMessages((prev) => prev.map((m, i) => i === idx ? {
         ...m,
         content: baseContent + appendedText,
-        events: [...baseEvents, ...newEvents],
       } : m));
     };
 
     try {
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (user?.id) headers["X-User-Id"] = user.id;
+      const turnId = crypto.randomUUID();
       const response = await fetch(getBackendEndpoint("chat/message"), {
         method: "POST",
         headers,
-        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, user_id: user?.id || null, charts_mode: chartsMode }),
+        body: JSON.stringify({ messages: apiMessages, session_id: sessionId.current, turn_id: turnId, user_id: user?.id || null, charts_mode: chartsMode, debug: debugMode }),
         signal: controller.signal,
       });
       if (response.status === 402) {
@@ -1046,38 +954,20 @@ export default function ChatPage() {
             const data = JSON.parse(line.slice(6));
             if (data.type === "chunk") {
               setIsWaiting(false);
-              const lastEvent = newEvents[newEvents.length - 1];
-              if (lastEvent?.type === "text") lastEvent.content += data.content;
-              else newEvents.push({ type: "text", content: data.content });
               appendedText += data.content;
               flushTarget();
-            } else if (data.type === "tool_start") {
-              setIsWaiting(false);
-              const toolData: ToolData = { tool_name: data.tool_name, tool_id: data.tool_id, status: "pending" };
-              toolsMap.set(data.tool_id, toolData);
-              newEvents.push({ type: "tool", data: toolData });
-              flushTarget();
-            } else if (data.type === "tool_use") {
-              const existing = toolsMap.get(data.tool_id);
-              if (existing) existing.input = data.tool_input;
-              else { const td: ToolData = { tool_name: data.tool_name, tool_id: data.tool_id, status: "pending", input: data.tool_input }; toolsMap.set(data.tool_id, td); newEvents.push({ type: "tool", data: td }); }
-              flushTarget();
-            } else if (data.type === "tool_result") {
-              const tool = toolsMap.get(data.tool_id);
-              if (tool) { tool.status = data.status; tool.result_summary = data.result_summary; }
-              flushTarget();
-              setIsWaiting(true);
+            } else if (data.type === "invocation_activity" && data.invocation) {
+              const invocation = data.invocation as InvocationActivityItem;
+              setInvocationActivity((current) => mergeInvocationActivity(current, invocation));
             } else if (data.type === "done") {
               setIsWaiting(false);
               const newCost = typeof data.cost_gbp === "number" ? data.cost_gbp : 0;
               const stopReason = typeof data.stop_reason === "string" ? data.stop_reason : undefined;
               const finalContent = baseContent + appendedText;
-              const finalEvents = [...baseEvents, ...newEvents];
               setMessages((prev) => prev.map((m, i) => i === idx ? {
                 ...m,
                 isComplete: true,
                 content: finalContent,
-                events: finalEvents,
                 cost_gbp: baseCost + newCost,
                 stop_reason: stopReason,
                 stopped: false,
@@ -1090,7 +980,6 @@ export default function ChatPage() {
                   ...m,
                   isComplete: true,
                   content: finalContent,
-                  events: finalEvents,
                   cost_gbp: baseCost + newCost,
                   stop_reason: stopReason,
                   stopped: false,
@@ -1105,9 +994,6 @@ export default function ChatPage() {
               }
             } else if (data.type === "error") {
               const errorText = `Error: ${data.content || "Something went wrong"}`;
-              const lastEvent = newEvents[newEvents.length - 1];
-              if (lastEvent?.type === "text") lastEvent.content += "\n\n" + errorText;
-              else newEvents.push({ type: "text", content: errorText });
               appendedText += errorText;
               flushTarget();
             }
@@ -1121,7 +1007,6 @@ export default function ChatPage() {
             ...m,
             isComplete: true,
             content: baseContent + appendedText,
-            events: [...baseEvents, ...newEvents],
             stopped: true,
           } : m));
         }
@@ -1133,7 +1018,6 @@ export default function ChatPage() {
           ...m,
           isComplete: true,
           content: baseContent + appendedText + "\n\n" + errorText,
-          events: [...baseEvents, ...newEvents],
           stop_reason: prevFlags.stop_reason,
           stopped: prevFlags.stopped,
         } : m));
@@ -1309,20 +1193,6 @@ export default function ChatPage() {
     }, 0);
   };
 
-  const toggleTool = (toolId: string) => {
-    setExpandedTools((prev) => { const next = new Set(prev); if (next.has(toolId)) next.delete(toolId); else next.add(toolId); return next; });
-  };
-
-  const copySnippet = async (snippetId: string, text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedSnippetId(snippetId);
-      setTimeout(() => setCopiedSnippetId((current) => current === snippetId ? null : current), 2000);
-    } catch (error) {
-      console.error("Failed to copy snippet", error);
-    }
-  };
-
   const copyMessage = async (idx: number) => {
     const msg = messages[idx];
     if (!msg) return;
@@ -1355,70 +1225,6 @@ export default function ChatPage() {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
-  };
-
-  const renderToolDetails = (t: ToolData) => {
-    const codeStyle = { margin: 0, padding: "8px 10px", background: "#1a1917", color: "#c9c5bc", whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const, maxHeight: "300px", overflow: "auto" as const, fontSize: "11px", lineHeight: 1.7, fontFamily: "'JetBrains Mono', monospace" };
-    const copyButtonStyle = { fontSize: "10px", color: THEME.primary, background: "none", border: "none", cursor: "pointer", padding: 0, fontFamily: "'JetBrains Mono', monospace" } as const;
-    const inputStr = t.input ? JSON.stringify(t.input, null, 2) : "";
-    const outputStr = t.result_summary || "";
-    return (
-      <div style={{ marginLeft: "18px", marginTop: "4px" }}>
-        {inputStr && (
-          <div style={{ marginBottom: "6px" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
-              <div style={{ color: THEME.muted, fontSize: "10px", fontFamily: "'JetBrains Mono', monospace" }}>input</div>
-              <button onClick={() => copySnippet(`${t.tool_id}-input`, inputStr)} style={copyButtonStyle}>
-                {copiedSnippetId === `${t.tool_id}-input` ? "copied" : "copy input"}
-              </button>
-            </div>
-            <pre style={{ ...codeStyle, background: "var(--surface-2)", color: THEME.text2, borderLeft: `2px solid ${THEME.border}` }}>{inputStr.length > 2000 ? inputStr.slice(0, 2000) + "…" : inputStr}</pre>
-          </div>
-        )}
-        {outputStr && (
-          <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
-              <div style={{ color: THEME.muted, fontSize: "10px", fontFamily: "'JetBrains Mono', monospace" }}>output</div>
-              <button onClick={() => copySnippet(`${t.tool_id}-output`, outputStr)} style={copyButtonStyle}>
-                {copiedSnippetId === `${t.tool_id}-output` ? "copied" : "copy output"}
-              </button>
-            </div>
-            <pre style={{ ...codeStyle, background: "var(--surface-2)", color: THEME.text2, borderLeft: `2px solid ${THEME.primary}` }}>{outputStr.length > 2000 ? outputStr.slice(0, 2000) + "…" : outputStr}</pre>
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const renderTool = (t: ToolData) => {
-    const isExpanded = expandedTools.has(t.tool_id);
-    const hasDetails = t.input || t.result_summary;
-    return (
-      <div key={t.tool_id} style={{ margin: "2px 0" }}>
-        <div
-          onClick={hasDetails ? () => toggleTool(t.tool_id) : undefined}
-          style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontFamily: "'JetBrains Mono', ui-monospace, monospace", fontSize: "11px", color: THEME.muted, padding: "2px 0", cursor: hasDetails ? "pointer" : "default" }}
-        >
-          {t.status === "pending" && <Loader size={10} color="#8e8e8e" />}
-          {hasDetails && <IconChevronDown size={10} style={{ opacity: 0.4, transform: isExpanded ? "none" : "rotate(-90deg)", transition: "transform 0.15s" }} />}
-          <span style={{ color: THEME.text3 }}>{({
-            validate_reform: "reform validation",
-            validate_household: "household validation",
-            run_household_simulation: "household simulation",
-            run_society_simulation: "society simulation",
-            compute_budgetary_impact: "budgetary impact",
-            compute_program_breakdown: "programme breakdown",
-            compute_decile_impacts: "decile impacts",
-            compute_winners_losers: "winners and losers",
-            compute_poverty_metrics: "poverty metrics",
-            compute_inequality_metrics: "inequality metrics",
-            aggregate_result: "aggregate result",
-          } as Record<string, string>)[t.tool_name] ?? t.tool_name}</span>
-          {t.status !== "pending" && <span style={{ color: THEME.muted }}>✓</span>}
-        </div>
-        {isExpanded && hasDetails && renderToolDetails(t)}
-      </div>
-    );
   };
 
   const renderMarkdown = (content: string) => {
@@ -1488,63 +1294,7 @@ export default function ChatPage() {
     );
   };
 
-  const renderAssistantMessage = (msg: Message, msgIdx: number) => {
-    if (!msg.events?.length) return renderMarkdown(msg.content);
-
-    const lastToolIdx = msg.events.reduce((acc, e, idx) => e.type === "tool" ? idx : acc, -1);
-    const hasTools = lastToolIdx >= 0;
-    const isWorkingCollapsed = collapsedWorking.has(msgIdx);
-
-    // During streaming: if tools exist, ALL events go into the working section
-    // so text doesn't jump between output→working when new tool calls arrive.
-    // On completion: position-based split — everything up to last tool = working,
-    // everything after = final output.
-    let workingEvents: StreamEvent[];
-    let finalEvents: StreamEvent[];
-
-    if (msg.isComplete && hasTools) {
-      workingEvents = msg.events.slice(0, lastToolIdx + 1);
-      finalEvents = visibleFinalEvents(msg);
-    } else if (!msg.isComplete && hasTools) {
-      // Streaming with tools: everything in working, nothing in output yet
-      workingEvents = [...msg.events];
-      finalEvents = [];
-    } else {
-      workingEvents = [];
-      finalEvents = [...msg.events];
-    }
-
-    const toggleWorking = () => setCollapsedWorking((prev) => { const next = new Set(prev); if (next.has(msgIdx)) next.delete(msgIdx); else next.add(msgIdx); return next; });
-
-    return (
-      <>
-        {hasTools && (
-          <>
-            <div onClick={toggleWorking} style={{ display: "flex", alignItems: "baseline", gap: "6px", color: THEME.muted, fontSize: "12px", cursor: "pointer", userSelect: "none", margin: "6px 0", padding: "2px 0" }}>
-              <IconChevronDown size={12} style={{ opacity: 0.5, transform: isWorkingCollapsed ? "rotate(-90deg)" : "none", transition: "transform 0.15s", flexShrink: 0, position: "relative", top: "1px" }} />
-              <span style={{ color: THEME.text3, fontStyle: "italic" }}>{getWorkingSummaryLabel(finalEvents)}</span>
-            </div>
-            {!isWorkingCollapsed && (
-              <div style={{ margin: "8px 0 16px", paddingLeft: "4px", borderLeft: `2px solid ${THEME.border}` }}>
-                <div style={{ paddingLeft: "14px" }}>
-                  {workingEvents.map((event, idx) =>
-                    event.type === "text"
-                      ? <div key={idx} style={{ fontStyle: "italic", opacity: 0.6, fontSize: "13px", margin: "6px 0" }}>{renderMarkdown(event.content)}</div>
-                      : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
-                  )}
-                </div>
-              </div>
-            )}
-          </>
-        )}
-        {finalEvents.map((event, idx) =>
-          event.type === "text"
-            ? <div key={idx} style={{ margin: "6px 0" }}>{renderMarkdown(event.content)}</div>
-            : <div key={idx} style={{ margin: "6px 0" }}>{renderTool(event.data)}</div>
-        )}
-      </>
-    );
-  };
+  const renderAssistantMessage = (msg: Message) => renderMarkdown(msg.content);
 
   const isEmbed = typeof window !== "undefined" && new URLSearchParams(window.location.search).has("embed");
   const sidebarOffset = isEmbed ? 0 : sidebarOpen ? 260 : 60;
@@ -1786,6 +1536,12 @@ export default function ChatPage() {
             </div>
             <div style={{ borderTop: "1px solid var(--border)", paddingTop: "8px", width: "100%" }}>
               <ThemeSelector compact={!sidebarOpen} preference={themePreference} onChange={setThemePreference} />
+              <DebugSetting
+                compact={!sidebarOpen}
+                enabled={debugMode}
+                disabled={isStreaming}
+                onChange={setDebugMode}
+              />
               {user ? (
                 <AccountMenu compact={!sidebarOpen} email={user.email || "Account"} onSignOut={signOut} />
               ) : (
@@ -1886,7 +1642,7 @@ export default function ChatPage() {
                   ) : (
                     <div style={{ padding: "10px 0 18px" }}>
                       <div className={!msg.isComplete ? "streaming-text" : undefined} style={{ fontFamily: "system-ui, -apple-system, sans-serif", color: "var(--text)", fontSize: "15.5px", lineHeight: 1.7, minWidth: 0 }}>
-                        {renderAssistantMessage(msg, idx)}
+                        {renderAssistantMessage(msg)}
                       </div>
                       {(msg.isComplete || msg.cost_gbp !== undefined) && (
                         <div style={{ display: "flex", gap: "12px", alignItems: "center", marginTop: "4px" }}>
@@ -1929,7 +1685,7 @@ export default function ChatPage() {
                           )}
                         </div>
                       )}
-                      {msg.isComplete && !isStreaming && (msg.stop_reason === "max_tokens" || msg.stopped) && !msg.events?.some((e) => e.type === "tool" && e.data.status === "pending") && (
+                      {msg.isComplete && !isStreaming && (msg.stop_reason === "max_tokens" || msg.stopped) && (
                         <div style={{ marginTop: "10px", display: "flex", alignItems: "center", gap: "8px" }}>
                           <button
                             type="button"
@@ -1990,7 +1746,7 @@ export default function ChatPage() {
                 </div>
               ))}
               {isWaiting && (
-                <div style={{ padding: "18px 0 14px", marginBottom: "18px" }}>
+                <div role="status" aria-label="Generating response" style={{ padding: "18px 0 14px", marginBottom: "18px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                     <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "var(--muted)", animation: "thinking-dot 1.2s ease-in-out 0s infinite" }} />
                     <div style={{ width: "5px", height: "5px", borderRadius: "50%", background: "var(--muted)", animation: "thinking-dot 1.2s ease-in-out 0.2s infinite" }} />
@@ -2028,6 +1784,9 @@ export default function ChatPage() {
           >
             {!hasMessages && (
               <div aria-hidden="true" style={{ position: "absolute", inset: "-40px -60px", background: "radial-gradient(ellipse at center, var(--accent-15), transparent 70%)", filter: "blur(20px)", pointerEvents: "none", zIndex: 0 }} />
+            )}
+            {hasMessages && (
+              <InvocationActivity invocations={invocationActivity} debug={debugMode} />
             )}
             <div style={{
               position: "relative",

@@ -1,24 +1,36 @@
-"""The conversations table model, engine, and schema bootstrap."""
+"""The SQLModel conversation table and runtime database engine."""
 
-import logging
 import os
 from datetime import datetime
-from typing import Optional
+from typing import Any, Optional
 
-from sqlmodel import Field, SQLModel, create_engine
+from sqlalchemy import JSON, Index, Text
+from sqlmodel import Field, SQLModel
 
-logger = logging.getLogger(__name__)
+from persistence.database_namespace import namespaced_engine
 
 
 class ChatConversation(SQLModel, table=True):
     __tablename__ = "chat_conversations"
+    __table_args__ = (
+        Index(
+            "idx_chat_conversations_session_id_unique",
+            "session_id",
+            unique=True,
+        ),
+        Index("idx_chat_conversations_share_token", "share_token"),
+        Index("ix_conversations_session", "session_id"),
+        Index("ix_conversations_user", "user_id"),
+        Index("ix_conversations_updated", "updated_at"),
+    )
+
     id: Optional[int] = Field(default=None, primary_key=True)
-    session_id: str = Field(index=True, unique=True)
+    session_id: str
     title: str
-    messages: str  # JSON string
+    messages: list[dict[str, Any]] = Field(sa_type=JSON)
     user_id: Optional[str] = None
-    user_email: Optional[str] = None
-    share_token: Optional[str] = Field(default=None, index=True)
+    user_email: Optional[str] = Field(default=None, sa_type=Text)
+    share_token: Optional[str] = Field(default=None, sa_type=Text)
     created_at: datetime
     updated_at: datetime
 
@@ -32,30 +44,5 @@ def get_engine():
         url = os.environ.get("DATABASE_URL", "")
         if not url:
             raise RuntimeError("DATABASE_URL not set")
-        _engine = create_engine(url)
+        _engine = namespaced_engine(url)
     return _engine
-
-
-def ensure_table():
-    try:
-        engine = get_engine()
-        SQLModel.metadata.create_all(engine)
-        # Add columns that may not exist yet on older databases
-        from sqlalchemy import text
-        with engine.connect() as conn:
-            for col, col_type in [("share_token", "TEXT"), ("user_email", "TEXT")]:
-                try:
-                    conn.execute(text(f"ALTER TABLE chat_conversations ADD COLUMN {col} {col_type}"))
-                    conn.commit()
-                    logger.info(f"Added column {col} to chat_conversations")
-                except Exception:
-                    conn.rollback()  # Column already exists
-            try:
-                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_chat_conversations_share_token ON chat_conversations (share_token)"))
-                conn.commit()
-            except Exception:
-                conn.rollback()
-        logger.info("Conversations table ensured successfully")
-    except Exception as e:
-        logger.error(f"Could not ensure conversations table: {e}")
-        import traceback; logger.error(traceback.format_exc())

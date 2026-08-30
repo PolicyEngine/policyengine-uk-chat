@@ -13,7 +13,9 @@ from slowapi.errors import RateLimitExceeded
 
 import billing
 import chat
-import conversations
+from chat.activity import router as chat_activity_router
+from conversations.routes import router as conversations_router
+from persistence.schema import verify_database_schema
 from eval.routes import router as eval_router
 from api.errors import NaNSafeJSONResponse, rate_limit_handler
 from api.rate_limit import limiter
@@ -38,7 +40,7 @@ else:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    conversations.ensure_table()
+    verify_database_schema()
     yield
     shutdown_observability()
 
@@ -65,7 +67,8 @@ app.add_middleware(
 
 app.include_router(billing.router)
 app.include_router(chat.router)
-app.include_router(conversations.router)
+app.include_router(chat_activity_router)
+app.include_router(conversations_router)
 app.include_router(eval_router)
 
 init_observability(app, service_role="api")

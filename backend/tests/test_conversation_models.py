@@ -1,6 +1,4 @@
 from pathlib import Path
-from types import SimpleNamespace
-
 import pytest
 
 from conversations import models
@@ -17,13 +15,14 @@ def test_get_engine_requires_database_url(monkeypatch):
         models.get_engine()
 
 
-def test_session_unique_migration_never_modifies_conversation_rows():
+def test_baseline_migration_never_modifies_conversation_rows():
     migration = (
-        REPO_ROOT / "supabase/migrations/004_conversation_session_unique.sql"
+        REPO_ROOT
+        / "backend/migrations/versions/0001_pre_branch_conversation_schema_baseline.py"
     ).read_text()
     normalized = " ".join(migration.upper().split())
 
-    assert "CREATE UNIQUE INDEX IF NOT EXISTS" in normalized
+    assert "CREATE_INDEX" in normalized
     assert "DELETE FROM" not in normalized
     assert "UPDATE CHAT_CONVERSATIONS" not in normalized
 
@@ -35,80 +34,23 @@ def test_get_engine_creates_and_caches_engine(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "sqlite:///test.sqlite")
     monkeypatch.setattr(
         models,
-        "create_engine",
+        "namespaced_engine",
         lambda url: calls.append(url) or engine,
     )
 
     assert models.get_engine() is engine
     assert models.get_engine() is engine
     assert calls == ["sqlite:///test.sqlite"]
+def test_conversation_model_declares_stable_migration_indexes():
+    indexes = {
+        index.name: (tuple(column.name for column in index.columns), index.unique)
+        for index in models.ChatConversation.__table__.indexes
+    }
 
-
-class FakeConnection:
-    def __init__(self, failures=()):
-        self.failures = set(failures)
-        self.statements = []
-        self.commits = 0
-        self.rollbacks = 0
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_args):
-        return None
-
-    def execute(self, statement):
-        sql = str(statement)
-        self.statements.append(sql)
-        if any(fragment in sql for fragment in self.failures):
-            raise RuntimeError("already exists")
-
-    def commit(self):
-        self.commits += 1
-
-    def rollback(self):
-        self.rollbacks += 1
-
-
-def test_ensure_table_adds_legacy_columns_and_share_index_only(monkeypatch):
-    connection = FakeConnection()
-    engine = SimpleNamespace(connect=lambda: connection)
-    create_all_calls = []
-    monkeypatch.setattr(models, "get_engine", lambda: engine)
-    monkeypatch.setattr(
-        models.SQLModel.metadata,
-        "create_all",
-        lambda value: create_all_calls.append(value),
-    )
-
-    models.ensure_table()
-
-    assert create_all_calls == [engine]
-    assert len(connection.statements) == 3
-    assert connection.commits == 3
-    assert connection.rollbacks == 0
-    assert not any("DELETE FROM" in sql for sql in connection.statements)
-    assert not any("session_id_unique" in sql for sql in connection.statements)
-
-
-def test_ensure_table_rolls_back_existing_columns_and_failed_index(monkeypatch):
-    connection = FakeConnection(failures=("ADD COLUMN", "INDEX IF NOT EXISTS"))
-    engine = SimpleNamespace(connect=lambda: connection)
-    monkeypatch.setattr(models, "get_engine", lambda: engine)
-    monkeypatch.setattr(models.SQLModel.metadata, "create_all", lambda _engine: None)
-
-    models.ensure_table()
-
-    assert connection.commits == 0
-    assert connection.rollbacks == 3
-
-
-def test_ensure_table_logs_outer_failure_without_raising(monkeypatch, caplog):
-    monkeypatch.setattr(
-        models,
-        "get_engine",
-        lambda: (_ for _ in ()).throw(RuntimeError("database unavailable")),
-    )
-
-    assert models.ensure_table() is None
-    assert "database unavailable" in caplog.text
+    assert indexes == {
+        "idx_chat_conversations_session_id_unique": (("session_id",), True),
+        "idx_chat_conversations_share_token": (("share_token",), False),
+        "ix_conversations_session": (("session_id",), False),
+        "ix_conversations_updated": (("updated_at",), False),
+        "ix_conversations_user": (("user_id",), False),
+    }

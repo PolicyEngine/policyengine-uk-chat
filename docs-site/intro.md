@@ -6,10 +6,10 @@ personal allowance increase cost?"_, _"What's the poverty impact of abolishing
 the two-child limit?"_ — and the assistant answers by computing the result
 against the PolicyEngine UK microsimulation engine.
 
-Every quantitative answer is computed, not recalled: the agent never quotes
-numbers from memory. It calls typed simulation tools (or writes Python),
-executes them against the compiled PolicyEngine UK model, and reports results
-straight from the run — often with a chart you can read inline.
+Every quantitative answer is computed, not recalled. The conversation model
+invokes typed capabilities, which validate their inputs and use deterministic
+tools against PolicyEngine UK before returning facts for a natural-language
+response.
 
 ## What's in this documentation
 
@@ -24,7 +24,7 @@ straight from the run — often with a chart you can read inline.
 | Backend | FastAPI (Python 3.13), served as a Modal ASGI app |
 | Agent | Anthropic Claude models driven through a streaming tool-use loop |
 | Engine | `policyengine.py` with the `policyengine-uk` country package |
-| Gateway | A cheap per-turn pre-pass that classifies and routes each message |
+| Capabilities | Typed policy-information, reform, household, population, follow-up, and chart operations |
 | Auth & storage | Supabase (auth) + Postgres (conversation history) |
 | Billing | Stripe checkout with per-token cost tracking |
 | Observability | `policyengine-observability` tracing/metrics across the turn |
@@ -44,11 +44,12 @@ The backend is organised by **topic packages** — each subdirectory of
 policyengine-uk-chat/
 ├── backend/                FastAPI app + chat agent (topic packages)
 │   ├── api/                App entrypoint, CORS, error/NaN handling, rate limits
-│   ├── chat/               The streaming agent loop, model selection, system blocks
-│   ├── gateway/            Cheap per-turn classify-and-route pre-pass
-│   ├── tools/              Decorator-based tool registry, schemas, dispatch
-│   ├── engine/             Compiled-engine helpers, sandbox, lookups, reference gen
-│   ├── prompts/            System prompt text (compute + gateway/lightweight)
+│   ├── chat/               Full-history model loop and public stream
+│   ├── capabilities/       Typed capability contracts, implementations, and execution
+│   ├── tools/              Typed tool registry, schemas, dispatch, and result context
+│   ├── engine/             policyengine.py UK calculations and catalogue discovery
+│   ├── persistence/        Artifacts, partial input, traces, and idempotency
+│   ├── prompts/            Title and follow-up-suggestion prompts
 │   ├── conversations/      Save / list / share / report chat history (Postgres)
 │   ├── billing/            Token cost model, credits, Stripe
 │   ├── observability/      Tracing/metrics wiring and segment names

@@ -20,6 +20,28 @@ def _matches(query: str, *values: str | None) -> bool:
     return bool(get_close_matches(q, [v.lower() for v in values if v], n=1, cutoff=0.65))
 
 
+def _normalized_search_text(value: str | None) -> str:
+    return " ".join((value or "").casefold().replace("_", " ").split())
+
+
+def _variable_search_rank(query: str, item: dict[str, Any]) -> tuple[int, str]:
+    normalized_query = _normalized_search_text(query)
+    name = _normalized_search_text(item.get("name"))
+    label = _normalized_search_text(item.get("label"))
+    description = _normalized_search_text(item.get("description"))
+    if normalized_query in {name, label}:
+        rank = 0
+    elif name.startswith(normalized_query) or label.startswith(normalized_query):
+        rank = 1
+    elif normalized_query in name or normalized_query in label:
+        rank = 2
+    elif normalized_query in description:
+        rank = 3
+    else:
+        rank = 4
+    return rank, name
+
+
 def _default_output_entities(model: Any, name: str) -> list[str]:
     return [
         entity
@@ -36,6 +58,16 @@ def _variable_item(name: str, variable: Any, model: Any) -> dict[str, Any]:
         "entity": getattr(variable, "entity", None),
         "description": getattr(variable, "description", None),
         "definition_period": getattr(variable, "definition_period", None),
+        "unit": getattr(variable, "unit", None),
+        "quantity_type": getattr(variable, "quantity_type", None),
+        "reference": json_safe(getattr(variable, "reference", None)),
+        "defined_for": getattr(variable, "defined_for", None),
+        "min_value": json_safe(getattr(variable, "min_value", None)),
+        "max_value": json_safe(getattr(variable, "max_value", None)),
+        "is_period_size_independent": getattr(
+            variable, "is_period_size_independent", None
+        ),
+        "metadata": json_safe(getattr(variable, "metadata", None)),
         "value_type": getattr(getattr(variable, "value_type", None), "__name__", None)
         or str(getattr(variable, "value_type", "")),
         "default_value": json_safe(getattr(variable, "default_value", None)),
@@ -71,13 +103,13 @@ def search_variables(
         if not _matches(query, name, item.get("label"), item.get("description")):
             continue
         rows.append(item)
-        if len(rows) >= limit:
-            break
+    if query:
+        rows.sort(key=lambda item: _variable_search_rank(query, item))
     return {
         "status": "success",
         "query": query,
         "entity": entity,
-        "variables": rows,
+        "variables": rows[:limit],
     }
 
 

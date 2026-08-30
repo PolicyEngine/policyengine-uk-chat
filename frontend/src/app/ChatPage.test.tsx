@@ -60,7 +60,75 @@ afterEach(() => {
 });
 
 describe("ChatPage", () => {
-  it("shows active wording during tool processing and completed wording after output appears", async () => {
+  it("persists the sidebar debug setting, sends an idempotent turn identifier, and renders sanitized debug activity outside the transcript", async () => {
+    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        streamController = controller;
+      },
+    });
+    vi.mocked(fetch).mockImplementation((input) =>
+      String(input).includes("chat/message")
+        ? Promise.resolve(new Response(stream, { status: 200 }))
+        : new Promise<Response>(() => {}),
+    );
+
+    render(<ChatPage />);
+    const debug = screen.getByRole("button", { name: "Debug activity" });
+    expect(debug).toHaveAttribute("aria-pressed", "false");
+    fireEvent.click(debug);
+    expect(debug).toHaveAttribute("aria-pressed", "true");
+    expect(window.localStorage.getItem("policyengine-uk-chat:debug")).toBe("true");
+    fireEvent.change(screen.getByRole("textbox", { name: "Ask a question" }), {
+      target: { value: "Calculate a reform" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+
+    await act(async () => {
+      streamController?.enqueue(encodeStreamEvent({
+        type: "invocation_activity",
+        phase: "finished",
+        invocation: {
+          turn_id: "turn-1",
+          invocation_id: "private-1",
+          parent_invocation_id: null,
+          sequence: 1,
+          kind: "tool",
+          identifier: "validate_reform",
+          version: "1",
+          visibility: "private",
+          started_at: "2026-01-01T00:00:00Z",
+          completed_at: "2026-01-01T00:00:00Z",
+          duration_ms: 4,
+          status: "completed",
+          summary: "tool validate_reform completed",
+          debug_input: { reform_instruction: "Raise the allowance" },
+          debug_output: { status: "completed" },
+        },
+      }));
+      streamController?.enqueue(encodeStreamEvent({ type: "chunk", content: "Done." }));
+      streamController?.enqueue(encodeStreamEvent({ type: "done" }));
+      streamController?.close();
+    });
+
+    const messageCall = vi.mocked(fetch).mock.calls.find(([input]) =>
+      String(input).includes("chat/message"),
+    );
+    const body = JSON.parse(String(messageCall?.[1]?.body));
+    expect(body.debug).toBe(true);
+    expect(body.turn_id).toEqual(expect.any(String));
+    expect(screen.getByRole("region", { name: "Invocation activity" })).toHaveTextContent("validate_reform");
+    expect(screen.getByText("private")).toBeInTheDocument();
+    const details = screen.getByRole("button", {
+      name: "Toggle validate_reform details",
+    });
+    expect(details).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(details);
+    expect(screen.getByText("Input")).toBeInTheDocument();
+    expect(screen.getByText("Output")).toBeInTheDocument();
+  });
+
+  it("keeps response loading visible while an invocation is running", async () => {
     let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -81,14 +149,49 @@ describe("ChatPage", () => {
 
     await act(async () => {
       streamController?.enqueue(encodeStreamEvent({
-        type: "tool_start",
-        tool_name: "run_python",
-        tool_id: "tool-1",
+        type: "invocation_activity",
+        phase: "started",
+        invocation: {
+          turn_id: "turn-1",
+          invocation_id: "household-1",
+          parent_invocation_id: null,
+          sequence: 1,
+          kind: "capability",
+          identifier: "household_calculation",
+          version: "1",
+          visibility: "public",
+          started_at: "2026-01-01T00:00:00Z",
+          completed_at: null,
+          duration_ms: null,
+          status: "running",
+          summary: "Calculating household results",
+        },
       }));
     });
-    expect(screen.getByText("Working through the problem")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "Generating response" })).toBeInTheDocument();
+    expect(screen.getByRole("region", { name: "Invocation activity" })).toHaveTextContent("household_calculation");
+    expect(screen.getByText("running")).toBeInTheDocument();
 
     await act(async () => {
+      streamController?.enqueue(encodeStreamEvent({
+        type: "invocation_activity",
+        phase: "finished",
+        invocation: {
+          turn_id: "turn-1",
+          invocation_id: "household-1",
+          parent_invocation_id: null,
+          sequence: 1,
+          kind: "capability",
+          identifier: "household_calculation",
+          version: "1",
+          visibility: "public",
+          started_at: "2026-01-01T00:00:00Z",
+          completed_at: "2026-01-01T00:00:01Z",
+          duration_ms: 1000,
+          status: "completed",
+          summary: "Household calculation completed",
+        },
+      }));
       streamController?.enqueue(encodeStreamEvent({
         type: "chunk",
         content: "Your tax result is £1,000.",
@@ -96,41 +199,9 @@ describe("ChatPage", () => {
       streamController?.enqueue(encodeStreamEvent({ type: "done" }));
       streamController?.close();
     });
-    expect(screen.getByText("Worked through the problem")).toBeInTheDocument();
-  });
-
-  it("keeps active wording when a completed tool response has no visible output", async () => {
-    let streamController: ReadableStreamDefaultController<Uint8Array> | undefined;
-    const stream = new ReadableStream<Uint8Array>({
-      start(controller) {
-        streamController = controller;
-      },
-    });
-    vi.mocked(fetch).mockImplementation((input) =>
-      String(input).includes("chat/message")
-        ? Promise.resolve(new Response(stream, { status: 200 }))
-        : new Promise<Response>(() => {}),
-    );
-
-    render(<ChatPage />);
-    fireEvent.change(screen.getByRole("textbox", { name: "Ask a question" }), {
-      target: { value: "Calculate my tax" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "Send" }));
-
-    await act(async () => {
-      streamController?.enqueue(encodeStreamEvent({
-        type: "tool_start",
-        tool_name: "run_python",
-        tool_id: "tool-1",
-      }));
-      streamController?.enqueue(encodeStreamEvent({ type: "chunk", content: "   " }));
-      streamController?.enqueue(encodeStreamEvent({ type: "done" }));
-      streamController?.close();
-    });
-
-    expect(screen.getByText("Working through the problem")).toBeInTheDocument();
-    expect(screen.queryByText("Worked through the problem")).not.toBeInTheDocument();
+    expect(screen.getByText("Your tax result is £1,000.")).toBeInTheDocument();
+    expect(screen.queryByRole("status", { name: "Generating response" })).not.toBeInTheDocument();
+    expect(screen.getByText(/completed · 1000 ms/)).toBeInTheDocument();
   });
 
   it("shows the automated placeholder only for an empty, blurred new-chat input", () => {

@@ -8,10 +8,7 @@ import yaml
 
 from eval.schemas import (
     EvalChatResponse,
-    EvalGatewayBinding,
-    EvalGatewayTrace,
-    EvalToolTrace,
-    GatewayTraceExpectation,
+    EvalInvocationTrace,
     ToolLoopCase,
 )
 
@@ -25,22 +22,16 @@ def completed_response(content="Completed annual result £100."):
         content=content,
         session_id="remote-session",
         model="claude",
-        route="compute",
+        route="capability",
         outcome="ready",
         stop_reason="end_turn",
-        gateway_trace=EvalGatewayTrace(
-            selected_tool="run_society_simulation",
-            target_tool="compute_budgetary_impact",
-            defaults_applied={"year": 2026},
-            reform_confidence=92,
-            catalogue_recovery_used=False,
-        ),
-        tool_trace=[
-            EvalToolTrace(
-                tool_id="tool-1",
+        invocation_trace=[
+            EvalInvocationTrace(
+                invocation_id="tool-1",
+                kind="tool",
                 name="run_society_simulation",
                 input={"year": 2026, "reform": {"rate": 0.19}},
-                status="success",
+                status="completed",
                 output={"budgetary_impact": -100},
             )
         ],
@@ -218,7 +209,7 @@ def test_deployed_report_schema_accepts_deployed_mode():
     assert report.mode == "deployed"
 
 
-def test_deployed_result_details_preserve_gateway_trace():
+def test_deployed_result_details_preserve_invocation_trace():
     from eval.deployed_runner import _grade_response
 
     result = _grade_response(
@@ -232,122 +223,10 @@ def test_deployed_result_details_preserve_gateway_trace():
         completed_response(),
     )
 
-    trace = result.details["deployed"]["gateway_trace"]
-    assert trace["target_tool"] == "compute_budgetary_impact"
-    assert trace["defaults_applied"] == {"year": 2026}
-    assert trace["reform_confidence"] == 92
-
-
-def test_gateway_grading_rejects_lightweight_route_even_when_answer_passes():
-    from eval.deployed_runner import _grade_response
-
-    case = ToolLoopCase(
-        id="gateway-route-case",
-        description="Requires compute routing",
-        prompt="Calculate",
-        expected_tools=[{"name": "run_society_simulation"}],
-        expect={"required": ["annual"]},
-        gateway_expect={"route": "compute", "outcome": "ready"},
-    )
-    response = completed_response().model_copy(
-        update={"route": "lightweight", "outcome": "needs_plan"}
-    )
-
-    result = _grade_response(case, response)
-
-    assert result.status == "failed"
-    assert result.errors[:2] == [
-        "gateway route was 'lightweight', expected 'compute'",
-        "gateway outcome was 'needs_plan', expected 'ready'",
-    ]
-
-
-def test_gateway_grading_rejects_missing_default():
-    from eval.deployed_runner import grade_gateway_expectation
-
-    case = ToolLoopCase(
-        id="gateway-default-case",
-        description="Requires current year",
-        prompt="Calculate",
-        gateway_expect={
-            "route": "compute",
-            "outcome": "ready",
-            "defaults_contains": {"year": 2026},
-        },
-    )
-    response = completed_response().model_copy(
-        update={
-            "gateway_trace": completed_response().gateway_trace.model_copy(
-                update={"defaults_applied": {}}
-            )
-        }
-    )
-
-    assert grade_gateway_expectation(case, response) == [
-        "gateway default 'year' was missing; expected 2026"
-    ]
-
-
-def test_gateway_grading_accepts_ready_compute_default_and_confident_binding():
-    from eval.deployed_runner import grade_gateway_expectation
-
-    case = ToolLoopCase(
-        id="gateway-pass-case",
-        description="Requires an executable reform",
-        prompt="Calculate",
-        gateway_expect=GatewayTraceExpectation(
-            route="compute",
-            outcome="ready",
-            defaults_contains={"year": 2026},
-            min_reform_confidence=80,
-            require_parameter_binding=True,
-        ),
-    )
-    response = completed_response().model_copy(
-        update={
-            "gateway_trace": completed_response().gateway_trace.model_copy(
-                update={
-                    "parameter_bindings": [
-                        EvalGatewayBinding(
-                            parameter_path="gov.example.rate",
-                            label="Example rate",
-                            catalogue_evidence="example rate",
-                        )
-                    ]
-                }
-            )
-        }
-    )
-
-    assert grade_gateway_expectation(case, response) == []
-
-
-def test_gateway_grading_rejects_low_confidence_and_missing_binding():
-    from eval.deployed_runner import grade_gateway_expectation
-
-    case = ToolLoopCase(
-        id="gateway-authorization-case",
-        description="Requires a safe exact construction",
-        prompt="Calculate",
-        gateway_expect={
-            "route": "compute",
-            "outcome": "ready",
-            "min_reform_confidence": 80,
-            "require_parameter_binding": True,
-        },
-    )
-    response = completed_response().model_copy(
-        update={
-            "gateway_trace": completed_response().gateway_trace.model_copy(
-                update={"reform_confidence": 79, "parameter_bindings": []}
-            )
-        }
-    )
-
-    assert grade_gateway_expectation(case, response) == [
-        "gateway reform confidence was 79, expected at least 80",
-        "gateway produced no validated parameter binding",
-    ]
+    trace = result.details["deployed"]["invocation_trace"]
+    assert trace[0]["name"] == "run_society_simulation"
+    assert trace[0]["input"]["year"] == 2026
+    assert trace[0]["output"] == {"budgetary_impact": -100}
 
 
 def test_deployed_make_target_does_not_require_local_generated_cases():

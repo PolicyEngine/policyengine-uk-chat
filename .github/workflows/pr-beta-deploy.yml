@@ -24,6 +24,7 @@ env:
   # short and stable rather than using branch names that Modal may truncate.
   MODAL_PREVIEW_APP_NAME: pe-uk-chat-${{ github.event.pull_request.number }}
   MODAL_PREVIEW_SECRET_NAME: pe-uk-chat-${{ github.event.pull_request.number }}-secrets
+  DATABASE_SCHEMA: uk_chat_pr_${{ github.event.pull_request.number }}
 
 jobs:
   deploy:
@@ -64,11 +65,11 @@ jobs:
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          GATEWAY_PROPOSAL_SIGNING_KEY: ${{ secrets.GATEWAY_PROPOSAL_SIGNING_KEY }}
           UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}
           POLICYENGINE_UK_DATA_TOKEN: ${{ secrets.POLICYENGINE_UK_DATA_TOKEN }}
           HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
           DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}
+          ALEMBIC_DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}
           BILLING_ENABLED: "false"
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
@@ -83,6 +84,14 @@ jobs:
           HOSTNAMES: ${{ steps.names.outputs.frontend_url }}
           PUBLIC_BASE_URL: ${{ steps.names.outputs.frontend_url }}/uk/chat
         run: .github/scripts/sync-modal-secret.sh
+
+      - name: Upgrade database schema
+        env:
+          MODAL_APP_NAME: ${{ env.MODAL_PREVIEW_APP_NAME }}
+          MODAL_SECRET_NAME: ${{ env.MODAL_PREVIEW_SECRET_NAME }}
+          MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
+          MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
+        run: .github/scripts/run-modal-migration.sh
 
       - name: Deploy backend preview to Modal
         id: modal_deploy
@@ -176,6 +185,7 @@ jobs:
         env:
           MODAL_APP_NAME: ${{ env.MODAL_PREVIEW_APP_NAME }}
           MODAL_SECRET_NAME: ${{ env.MODAL_PREVIEW_SECRET_NAME }}
+          DATABASE_SCHEMA: ${{ env.DATABASE_SCHEMA }}
           MODAL_TOKEN_ID: ${{ secrets.MODAL_TOKEN_ID }}
           MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
         run: .github/scripts/cleanup-modal-preview.sh

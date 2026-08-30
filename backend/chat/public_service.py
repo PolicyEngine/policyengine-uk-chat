@@ -15,22 +15,17 @@ from chat.events import (
     CancellationProbe,
     SuggestionsGenerated,
     TextChunk,
-    ThinkingCompleted,
-    ToolCompleted,
-    ToolStarted,
-    ToolUsed,
+    InvocationActivity,
     TurnCancelled,
     TurnCompleted,
     TurnFailed,
 )
-from chat.orchestrator import run_chat_turn
+from chat.capability_runtime import run_capability_chat_turn
 from chat.schemas import ChatRequest
-from chat.system_blocks import serialise_tool_result
 from chat.turn_input import ChatTurnInput, prepare_turn_input
 
 
 logger = logging.getLogger(__name__)
-MAX_PUBLIC_TOOL_RESULT_CHARS = 5000
 
 
 class InsufficientCredit(Exception):
@@ -47,9 +42,20 @@ def _record_turn_usage(
     session_id: str,
     model: str | None,
     usage: ChatUsage,
+    turn_id: str | None = None,
 ) -> dict | None:
     if not billing_enabled():
         return None
+
+    if turn_id is not None:
+        try:
+            from persistence.idempotency import SQLIdempotencyRepository
+
+            if not SQLIdempotencyRepository().claim_billing(turn_id):
+                return None
+        except Exception as exc:
+            logger.warning("[CHAT] Failed to claim idempotent billing: %s", exc)
+            return None
 
     try:
         with segment(SegmentName.BILLING_RECORD_USAGE):
@@ -65,37 +71,18 @@ def _record_turn_usage(
 
 
 def _public_payload(event: ChatEvent, billing: dict | None = None) -> dict | None:
-    if isinstance(event, ToolStarted):
-        return {
-            "type": event.type,
-            "tool_name": event.tool_name,
-            "tool_id": event.tool_id,
-        }
     if isinstance(event, TextChunk):
         return {"type": event.type, "content": event.content}
-    if isinstance(event, ToolUsed):
+    if isinstance(event, InvocationActivity):
+        record = event.record
         return {
             "type": event.type,
-            "tool_name": event.tool_name,
-            "tool_id": event.tool_id,
-            "tool_input": event.tool_input,
-            "status": "pending",
-        }
-    if isinstance(event, ThinkingCompleted):
-        return {"type": event.type}
-    if isinstance(event, ToolCompleted):
-        result = serialise_tool_result(event.output)
-        summary = (
-            result[:MAX_PUBLIC_TOOL_RESULT_CHARS] + "..."
-            if len(result) > MAX_PUBLIC_TOOL_RESULT_CHARS
-            else result
-        )
-        return {
-            "type": event.type,
-            "tool_name": event.tool_name,
-            "tool_id": event.tool_id,
-            "status": event.status,
-            "result_summary": summary,
+            "phase": event.phase,
+            "invocation": record.model_dump(
+                mode="json",
+                exclude={"conversation_id"},
+                exclude_none=True,
+            ),
         }
     if isinstance(event, TurnCompleted):
         return {
@@ -125,7 +112,7 @@ async def _stream_public_chat(
     *,
     is_cancelled: CancellationProbe,
 ) -> AsyncIterator[str]:
-    async for event in run_chat_turn(turn, is_cancelled=is_cancelled):
+    async for event in run_capability_chat_turn(turn, is_cancelled=is_cancelled):
         billing = None
         if isinstance(event, TurnCompleted):
             billing = _record_turn_usage(
@@ -133,6 +120,7 @@ async def _stream_public_chat(
                 session_id=event.session_id,
                 model=event.model,
                 usage=event.usage,
+                turn_id=event.turn_id,
             )
         elif isinstance(event, TurnCancelled):
             _record_turn_usage(
@@ -140,6 +128,7 @@ async def _stream_public_chat(
                 session_id=event.session_id,
                 model=event.model,
                 usage=event.usage,
+                turn_id=event.turn_id,
             )
         elif isinstance(event, TurnFailed) and event.billable:
             _record_turn_usage(
@@ -147,6 +136,7 @@ async def _stream_public_chat(
                 session_id=event.session_id,
                 model=None,
                 usage=event.usage,
+                turn_id=event.turn_id,
             )
 
         payload = _public_payload(event, billing)

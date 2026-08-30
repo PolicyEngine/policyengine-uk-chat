@@ -25,7 +25,7 @@ Then edit `.env`. The key variables (see `.env.example` and
 | Variable | Purpose |
 | --- | --- |
 | `ANTHROPIC_API_KEY` | Required — authenticates the chat agent |
-| `ANTHROPIC_FAST_MODEL` | Cheap model for titles/gateway/light work (default `claude-haiku-4-5`) |
+| `ANTHROPIC_FAST_MODEL` | Fast model for titles and bounded model-assisted operations (default `claude-haiku-4-5`) |
 | `ANTHROPIC_COMPLEX_MODEL` | Larger model for big-context analysis (default `claude-sonnet-4-6`) |
 | `ANTHROPIC_REASONING_MODEL` | Reasoning model for reform/distributional work (default `claude-opus-4-5`) |
 | `ANTHROPIC_TITLE_MODEL` | Model used to title conversations (defaults to the fast model) |
@@ -77,12 +77,10 @@ cd backend
 pytest
 ```
 
-The suite lives in `backend/tests/` and covers the API (`test_api.py`), the
-agent tools (`test_agent_tools.py`), the gateway (`test_gateway.py`), model
-selection (`test_model_selection.py`), billing (`test_billing.py`),
-observability (`test_observability.py`), prompts (`test_prompts.py`), and the
-evaluation harness (`test_evaluation.py`). `make test-backend` runs the same
-suite the CI `tests.yml` workflow uses.
+The suite lives in `backend/tests/` and covers the API, capability composition
+and execution, typed tools, persistence and migrations, billing, observability,
+prompts, and the evaluation harness. `make test-backend` runs the same suite the
+CI `tests.yml` workflow uses.
 
 ## Smoke-checking the backend
 

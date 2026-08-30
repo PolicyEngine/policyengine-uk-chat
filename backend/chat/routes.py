@@ -23,7 +23,7 @@ def generate_title(request: TitleRequest):
 @limiter.limit(CHAT_IP_LIMIT)
 async def chat_message(request: Request, chat_request: ChatRequest):
     # `request` is the Starlette Request that slowapi's @limiter.limit decorators
-    # require; the parsed body is `chat_request`. Delegate to the orchestrator.
+    # require; the parsed body is `chat_request`. Delegate to the chat service.
     try:
         stream = await start_public_chat(
             chat_request,

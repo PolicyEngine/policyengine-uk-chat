@@ -1,4 +1,4 @@
-.PHONY: up down build logs restart shell-backend shell-frontend test test-backend test-frontend sync-policyengine-uk-evals check-policyengine-uk-evals eval-ai-offline eval-ai-live eval-ai-live-uk-population eval-ai-deployed-uk-population
+.PHONY: up down build logs restart shell-backend shell-frontend migrate migration-check migration-current test test-backend test-frontend typecheck-backend sync-policyengine-uk-evals check-policyengine-uk-evals eval-ai-offline eval-ai-live eval-ai-deployed-uk-population
 
 # Start all services in dev mode (live reload)
 up:
@@ -39,6 +39,15 @@ shell-backend:
 shell-frontend:
 	docker compose exec frontend sh
 
+migrate:
+	python -m alembic -c backend/alembic.ini upgrade head
+
+migration-check:
+	python -m alembic -c backend/alembic.ini check
+
+migration-current:
+	python -m alembic -c backend/alembic.ini current
+
 # One-time setup: copy .env.example to .env
 init:
 	@if [ ! -f .env ]; then cp .env.example .env && echo "Created .env — fill in your ANTHROPIC_API_KEY"; else echo ".env already exists"; fi
@@ -47,26 +56,26 @@ init:
 test: test-backend test-frontend
 
 test-backend:
-	PYTHONPATH=backend python -m pytest backend/tests --cov --cov-config=.coveragerc --cov-report=term-missing --cov-report=xml --cov-fail-under=80
+	PYTHONPATH=backend:. python -m pytest backend/tests --cov --cov-config=.coveragerc --cov-report=term-missing --cov-report=xml --cov-fail-under=80
 
 test-frontend:
 	cd frontend && npm run test:coverage
 	cd frontend && npm run build
 
+typecheck-backend:
+	PYTHONPATH=backend:. python -m mypy --config-file backend/mypy.ini
+
 sync-policyengine-uk-evals:
-	PYTHONPATH=backend python -m eval.sync_policyengine_uk --sync
+	PYTHONPATH=backend:. python -m eval.sync_policyengine_uk --sync
 
 check-policyengine-uk-evals:
-	PYTHONPATH=backend python -m eval.sync_policyengine_uk --check
+	PYTHONPATH=backend:. python -m eval.sync_policyengine_uk --check
 
 eval-ai-offline: check-policyengine-uk-evals
-	PYTHONPATH=backend python -m eval.run --mode offline
+	PYTHONPATH=backend:. python -m eval.run --mode offline
 
 eval-ai-live: check-policyengine-uk-evals
-	PYTHONPATH=backend python -m eval.run --mode live --provider anthropic
-
-eval-ai-live-uk-population: check-policyengine-uk-evals
-	RUN_DATA_EVALS=1 PYTHONPATH=backend python -m eval.run --suite tool_loop --mode live --provider anthropic
+	PYTHONPATH=backend:. python -m eval.run --mode live --provider anthropic
 
 eval-ai-deployed-uk-population:
-	PYTHONPATH=backend python -m eval.run_deployed --case-file evals/cases/tool_loop/uk_population_live.yaml
+	PYTHONPATH=backend:. python -m eval.run_deployed --case-file evals/cases/tool_loop/uk_population_live.yaml

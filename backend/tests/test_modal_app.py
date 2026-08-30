@@ -94,6 +94,10 @@ def test_modal_deployment_definition_imports_without_remote_calls(monkeypatch):
         assert modal_app.SECRET_NAME == "peukchat-test-secrets"
         assert modal_app.app.name == "peukchat-test"
         assert modal_app.chat_secrets.name == "peukchat-test-secrets"
+        assert "migrate" in modal_app.app.function_options
+        assert "web" in modal_app.app.function_options
+        assert modal_app.WEB_MEMORY_MIB == 16_384
+        assert modal_app.app.function_options["web"]["memory"] == 16_384
         assert [step[0] for step in modal_app.image.steps] == [
             "debian_slim",
             "apt_install",
@@ -165,6 +169,36 @@ def test_local_docker_exposes_enhanced_frs_credentials():
     assert "HUGGING_FACE_TOKEN=${HUGGING_FACE_TOKEN}" in compose
 
 
+def test_local_docker_uses_the_single_chat_runtime():
+    env_example = (REPO_ROOT / ".env.example").read_text()
+    compose = (REPO_ROOT / "docker-compose.yml").read_text()
+
+    assert "UK_CHAT_RUNTIME" not in env_example
+    assert "UK_CHAT_RUNTIME" not in compose
+
+
+def test_database_migrations_run_before_local_and_modal_backends():
+    compose = (REPO_ROOT / "docker-compose.yml").read_text()
+    modal_app = (REPO_ROOT / "modal_app.py").read_text()
+    production = (REPO_ROOT / ".github/workflows/deploy.yml").read_text()
+    preview = (REPO_ROOT / ".github/workflows/pr-beta-deploy.yml").read_text()
+    sync_script = (REPO_ROOT / ".github/scripts/sync-modal-secret.sh").read_text()
+
+    assert 'command: ["alembic", "-c", "alembic.ini", "upgrade", "head"]' in compose
+    assert "condition: service_completed_successfully" in compose
+    assert "ALEMBIC_DATABASE_URL=" in compose
+    assert "def migrate():" in modal_app
+    assert 'upgrade_deployed_database("/app/backend/alembic.ini")' in modal_app
+    assert production.index(".github/scripts/run-modal-migration.sh") < production.index(
+        "modal deploy modal_app.py"
+    )
+    assert preview.index(".github/scripts/run-modal-migration.sh") < preview.index(
+        ".github/scripts/deploy-modal-preview.sh"
+    )
+    assert '"ALEMBIC_DATABASE_URL=$ALEMBIC_DATABASE_URL"' in sync_script
+    assert '"DATABASE_SCHEMA=$DATABASE_SCHEMA"' in sync_script
+
+
 def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
     workflow = (REPO_ROOT / ".github/workflows/pr-beta-deploy.yml").read_text()
     sync_script = (REPO_ROOT / ".github/scripts/sync-modal-secret.sh").read_text()
@@ -181,6 +215,7 @@ def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
         "MODAL_PREVIEW_SECRET_NAME: "
         "pe-uk-chat-${{ github.event.pull_request.number }}-secrets" in workflow
     )
+    assert "DATABASE_SCHEMA: uk_chat_pr_${{ github.event.pull_request.number }}" in workflow
     assert "peukchat-$branch_slug" not in workflow
     assert (
         'modal.Function.from_name(os.environ["MODAL_APP_NAME"], "web")' in deploy_script
@@ -213,6 +248,7 @@ def _run_modal_preview_cleanup(
     *,
     list_exit_code=0,
     stop_exit_code=0,
+    database_schema=None,
 ):
     calls_path = tmp_path / "modal-calls"
     fake_modal = tmp_path / "modal"
@@ -238,6 +274,8 @@ def _run_modal_preview_cleanup(
         "MODAL_STOP_EXIT_CODE": str(stop_exit_code),
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
     }
+    if database_schema is not None:
+        environment["DATABASE_SCHEMA"] = database_schema
 
     result = subprocess.run(
         [REPO_ROOT / ".github/scripts/cleanup-modal-preview.sh"],
@@ -258,6 +296,22 @@ def test_modal_preview_cleanup_stops_app_before_deleting_secret(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert calls == [
+        "app list --json",
+        "app stop pe-uk-chat-123 --yes",
+        "secret delete pe-uk-chat-123-secrets --yes --allow-missing",
+    ]
+
+
+def test_modal_preview_cleanup_removes_only_configured_preview_schema(tmp_path):
+    result, calls = _run_modal_preview_cleanup(
+        tmp_path,
+        '[{"description":"pe-uk-chat-123","state":"deployed"}]',
+        database_schema="uk_chat_pr_123",
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert calls == [
+        "run --name pe-uk-chat-123-schema-cleanup modal_app.py::remove_preview_database_schema",
         "app list --json",
         "app stop pe-uk-chat-123 --yes",
         "secret delete pe-uk-chat-123-secrets --yes --allow-missing",
@@ -332,11 +386,11 @@ def test_modal_secret_sync_omits_billing_credentials_when_disabled(tmp_path):
     environment = {
         "MODAL_SECRET_NAME": "test-secret",
         "ANTHROPIC_API_KEY": "anthropic",
-        "GATEWAY_PROPOSAL_SIGNING_KEY": "gateway-signing-key",
         "UK_CHAT_EVAL_TOKEN": "eval-token",
         "POLICYENGINE_UK_DATA_TOKEN": "uk-data",
         "HUGGING_FACE_TOKEN": "hugging-face",
-        "DATABASE_URL": "postgresql://example",
+            "DATABASE_URL": "postgresql://example",
+            "ALEMBIC_DATABASE_URL": "postgresql://migration-example",
         "BILLING_ENABLED": "false",
         "OBSERVABILITY_ENVIRONMENT": "test",
         "OBSERVABILITY_GOOGLE_CLOUD_PROJECT": "project",
@@ -374,11 +428,11 @@ def test_modal_secret_sync_requires_credentials_when_billing_is_enabled(
     environment = {
         "MODAL_SECRET_NAME": "test-secret",
         "ANTHROPIC_API_KEY": "anthropic",
-        "GATEWAY_PROPOSAL_SIGNING_KEY": "gateway-signing-key",
         "UK_CHAT_EVAL_TOKEN": "eval-token",
         "POLICYENGINE_UK_DATA_TOKEN": "uk-data",
         "HUGGING_FACE_TOKEN": "hugging-face",
-        "DATABASE_URL": "postgresql://example",
+            "DATABASE_URL": "postgresql://example",
+            "ALEMBIC_DATABASE_URL": "postgresql://migration-example",
         "BILLING_ENABLED": "true",
         "OBSERVABILITY_ENVIRONMENT": "test",
         "OBSERVABILITY_GOOGLE_CLOUD_PROJECT": "project",
@@ -445,7 +499,7 @@ def test_deploy_workflows_reuse_modal_secret_and_smoke_test_scripts():
 
     for workflow in (production, preview):
         assert "run: .github/scripts/sync-modal-secret.sh" in workflow
-        assert "GATEWAY_PROPOSAL_SIGNING_KEY" in workflow
+        assert "GATEWAY_PROPOSAL_SIGNING_KEY" not in workflow
         assert "run: .github/scripts/smoke-test-modal-backend.sh" in workflow
         assert workflow.count(
             "UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}"

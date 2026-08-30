@@ -273,11 +273,14 @@ DISCOVERY_DESCRIPTION = "Discover model metadata from policyengine.py without ru
 SEARCH_VARIABLES_DESCRIPTION = (
     "Search the policyengine.py UK variable registry. Use this before passing a "
     "variable to run_society_simulation.extra_variables or aggregate_result; "
-    "never invent variable names. Results identify default society outputs."
+    "never invent variable names. Results include entity, period, unit, quantity "
+    "type, references, applicability, bounds, period-size behavior, country "
+    "metadata, and whether the variable is a default society output."
 )
 GET_VARIABLE_DESCRIPTION = (
-    "Verify one exact policyengine.py UK variable and inspect its entity and "
-    "whether it is a default society output."
+    "Verify one exact policyengine.py UK variable and inspect its entity, period, "
+    "unit, quantity type, references, applicability, bounds, period-size behavior, "
+    "country metadata, and whether it is a default society output."
 )
 LIST_SOCIETY_OUTPUT_VARIABLES_DESCRIPTION = (
     "List the policyengine.py UK variables automatically materialized by a "

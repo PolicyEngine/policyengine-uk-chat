@@ -2,7 +2,7 @@ const LOCAL_BACKEND_URL = "http://localhost:8080";
 const PULL_REQUEST_NUMBER = /^[1-9]\d*$/;
 
 export function resolveBackendUrl(
-  env: NodeJS.ProcessEnv = process.env,
+  env: Readonly<Record<string, string | undefined>> = process.env,
 ): string {
   if (env.VERCEL_ENV === "preview") {
     // The GitHub preview workflow names each Modal app pe-uk-chat-<PR>.

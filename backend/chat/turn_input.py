@@ -18,7 +18,9 @@ class InvalidChatRequest(ValueError):
 class ChatTurnInput:
     messages: list[dict[str, Any]]
     session_id: str
+    turn_id: str = ""
     charts_mode: bool = False
+    debug: bool = False
 
 
 def prepare_turn_input(chat_request: ChatRequest) -> ChatTurnInput:
@@ -66,5 +68,7 @@ def prepare_turn_input(chat_request: ChatRequest) -> ChatTurnInput:
     return ChatTurnInput(
         messages=deduplicated,
         session_id=chat_request.session_id or str(uuid.uuid4()),
+        turn_id=chat_request.turn_id or str(uuid.uuid4()),
         charts_mode=chat_request.charts_mode,
+        debug=chat_request.debug,
     )

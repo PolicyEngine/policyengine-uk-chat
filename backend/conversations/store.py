@@ -24,7 +24,7 @@ def _upsert_conversation(session, request, now):
     values = {
         "session_id": request.session_id,
         "title": request.title,
-        "messages": json.dumps(request.messages),
+        "messages": request.messages,
         "user_id": request.user_id,
         "user_email": request.user_email,
         "created_at": now,
@@ -175,5 +175,8 @@ def delete_conversation(conversation_id: int):
         row = session.get(ChatConversation, conversation_id)
         if not row:
             raise HTTPException(status_code=404, detail="Conversation not found")
+        from persistence.deletion import delete_capability_records
+
+        delete_capability_records(session, row.session_id)
         session.delete(row)
         session.commit()

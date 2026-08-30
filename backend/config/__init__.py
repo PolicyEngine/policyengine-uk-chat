@@ -3,7 +3,7 @@
 Split by sub-responsibility (models / sampling / clients) so each file
 owns one concern, but this package re-exports the public surface so callers do
 `from config import X` regardless of which sub-module owns X. Kept import-light
-(no heavy deps) so the gateway and the eval harness can import it without
+(no heavy deps) so the capability runtime and evaluation harness can import it without
 dragging in the chat route.
 """
 

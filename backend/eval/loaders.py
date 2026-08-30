@@ -8,7 +8,6 @@ import yaml
 from eval.schemas import (
     AnswerCase,
     EvalCase,
-    GatewayCase,
     ToolContractCase,
     ToolLoopCase,
     TrajectoryCase,
@@ -20,7 +19,6 @@ CASE_MODELS = {
     "trajectory": TrajectoryCase,
     "answer": AnswerCase,
     "tool_loop": ToolLoopCase,
-    "gateway": GatewayCase,
 }
 
 

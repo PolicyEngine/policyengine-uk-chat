@@ -25,7 +25,8 @@ Request and response shapes below are summarised from the route handlers under
 ## Chat — `/chat`
 
 Defined in `backend/chat/routes.py`, mounted under the `/chat` prefix. This is
-the core of the app: a streaming Claude tool-use loop, fronted by the gateway.
+the core of the app: a full-history Claude conversation loop with typed
+capabilities.
 
 ```{list-table}
 :header-rows: 1
@@ -36,16 +37,16 @@ the core of the app: a streaming Claude tool-use loop, fronted by the gateway.
 * - `POST /chat/message`
   - Send a user message and stream the agent's response back over Server-Sent
     Events. Accepts `messages`, `session_id`, `user_id`, `charts_mode`, and an
-    optional image (`image_base64` / `image_media_type`). Rate-limited per user
-    and per IP.
+    optional image (`image_base64` / `image_media_type`), and a browser debug
+    preference. Rate-limited per user and per IP.
 * - `POST /chat/title`
   - Generate a short title for a conversation using the fast title model.
 ```
 
-The SSE stream emits typed events: `chunk` (text deltas), `tool_start` /
-`tool_use` / `tool_result` (tool activity), `thinking_done`, `suggestions`
+The SSE stream emits typed events: `chunk` (user-facing text),
+`invocation_activity` (sanitized capability/tool status), `suggestions`
 (follow-up chips), `done` (final usage, cost, balance, model, route, outcome),
-and `error`. See [The chat agent](chat.md) for the loop.
+and `error`. See [The chat runtime](chat.md) for the loop.
 
 ## Conversations — `/conversations`
 

@@ -1,0 +1,3 @@
+Alembic owns only the SQLModel conversation, typed-context, and capability tables listed in
+docs/engineering/skills/database-migrations.md. Revision files must be created
+with the Alembic CLI's --autogenerate option.

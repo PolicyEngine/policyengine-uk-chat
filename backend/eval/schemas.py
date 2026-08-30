@@ -114,20 +114,6 @@ class AnswerCase(CaseBase):
     offline_response: Optional[ModelTurn] = None
 
 
-class GatewayTraceExpectation(StrictModel):
-    route: Literal["compute", "lightweight"]
-    outcome: Literal[
-        "irrelevant",
-        "out_of_scope",
-        "partial",
-        "needs_plan",
-        "ready",
-    ]
-    defaults_contains: Dict[str, Any] = Field(default_factory=dict)
-    min_reform_confidence: Optional[int] = Field(default=None, ge=0, le=100)
-    require_parameter_binding: bool = False
-
-
 class ToolLoopCase(CaseBase):
     suite: Literal["tool_loop"] = "tool_loop"
     prompt: str
@@ -140,28 +126,8 @@ class ToolLoopCase(CaseBase):
     trials: int = Field(default=1, ge=1, le=10)
     pass_threshold: float = Field(default=1.0, ge=0.0, le=1.0)
     offline_responses: List[ModelTurn] = Field(default_factory=list)
-    gateway_expect: Optional[GatewayTraceExpectation] = None
-
-
-class SlotExpectation(StrictModel):
-    slot: str
-    source: Optional[Literal["prompt", "default", "assumed", "runtime"]] = None
-    gates: Optional[bool] = None  # whether this slot should trigger a question
-
-
-class GatewayCase(CaseBase):
-    suite: Literal["gateway"] = "gateway"
-    prompt: str
-    expected_outcome: Literal[
-        "irrelevant", "out_of_scope", "partial", "needs_plan", "ready"
-    ]
-    expected_tool: Optional[str] = None
-    forbidden_tool: Optional[str] = None
-    expected_gating_slots: List[str] = Field(default_factory=list)
-    expected_slots: List[SlotExpectation] = Field(default_factory=list)
-
-
-EvalCase = ToolContractCase | TrajectoryCase | AnswerCase | ToolLoopCase | GatewayCase
+    capability_outputs: List[FrozenToolCall] = Field(default_factory=list)
+EvalCase = ToolContractCase | TrajectoryCase | AnswerCase | ToolLoopCase
 
 
 class CaseResult(StrictModel):
@@ -203,55 +169,20 @@ class EvalUsage(StrictModel):
     cache_read_input_tokens: int = 0
 
 
-class EvalToolTrace(StrictModel):
-    tool_id: str
+class EvalInvocationTrace(StrictModel):
+    invocation_id: str
+    kind: Literal["capability", "tool"]
     name: str
     input: Dict[str, Any] = Field(default_factory=dict)
-    status: Literal["pending", "success", "error"] = "pending"
+    status: Literal[
+        "running",
+        "completed",
+        "needs_input",
+        "unsupported",
+        "failed",
+        "cancelled",
+    ] = "running"
     output: Any = None
-
-
-class EvalGatewaySlot(StrictModel):
-    name: str
-    kind: str
-    source: str
-    value: Optional[str] = None
-
-
-class EvalGatewayReason(StrictModel):
-    code: str
-    slot: str
-    options: List[str] = Field(default_factory=list)
-    evidence: Optional[str] = None
-
-
-class EvalGatewayBinding(StrictModel):
-    parameter_path: str
-    label: str
-    catalogue_evidence: str
-
-
-class EvalGatewayAlternative(StrictModel):
-    summary: str
-    parameter_bindings: List[EvalGatewayBinding] = Field(default_factory=list)
-    reform: Dict[str, Any] = Field(default_factory=dict)
-
-
-class EvalGatewayTrace(StrictModel):
-    selected_tool: Optional[str] = None
-    target_tool: Optional[str] = None
-    slots: List[EvalGatewaySlot] = Field(default_factory=list)
-    gating_reasons: List[EvalGatewayReason] = Field(default_factory=list)
-    defaults_applied: Dict[str, Any] = Field(default_factory=dict)
-    reform_confidence: Optional[int] = Field(default=None, ge=0, le=100)
-    reform_summary: Optional[str] = None
-    reform_search_queries: List[str] = Field(default_factory=list)
-    catalogue_version: Optional[str] = None
-    resolver_model: Optional[str] = None
-    parameter_bindings: List[EvalGatewayBinding] = Field(default_factory=list)
-    alternatives: List[EvalGatewayAlternative] = Field(default_factory=list)
-    catalogue_recovery_used: bool = False
-    proposal_resumed: bool = False
 
 
 class EvalChatResponse(StrictModel):
@@ -259,9 +190,8 @@ class EvalChatResponse(StrictModel):
     content: str = ""
     session_id: str
     model: Optional[str] = None
-    route: str = "compute"
+    route: str = "capability"
     outcome: Optional[str] = None
     stop_reason: Optional[str] = None
     usage: EvalUsage = Field(default_factory=EvalUsage)
-    tool_trace: List[EvalToolTrace] = Field(default_factory=list)
-    gateway_trace: Optional[EvalGatewayTrace] = None
+    invocation_trace: List[EvalInvocationTrace] = Field(default_factory=list)

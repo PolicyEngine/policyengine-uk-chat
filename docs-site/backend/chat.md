@@ -1,51 +1,70 @@
-# The chat agent
+# The chat runtime
 
-The chat agent answers quantitative questions through typed tools rather than
-recalling numbers or writing executable code. Tool details are documented in
-[Tools](tools.md); request routing is documented in [The gateway](gateway.md).
+The chat runtime keeps the conversation primary and brings typed capabilities
+into it only when needed. Calculation behavior is documented in
+[Tools](tools.md).
 
-## Agent loop
+## Conversation loop
 
-`backend/chat/orchestrator.py` runs the gateway, selects a model, builds the
-system blocks, and enters the streaming tool-use loop. One
-`ToolExecutionContext` is created for the turn and shared by every tool call, so
-simulation and derivative handles remain usable across iterations.
+`backend/chat/capability_service.py` supplies the complete supported message
+history, current compatible artifact summaries, and public capability
+descriptions to the conversation model. A model turn may return prose, one or
+more capability calls, or both. Capability results are returned to the same
+conversation loop until the model produces the user-facing response.
 
-Tool calls within an iteration are dispatched concurrently. Results stream back
-as they finish, while the Anthropic transcript preserves the original tool-call
-order. The loop stops on a final answer or at the configured iteration cap.
+There is no global analysis phase and no alternate chat implementation selected
+by configuration. Independent capability invocations may complete, request
+clarification, report an unsupported request, or fail without forcing the whole
+conversation into a shared lifecycle state.
 
-## Model selection
+## Required calculations
 
-`backend/chat/model_selection.py` uses the gateway plan, reform/distributional
-signals, charts mode, and estimated input size to choose the fast, complex, or
-reasoning model. Model IDs are configured in `backend/config/models.py`.
+The model must invoke:
 
-## Prompt rules
+- `policy_information` for government-policy formulation, scope, formula, or
+  calculation-method questions;
+- `household_analysis` for a described household's tax, benefit, entitlement,
+  or policy impact; and
+- `society_analysis` for population-wide reform or benefit impacts.
 
-The compute prompt in `backend/prompts/system.py` requires the agent to:
+Other supported questions may be answered directly. A private relevance
+capability checks every turn but cannot choose another capability or construct
+domain input.
 
-- use discovery tools instead of guessing variable or parameter names;
-- validate reforms and synthetic households before relying on them;
-- run `run_society_simulation` before requesting society derivatives;
-- use the official budget, programme, decile, winners/losers, poverty,
-  inequality, and aggregate tools;
-- never expose row-level survey data or describe a synthetic household as real;
-- pass derivative handles to deterministic preset charts; and
-- keep explanations neutral and use British English.
+## Typed execution
 
-There is no `run_python` fallback. Unsupported calculations must be stated as
-unsupported or decomposed into existing typed tools.
+`InvocationExecutor` is the shared execution boundary for capabilities and
+tools. It validates the registered caller permissions, Pydantic input and
+output, prerequisite declarations, cancellation, parent invocation identity,
+and trace state. Provider-specific model blocks remain in `chat/model_port.py`;
+calculation, validation, aggregate derivation, and chart construction remain
+behind typed tools.
 
-## System blocks
+## Retained conversational state
 
-`backend/chat/system_blocks.py` emits a cached compute prompt followed by
-per-turn charts-mode and gateway-plan blocks. Lightweight gateway outcomes use a
-separate no-tools prompt plus an outcome-specific writer directive.
+Capabilities persist immutable, versioned artifact summaries and validated
+partial input. Consumers declare compatibility requirements instead of parsing
+earlier assistant prose. Complete population simulation objects and record-level
+arrays stay request-local; only aggregate results are durable.
+
+## Response verification
+
+Capabilities return validated facts without imposing a fixed prose layout. The
+conversation model writes ordinary Markdown. When quantitative capability facts
+are used, a private deterministic verifier checks sign, scale, currency,
+percentages, and rounding. Household responses also enumerate every applied
+material assumption under one `Assumptions used` heading.
 
 ## Streaming events
 
-The backend streams text chunks, tool start/result events, suggestions, and a
-final `done` event containing stop reason, usage, cost, balance, model, and
-gateway metadata. The frontend renders chart code blocks emitted by
-`generate_chart` as chart components.
+The public stream emits:
+
+- `chunk` for user-facing response text;
+- `invocation_activity` for sanitized capability/tool status updates;
+- `suggestions` for optional follow-up prompts;
+- `done` for the final response metadata; and
+- `error` for a safe user-facing failure.
+
+Normal activity includes public invocations without debug values. Debug mode
+also includes private calls and expandable structured input/output projections.
+The frontend stores activity separately from the model transcript.

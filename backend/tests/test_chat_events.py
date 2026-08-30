@@ -1,4 +1,8 @@
-from chat.events import ChatUsage, ToolCompleted, TurnCompleted
+from datetime import datetime, timezone
+
+from capabilities.tracing import InvocationKind, InvocationRecord, InvocationStatus
+from chat.events import ChatUsage, InvocationActivity, TurnCompleted
+from tools.contracts import Visibility
 
 
 def test_chat_usage_exposes_the_existing_public_shape():
@@ -17,21 +21,32 @@ def test_chat_usage_exposes_the_existing_public_shape():
     }
 
 
-def test_tool_completed_retains_the_complete_structured_result():
+def test_invocation_activity_retains_the_sanitized_structured_projection():
     output = {
         "status": "success",
         "rows": [{"income": 25_000, "nested": {"values": list(range(30))}}],
     }
 
-    event = ToolCompleted(
-        tool_name="run_society_simulation",
-        tool_id="tool-1",
-        status="success",
-        output=output,
+    record = InvocationRecord(
+        conversation_id="session-1",
+        turn_id="turn-1",
+        invocation_id="invocation-1",
+        sequence=1,
+        kind=InvocationKind.TOOL,
+        identifier="run_society_simulation",
+        version="1",
+        visibility=Visibility.PRIVATE,
+        started_at=datetime.now(timezone.utc),
+        completed_at=datetime.now(timezone.utc),
+        duration_ms=1,
+        status=InvocationStatus.COMPLETED,
+        summary="Society simulation completed.",
+        debug_output=output,
     )
+    event = InvocationActivity("finished", record)
 
-    assert event.output is output
-    assert event.output["rows"][0]["nested"]["values"][-1] == 29
+    assert event.record.debug_output == output
+    assert event.record.debug_output["rows"][0]["nested"]["values"][-1] == 29
 
 
 def test_turn_completed_carries_execution_metadata_without_http_fields():

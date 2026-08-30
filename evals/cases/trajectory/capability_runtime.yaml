@@ -1,0 +1,160 @@
+cases:
+  - id: capability_trajectory_direct_conversation
+    suite: trajectory
+    description: A supported conceptual follow-up can remain direct conversation.
+    prompt: In plain language, what does a marginal tax rate mean?
+    expected_tools: []
+    forbidden_tools:
+      - policy_information
+      - household_analysis
+      - society_analysis
+    offline_response:
+      text: A marginal tax rate is the rate applied to the next unit of taxable income.
+
+  - id: capability_trajectory_policy_method
+    suite: trajectory
+    description: An ordinary-language policy calculation-method question must use policy information.
+    prompt: How is a household's Universal Credit award worked out?
+    expected_tools:
+      - name: policy_information
+        input_contains:
+          year: 2026
+        required_input_paths: [question]
+    forbidden_tools: [household_analysis, society_analysis]
+    offline_response:
+      tool_calls:
+        - name: policy_information
+          input:
+            question: How is a household's Universal Credit award worked out?
+            year: 2026
+
+  - id: capability_trajectory_household_ordinary_language
+    suite: trajectory
+    description: A household impact request uses the household capability without requiring variable names.
+    prompt: I am 35, live alone, and earn GBP 30,000. What benefits would I receive?
+    expected_tools:
+      - name: household_analysis
+        input_contains:
+          year: 2026
+        required_input_paths: [description]
+    forbidden_tools: [society_analysis]
+    offline_response:
+      tool_calls:
+        - name: household_analysis
+          input:
+            description: I am 35, live alone, and earn GBP 30,000.
+            year: 2026
+
+  - id: capability_trajectory_household_tax_outputs
+    suite: trajectory
+    description: A personal tax calculation uses household analysis and names each requested tax output.
+    prompt: How much tax would I pay on £50,000 of income?
+    expected_tools:
+      - name: household_analysis
+        input_contains:
+          requested_outputs:
+            - income tax
+            - national insurance contributions
+            - total tax
+        required_input_paths: [description]
+    forbidden_tools: [policy_information, society_analysis]
+    offline_response:
+      tool_calls:
+        - name: household_analysis
+          input:
+            description: A person with £50,000 of annual income.
+            requested_outputs:
+              - income tax
+              - national insurance contributions
+              - total tax
+
+  - id: capability_trajectory_household_reuses_explicit_artifact
+    suite: trajectory
+    description: An unambiguous correction to a completed household explicitly references its compatible typed artifact.
+    prompt: Recalculate that same household with my spouse aged 34 instead.
+    messages:
+      - role: user
+        content: Calculate tax for me and my spouse.
+      - role: assistant
+        content: The calculation completed from validated household artifact household-1.
+      - role: user
+        content: Recalculate that same household with my spouse aged 34 instead.
+    expected_tools:
+      - name: household_analysis
+        input_contains:
+          referenced_household_id: household-1
+        required_input_paths: [description]
+    forbidden_tools: [policy_information, society_analysis]
+    offline_response:
+      tool_calls:
+        - name: household_analysis
+          input:
+            description: My spouse is now 34; recalculate the same household.
+            referenced_household_id: household-1
+
+  - id: capability_trajectory_household_collective_income_follow_up
+    suite: trajectory
+    description: A collective-income household follow-up remains a household calculation request without requiring internal variable names.
+    prompt: What if I were married and we collectively made 70k?
+    messages:
+      - role: user
+        content: How much tax would I pay on £50,000 of income?
+      - role: assistant
+        content: What age should I use for this calculation?
+      - role: user
+        content: "26"
+      - role: assistant
+        content: The household tax calculation has completed.
+      - role: user
+        content: What if I were married and we collectively made 70k?
+    expected_tools:
+      - name: household_analysis
+        required_input_paths: [description]
+    forbidden_tools: [policy_information, society_analysis]
+    offline_response:
+      tool_calls:
+        - name: household_analysis
+          input:
+            description: Recalculate for the user and their spouse with £70,000 of collective employment income.
+            requested_outputs:
+              - income tax
+              - national insurance contributions
+              - total tax
+
+  - id: capability_trajectory_society_ordinary_language
+    suite: trajectory
+    description: A population-wide reform request uses society analysis from ordinary policy wording.
+    prompt: What would raising the personal allowance to GBP 15,000 do across the UK?
+    expected_tools:
+      - name: society_analysis
+        input_contains:
+          year: 2026
+          reform_instruction: Raise the personal allowance to GBP 15,000.
+    forbidden_tools: [household_analysis]
+    offline_response:
+      tool_calls:
+        - name: society_analysis
+          input:
+            reform_instruction: Raise the personal allowance to GBP 15,000.
+            year: 2026
+
+  - id: capability_trajectory_mixed_policy_and_household
+    suite: trajectory
+    description: A mixed formulation and household-impact request invokes both applicable capabilities.
+    prompt: How is Universal Credit calculated, and what would it be for a single 30-year-old earning GBP 18,000?
+    expected_tools:
+      - name: policy_information
+        required_input_paths: [question]
+      - name: household_analysis
+        required_input_paths: [description]
+    forbidden_tools: [society_analysis]
+    offline_response:
+      tool_calls:
+        - name: policy_information
+          input:
+            question: How is Universal Credit calculated?
+            year: 2026
+        - name: household_analysis
+          input:
+            description: A single 30-year-old earning GBP 18,000.
+            year: 2026

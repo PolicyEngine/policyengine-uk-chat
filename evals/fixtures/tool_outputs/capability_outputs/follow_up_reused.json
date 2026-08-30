@@ -1,0 +1,37 @@
+{
+  "status": "completed",
+  "value": {
+    "source_artifact_id": "society-result-1",
+    "result": {
+      "artifact_id": "society-result-1",
+      "provenance": {
+        "conversation_id": "eval-conversation",
+        "turn_id": "eval-turn",
+        "capability_id": "society_analysis",
+        "capability_version": "1",
+        "invocation_id": "society-invocation"
+      },
+      "year": 2026,
+      "policy_scenario_artifact_id": "scenario-1",
+      "scenario_revision": "reform-2026",
+      "catalogue_version": "5.0.1",
+      "dataset_version": "2024-25",
+      "calculation_engine_version": "5.0.1",
+      "default_profile_version": "1",
+      "calculated_output_ids": ["budgetary_impact", "winners_losers", "decile_impacts"],
+      "outputs": [
+        {
+          "output_id": "budgetary_impact",
+          "metric_id": "net_budgetary_impact",
+          "label": "Net budgetary impact",
+          "value": 1200000000,
+          "unit": "GBP/year"
+        }
+      ]
+    },
+    "reran_provider": false,
+    "narration_facts": [
+      {"label": "Net budgetary impact", "value": 1200000000, "unit": "GBP/year"}
+    ]
+  }
+}

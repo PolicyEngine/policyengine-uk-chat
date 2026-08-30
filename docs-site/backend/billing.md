@@ -107,10 +107,10 @@ service-role key (bypassing RLS). The key functions in
 - `record_usage(...)` — writes a row to the `token_usage` table and deducts the
   cost from the free tier first, then from the paid balance.
 
-When `BILLING_ENABLED=true`, the chat orchestrator calls these to debit usage as
-conversations run. The per-turn `done` SSE event then reports the turn's
-`cost_gbp` and the remaining balance. With billing disabled, the orchestrator
-does not create a Supabase client, enforce credit, or record usage.
+When `BILLING_ENABLED=true`, the public chat service calls these to debit usage
+as conversations run. The per-turn `done` SSE event then reports the turn's
+`cost_gbp` and the remaining balance. With billing disabled, the service does
+not create a Supabase client, enforce credit, or record usage.
 
 ## Endpoints
 
