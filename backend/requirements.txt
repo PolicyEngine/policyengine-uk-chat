@@ -4,7 +4,7 @@ alembic
 sqlmodel
 psycopg2-binary
 anthropic==0.125.0
-policyengine[uk]==5.2.0
+policyengine[uk]==5.3.0
 pandas
 pyyaml
 httpx
