@@ -262,6 +262,12 @@ def test_baseline_run_always_calculates_and_persists_complete_default_profile(
     result = outcome.value.result
     assert result.year == 2026
     assert result.default_profile_version == SOCIETY_DEFAULT_PROFILE_VERSION
+    assert result.dataset is not None
+    assert result.dataset.revision == result.dataset_version
+    assert result.dataset.logical_name
+    assert result.dataset.title == "Enhanced FRS 2024-25"
+    assert result.dataset.data_package_name == "policyengine-uk-data"
+    assert result.dataset.data_package_version
     assert result.calculated_output_ids == SOCIETY_DEFAULT_OUTPUTS
     assert {value.output_id for value in result.outputs} == set(
         SOCIETY_DEFAULT_OUTPUTS

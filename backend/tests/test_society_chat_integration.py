@@ -338,8 +338,14 @@ def test_ten_user_turn_population_conversations(
         "resolve_dataset",
         lambda: DatasetSpec(
             name="enhanced_frs_2024_25",
-            label="Enhanced FRS 2024-25",
+            title="Enhanced FRS 2024-25",
             uri="hf://example/enhanced_frs_2024_25.h5@1.56.16",
+            data_package_name="policyengine-uk-data",
+            data_package_version="1.56.16",
+            revision="1.56.16",
+            sha256="dataset-sha256",
+            certification_basis="legacy_compatible_model_package",
+            certified_for_model_version="2.90.2",
             row_level_access=False,
         ),
     )
@@ -591,6 +597,16 @@ def test_ten_user_turn_population_conversations(
     )
     assert len(persisted_results) == path.expected_society_runs
     assert all(result.dataset_version == "1.56.16" for result in persisted_results)
+    assert all(result.dataset is not None for result in persisted_results)
+    assert all(
+        result.dataset.logical_name == "enhanced_frs_2024_25"
+        and result.dataset.title == "Enhanced FRS 2024-25"
+        and result.dataset.data_package_name == "policyengine-uk-data"
+        and result.dataset.data_package_version == "1.56.16"
+        and result.dataset.revision == result.dataset_version
+        for result in persisted_results
+        if result.dataset is not None
+    )
 
     if path is HOUSEHOLD_TO_SOCIETY:
         identifiers = [identifier for identifier, _ in tool_calls]

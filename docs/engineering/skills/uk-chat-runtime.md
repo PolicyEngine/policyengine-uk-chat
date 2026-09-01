@@ -513,10 +513,14 @@ Population simulations omit the dataset selector when calling policyengine.py's
 managed-data API. The installed policyengine.py release therefore chooses its
 certified default UK dataset and resolves the corresponding URI and revision.
 UK Chat does not contain a dataset name or URI and does not enable unmanaged-data
-loading. Complete simulation objects and any record-level arrays exist only in
-the request-local `TurnResultStore`. Durable population artifacts contain
-aggregate values and the selected dataset name and revision as compatibility
-metadata only. There is no shared record-level population result cache.
+loading. It contains one presentation-only constant for the friendly dataset
+title. Complete simulation objects and any record-level arrays exist only in the
+request-local `TurnResultStore`. Durable population artifacts contain aggregate
+values plus typed dataset provenance from policyengine.py: the logical dataset
+name, data-package name and version, dataset revision, checksum, and certification
+metadata. Model-visible results and later-turn artifact summaries include that
+provenance and the friendly title. There is no shared record-level population
+result cache.
 
 ## Transferable state and persistence
 

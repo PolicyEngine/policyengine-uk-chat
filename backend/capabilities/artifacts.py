@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from typing import Literal, TypeAlias
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 Scalar: TypeAlias = str | int | float | bool | None
@@ -115,6 +115,17 @@ class RequestedOutputIssue(ImmutableModel):
     guidance: str
 
 
+class SocietyDatasetProvenance(ImmutableModel):
+    logical_name: str
+    title: str
+    data_package_name: str
+    data_package_version: str
+    revision: str
+    sha256: str | None = None
+    certification_basis: str | None = None
+    certified_for_model_version: str | None = None
+
+
 class SocietyAnalysisResultRef(ArtifactBase):
     artifact_type: Literal["society_analysis_result"] = "society_analysis_result"
     year: int
@@ -122,11 +133,20 @@ class SocietyAnalysisResultRef(ArtifactBase):
     scenario_revision: str
     catalogue_version: str
     dataset_version: str
+    dataset: SocietyDatasetProvenance | None = None
     calculation_engine_version: str
     default_profile_version: str
     calculated_output_ids: tuple[str, ...]
     outputs: tuple[AggregateValue, ...]
     requested_output_issues: tuple[RequestedOutputIssue, ...] = ()
+
+    @model_validator(mode="after")
+    def dataset_revision_matches_compatibility_version(
+        self,
+    ) -> SocietyAnalysisResultRef:
+        if self.dataset is not None and self.dataset.revision != self.dataset_version:
+            raise ValueError("dataset revision must match dataset_version")
+        return self
 
 
 class ChartPresentation(ImmutableModel):

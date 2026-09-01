@@ -3,18 +3,26 @@
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
 
+UK_SOCIETY_DATASET_TITLE = "Enhanced FRS 2024-25"
+
+
 @dataclass(frozen=True)
 class DatasetSpec:
     name: str
-    label: str
+    title: str
     uri: str
+    data_package_name: str
+    data_package_version: str
+    revision: str
     row_level_access: bool
+    sha256: str | None = None
+    certification_basis: str | None = None
+    certified_for_model_version: str | None = None
     notes: str | None = None
 
 
@@ -47,20 +55,56 @@ def resolve_dataset() -> DatasetSpec:
 
     manifest = _manifest_module()("uk")
     name = manifest.default_dataset
+    uri = manifest.default_dataset_uri
+    reference = manifest.datasets.get(name)
+    certified_artifact = manifest.certified_data_artifact
+    certification = manifest.certification
+    artifact_package = (
+        certified_artifact.data_package
+        if certified_artifact is not None
+        and certified_artifact.dataset == name
+        and certified_artifact.data_package is not None
+        else manifest.data_package
+    )
+    revision = reference.revision if reference is not None else None
+    if revision is None:
+        revision = _dataset_revision(uri)
+    certified_sha256 = (
+        certified_artifact.sha256
+        if certified_artifact is not None and certified_artifact.dataset == name
+        else None
+    )
+    sha256 = certified_sha256 or (
+        reference.sha256 if reference is not None else None
+    )
     return DatasetSpec(
         name=name,
-        label=_dataset_label(name),
-        uri=manifest.default_dataset_uri,
+        title=UK_SOCIETY_DATASET_TITLE,
+        uri=uri,
+        data_package_name=artifact_package.name,
+        data_package_version=artifact_package.version,
+        revision=revision,
         row_level_access=False,
+        sha256=sha256,
+        certification_basis=(
+            certification.compatibility_basis if certification is not None else None
+        ),
+        certified_for_model_version=(
+            certification.certified_for_model_version
+            if certification is not None
+            else None
+        ),
         notes="policyengine.py's certified default UK society dataset.",
     )
 
 
-def _dataset_label(name: str) -> str:
-    enhanced_frs = re.fullmatch(r"enhanced_frs_(\d{4})_(\d{2})", name)
-    if enhanced_frs is None:
-        return name
-    return f"Enhanced FRS {enhanced_frs.group(1)}-{enhanced_frs.group(2)}"
+def _dataset_revision(uri: str) -> str:
+    _source, separator, revision = uri.rpartition("@")
+    if not separator or not revision:
+        raise RuntimeError(
+            "policyengine.py's certified default dataset URI has no revision."
+        )
+    return revision
 
 
 def _managed_dataset_folder() -> str:

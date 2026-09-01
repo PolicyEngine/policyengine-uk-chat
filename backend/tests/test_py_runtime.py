@@ -15,6 +15,28 @@ def test_certified_default_dataset_metadata_comes_from_release_manifest(monkeypa
     manifest = SimpleNamespace(
         default_dataset="enhanced_frs_2024_25",
         default_dataset_uri=resolved_uri,
+        datasets={
+            "enhanced_frs_2024_25": SimpleNamespace(
+                revision="1.56.16",
+                sha256="manifest-sha256",
+            )
+        },
+        data_package=SimpleNamespace(
+            name="policyengine-uk-data",
+            version="1.56.16",
+        ),
+        certified_data_artifact=SimpleNamespace(
+            dataset="enhanced_frs_2024_25",
+            data_package=SimpleNamespace(
+                name="policyengine-uk-data",
+                version="1.56.16",
+            ),
+            sha256="certified-sha256",
+        ),
+        certification=SimpleNamespace(
+            compatibility_basis="legacy_compatible_model_package",
+            certified_for_model_version="2.90.2",
+        ),
     )
 
     def fake_manifest(country):
@@ -30,8 +52,14 @@ def test_certified_default_dataset_metadata_comes_from_release_manifest(monkeypa
 
     assert calls == ["uk"]
     assert spec.name == "enhanced_frs_2024_25"
-    assert spec.label == "Enhanced FRS 2024-25"
+    assert spec.title == "Enhanced FRS 2024-25"
     assert spec.uri == resolved_uri
+    assert spec.data_package_name == "policyengine-uk-data"
+    assert spec.data_package_version == "1.56.16"
+    assert spec.revision == "1.56.16"
+    assert spec.sha256 == "certified-sha256"
+    assert spec.certification_basis == "legacy_compatible_model_package"
+    assert spec.certified_for_model_version == "2.90.2"
     assert spec.row_level_access is False
 
 

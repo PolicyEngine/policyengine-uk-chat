@@ -9,12 +9,14 @@ from capabilities.artifacts import (
     PolicyChange,
     PolicyScenarioRef,
     SocietyAnalysisResultRef,
+    SocietyDatasetProvenance,
 )
 from capabilities.compatibility import (
     ArtifactRequirements,
     check_artifact_compatibility,
 )
 from chat.artifact_context import sanitized_artifact_summary
+from chat.capability_service import capability_result_for_model
 
 
 def provenance() -> ArtifactProvenance:
@@ -67,6 +69,16 @@ def test_compatibility_checks_only_declared_consumer_requirements():
         scenario_revision="revision-1",
         catalogue_version="catalogue-1",
         dataset_version="dataset-1",
+        dataset=SocietyDatasetProvenance(
+            logical_name="enhanced_frs_2024_25",
+            title="Enhanced FRS 2024-25",
+            data_package_name="policyengine-uk-data",
+            data_package_version="1.56.16",
+            revision="dataset-1",
+            sha256="dataset-sha256",
+            certification_basis="legacy_compatible_model_package",
+            certified_for_model_version="2.90.2",
+        ),
         calculation_engine_version="engine-1",
         default_profile_version="default-1",
         calculated_output_ids=("budgetary_impact",),
@@ -113,6 +125,17 @@ def test_compatibility_checks_only_declared_consumer_requirements():
     }
     summary = sanitized_artifact_summary(result)
     assert summary["artifact_type"] == "society_analysis_result"
+    assert summary["dataset_version"] == "dataset-1"
+    assert summary["dataset"] == {
+        "logical_name": "enhanced_frs_2024_25",
+        "title": "Enhanced FRS 2024-25",
+        "data_package_name": "policyengine-uk-data",
+        "data_package_version": "1.56.16",
+        "revision": "dataset-1",
+        "sha256": "dataset-sha256",
+        "certification_basis": "legacy_compatible_model_package",
+        "certified_for_model_version": "2.90.2",
+    }
     assert summary["outputs"] == (
         {
             "output_id": "budgetary_impact",
@@ -124,6 +147,39 @@ def test_compatibility_checks_only_declared_consumer_requirements():
         },
     )
     assert "provenance" not in summary
+    model_result = capability_result_for_model(
+        {
+            "status": "completed",
+            "value": {"result": result.model_dump(mode="json")},
+        }
+    )
+    model_dataset = model_result["value"]["result"]["dataset"]
+    assert model_dataset == summary["dataset"]
+    assert "uri" not in model_dataset
+
+
+def test_society_dataset_revision_must_match_compatibility_version():
+    with pytest.raises(ValidationError, match="dataset revision must match"):
+        SocietyAnalysisResultRef(
+            artifact_id="result-mismatched-dataset",
+            provenance=provenance(),
+            year=2026,
+            policy_scenario_artifact_id="scenario-1",
+            scenario_revision="revision-1",
+            catalogue_version="catalogue-1",
+            dataset_version="dataset-1",
+            dataset=SocietyDatasetProvenance(
+                logical_name="enhanced_frs_2024_25",
+                title="Enhanced FRS 2024-25",
+                data_package_name="policyengine-uk-data",
+                data_package_version="1.56.16",
+                revision="dataset-2",
+            ),
+            calculation_engine_version="engine-1",
+            default_profile_version="default-1",
+            calculated_output_ids=(),
+            outputs=(),
+        )
 
 
 @pytest.mark.parametrize(

@@ -13,6 +13,7 @@ from capabilities.artifacts import (
     PolicyScenarioRef,
     RequestedOutputIssue,
     SocietyAnalysisResultRef,
+    SocietyDatasetProvenance,
 )
 from capabilities.contracts import (
     ArtifactContract,
@@ -60,7 +61,21 @@ def _package_version(package: str) -> str:
 
 
 def current_dataset_version() -> str:
-    return resolve_dataset().uri.rsplit("@", 1)[-1]
+    return resolve_dataset().revision
+
+
+def current_dataset_provenance() -> SocietyDatasetProvenance:
+    dataset = resolve_dataset()
+    return SocietyDatasetProvenance(
+        logical_name=dataset.name,
+        title=dataset.title,
+        data_package_name=dataset.data_package_name,
+        data_package_version=dataset.data_package_version,
+        revision=dataset.revision,
+        sha256=dataset.sha256,
+        certification_basis=dataset.certification_basis,
+        certified_for_model_version=dataset.certified_for_model_version,
+    )
 
 
 class StrictModel(BaseModel):
@@ -263,6 +278,7 @@ class SocietyAnalysisCapability(Capability[SocietyAnalysisInput, SocietyAnalysis
             )
             for issue in selected.issues
         )
+        dataset = current_dataset_provenance()
         result = SocietyAnalysisResultRef(
             provenance=ArtifactProvenance(
                 conversation_id=context.conversation_id,
@@ -280,7 +296,8 @@ class SocietyAnalysisCapability(Capability[SocietyAnalysisInput, SocietyAnalysis
             policy_scenario_artifact_id=scenario.artifact_id,
             scenario_revision=scenario.scenario_revision,
             catalogue_version=scenario.catalogue_version,
-            dataset_version=current_dataset_version(),
+            dataset_version=dataset.revision,
+            dataset=dataset,
             calculation_engine_version=scenario.calculation_engine_version,
             default_profile_version=SOCIETY_DEFAULT_PROFILE_VERSION,
             calculated_output_ids=calculated_ids,

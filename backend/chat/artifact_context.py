@@ -51,10 +51,11 @@ def sanitized_artifact_summary(artifact: ArtifactBase) -> dict[str, object]:
             "outputs": tuple(output.model_dump(mode="json") for output in artifact.outputs),
         }
     if isinstance(artifact, SocietyAnalysisResultRef):
-        return {
+        summary = {
             **base,
             "year": artifact.year,
             "scenario_revision": artifact.scenario_revision,
+            "dataset_version": artifact.dataset_version,
             "default_profile_version": artifact.default_profile_version,
             "outputs": tuple(output.model_dump(mode="json") for output in artifact.outputs),
             "requested_output_issues": tuple(
@@ -62,6 +63,9 @@ def sanitized_artifact_summary(artifact: ArtifactBase) -> dict[str, object]:
                 for issue in artifact.requested_output_issues
             ),
         }
+        if artifact.dataset is not None:
+            summary["dataset"] = artifact.dataset.model_dump(mode="json")
+        return summary
     if isinstance(artifact, ChartArtifactRef):
         return {
             **base,

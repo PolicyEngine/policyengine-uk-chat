@@ -244,8 +244,11 @@ def test_validate_household_rejects_non_categorical_country_values():
 def test_society_simulation_result_handle_feeds_derivative_and_chart_tools(monkeypatch):
     dataset = DatasetSpec(
         name="enhanced_frs_2024_25",
-        label="Enhanced FRS 2024-25",
+        title="Enhanced FRS 2024-25",
         uri="hf://policyengine/uk/enhanced_frs_2024_25",
+        data_package_name="policyengine-uk-data",
+        data_package_version="1.56.16",
+        revision="1.56.16",
         row_level_access=False,
     )
     payload = SocietySimulationRun(
@@ -297,8 +300,11 @@ def test_society_simulation_defaults_the_year_and_preserves_explicit_years(
             year=kwargs["year"],
             dataset=DatasetSpec(
                 name="enhanced_frs_2024_25",
-                label="Enhanced FRS 2024-25",
+                title="Enhanced FRS 2024-25",
                 uri="hf://example",
+                data_package_name="policyengine-uk-data",
+                data_package_version="1.56.16",
+                revision="1.56.16",
                 row_level_access=False,
             ),
             reform_applied=False,
@@ -330,8 +336,11 @@ def test_society_simulation_normalizes_unset_reform_values(monkeypatch):
     captured = {}
     dataset = DatasetSpec(
         name="enhanced_frs_2024_25",
-        label="Enhanced FRS 2024-25",
+        title="Enhanced FRS 2024-25",
         uri="hf://example",
+        data_package_name="policyengine-uk-data",
+        data_package_version="1.56.16",
+        revision="1.56.16",
         row_level_access=False,
     )
     monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda: dataset)
@@ -357,8 +366,11 @@ def test_society_simulation_uses_native_default_dataset(monkeypatch):
     captured = {}
     dataset = DatasetSpec(
         name="enhanced_frs_2024_25",
-        label="Enhanced FRS 2024-25",
+        title="Enhanced FRS 2024-25",
         uri="hf://example/enhanced_frs_2024_25.h5@1.56.16",
+        data_package_name="policyengine-uk-data",
+        data_package_version="1.56.16",
+        revision="1.56.16",
         row_level_access=False,
     )
     monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda: dataset)
