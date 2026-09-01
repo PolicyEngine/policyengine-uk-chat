@@ -60,8 +60,6 @@ def test_simulation_schema_uses_current_year_and_fixed_dataset():
     assert DEFAULT_SIMULATION_YEAR == date.today().year
     assert UK_CHAT_DATASET.name == "enhanced_frs_2024_25"
     assert UK_CHAT_DATASET.label == "Enhanced FRS 2024-25"
-    assert UK_CHAT_DATASET.uri.startswith("hf://")
-    assert "@" in UK_CHAT_DATASET.uri
     society_schema = _tool("run_society_simulation")["input_schema"]
     assert society_schema["properties"]["year"]["default"] == DEFAULT_SIMULATION_YEAR
     assert "dataset" not in society_schema["properties"]
@@ -365,7 +363,7 @@ def test_society_simulation_uses_fixed_dataset(monkeypatch):
     dataset = DatasetSpec(
         name=UK_CHAT_DATASET.name,
         label=UK_CHAT_DATASET.label,
-        uri=UK_CHAT_DATASET.uri,
+        uri="hf://example/enhanced_frs_2024_25.h5@1.56.16",
         row_level_access=False,
     )
     monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda: dataset)

@@ -203,16 +203,22 @@ CI; the frontend upload runs after the production build and remains non-blocking
 Repository branch protection must explicitly require the backend Codecov status
 after its first upload creates that check.
 
-For an authenticated end-to-end check of the Enhanced FRS society lifecycle
-and every official derivative adapter, run:
+For an authenticated end-to-end check that materializes the managed Enhanced
+FRS data, runs a real baseline/reform population calculation, and exercises
+every official derivative adapter, run:
 
 ```bash
-HUGGING_FACE_TOKEN=... RUN_DATA_EVALS=1 PYTHONPATH=backend \
-  python -m pytest backend/tests/test_data_integration.py
+HUGGING_FACE_TOKEN=... make test-society-live
 ```
 
 This test is deliberately excluded from the default suite because it downloads
 managed data and runs a full baseline/reform society simulation.
+
+The default backend suite separately runs three SQL-backed ten-user-turn chat
+paths that use deterministic provider substitutes. They cover repeated
+population calculations, optional population outputs, and a transition from a
+household calculation to population analysis without making external model or
+dataset calls.
 
 If a command cannot run locally because dependencies or credentials are missing,
 state that explicitly in the handoff.

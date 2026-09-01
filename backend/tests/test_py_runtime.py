@@ -7,12 +7,16 @@ from engine import py_runtime
 from engine.constants import UK_CHAT_DATASET
 
 
-def test_fixed_dataset_resolves_pinned_release_reference(monkeypatch):
+def test_fixed_dataset_name_resolves_through_release_manifest(monkeypatch):
     calls = []
+    resolved_uri = (
+        "hf://policyengine/policyengine-uk-data-private/"
+        "enhanced_frs_2024_25.h5@1.56.16"
+    )
 
     def fake_resolve(country, reference):
         calls.append((country, reference))
-        return reference
+        return resolved_uri
 
     monkeypatch.setattr(py_runtime, "_manifest_module", lambda: fake_resolve)
     py_runtime.resolve_dataset.cache_clear()
@@ -21,19 +25,19 @@ def test_fixed_dataset_resolves_pinned_release_reference(monkeypatch):
     finally:
         py_runtime.resolve_dataset.cache_clear()
 
-    assert calls == [("uk", UK_CHAT_DATASET.uri)]
+    assert calls == [("uk", UK_CHAT_DATASET.name)]
     assert spec.name == UK_CHAT_DATASET.name
     assert spec.label == UK_CHAT_DATASET.label
-    assert spec.uri == UK_CHAT_DATASET.uri
+    assert spec.uri == resolved_uri
     assert spec.row_level_access is False
 
 
-def test_managed_dataset_materializes_resolved_reference(monkeypatch):
+def test_managed_dataset_materializes_manifest_name(monkeypatch):
     calls = []
     spec = py_runtime.DatasetSpec(
         name=UK_CHAT_DATASET.name,
         label="Enhanced FRS 2024-25",
-        uri=UK_CHAT_DATASET.uri,
+        uri="hf://example/enhanced_frs_2024_25.h5@1.56.16",
         row_level_access=False,
     )
 
@@ -47,7 +51,7 @@ def test_managed_dataset_materializes_resolved_reference(monkeypatch):
 
     assert py_runtime.managed_dataset(year=2026) == "dataset"
     assert calls == [
-        (UK_CHAT_DATASET.uri, 2026, "/tmp/policyengine-uk-chat-data")
+        (UK_CHAT_DATASET.name, 2026, "/tmp/policyengine-uk-chat-data")
     ]
 
 

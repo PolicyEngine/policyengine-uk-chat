@@ -22,7 +22,8 @@ def _execute(name: str, tool_input: dict, context) -> dict:
     return result
 
 
-def test_enhanced_frs_full_society_derivative_lifecycle():
+@pytest.fixture(scope="module")
+def live_society_run():
     context = new_tool_context("enhanced-frs-integration")
     simulation = _execute(
         "run_society_simulation",
@@ -34,6 +35,21 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
         },
         context,
     )
+    return context, simulation
+
+
+def test_live_society_simulation_smoke(live_society_run):
+    """Materialize and run one real managed-data baseline/reform pair."""
+
+    _context, simulation = live_society_run
+
+    assert simulation["status"] == "success"
+    assert simulation["year"] == 2026
+    assert simulation["result_id"].startswith("society_simulation_")
+
+
+def test_enhanced_frs_full_society_derivative_lifecycle(live_society_run):
+    context, simulation = live_society_run
     simulation_id = simulation["result_id"]
 
     budget = _execute(

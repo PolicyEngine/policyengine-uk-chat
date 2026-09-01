@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 from functools import lru_cache
+from pathlib import PurePosixPath
 from typing import Any
 
 from engine.constants import DatasetConfig, UK_CHAT_DATASET
@@ -46,8 +47,11 @@ def uk_model_version():
 def resolve_dataset() -> DatasetSpec:
     """Resolve UK Chat's fixed dataset to its managed reference."""
 
-    uri = _manifest_module()("uk", UK_CHAT_DATASET.uri)
-    resolved = DatasetConfig(uri=uri)
+    uri = _manifest_module()("uk", UK_CHAT_DATASET.name)
+    resolved_name = PurePosixPath(uri.rsplit("@", 1)[0]).name.removesuffix(
+        ".h5"
+    )
+    resolved = DatasetConfig(name=resolved_name)
     return DatasetSpec(
         name=resolved.name,
         label=resolved.label,
@@ -98,7 +102,7 @@ def managed_dataset(*, year: int):
     """Return UK Chat's fixed policyengine.py Dataset ready for Simulation."""
 
     spec = resolve_dataset()
-    return _managed_dataset(spec.uri, year, _managed_dataset_folder())
+    return _managed_dataset(spec.name, year, _managed_dataset_folder())
 
 
 def managed_simulation_pair(

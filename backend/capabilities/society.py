@@ -25,7 +25,7 @@ from capabilities.contracts import (
 )
 from capabilities.input_resolution import InputSource, resolve_policy_year
 from capabilities.policy_reform import PolicyReformOutput
-from engine.constants import UK_CHAT_DATASET
+from engine.py_runtime import resolve_dataset
 from tools.analysis_support import (
     ExtractResultFindingsOutput,
     NumericalFact,
@@ -60,7 +60,7 @@ def _package_version(package: str) -> str:
 
 
 def current_dataset_version() -> str:
-    return UK_CHAT_DATASET.uri.rsplit("@", 1)[-1]
+    return resolve_dataset().uri.rsplit("@", 1)[-1]
 
 
 class StrictModel(BaseModel):
