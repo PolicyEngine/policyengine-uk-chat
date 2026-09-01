@@ -191,6 +191,9 @@ def test_context_interpreter_uses_one_declarative_fact_claim_route(monkeypatch):
     assert "every supported assertion exactly once" in system
     assert "do not infer an income source" in system
     assert "apply a default" in system
+    assert "societal impact" in system
+    assert "not metric names" in system
+    assert "must not create an analysis.requested_outputs fact" in system
     assert '"current_message":"I am 42"' in calls[0]["messages"][0]["content"]
 
 

@@ -13,6 +13,7 @@ from capabilities.policy_information import (
     PolicyInformationCapability,
 )
 from capabilities.policy_reform import (
+    AnthropicReformCandidateResolver,
     PolicyReformCapability,
     ReformMeaning,
     ReformResolutionDecision,
@@ -68,7 +69,7 @@ def _resolved(path="gov.example.amount", value=15_000):
         summary="Set Example amount to £15,000.",
         reform={path: value},
         meaning=ReformMeaning(
-            target=path,
+            parameter_path=path,
             operation="set",
             value=value,
             unit="currency-GBP",
@@ -218,6 +219,23 @@ def _invoke(composition, context, identifier, payload):
     )
 
 
+def test_reform_resolution_schema_constrains_the_semantic_parameter_path():
+    schema = AnthropicReformCandidateResolver._resolution_schema(
+        (
+            {"path": "gov.example.amount", "label": "Example amount"},
+            {"path": "gov.example.other", "label": "Other amount"},
+        )
+    )
+
+    meaning = schema["$defs"]["ReformMeaning"]
+    properties = meaning["properties"]
+    assert "target" not in properties
+    assert properties["parameter_path"]["enum"] == [
+        "gov.example.amount",
+        "gov.example.other",
+    ]
+
+
 def test_policy_information_uses_ordinary_language_and_fixed_year(monkeypatch):
     resolver = FakeResolver([])
     composition, context, _artifacts, calls = _runtime(monkeypatch, resolver)
@@ -362,6 +380,39 @@ def test_final_value_reform_envelope_is_normalized_to_catalogue_mapping(monkeypa
     assert outcome.value.scenario.verified_changes[0].value == 15_000
 
 
+def test_inconsistent_parameter_mapping_is_repaired_without_user_clarification(
+    monkeypatch,
+):
+    meaning = _resolved().meaning.model_copy(
+        update={"operation": "increase", "value": 5_000}
+    )
+    inconsistent = _resolved().model_copy(
+        update={
+            "reform": {"gov.example.other": 15_000},
+            "meaning": meaning,
+        }
+    )
+    corrected = inconsistent.model_copy(
+        update={"reform": {"gov.example.amount": 15_000}}
+    )
+    resolver = FakeResolver([inconsistent], corrections=[corrected])
+    composition, context, artifacts, _calls = _runtime(monkeypatch, resolver)
+
+    outcome = _invoke(
+        composition,
+        context,
+        "policy_reform",
+        {"instruction": "Increase the Example amount by £5,000"},
+    )
+
+    assert isinstance(outcome, Completed)
+    assert len(resolver.correction_calls) == 1
+    assert outcome.value.scenario.verified_changes[0].parameter_path == (
+        "gov.example.amount"
+    )
+    assert artifacts.waiting == []
+
+
 def test_unknown_catalogue_path_and_missing_magnitude_never_create_scenarios(
     monkeypatch,
 ):
@@ -376,7 +427,7 @@ def test_unknown_catalogue_path_and_missing_magnitude_never_create_scenarios(
         {"instruction": "Set an invented amount to £15,000"},
     )
 
-    assert isinstance(outcome, NeedsInput)
+    assert isinstance(outcome, Failed)
     assert artifacts.artifacts == []
     assert "validate_reform" not in [identifier for identifier, _payload in calls]
 
@@ -452,7 +503,7 @@ def test_representation_correction_runs_at_most_once_and_cannot_change_meaning(
         "policy_reform",
         {"instruction": "Set the Example amount to £15,000"},
     )
-    assert isinstance(outcome, NeedsInput)
+    assert isinstance(outcome, Failed)
     assert artifacts.artifacts == []
 
 

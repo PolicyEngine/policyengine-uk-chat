@@ -48,6 +48,12 @@ _OUTPUT_ALIASES = {
     "inequality": ("inequality", "gini", "income share", "distribution"),
 }
 
+_DEFAULT_PROFILE_REQUEST = re.compile(
+    r"^(?:(?:overall )?(?:societal|society(?: wide)?|population(?: wide)?) "
+    r"(?:impact|impacts|effect|effects|result|results)|overall impact|"
+    r"impact on (?:all of )?(?:society|the population))$"
+)
+
 
 class SelectSupportedOutputsTool(
     Tool[SelectSupportedOutputsInput, SelectSupportedOutputsOutput]
@@ -88,7 +94,9 @@ class SelectSupportedOutputsTool(
         selected = list(DEFAULT_SOCIETY_OUTPUTS)
         issues: list[RequestedOutputIssue] = []
         for request in tool_input.requested_outputs:
-            normalized = " ".join(request.casefold().replace("_", " ").split())
+            normalized = " ".join(
+                request.casefold().replace("_", " ").replace("-", " ").split()
+            )
             exact = next(
                 (
                     output_id
@@ -119,7 +127,7 @@ class SelectSupportedOutputsTool(
                         guidance="Please distinguish: " + ", ".join(matches) + ".",
                     )
                 )
-            else:
+            elif not _DEFAULT_PROFILE_REQUEST.fullmatch(normalized):
                 issues.append(
                     RequestedOutputIssue(
                         request=request,

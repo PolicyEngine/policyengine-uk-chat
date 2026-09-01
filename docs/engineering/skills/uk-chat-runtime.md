@@ -354,8 +354,14 @@ Capability-specific and runtime tools add `assess_relevance`,
 `resolve_reform` performs catalogue search, one structured candidate decision,
 private deterministic validation, and at most one representation-only
 correction. It cannot introduce an unreturned catalogue path or change policy
-target, operation, value, unit, effective date, population, or jurisdiction.
-Semantic uncertainty returns focused clarification.
+parameter path, operation, value, unit, effective date, population, or
+jurisdiction. The model tool schema restricts `meaning.parameter_path` to the
+paths returned by the catalogue, while friendly labels are derived from the
+catalogue by the server. A mismatch between the semantic parameter path and the
+reform mapping receives at most one internal representation correction and then
+fails as inconsistent structured output; it is never presented as a user
+clarification. Genuine semantic uncertainty returned by the resolver still
+produces a focused clarification.
 
 ## Input precedence and calculation behavior
 
@@ -380,6 +386,11 @@ household membership and relationships, children, rent, Council Tax, UK
 country, policy year, requested outputs, and reform instruction. It also
 retains medical expenses as a conversational fact even though the current
 household calculation adapter does not consume it.
+
+Requested-output extraction records only explicitly named calculation metrics.
+Generic scope phrases such as “societal impact”, “society-wide impact”,
+“population impact”, and “overall impact” select population analysis and its
+default output profile; they do not create an `analysis.requested_outputs` fact.
 
 The registry may materialize an additional fact definition only from a verified
 PolicyEngine catalogue record. Its key is derived from the catalogue entity and
@@ -508,6 +519,10 @@ Supported `requested_outputs` are additive and deduplicated against those
 defaults. Ambiguous or unsupported requests are retained as typed issues and
 must not be described as calculated. Every rerun recalculates the complete
 default profile plus supported additions.
+The output selector also treats normalized generic population-scope phrases as
+the default profile without producing an unsupported-output issue. This
+provides deterministic handling for older retained context or imperfect model
+extraction.
 
 Population simulations omit the dataset selector when calling policyengine.py's
 managed-data API. The installed policyengine.py release therefore chooses its

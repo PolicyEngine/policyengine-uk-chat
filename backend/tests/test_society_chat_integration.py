@@ -6,6 +6,7 @@ import asyncio
 from dataclasses import dataclass
 from decimal import Decimal
 import json
+from types import SimpleNamespace
 
 import pytest
 from sqlmodel import SQLModel, create_engine
@@ -25,6 +26,7 @@ from capabilities.household_input import (
     PersonEvidence,
 )
 from capabilities.policy_reform import (
+    AnthropicReformCandidateResolver,
     PolicyReformCapability,
     PolicyReformInput,
     ReformMeaning,
@@ -32,6 +34,7 @@ from capabilities.policy_reform import (
     ReformResolutionKind,
     ResolveReformTool,
 )
+import capabilities.policy_reform as policy_reform_module
 from capabilities.relevance import (
     AssessRelevanceTool,
     ConversationRelevanceCapability,
@@ -75,6 +78,7 @@ class ConversationPath:
     actions: tuple[CapabilityAction, ...]
     expected_society_runs: int
     expected_compute_tools: frozenset[str]
+    use_model_backed_reform: bool = False
 
 
 class RelevantAssessor:
@@ -96,7 +100,7 @@ class FixedReformResolver:
             summary="Set the UK basic income-tax rate to 22%.",
             reform={"gov.hmrc.income_tax.rates.uk[0].rate": 0.22},
             meaning=ReformMeaning(
-                target="gov.hmrc.income_tax.rates.uk[0].rate",
+                parameter_path="gov.hmrc.income_tax.rates.uk[0].rate",
                 operation="set",
                 value=0.22,
                 unit="ratio",
@@ -108,6 +112,65 @@ class FixedReformResolver:
 
     async def correct_representation(self, **kwargs):
         raise AssertionError(f"No representation correction expected: {kwargs}")
+
+
+class SchemaConstrainedResolverMessages:
+    """Return a valid Basic Rate reform through the production resolver adapter."""
+
+    def __init__(self) -> None:
+        self.calls = []
+
+    async def create(self, **kwargs):
+        self.calls.append(kwargs)
+        assert "meaning.parameter_path" in kwargs["system"]
+        assert "friendly label" in kwargs["system"]
+        schema = kwargs["tools"][0]["input_schema"]
+        meaning_properties = schema["$defs"]["ReformMeaning"]["properties"]
+        assert "target" not in meaning_properties
+        assert meaning_properties["parameter_path"]["enum"] == [
+            "gov.hmrc.income_tax.rates.uk[0].rate",
+            "gov.hmrc.income_tax.rates.savings.basic",
+        ]
+        request = json.loads(kwargs["messages"][0]["content"])
+        assert request["instruction"] == "raising the Basic Rate 2pp"
+        assert request["representation_correction"] is None
+        return SimpleNamespace(
+            content=[
+                SimpleNamespace(
+                    type="tool_use",
+                    name="submit_reform_resolution",
+                    input={
+                        "outcome": "resolved",
+                        "summary": "Raise the UK basic income-tax rate to 22%.",
+                        "reform": {
+                            "gov.hmrc.income_tax.rates.uk[0].rate": 0.22,
+                        },
+                        "meaning": {
+                            "parameter_path": (
+                                "gov.hmrc.income_tax.rates.uk[0].rate"
+                            ),
+                            "operation": "increase",
+                            "value": 0.02,
+                            "unit": "percentage points",
+                            "effective_date": "2026-01-01",
+                            "population": "UK income-tax payers",
+                            "jurisdiction": "United Kingdom",
+                        },
+                    },
+                )
+            ],
+            usage=SimpleNamespace(
+                input_tokens=100,
+                output_tokens=50,
+                cache_creation_input_tokens=0,
+                cache_read_input_tokens=0,
+            ),
+        )
+
+
+class SchemaConstrainedResolverClient:
+    def __init__(self) -> None:
+        self.messages = SchemaConstrainedResolverMessages()
 
 
 class FixedHouseholdAssembler:
@@ -449,7 +512,42 @@ POPULATION_OUTPUT_VARIANTS = ConversationPath(
 )
 
 
-PATHS = (BASELINE_TO_REFORM, HOUSEHOLD_TO_SOCIETY, POPULATION_OUTPUT_VARIANTS)
+BASIC_RATE_PARAMETER_PATH_REGRESSION = ConversationPath(
+    name="basic-rate-parameter-path-regression",
+    turns=(
+        "What's the impact of raising the Basic Rate 2pp on all of society?",
+        "Run that complete population analysis again.",
+        "Recalculate the population-wide fiscal impact.",
+        "Run the winners-and-losers calculation again.",
+        "Recalculate the income-decile impacts.",
+        "Run another complete population calculation.",
+        "Repeat the population analysis for the same reform.",
+        "Calculate the complete default population profile again.",
+        "Run one more society-wide calculation.",
+        "Finish with a final complete population analysis.",
+    ),
+    actions=tuple(
+        _society_action("raising the Basic Rate 2pp", "societal_impact")
+        for _ in range(10)
+    ),
+    expected_society_runs=10,
+    expected_compute_tools=frozenset(
+        {
+            "compute_budgetary_impact",
+            "compute_winners_losers",
+            "compute_decile_impacts",
+        }
+    ),
+    use_model_backed_reform=True,
+)
+
+
+PATHS = (
+    BASELINE_TO_REFORM,
+    HOUSEHOLD_TO_SOCIETY,
+    POPULATION_OUTPUT_VARIANTS,
+    BASIC_RATE_PARAMETER_PATH_REGRESSION,
+)
 ALL_SOCIETY_COMPUTE_TOOLS = frozenset(
     {
         "compute_budgetary_impact",
@@ -525,21 +623,30 @@ def test_ten_user_turn_population_conversations(
                 ],
             }
         if identifier == "list_reform_targets":
+            targets = [
+                {
+                    "path": "gov.hmrc.income_tax.rates.uk[0].rate",
+                    "label": "Basic rate",
+                }
+            ]
+            if path.use_model_backed_reform:
+                targets.append(
+                    {
+                        "path": "gov.hmrc.income_tax.rates.savings.basic",
+                        "label": "Savings basic rate",
+                    }
+                )
             return {
                 "status": "success",
-                "targets": [
-                    {
-                        "path": "gov.hmrc.income_tax.rates.uk[0].rate",
-                        "label": "Basic rate",
-                    }
-                ],
+                "targets": targets,
             }
         if identifier == "get_parameter":
+            savings = payload["path"].endswith("savings.basic")
             return {
                 "status": "success",
                 "parameter": {
                     "path": payload["path"],
-                    "label": "Basic rate",
+                    "label": "Savings basic rate" if savings else "Basic rate",
                     "unit": "ratio",
                     "value": 0.20,
                 },
@@ -611,11 +718,21 @@ def test_ten_user_turn_population_conversations(
     )
     artifacts = RepositoryArtifactAccess(capability_repository)
     trace_repository = SQLInvocationTraceRepository(engine=engine)
+    resolver_client = None
+    reform_resolver = FixedReformResolver()
+    if path.use_model_backed_reform:
+        resolver_client = SchemaConstrainedResolverClient()
+        monkeypatch.setattr(
+            policy_reform_module,
+            "get_async_client",
+            lambda: resolver_client,
+        )
+        reform_resolver = AnthropicReformCandidateResolver()
     composition = compose_runtime(
         tools=(
             *build_dispatch_tools(),
             AssessRelevanceTool(RelevantAssessor()),
-            ResolveReformTool(FixedReformResolver()),
+            ResolveReformTool(reform_resolver),
             AssembleHouseholdCandidateTool(FixedHouseholdAssembler()),
             SelectSupportedOutputsTool(),
             ExtractResultFindingsTool(),
@@ -675,6 +792,12 @@ def test_ten_user_turn_population_conversations(
         "calculation failed" not in turn.content.casefold()
         for turn in completed_turns
     )
+    assert all(
+        "does not match" not in turn.content.casefold()
+        for turn in completed_turns
+    )
+    if resolver_client is not None:
+        assert len(resolver_client.messages.calls) == path.expected_society_runs
 
     society_calls = [
         payload
@@ -717,12 +840,31 @@ def test_ten_user_turn_population_conversations(
         and trace.identifier == "verify_numerical_response"
         for trace in traces
     )
+    if path is BASIC_RATE_PARAMETER_PATH_REGRESSION:
+        selections = [
+            trace for trace in traces if trace.identifier == "select_supported_outputs"
+        ]
+        assert len(selections) == 10
+        assert all(
+            trace.debug_input == {"requested_outputs": ["societal_impact"]}
+            and trace.debug_output == {
+                "output_ids": [
+                    "budgetary_impact",
+                    "winners_losers",
+                    "decile_impacts",
+                ],
+                "issues": [],
+            }
+            for trace in selections
+        )
 
     persisted_results = capability_repository.find_artifacts(
         path.name,
         SocietyAnalysisResultRef,
     )
     assert len(persisted_results) == path.expected_society_runs
+    if path is BASIC_RATE_PARAMETER_PATH_REGRESSION:
+        assert all(not result.requested_output_issues for result in persisted_results)
     assert all(result.dataset_version == "1.56.16" for result in persisted_results)
     assert all(result.dataset is not None for result in persisted_results)
     assert all(

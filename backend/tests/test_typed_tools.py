@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from capabilities.composition import compose_runtime
 from capabilities.contracts import Capability, CapabilitySpec, Completed
 from tools.analysis_support import (
+    DEFAULT_SOCIETY_OUTPUTS,
     ExtractResultFindingsTool,
     NumericalFact,
     SelectSupportedOutputsTool,
@@ -349,6 +350,7 @@ def test_supported_output_selection_uses_registry_defaults_and_typed_issues():
             "select_supported_outputs",
             {
                 "requested_outputs": [
+                    "societal_impact",
                     "poverty rate",
                     "budget cost",
                     "Canadian GDP",
@@ -367,6 +369,35 @@ def test_supported_output_selection_uses_registry_defaults_and_typed_issues():
     )
     assert output.issues[0].request == "Canadian GDP"
     assert output.issues[0].kind == "unsupported"
+
+
+@pytest.mark.parametrize(
+    "scope_phrase",
+    (
+        "societal_impact",
+        "society-wide impact",
+        "population impact",
+        "impact on all of society",
+        "overall impact",
+    ),
+)
+def test_population_scope_phrases_select_the_default_profile_without_issues(
+    scope_phrase,
+):
+    composition = _composition(SelectSupportedOutputsTool())
+    context = _context(composition).for_capability("tool_caller")
+
+    output = asyncio.run(
+        composition.executor.invoke_tool(
+            "select_supported_outputs",
+            {"requested_outputs": [scope_phrase]},
+            caller=CallerType.CAPABILITY,
+            context=context,
+        )
+    )
+
+    assert output.output_ids == DEFAULT_SOCIETY_OUTPUTS
+    assert output.issues == ()
 
 
 def test_findings_project_only_validated_aggregate_values():

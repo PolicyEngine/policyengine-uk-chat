@@ -64,7 +64,7 @@ class FakeReformResolver:
             summary="Set Example amount to £15,000.",
             reform={"gov.example.amount": 15_000},
             meaning=ReformMeaning(
-                target="gov.example.amount",
+                parameter_path="gov.example.amount",
                 operation="set",
                 value=15_000,
                 unit="currency-GBP",
