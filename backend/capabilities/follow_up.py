@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 from capabilities.artifacts import (
@@ -46,7 +48,8 @@ class AnalysisFollowUpOutput(StrictModel):
     source_artifact_id: str
     result: HouseholdResultRef | SocietyAnalysisResultRef
     reran_provider: bool = False
-    narration_facts: tuple[NumericalFact, ...]
+    narration_facts: tuple[NumericalFact, ...] = ()
+    numerical_verification: Literal["disabled"] | None = None
 
 
 class AnalysisFollowUpCapability(
@@ -168,27 +171,39 @@ class AnalysisFollowUpCapability(
                 result = rerun.value.result
                 reran = True
 
-        extracted = await context.invoke_tool(
-            "extract_result_findings",
-            {
-                "outputs": [
-                    output.model_dump(mode="json") for output in result.outputs
-                ]
-            },
-        )
-        if not isinstance(extracted, ExtractResultFindingsOutput):
-            raise TypeError("Follow-up finding extraction returned an incompatible result.")
-        facts = tuple(
-            NumericalFact(label=finding.label, value=finding.value, unit=finding.unit)
-            for finding in extracted.findings
-            if finding.value is not None
-        )
+        facts: tuple[NumericalFact, ...] = ()
+        numerical_verification = None
+        if isinstance(result, SocietyAnalysisResultRef):
+            numerical_verification = "disabled"
+        else:
+            extracted = await context.invoke_tool(
+                "extract_result_findings",
+                {
+                    "outputs": [
+                        output.model_dump(mode="json") for output in result.outputs
+                    ]
+                },
+            )
+            if not isinstance(extracted, ExtractResultFindingsOutput):
+                raise TypeError(
+                    "Follow-up finding extraction returned an incompatible result."
+                )
+            facts = tuple(
+                NumericalFact(
+                    label=finding.label,
+                    value=finding.value,
+                    unit=finding.unit,
+                )
+                for finding in extracted.findings
+                if finding.value is not None
+            )
         return Completed(
             value=AnalysisFollowUpOutput(
                 source_artifact_id=source.artifact_id,
                 result=result,
                 reran_provider=reran,
                 narration_facts=facts,
+                numerical_verification=numerical_verification,
             )
         )
 

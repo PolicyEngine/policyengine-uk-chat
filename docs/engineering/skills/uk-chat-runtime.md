@@ -522,6 +522,13 @@ metadata. Model-visible results and later-turn artifact summaries include that
 provenance and the friendly title. There is no shared record-level population
 result cache.
 
+Each population derivative has an explicit validated projection into the
+durable aggregate artifact. Validation rejects non-finite values, incomplete or
+duplicate decile/group collections, out-of-range shares and rates, and invalid
+winner/loser totals before the result reaches the conversational model. The
+projection assigns metric-specific units and dimensions; it does not infer them
+by recursively inspecting field names.
+
 ## Transferable state and persistence
 
 Every conversation has one logical typed `ConversationContext` aggregate in
@@ -601,6 +608,13 @@ facts. If the corrected draft still contains unsupported expressions, the
 runtime removes only the affected sentences or Markdown lines and verifies the
 remaining prose again. It returns the deterministic fact summary only when no
 safe prose remains.
+
+Population analysis and follow-ups over a population artifact are not passed
+through `verify_numerical_response`. Their numerical values have already passed
+the output-specific aggregate validation described above, and the conversational
+model receives those complete validated outputs to summarize in ordinary
+Markdown. This exception also disables whole-response numerical verification on
+a turn that combines population analysis with another capability.
 
 A clarification-only response has no calculated fact set and does not invoke
 `verify_numerical_response`. `ClarificationNarrationGuard` permits natural prose

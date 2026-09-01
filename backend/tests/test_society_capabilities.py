@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from capabilities.artifacts import SocietyAnalysisResultRef
 from capabilities.chart import SocietyChartCapability
 from capabilities.composition import compose_runtime
-from capabilities.contracts import Completed, NeedsInput, Unsupported
+from capabilities.contracts import Completed, Failed, NeedsInput, Unsupported
 from capabilities.follow_up import AnalysisFollowUpCapability
 from capabilities.policy_reform import (
     PolicyReformCapability,
@@ -19,6 +21,7 @@ from capabilities.society import (
     SOCIETY_DEFAULT_PROFILE_VERSION,
     SocietyAnalysisCapability,
 )
+from capabilities.society_outputs import validated_aggregate_values
 from tools.analysis_support import (
     ExtractResultFindingsTool,
     SelectSupportedOutputsTool,
@@ -73,6 +76,130 @@ class FakeReformResolver:
 
     async def correct_representation(self, **kwargs):
         raise AssertionError("No correction expected")
+
+
+def _budgetary_output():
+    return {
+        "tax_revenue": {
+            "baseline": 500_000_000,
+            "reform": 620_000_000,
+            "change": 120_000_000,
+        },
+        "benefit_spending": {
+            "baseline": 250_000_000,
+            "reform": 270_000_000,
+            "change": 20_000_000,
+        },
+        "net_budgetary_impact": 100_000_000,
+    }
+
+
+def _decile_output(decile_concept="household_net_income"):
+    return {
+        "decile_concept": decile_concept,
+        "basis": "income",
+        "income_variable": "household_net_income",
+        "decile_variable": None,
+        "grouping_variable": "household_net_income",
+        "entity": "household",
+        "quantiles": 10,
+        "measure_label": "household net income",
+        "grouping_label": "Household net income decile",
+        "deciles": [
+            {
+                "decile": decile,
+                "baseline_mean": decile * 10_000,
+                "reform_mean": decile * 10_000 - decile * 10,
+                "absolute_change": -decile * 10,
+                "relative_change": -0.1,
+                "count_better_off": 0,
+                "count_worse_off": decile * 100_000,
+                "count_no_change": (11 - decile) * 100_000,
+            }
+            for decile in range(1, 11)
+        ],
+    }
+
+
+def _winners_losers_output():
+    return {
+        "basis": "income",
+        "grouping_label": "Income decile",
+        "deciles": [
+            {
+                "decile": decile,
+                "lose_more_than_5pct": 0.01,
+                "lose_less_than_5pct": 0.59,
+                "no_change": 0.4,
+                "gain_less_than_5pct": 0,
+                "gain_more_than_5pct": 0,
+            }
+            for decile in range(11)
+        ],
+    }
+
+
+def _poverty_output():
+    return {
+        "rates": [
+            {
+                "poverty_type": poverty_type,
+                "group": group,
+                "baseline_rate": 0.2,
+                "reform_rate": 0.19,
+                "rate_change": -0.01,
+                "relative_change": -0.05,
+                "baseline_headcount": 1_000_000,
+                "reform_headcount": 950_000,
+            }
+            for poverty_type in (
+                "absolute_ahc",
+                "absolute_bhc",
+                "relative_ahc",
+                "relative_bhc",
+            )
+            for group in ("adult", "all", "child", "senior")
+        ]
+    }
+
+
+def _inequality_output():
+    return {
+        "metrics": {
+            metric: {
+                "baseline": 0.3,
+                "reform": 0.29,
+                "change": -0.01,
+                "relative_change": -1 / 30,
+            }
+            for metric in (
+                "gini",
+                "top_10_share",
+                "top_1_share",
+                "bottom_50_share",
+            )
+        }
+    }
+
+
+def _program_output():
+    return {
+        "programs": [
+            {
+                "program": "income_tax",
+                "entity": "person",
+                "is_tax": True,
+                "baseline_total": 500_000_000,
+                "reform_total": 620_000_000,
+                "change": 120_000_000,
+                "baseline_count": 30_000_000,
+                "reform_count": 31_000_000,
+                "winners": 0,
+                "losers": 20_000_000,
+            }
+        ],
+        "net_budgetary_impact": 100_000_000,
+    }
 
 
 def _runtime(monkeypatch):
@@ -138,51 +265,42 @@ def _runtime(monkeypatch):
             return {
                 "status": "success",
                 "simulation_id": payload["simulation_id"],
-                "tax_revenue": 100_000_000,
-                "benefit_spending": 250_000_000,
-                "net_cost": 150_000_000,
+                **_budgetary_output(),
                 "result_id": "budget-request-local",
             }
         if identifier == "compute_winners_losers":
             return {
                 "status": "success",
                 "simulation_id": payload["simulation_id"],
-                "winners": 10_000_000,
-                "losers": 3_000_000,
-                "unchanged": 54_000_000,
+                **_winners_losers_output(),
                 "result_id": "winners-request-local",
             }
         if identifier == "compute_decile_impacts":
             return {
                 "status": "success",
                 "simulation_id": payload["simulation_id"],
-                "decile_concept": payload["decile_concept"],
-                "deciles": [
-                    {"decile": 1, "absolute_change": 120, "relative_change": 0.01},
-                    {"decile": 10, "absolute_change": -40, "relative_change": -0.001},
-                ],
+                **_decile_output(payload["decile_concept"]),
                 "result_id": "decile-request-local",
             }
         if identifier == "compute_poverty_metrics":
             return {
                 "status": "success",
                 "simulation_id": payload["simulation_id"],
-                "overall_rate": 0.18,
-                "change": -0.01,
+                **_poverty_output(),
                 "result_id": "poverty-request-local",
             }
         if identifier == "compute_inequality_metrics":
             return {
                 "status": "success",
                 "simulation_id": payload["simulation_id"],
-                "gini": 0.31,
+                **_inequality_output(),
                 "result_id": "inequality-request-local",
             }
         if identifier == "compute_program_breakdown":
             return {
                 "status": "success",
                 "simulation_id": payload["simulation_id"],
-                "programmes": [{"name": "Universal Credit", "change": 20_000_000}],
+                **_program_output(),
                 "result_id": "programme-request-local",
             }
         if identifier == "generate_chart":
@@ -273,6 +391,13 @@ def test_baseline_run_always_calculates_and_persists_complete_default_profile(
         SOCIETY_DEFAULT_OUTPUTS
     )
     assert result.requested_output_issues == ()
+    assert outcome.value.numerical_verification == "disabled"
+    units = {
+        (value.output_id, value.metric_id): value.unit for value in result.outputs
+    }
+    assert units[("decile_impacts", "deciles.relative_change")] == "percent"
+    assert units[("decile_impacts", "deciles.count_worse_off")] == "people"
+    assert units[("winners_losers", "deciles.lose_less_than_5pct")] == "ratio"
     simulation_input = _simulation_calls(calls)[0]
     assert set(simulation_input) == {"year"}
     assert simulation_input["year"] == 2026
@@ -400,6 +525,8 @@ def test_follow_up_reuses_retained_aggregates_without_rerun(monkeypatch):
     assert isinstance(follow_up, Completed)
     assert follow_up.value.reran_provider is False
     assert follow_up.value.result.artifact_id == result_id
+    assert follow_up.value.narration_facts == ()
+    assert follow_up.value.numerical_verification == "disabled"
     assert len(_simulation_calls(calls)) == before
     assert set(follow_up.value.result.calculated_output_ids) == set(
         SOCIETY_DEFAULT_OUTPUTS
@@ -513,3 +640,38 @@ def test_incompatible_dataset_result_is_not_combined(monkeypatch):
     )
 
     assert isinstance(outcome, Unsupported)
+
+
+def test_decile_projection_rejects_incomplete_or_non_finite_values():
+    incomplete = _decile_output()
+    incomplete["deciles"] = incomplete["deciles"][:-1]
+    with pytest.raises(ValueError, match="each decile"):
+        validated_aggregate_values("decile_impacts", incomplete)
+
+    non_finite = _decile_output()
+    non_finite["deciles"][0]["baseline_mean"] = float("nan")
+    with pytest.raises(ValueError, match="finite number"):
+        validated_aggregate_values("decile_impacts", non_finite)
+
+
+def test_invalid_society_output_fails_before_artifact_persistence(monkeypatch):
+    composition, context, artifacts, _calls, _heavy, _resolver = _runtime(monkeypatch)
+
+    def reject_deciles(output_id, payload):
+        if output_id == "decile_impacts":
+            raise ValueError("invalid deciles")
+        return validated_aggregate_values(output_id, payload)
+
+    monkeypatch.setattr(
+        "capabilities.society.validated_aggregate_values",
+        reject_deciles,
+    )
+
+    outcome = _invoke(composition, context, "society_analysis", {})
+
+    assert isinstance(outcome, Failed)
+    assert outcome.error_code == "society_output_validation_failed"
+    assert not any(
+        isinstance(artifact, SocietyAnalysisResultRef)
+        for artifact in artifacts.artifacts
+    )

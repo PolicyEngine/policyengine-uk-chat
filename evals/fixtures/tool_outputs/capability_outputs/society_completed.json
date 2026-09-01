@@ -17,7 +17,7 @@
       "catalogue_version": "5.0.1",
       "dataset_version": "2024-25",
       "calculation_engine_version": "5.0.1",
-      "default_profile_version": "1",
+      "default_profile_version": "2",
       "calculated_output_ids": [
         "budgetary_impact",
         "winners_losers",
@@ -79,13 +79,6 @@
       ]
     },
     "year_source": "server_default",
-    "narration_facts": [
-      {"label": "Net budgetary impact", "value": 1200000000, "unit": "GBP/year"},
-      {"label": "Winners", "value": 8400000, "unit": "people"},
-      {"label": "Losers", "value": 2100000, "unit": "people"},
-      {"label": "Income decile 1 change", "value": 45, "unit": "GBP/year"},
-      {"label": "Income decile 10 change", "value": 120, "unit": "GBP/year"},
-      {"label": "Relative poverty rate", "value": 0.18, "unit": "ratio"}
-    ]
+    "numerical_verification": "disabled"
   }
 }

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from importlib.metadata import PackageNotFoundError, version
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 
 from capabilities.artifacts import (
-    AggregateDimension,
     AggregateValue,
     ArtifactProvenance,
     PolicyScenarioRef,
@@ -26,17 +26,16 @@ from capabilities.contracts import (
 )
 from capabilities.input_resolution import InputSource, resolve_policy_year
 from capabilities.policy_reform import PolicyReformOutput
+from capabilities.society_outputs import validated_aggregate_values
 from engine.py_runtime import resolve_dataset
 from tools.analysis_support import (
-    ExtractResultFindingsOutput,
-    NumericalFact,
     SelectSupportedOutputsOutput,
 )
 from tools.contracts import CallerType, Visibility
 from tools.typed_models import SafeToolOutput
 
 
-SOCIETY_DEFAULT_PROFILE_VERSION = "1"
+SOCIETY_DEFAULT_PROFILE_VERSION = "2"
 SOCIETY_DEFAULT_OUTPUTS = (
     "budgetary_impact",
     "winners_losers",
@@ -92,7 +91,7 @@ class SocietyAnalysisInput(StrictModel):
 class SocietyAnalysisOutput(StrictModel):
     result: SocietyAnalysisResultRef
     year_source: InputSource
-    narration_facts: tuple[NumericalFact, ...]
+    numerical_verification: Literal["disabled"] = "disabled"
     required_output_ids: tuple[str, ...] = SOCIETY_DEFAULT_OUTPUTS
     narration_requirement: str = (
         "Present budgetary impact, winners/losers/unchanged, and income-decile "
@@ -160,7 +159,6 @@ class SocietyAnalysisCapability(Capability[SocietyAnalysisInput, SocietyAnalysis
             "compute_winners_losers",
             "compute_poverty_metrics",
             "compute_inequality_metrics",
-            "extract_result_findings",
         ),
     )
 
@@ -254,7 +252,17 @@ class SocietyAnalysisCapability(Capability[SocietyAnalysisInput, SocietyAnalysis
                         error_code="society_default_output_failed",
                     )
                 continue
-            aggregate_values.extend(self._flatten(output_id, derivative.root))
+            try:
+                aggregate_values.extend(
+                    validated_aggregate_values(output_id, derivative.root)
+                )
+            except ValueError:
+                return Failed(
+                    safe_message=(
+                        f"The calculated {output_id} values did not pass validation."
+                    ),
+                    error_code="society_output_validation_failed",
+                )
 
         calculated_ids = tuple(
             output_id
@@ -305,26 +313,10 @@ class SocietyAnalysisCapability(Capability[SocietyAnalysisInput, SocietyAnalysis
             requested_output_issues=issues,
         )
         result = await context.save_artifact(result)
-        extracted = await context.invoke_tool(
-            "extract_result_findings",
-            {
-                "outputs": [
-                    output.model_dump(mode="json") for output in result.outputs
-                ]
-            },
-        )
-        if not isinstance(extracted, ExtractResultFindingsOutput):
-            raise TypeError("Society finding extraction returned an incompatible output.")
-        narration_facts = tuple(
-            NumericalFact(label=finding.label, value=finding.value, unit=finding.unit)
-            for finding in extracted.findings
-            if finding.value is not None
-        )
         return Completed(
             value=SocietyAnalysisOutput(
                 result=result,
                 year_source=resolved_year.source,
-                narration_facts=narration_facts,
             )
         )
 
@@ -357,79 +349,6 @@ class SocietyAnalysisCapability(Capability[SocietyAnalysisInput, SocietyAnalysis
             ),
             None,
         )
-
-    @classmethod
-    def _flatten(cls, output_id: str, payload: dict) -> tuple[AggregateValue, ...]:
-        values: list[AggregateValue] = []
-        ignored = {
-            "status",
-            "simulation_id",
-            "result_id",
-            "year",
-            "quantiles",
-            "decile_concept",
-        }
-
-        def visit(value, path: tuple[str, ...], dimensions=()):
-            if isinstance(value, bool) or value is None:
-                return
-            if isinstance(value, (int, float)):
-                metric = ".".join(path) or "value"
-                values.append(
-                    AggregateValue(
-                        output_id=output_id,
-                        metric_id=metric,
-                        label=cls._label(output_id, path),
-                        value=value,
-                        unit=cls._unit(output_id, path),
-                        dimensions=dimensions,
-                    )
-                )
-                return
-            if isinstance(value, dict):
-                local_dimensions = list(dimensions)
-                for key in ("decile", "group", "age_group", "poverty_type"):
-                    if key in value and isinstance(value[key], (str, int)):
-                        local_dimensions.append(
-                            AggregateDimension(name=key, value=str(value[key]))
-                        )
-                for key, nested in value.items():
-                    if key in ignored or key in {
-                        "decile",
-                        "group",
-                        "age_group",
-                        "poverty_type",
-                        "label",
-                        "description",
-                    }:
-                        continue
-                    visit(nested, (*path, str(key)), tuple(local_dimensions))
-                return
-            if isinstance(value, list):
-                for item in value:
-                    visit(item, path, dimensions)
-
-        visit(payload, ())
-        return tuple(values)
-
-    @staticmethod
-    def _label(output_id, path):
-        suffix = " ".join(path).replace("_", " ").title()
-        prefix = output_id.replace("_", " ").title()
-        return f"{prefix}: {suffix}" if suffix else prefix
-
-    @staticmethod
-    def _unit(output_id, path):
-        metric = " ".join(path).casefold()
-        if any(word in metric for word in ("rate", "share", "relative", "percent")):
-            return "ratio"
-        if output_id == "winners_losers" and any(
-            word in metric for word in ("winner", "loser", "unchanged")
-        ):
-            return "people"
-        if output_id in {"budgetary_impact", "program_statistics", "decile_impacts"}:
-            return "GBP/year"
-        return "number"
 
     @staticmethod
     def _execution_order(output_ids):

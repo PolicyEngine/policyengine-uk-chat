@@ -218,7 +218,11 @@ The default backend suite separately runs three SQL-backed ten-user-turn chat
 paths that use deterministic provider substitutes. They cover repeated
 population calculations, optional population outputs, and a transition from a
 household calculation to population analysis without making external model or
-dataset calls.
+dataset calls. Every population turn must execute the three default derivative
+operations. The three paths respectively add poverty, inequality, and programme
+statistics so their combined assertions cover every `compute_*` population
+derivative. They must also assert that population turns do not invoke numerical
+narration verification.
 
 If a command cannot run locally because dependencies or credentials are missing,
 state that explicitly in the handoff.

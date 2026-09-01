@@ -74,6 +74,7 @@ class ConversationPath:
     turns: tuple[str, ...]
     actions: tuple[CapabilityAction, ...]
     expected_society_runs: int
+    expected_compute_tools: frozenset[str]
 
 
 class RelevantAssessor:
@@ -137,6 +138,133 @@ class FixedHouseholdAssembler:
                 sources={"rent": "user", "council_tax": "user"},
             )
         )
+
+
+def _society_derivative_result(identifier, payload):
+    common = {
+        "status": "success",
+        "simulation_id": payload["simulation_id"],
+        "result_id": f"{identifier}-request-local",
+    }
+    if identifier == "compute_budgetary_impact":
+        return {
+            **common,
+            "tax_revenue": {
+                "baseline": 500_000_000,
+                "reform": 620_000_000,
+                "change": 120_000_000,
+            },
+            "benefit_spending": {
+                "baseline": 250_000_000,
+                "reform": 270_000_000,
+                "change": 20_000_000,
+            },
+            "net_budgetary_impact": 100_000_000,
+        }
+    if identifier == "compute_decile_impacts":
+        return {
+            **common,
+            "decile_concept": payload["decile_concept"],
+            "basis": "income",
+            "income_variable": "household_net_income",
+            "decile_variable": None,
+            "grouping_variable": "household_net_income",
+            "entity": "household",
+            "quantiles": 10,
+            "measure_label": "household net income",
+            "grouping_label": "Household net income decile",
+            "deciles": [
+                {
+                    "decile": decile,
+                    "baseline_mean": decile * 10_000,
+                    "reform_mean": decile * 10_000 - decile * 10,
+                    "absolute_change": -decile * 10,
+                    "relative_change": -0.1,
+                    "count_better_off": 0,
+                    "count_worse_off": decile * 100_000,
+                    "count_no_change": (11 - decile) * 100_000,
+                }
+                for decile in range(1, 11)
+            ],
+        }
+    if identifier == "compute_winners_losers":
+        return {
+            **common,
+            "basis": "income",
+            "grouping_label": "Income decile",
+            "deciles": [
+                {
+                    "decile": decile,
+                    "lose_more_than_5pct": 0.01,
+                    "lose_less_than_5pct": 0.59,
+                    "no_change": 0.4,
+                    "gain_less_than_5pct": 0,
+                    "gain_more_than_5pct": 0,
+                }
+                for decile in range(11)
+            ],
+        }
+    if identifier == "compute_poverty_metrics":
+        return {
+            **common,
+            "rates": [
+                {
+                    "poverty_type": poverty_type,
+                    "group": group,
+                    "baseline_rate": 0.2,
+                    "reform_rate": 0.19,
+                    "rate_change": -0.01,
+                    "relative_change": -0.05,
+                    "baseline_headcount": 1_000_000,
+                    "reform_headcount": 950_000,
+                }
+                for poverty_type in (
+                    "absolute_ahc",
+                    "absolute_bhc",
+                    "relative_ahc",
+                    "relative_bhc",
+                )
+                for group in ("adult", "all", "child", "senior")
+            ],
+        }
+    if identifier == "compute_inequality_metrics":
+        return {
+            **common,
+            "metrics": {
+                metric: {
+                    "baseline": 0.3,
+                    "reform": 0.29,
+                    "change": -0.01,
+                    "relative_change": -1 / 30,
+                }
+                for metric in (
+                    "gini",
+                    "top_10_share",
+                    "top_1_share",
+                    "bottom_50_share",
+                )
+            },
+        }
+    if identifier == "compute_program_breakdown":
+        return {
+            **common,
+            "programs": [
+                {
+                    "program": "income_tax",
+                    "entity": "person",
+                    "is_tax": True,
+                    "baseline_total": 500_000_000,
+                    "reform_total": 620_000_000,
+                    "change": 120_000_000,
+                    "baseline_count": 30_000_000,
+                    "reform_count": 31_000_000,
+                    "winners": 0,
+                    "losers": 20_000_000,
+                }
+            ],
+            "net_budgetary_impact": 100_000_000,
+        }
+    raise AssertionError(f"Unexpected society derivative: {identifier}")
 
 
 class ScriptedConversationModel:
@@ -204,7 +332,7 @@ BASELINE_TO_REFORM = ConversationPath(
         "Now raise the basic income-tax rate by 2 percentage points.",
         "Run that population analysis again for 2026.",
         "Include poverty in a fresh population calculation.",
-        "Include inequality in another population calculation.",
+        "Run the complete default profile again.",
         "Recalculate the budget and distributional effects.",
         "Run a new population calculation for the same reform.",
         "Check winners and losers again.",
@@ -218,15 +346,21 @@ BASELINE_TO_REFORM = ConversationPath(
         _society_action(
             "Raise the basic income-tax rate by 2 percentage points", "poverty"
         ),
-        _society_action(
-            "Raise the basic income-tax rate by 2 percentage points", "inequality"
-        ),
+        _society_action("Raise the basic income-tax rate by 2 percentage points"),
         *(
             _society_action("Raise the basic income-tax rate by 2 percentage points")
             for _ in range(5)
         ),
     ),
     expected_society_runs=10,
+    expected_compute_tools=frozenset(
+        {
+            "compute_budgetary_impact",
+            "compute_winners_losers",
+            "compute_decile_impacts",
+            "compute_poverty_metrics",
+        }
+    ),
 )
 
 
@@ -235,8 +369,8 @@ HOUSEHOLD_TO_SOCIETY = ConversationPath(
     turns=(
         "I am 35 and earn £50,000 a year. How much tax do I pay?",
         "What's the society-wide impact of raising the Basic Rate by 2pp?",
-        "Run the population calculation again and include poverty.",
-        "Now include inequality in a fresh population run.",
+        "Run the population calculation again and include inequality.",
+        "Now rerun the complete default population profile.",
         "Recalculate the population-wide winners and losers.",
         "Run another society-wide calculation for the same reform.",
         "Check the income-decile effects with a new population run.",
@@ -254,17 +388,22 @@ HOUSEHOLD_TO_SOCIETY = ConversationPath(
         ),
         _society_action("Raise the basic income-tax rate by 2 percentage points"),
         _society_action(
-            "Raise the basic income-tax rate by 2 percentage points", "poverty"
-        ),
-        _society_action(
             "Raise the basic income-tax rate by 2 percentage points", "inequality"
         ),
         *(
             _society_action("Raise the basic income-tax rate by 2 percentage points")
-            for _ in range(6)
+            for _ in range(7)
         ),
     ),
     expected_society_runs=9,
+    expected_compute_tools=frozenset(
+        {
+            "compute_budgetary_impact",
+            "compute_winners_losers",
+            "compute_decile_impacts",
+            "compute_inequality_metrics",
+        }
+    ),
 )
 
 
@@ -272,9 +411,9 @@ POPULATION_OUTPUT_VARIANTS = ConversationPath(
     name="population-output-variants",
     turns=(
         "Run a population analysis of a 2 percentage point basic-rate increase.",
-        "Add poverty to a new run.",
-        "Add inequality to a new run.",
         "Add programme statistics to a new run.",
+        "Run the default profile again.",
+        "Recalculate the programme statistics.",
         "Run the default population profile again.",
         "Recalculate the fiscal impact.",
         "Recalculate winners and losers.",
@@ -285,11 +424,10 @@ POPULATION_OUTPUT_VARIANTS = ConversationPath(
     actions=(
         _society_action("Raise the basic income-tax rate by 2 percentage points"),
         _society_action(
-            "Raise the basic income-tax rate by 2 percentage points", "poverty"
+            "Raise the basic income-tax rate by 2 percentage points",
+            "programme statistics",
         ),
-        _society_action(
-            "Raise the basic income-tax rate by 2 percentage points", "inequality"
-        ),
+        _society_action("Raise the basic income-tax rate by 2 percentage points"),
         _society_action(
             "Raise the basic income-tax rate by 2 percentage points",
             "programme statistics",
@@ -300,10 +438,28 @@ POPULATION_OUTPUT_VARIANTS = ConversationPath(
         ),
     ),
     expected_society_runs=10,
+    expected_compute_tools=frozenset(
+        {
+            "compute_budgetary_impact",
+            "compute_winners_losers",
+            "compute_decile_impacts",
+            "compute_program_breakdown",
+        }
+    ),
 )
 
 
 PATHS = (BASELINE_TO_REFORM, HOUSEHOLD_TO_SOCIETY, POPULATION_OUTPUT_VARIANTS)
+ALL_SOCIETY_COMPUTE_TOOLS = frozenset(
+    {
+        "compute_budgetary_impact",
+        "compute_program_breakdown",
+        "compute_decile_impacts",
+        "compute_winners_losers",
+        "compute_poverty_metrics",
+        "compute_inequality_metrics",
+    }
+)
 
 
 async def _not_cancelled() -> bool:
@@ -404,60 +560,8 @@ def test_ten_user_turn_population_conversations(
                 "year": payload["year"],
                 "result_id": result_id,
             }
-        if identifier == "compute_budgetary_impact":
-            return {
-                "status": "success",
-                "simulation_id": payload["simulation_id"],
-                "net_budgetary_impact": 150_000_000,
-                "result_id": "budget-request-local",
-            }
-        if identifier == "compute_winners_losers":
-            return {
-                "status": "success",
-                "simulation_id": payload["simulation_id"],
-                "winners": 10_000_000,
-                "losers": 3_000_000,
-                "unchanged": 54_000_000,
-                "result_id": "winners-request-local",
-            }
-        if identifier == "compute_decile_impacts":
-            return {
-                "status": "success",
-                "simulation_id": payload["simulation_id"],
-                "decile_concept": payload["decile_concept"],
-                "deciles": [
-                    {
-                        "decile": decile,
-                        "absolute_change": decile * 10,
-                        "relative_change": decile / 1_000,
-                    }
-                    for decile in range(1, 11)
-                ],
-                "result_id": "deciles-request-local",
-            }
-        if identifier == "compute_poverty_metrics":
-            return {
-                "status": "success",
-                "simulation_id": payload["simulation_id"],
-                "overall_rate": 0.18,
-                "result_id": "poverty-request-local",
-            }
-        if identifier == "compute_inequality_metrics":
-            return {
-                "status": "success",
-                "simulation_id": payload["simulation_id"],
-                "gini": 0.31,
-                "result_id": "inequality-request-local",
-            }
-        if identifier == "compute_program_breakdown":
-            return {
-                "status": "success",
-                "simulation_id": payload["simulation_id"],
-                "programmes": [
-                    {"program": "income_tax", "change": 150_000_000}
-                ],
-                "result_id": "programmes-request-local",
-            }
+        if identifier.startswith("compute_"):
+            return _society_derivative_result(identifier, payload)
         if identifier == "get_variable":
             return {
                 "status": "success",
@@ -591,6 +695,29 @@ def test_ten_user_turn_population_conversations(
             path.expected_society_runs
         ), [identifier for identifier, _ in tool_calls]
 
+    compute_tools = [
+        identifier
+        for identifier, _payload in tool_calls
+        if identifier.startswith("compute_")
+    ]
+    assert frozenset(compute_tools) == path.expected_compute_tools
+    assert len(path.expected_compute_tools) >= 2
+
+    society_turn_ids = {
+        f"turn-{index}"
+        for index, action in enumerate(path.actions, start=1)
+        if action.capability_id == "society_analysis"
+    }
+    traces = trace_repository.list_for_conversation(
+        path.name,
+        include_private=True,
+    )
+    assert not any(
+        trace.turn_id in society_turn_ids
+        and trace.identifier == "verify_numerical_response"
+        for trace in traces
+    )
+
     persisted_results = capability_repository.find_artifacts(
         path.name,
         SocietyAnalysisResultRef,
@@ -614,3 +741,9 @@ def test_ten_user_turn_population_conversations(
         assert identifiers.index("run_household_simulation") < identifiers.index(
             "run_society_simulation"
         )
+
+
+def test_ten_turn_paths_collectively_cover_every_society_compute_tool():
+    assert frozenset().union(
+        *(path.expected_compute_tools for path in PATHS)
+    ) == ALL_SOCIETY_COMPUTE_TOOLS

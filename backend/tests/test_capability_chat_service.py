@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session, SQLModel, create_engine
@@ -48,6 +49,7 @@ class EchoOutput(StrictModel):
     narration_facts: tuple[NumericalFact, ...] = ()
     assumption_statements: tuple[str, ...] = ()
     narration_fallback: str | None = None
+    numerical_verification: Literal["disabled"] | None = None
 
 
 class EchoCapability(Capability[EchoInput, EchoOutput]):
@@ -65,7 +67,7 @@ class EchoCapability(Capability[EchoInput, EchoOutput]):
     async def run(self, capability_input, context):
         del context
         facts = ()
-        if capability_input.text == "numeric":
+        if capability_input.text in {"numeric", "numeric-unverified"}:
             facts = (
                 NumericalFact(
                     label="Net cost",
@@ -85,7 +87,12 @@ class EchoCapability(Capability[EchoInput, EchoOutput]):
                 assumption_statements=assumptions,
                 narration_fallback=(
                     "### Results\n\n- Net cost: £1.2 billion."
-                    if capability_input.text == "numeric"
+                    if capability_input.text in {"numeric", "numeric-unverified"}
+                    else None
+                ),
+                numerical_verification=(
+                    "disabled"
+                    if capability_input.text == "numeric-unverified"
                     else None
                 ),
             )
@@ -529,6 +536,7 @@ def test_model_result_omits_verifier_only_narration_fields():
     )
     assert "narration_facts" not in model_result["value"]
     assert "narration_fallback" not in model_result["value"]
+    assert "numerical_verification" not in model_result["value"]
     assert model_result["value"]["text"] == "numeric"
     finished = next(
         event.record
@@ -724,6 +732,40 @@ def test_quantitative_response_gets_one_free_form_correction_and_usage_accountin
     assert len(model.redraft_calls) == 1
     assert events[-1].usage.input_tokens == 9
     assert events[-1].usage.output_tokens == 6
+
+
+def test_capability_can_disable_numerical_verification_for_model_narration():
+    model = FakeConversationModel(
+        [
+            ConversationModelResponse(
+                capability_calls=(
+                    ModelCapabilityCall(
+                        call_id="call-unverified",
+                        capability_id="echo_capability",
+                        input={"text": "numeric-unverified"},
+                    ),
+                ),
+                model="fake-model",
+            ),
+            ConversationModelResponse(
+                text="The model may describe this as approximately £1.2 billion.",
+                model="fake-model",
+            ),
+        ]
+    )
+    _composition, service, context = _runtime(model, FakeRelevanceAssessor())
+
+    events = _collect(service, _turn(debug=True), context)
+
+    assert events[-2].content == (
+        "The model may describe this as approximately £1.2 billion."
+    )
+    assert model.redraft_calls == []
+    assert not any(
+        isinstance(event, InvocationActivity)
+        and event.record.identifier == "verify_numerical_response"
+        for event in events
+    )
 
 
 def test_remaining_unsupported_sentence_is_removed_before_fact_list_fallback():

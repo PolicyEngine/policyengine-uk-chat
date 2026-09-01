@@ -194,11 +194,11 @@ def capability_result_for_model(
     value = projected.get("value")
     if isinstance(value, dict):
         visible_value = dict(value)
-        # These fields support server-side numerical verification and its final
-        # fail-safe. Showing them to the model turns the fail-safe into a prose
-        # template and duplicates values already present in the typed result.
+        # These fields control server-side narration handling. The model already
+        # receives the validated calculation result that it needs to answer.
         visible_value.pop("narration_facts", None)
         visible_value.pop("narration_fallback", None)
+        visible_value.pop("numerical_verification", None)
         projected["value"] = visible_value
     return _with_model_response_guidance(projected)
 
@@ -449,6 +449,7 @@ class ChatTurnService:
                 context_validation.issues,
             )
             narration_facts: list[NumericalFact] = []
+            numerical_verification_disabled = False
             assumption_statements: list[str] = []
             unresolved_fallbacks: list[str] = []
             completed_fallbacks: list[str] = []
@@ -497,7 +498,10 @@ class ChatTurnService:
                     deterministic_fallback = self._join_fallbacks(
                         [*completed_fallbacks, *unresolved_fallbacks]
                     )
-                    if unresolved_fallbacks and not narration_facts:
+                    if numerical_verification_disabled:
+                        final_text = response.text or deterministic_fallback or ""
+                        correction_usage = None
+                    elif unresolved_fallbacks and not narration_facts:
                         final_text = self._clarification_narration.finalize(
                             draft=response.text,
                             deterministic_fallback=deterministic_fallback,
@@ -594,6 +598,10 @@ class ChatTurnService:
                             context_validation.issues,
                         )
                     narration_facts.extend(self._narration_facts(result))
+                    numerical_verification_disabled = (
+                        numerical_verification_disabled
+                        or self._numerical_verification_disabled(result)
+                    )
                     assumption_statements.extend(
                         self._assumption_statements(result)
                     )
@@ -989,6 +997,14 @@ class ChatTurnService:
             except Exception:
                 continue
         return tuple(parsed)
+
+    @staticmethod
+    def _numerical_verification_disabled(result: dict[str, object]) -> bool:
+        value = result.get("value")
+        return (
+            isinstance(value, dict)
+            and value.get("numerical_verification") == "disabled"
+        )
 
     @staticmethod
     def _system_prompt(
