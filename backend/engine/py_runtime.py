@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import os
+import re
 from dataclasses import dataclass
 from functools import lru_cache
-from pathlib import PurePosixPath
 from typing import Any
-
-from engine.constants import DatasetConfig, UK_CHAT_DATASET
 
 
 @dataclass(frozen=True)
@@ -31,9 +29,9 @@ def _policyengine_module():
 
 
 def _manifest_module():
-    from policyengine.provenance.manifest import resolve_dataset_reference
+    from policyengine.provenance.manifest import get_release_manifest
 
-    return resolve_dataset_reference
+    return get_release_manifest
 
 
 @lru_cache(maxsize=1)
@@ -45,64 +43,50 @@ def uk_model_version():
 
 @lru_cache(maxsize=1)
 def resolve_dataset() -> DatasetSpec:
-    """Resolve UK Chat's fixed dataset to its managed reference."""
+    """Describe policyengine.py's certified default UK dataset."""
 
-    uri = _manifest_module()("uk", UK_CHAT_DATASET.name)
-    resolved_name = PurePosixPath(uri.rsplit("@", 1)[0]).name.removesuffix(
-        ".h5"
-    )
-    resolved = DatasetConfig(name=resolved_name)
+    manifest = _manifest_module()("uk")
+    name = manifest.default_dataset
     return DatasetSpec(
-        name=resolved.name,
-        label=resolved.label,
-        uri=uri,
+        name=name,
+        label=_dataset_label(name),
+        uri=manifest.default_dataset_uri,
         row_level_access=False,
-        notes="UK Chat's fixed society dataset.",
+        notes="policyengine.py's certified default UK society dataset.",
     )
+
+
+def _dataset_label(name: str) -> str:
+    enhanced_frs = re.fullmatch(r"enhanced_frs_(\d{4})_(\d{2})", name)
+    if enhanced_frs is None:
+        return name
+    return f"Enhanced FRS {enhanced_frs.group(1)}-{enhanced_frs.group(2)}"
 
 
 def _managed_dataset_folder() -> str:
     return os.environ.get("POLICYENGINE_DATA_FOLDER", "/tmp/policyengine-uk-chat-data")
 
 
-def _mirror_hugging_face_token() -> None:
-    """Expose HUGGING_FACE_TOKEN under HF_TOKEN for huggingface_hub.
-
-    policyengine.py's primary download helper reads HUGGING_FACE_TOKEN, but its
-    fallback for dataset-type repos calls hf_hub_download without an explicit
-    token, so huggingface_hub falls back to its own HF_TOKEN env var. The
-    deployment secret only sets HUGGING_FACE_TOKEN, which made private
-    dataset-repo downloads fail with 401.
-    """
-
-    token = os.environ.get("HUGGING_FACE_TOKEN")
-    if token and not os.environ.get("HF_TOKEN"):
-        os.environ["HF_TOKEN"] = token
-
-
 @lru_cache(maxsize=16)
-def _managed_dataset(reference: str, year: int, data_folder: str):
-    """Load one configured policyengine.py dataset/year combination."""
+def _managed_dataset(year: int, data_folder: str):
+    """Load policyengine.py's certified default UK dataset for one year."""
 
-    _mirror_hugging_face_token()
     datasets = _policyengine_module().uk.ensure_datasets(
-        datasets=[reference],
         years=[year],
         data_folder=data_folder,
     )
     if len(datasets) != 1:
         raise RuntimeError(
-            f"Expected one managed UK dataset for {reference!r} in {year}, "
+            f"Expected one certified default UK dataset in {year}, "
             f"received {list(datasets)}."
         )
     return next(iter(datasets.values()))
 
 
 def managed_dataset(*, year: int):
-    """Return UK Chat's fixed policyengine.py Dataset ready for Simulation."""
+    """Return policyengine.py's certified default UK Dataset for Simulation."""
 
-    spec = resolve_dataset()
-    return _managed_dataset(spec.name, year, _managed_dataset_folder())
+    return _managed_dataset(year, _managed_dataset_folder())
 
 
 def managed_simulation_pair(

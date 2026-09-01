@@ -509,14 +509,14 @@ defaults. Ambiguous or unsupported requests are retained as typed issues and
 must not be described as calculated. Every rerun recalculates the complete
 default profile plus supported additions.
 
-Population simulations use the fixed logical dataset name in
-`UK_CHAT_DATASET`. The installed policyengine.py release manifest resolves that
-name to its certified dataset URI and revision; UK Chat never passes an explicit
-URI through the managed-data API or enables unmanaged-data loading. Complete
-simulation objects and any record-level arrays exist only in the request-local
-`TurnResultStore`. Durable population artifacts contain aggregate values and
-the resolved dataset revision as compatibility metadata only. There is no
-shared record-level population result cache.
+Population simulations omit the dataset selector when calling policyengine.py's
+managed-data API. The installed policyengine.py release therefore chooses its
+certified default UK dataset and resolves the corresponding URI and revision.
+UK Chat does not contain a dataset name or URI and does not enable unmanaged-data
+loading. Complete simulation objects and any record-level arrays exist only in
+the request-local `TurnResultStore`. Durable population artifacts contain
+aggregate values and the selected dataset name and revision as compatibility
+metadata only. There is no shared record-level population result cache.
 
 ## Transferable state and persistence
 

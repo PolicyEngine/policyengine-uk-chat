@@ -4,54 +4,75 @@ import sys
 from types import ModuleType, SimpleNamespace
 
 from engine import py_runtime
-from engine.constants import UK_CHAT_DATASET
 
 
-def test_fixed_dataset_name_resolves_through_release_manifest(monkeypatch):
+def test_certified_default_dataset_metadata_comes_from_release_manifest(monkeypatch):
     calls = []
     resolved_uri = (
         "hf://policyengine/policyengine-uk-data-private/"
         "enhanced_frs_2024_25.h5@1.56.16"
     )
+    manifest = SimpleNamespace(
+        default_dataset="enhanced_frs_2024_25",
+        default_dataset_uri=resolved_uri,
+    )
 
-    def fake_resolve(country, reference):
-        calls.append((country, reference))
-        return resolved_uri
+    def fake_manifest(country):
+        calls.append(country)
+        return manifest
 
-    monkeypatch.setattr(py_runtime, "_manifest_module", lambda: fake_resolve)
+    monkeypatch.setattr(py_runtime, "_manifest_module", lambda: fake_manifest)
     py_runtime.resolve_dataset.cache_clear()
     try:
         spec = py_runtime.resolve_dataset()
     finally:
         py_runtime.resolve_dataset.cache_clear()
 
-    assert calls == [("uk", UK_CHAT_DATASET.name)]
-    assert spec.name == UK_CHAT_DATASET.name
-    assert spec.label == UK_CHAT_DATASET.label
+    assert calls == ["uk"]
+    assert spec.name == "enhanced_frs_2024_25"
+    assert spec.label == "Enhanced FRS 2024-25"
     assert spec.uri == resolved_uri
     assert spec.row_level_access is False
 
 
-def test_managed_dataset_materializes_manifest_name(monkeypatch):
+def test_managed_dataset_delegates_year_and_cache_folder(monkeypatch):
     calls = []
-    spec = py_runtime.DatasetSpec(
-        name=UK_CHAT_DATASET.name,
-        label="Enhanced FRS 2024-25",
-        uri="hf://example/enhanced_frs_2024_25.h5@1.56.16",
-        row_level_access=False,
-    )
 
-    monkeypatch.setattr(py_runtime, "resolve_dataset", lambda: spec)
     monkeypatch.setattr(
         py_runtime,
         "_managed_dataset",
-        lambda reference, year, folder: calls.append((reference, year, folder))
-        or "dataset",
+        lambda year, folder: calls.append((year, folder)) or "dataset",
     )
 
     assert py_runtime.managed_dataset(year=2026) == "dataset"
+    assert calls == [(2026, "/tmp/policyengine-uk-chat-data")]
+
+
+def test_native_default_loader_omits_dataset_selector(monkeypatch):
+    calls = []
+
+    class FakeUK:
+        def ensure_datasets(self, **kwargs):
+            calls.append(kwargs)
+            return {"release-default-2026": "dataset"}
+
+    monkeypatch.setattr(
+        py_runtime,
+        "_policyengine_module",
+        lambda: SimpleNamespace(uk=FakeUK()),
+    )
+    py_runtime._managed_dataset.cache_clear()
+    try:
+        dataset = py_runtime._managed_dataset(2026, "/tmp/managed-data")
+    finally:
+        py_runtime._managed_dataset.cache_clear()
+
+    assert dataset == "dataset"
     assert calls == [
-        (UK_CHAT_DATASET.name, 2026, "/tmp/policyengine-uk-chat-data")
+        {
+            "years": [2026],
+            "data_folder": "/tmp/managed-data",
+        }
     ]
 
 
@@ -128,36 +149,3 @@ def test_managed_simulation_pair_uses_high_level_simulation(monkeypatch):
 
 def test_no_low_level_microsimulation_factory_remains():
     assert not hasattr(py_runtime, "managed_microsimulation")
-
-
-def test_mirror_hugging_face_token_sets_hf_token(monkeypatch):
-    monkeypatch.setenv("HUGGING_FACE_TOKEN", "hf_secret")
-    monkeypatch.delenv("HF_TOKEN", raising=False)
-
-    py_runtime._mirror_hugging_face_token()
-
-    import os
-
-    assert os.environ["HF_TOKEN"] == "hf_secret"
-
-
-def test_mirror_hugging_face_token_keeps_existing_hf_token(monkeypatch):
-    monkeypatch.setenv("HUGGING_FACE_TOKEN", "hf_secret")
-    monkeypatch.setenv("HF_TOKEN", "hf_existing")
-
-    py_runtime._mirror_hugging_face_token()
-
-    import os
-
-    assert os.environ["HF_TOKEN"] == "hf_existing"
-
-
-def test_mirror_hugging_face_token_noop_without_token(monkeypatch):
-    monkeypatch.delenv("HUGGING_FACE_TOKEN", raising=False)
-    monkeypatch.delenv("HF_TOKEN", raising=False)
-
-    py_runtime._mirror_hugging_face_token()
-
-    import os
-
-    assert "HF_TOKEN" not in os.environ

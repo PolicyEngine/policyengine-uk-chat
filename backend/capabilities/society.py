@@ -270,7 +270,11 @@ class SocietyAnalysisCapability(Capability[SocietyAnalysisInput, SocietyAnalysis
                 capability_id=self.spec.identifier,
                 capability_version=self.spec.version,
                 invocation_id=context.capability_invocation_id,
-                sources=("fixed dataset", "verified scenario", "aggregate derivatives"),
+                sources=(
+                    "certified default dataset",
+                    "verified scenario",
+                    "aggregate derivatives",
+                ),
             ),
             year=resolved_year.year,
             policy_scenario_artifact_id=scenario.artifact_id,
