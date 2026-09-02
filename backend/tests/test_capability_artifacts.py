@@ -126,6 +126,7 @@ def test_compatibility_checks_only_declared_consumer_requirements():
     summary = sanitized_artifact_summary(result)
     assert summary["artifact_type"] == "society_analysis_result"
     assert summary["dataset_version"] == "dataset-1"
+    assert summary["decile_concept"] == "household_net_income"
     assert summary["dataset"] == {
         "logical_name": "enhanced_frs_2024_25",
         "title": "Enhanced FRS 2024-25",

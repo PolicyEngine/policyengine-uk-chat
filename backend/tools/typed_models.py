@@ -110,7 +110,11 @@ class DecileImpactsInput(SimulationRefInput):
 
 
 class WinnersLosersInput(SimulationRefInput):
-    basis: Literal["income", "wealth"] = "income"
+    decile_concept: Literal[
+        "household_net_income",
+        "equivalised_hbai_net_income",
+        "wealth",
+    ] = "household_net_income"
 
 
 FilterValue = float | int | str | bool
@@ -571,7 +575,14 @@ class WinnersLosersOutput(SafeToolOutput):
         {
             "status",
             "simulation_id",
+            "decile_concept",
             "basis",
+            "income_variable",
+            "decile_variable",
+            "grouping_variable",
+            "entity",
+            "quantiles",
+            "measure_label",
             "grouping_label",
             "deciles",
             "winners",
@@ -584,7 +595,14 @@ class WinnersLosersOutput(SafeToolOutput):
     field_types = {
         "status": Literal["success"],
         "simulation_id": str,
+        "decile_concept": str,
         "basis": str,
+        "income_variable": str,
+        "decile_variable": str | None,
+        "grouping_variable": str,
+        "entity": str,
+        "quantiles": int,
+        "measure_label": str,
         "grouping_label": str,
         "deciles": tuple[dict[str, JsonValue], ...],
         "winners": float,

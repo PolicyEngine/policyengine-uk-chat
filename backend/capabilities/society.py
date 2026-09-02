@@ -5,7 +5,7 @@ from __future__ import annotations
 from importlib.metadata import PackageNotFoundError, version
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from capabilities.artifacts import (
     AggregateValue,
@@ -27,6 +27,7 @@ from capabilities.contracts import (
 from capabilities.input_resolution import InputSource, resolve_policy_year
 from capabilities.policy_reform import PolicyReformOutput
 from capabilities.society_outputs import validated_aggregate_values
+from engine.decile_concepts import DEFAULT_DECILE_CONCEPT
 from engine.py_runtime import resolve_dataset
 from tools.analysis_support import (
     SelectSupportedOutputsOutput,
@@ -35,13 +36,34 @@ from tools.contracts import CallerType, Visibility
 from tools.typed_models import SafeToolOutput
 
 
-SOCIETY_DEFAULT_PROFILE_VERSION = "2"
+SOCIETY_DEFAULT_PROFILE_VERSION = "3"
 SOCIETY_DEFAULT_OUTPUTS = (
     "budgetary_impact",
     "winners_losers",
     "decile_impacts",
 )
-SOCIETY_DEFAULT_DECILE_CONCEPT = "household_net_income"
+SOCIETY_DEFAULT_DECILE_CONCEPT = DEFAULT_DECILE_CONCEPT.value
+SOCIETY_HOUSEHOLD_INCOME_REPORTING_NOTE = (
+    "Income levels and income changes in the decile results are annual household "
+    "amounts, not individual earnings."
+)
+SOCIETY_EQUIVALISED_DECILE_REPORTING_NOTE = (
+    "Decile income levels and changes are annual equivalised HBAI household "
+    "amounts, not individual earnings; winner/loser categories use the same "
+    "income concept."
+)
+SOCIETY_WEALTH_DECILE_REPORTING_NOTE = (
+    "Income changes in the wealth-decile results are annual household net income "
+    "amounts, not individual earnings; households are grouped by wealth."
+)
+SOCIETY_POVERTY_HBAI_REPORTING_NOTE = (
+    "Poverty calculations use equivalised HBAI household net income: "
+    "before-housing-cost income for BHC measures and after-housing-cost income "
+    "for AHC measures."
+)
+SOCIETY_INEQUALITY_HBAI_REPORTING_NOTE = (
+    "Inequality calculations use equivalised HBAI household net income."
+)
 SOCIETY_EXTRA_VARIABLES_BY_OUTPUT: dict[str, dict[str, tuple[str, ...]]] = {
     "budgetary_impact": {},
     "program_statistics": {},
@@ -86,6 +108,18 @@ class SocietyAnalysisInput(StrictModel):
     referenced_policy_scenario_id: str | None = None
     year: int | None = None
     requested_outputs: tuple[str, ...] = ()
+    decile_concept: Literal[
+        "household_net_income",
+        "equivalised_hbai_net_income",
+        "wealth",
+    ] = Field(
+        default=SOCIETY_DEFAULT_DECILE_CONCEPT,
+        description=(
+            "Use household_net_income for ordinary distributional requests, "
+            "equivalised_hbai_net_income only when the user explicitly requests "
+            "equivalised HBAI net income, or wealth for wealth-decile requests."
+        ),
+    )
 
 
 class SocietyAnalysisOutput(StrictModel):
@@ -93,10 +127,39 @@ class SocietyAnalysisOutput(StrictModel):
     year_source: InputSource
     numerical_verification: Literal["disabled"] = "disabled"
     required_output_ids: tuple[str, ...] = SOCIETY_DEFAULT_OUTPUTS
+    income_reporting_notes: tuple[str, ...]
     narration_requirement: str = (
-        "Present budgetary impact, winners/losers/unchanged, and income-decile "
-        "impacts, plus every successfully calculated requested output and any issue."
+        "Present budgetary impact, winner/loser/unchanged percentages within named "
+        "deciles, and decile impacts, plus every successfully calculated requested "
+        "output and any issue. "
+        "Include every income_reporting_notes statement explicitly and identify the "
+        "income measure named by the decile result labels. Describe calculated "
+        "direction, magnitude, and distribution without political, normative, or "
+        "value-judgment labels. Report incidence only as percentages within a named "
+        "decile from the winners_losers decile 1 through 10 rows. Do not report or "
+        "derive absolute numbers of people or households, do not report any calculated "
+        "value whose unit is people or households, and do not report the "
+        "winners_losers overall row."
     )
+
+
+def society_income_reporting_notes(
+    output_ids: tuple[str, ...],
+    decile_concept: str,
+) -> tuple[str, ...]:
+    notes: list[str] = []
+    if {"decile_impacts", "winners_losers"}.intersection(output_ids):
+        if decile_concept == "equivalised_hbai_net_income":
+            notes.append(SOCIETY_EQUIVALISED_DECILE_REPORTING_NOTE)
+        elif decile_concept == "wealth":
+            notes.append(SOCIETY_WEALTH_DECILE_REPORTING_NOTE)
+        else:
+            notes.append(SOCIETY_HOUSEHOLD_INCOME_REPORTING_NOTE)
+    if "poverty" in output_ids:
+        notes.append(SOCIETY_POVERTY_HBAI_REPORTING_NOTE)
+    if "inequality" in output_ids:
+        notes.append(SOCIETY_INEQUALITY_HBAI_REPORTING_NOTE)
+    return tuple(notes)
 
 
 _DERIVATIVE_TOOL = {
@@ -240,8 +303,8 @@ class SocietyAnalysisCapability(Capability[SocietyAnalysisInput, SocietyAnalysis
             if tool_id is None:
                 continue
             tool_input = {"simulation_id": simulation_id}
-            if output_id == "decile_impacts":
-                tool_input["decile_concept"] = SOCIETY_DEFAULT_DECILE_CONCEPT
+            if output_id in {"decile_impacts", "winners_losers"}:
+                tool_input["decile_concept"] = capability_input.decile_concept
             derivative = await context.invoke_tool(tool_id, tool_input)
             if not isinstance(derivative, SafeToolOutput):
                 raise TypeError(f"{tool_id} returned an incompatible output.")
@@ -308,6 +371,7 @@ class SocietyAnalysisCapability(Capability[SocietyAnalysisInput, SocietyAnalysis
             dataset=dataset,
             calculation_engine_version=scenario.calculation_engine_version,
             default_profile_version=SOCIETY_DEFAULT_PROFILE_VERSION,
+            decile_concept=capability_input.decile_concept,
             calculated_output_ids=calculated_ids,
             outputs=tuple(aggregate_values),
             requested_output_issues=issues,
@@ -317,6 +381,10 @@ class SocietyAnalysisCapability(Capability[SocietyAnalysisInput, SocietyAnalysis
             value=SocietyAnalysisOutput(
                 result=result,
                 year_source=resolved_year.source,
+                income_reporting_notes=society_income_reporting_notes(
+                    calculated_ids,
+                    capability_input.decile_concept,
+                ),
             )
         )
 

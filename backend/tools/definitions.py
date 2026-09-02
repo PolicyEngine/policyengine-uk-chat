@@ -200,7 +200,16 @@ COMPUTE_DECILE_IMPACTS_INPUT_SCHEMA = _object_schema(
 COMPUTE_WINNERS_LOSERS_INPUT_SCHEMA = _object_schema(
     {
         "simulation_id": RESULT_ID_INPUT_SCHEMA,
-        "basis": {"type": "string", "enum": ["income", "wealth"], "default": "income"},
+        "decile_concept": {
+            "type": "string",
+            "enum": list(DECILE_CONCEPT_VALUES),
+            "default": DEFAULT_DECILE_CONCEPT.value,
+            "description": (
+                "Use `household_net_income` for ordinary distributional requests, "
+                "`equivalised_hbai_net_income` only when the user explicitly requests "
+                "equivalised HBAI net income, or `wealth` for wealth deciles."
+            ),
+        },
     },
     ["simulation_id"],
 )

@@ -14,7 +14,8 @@ from tools.analysis_support import (
 from tools.contracts import CallerType
 
 
-Redraft = Callable[[str, VerifyNumericalResponseOutput], Awaitable[str]]
+NumericalRedraft = Callable[[str, VerifyNumericalResponseOutput], Awaitable[str]]
+AssessmentLanguageReview = Callable[[str, tuple[str, ...]], Awaitable[str]]
 
 
 class ClarificationNarrationGuard:
@@ -34,6 +35,35 @@ class ClarificationNarrationGuard:
         return draft or deterministic_fallback or ""
 
 
+class AssessmentLanguageGuard:
+    """Request one contextual review when literal assessment terms are present."""
+
+    _potential_assessment_terms = re.compile(
+        r"\b(?:"
+        r"bad|beneficial|desirable|equitable|fair|favourable|favorable|generous|good|"
+        r"harmful|inequitable|negative|positive|progressive|progressivity|punitive|"
+        r"regressive|regressivity|undesirable|unfair|unfavourable|unfavorable"
+        r")\b",
+        re.IGNORECASE,
+    )
+
+    async def finalize(
+        self,
+        *,
+        draft: str,
+        review: AssessmentLanguageReview,
+    ) -> str:
+        matched_terms = tuple(
+            dict.fromkeys(
+                match.group(0).casefold()
+                for match in self._potential_assessment_terms.finditer(draft)
+            )
+        )
+        if not matched_terms:
+            return draft
+        return await review(draft, matched_terms)
+
+
 class NumericalNarrationVerifier:
     """Allow free-form prose, one correction, then a verified fact summary."""
 
@@ -46,7 +76,7 @@ class NumericalNarrationVerifier:
         draft: str,
         facts: tuple[NumericalFact, ...],
         context: CapabilityContext,
-        redraft: Redraft,
+        redraft: NumericalRedraft,
         deterministic_fallback: str | None = None,
         allow_redraft: bool = True,
     ) -> str:

@@ -136,6 +136,11 @@ class SocietyAnalysisResultRef(ArtifactBase):
     dataset: SocietyDatasetProvenance | None = None
     calculation_engine_version: str
     default_profile_version: str
+    decile_concept: Literal[
+        "household_net_income",
+        "equivalised_hbai_net_income",
+        "wealth",
+    ] = "household_net_income"
     calculated_output_ids: tuple[str, ...]
     outputs: tuple[AggregateValue, ...]
     requested_output_issues: tuple[RequestedOutputIssue, ...] = ()

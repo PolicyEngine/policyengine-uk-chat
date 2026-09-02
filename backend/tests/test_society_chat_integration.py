@@ -41,7 +41,14 @@ from capabilities.relevance import (
     RelevanceAssessment,
     RelevanceResult,
 )
-from capabilities.society import SocietyAnalysisCapability, SocietyAnalysisInput
+from capabilities.society import (
+    SOCIETY_EQUIVALISED_DECILE_REPORTING_NOTE,
+    SOCIETY_HOUSEHOLD_INCOME_REPORTING_NOTE,
+    SOCIETY_INEQUALITY_HBAI_REPORTING_NOTE,
+    SOCIETY_POVERTY_HBAI_REPORTING_NOTE,
+    SocietyAnalysisCapability,
+    SocietyAnalysisInput,
+)
 import capabilities.society as society_module
 from capabilities.tracing import InvocationTracer
 from chat.artifact_context import RepositoryArtifactSummarySource
@@ -225,17 +232,35 @@ def _society_derivative_result(identifier, payload):
             "net_budgetary_impact": 100_000_000,
         }
     if identifier == "compute_decile_impacts":
+        decile_concept = payload["decile_concept"]
+        income_variable = (
+            "equiv_hbai_household_net_income"
+            if decile_concept == "equivalised_hbai_net_income"
+            else "household_net_income"
+        )
+        decile_variable = (
+            "household_wealth_decile" if decile_concept == "wealth" else None
+        )
+        grouping_label = {
+            "household_net_income": "Household net income decile",
+            "equivalised_hbai_net_income": "Equivalised HBAI net income decile",
+            "wealth": "Wealth decile",
+        }[decile_concept]
         return {
             **common,
-            "decile_concept": payload["decile_concept"],
-            "basis": "income",
-            "income_variable": "household_net_income",
-            "decile_variable": None,
-            "grouping_variable": "household_net_income",
+            "decile_concept": decile_concept,
+            "basis": "wealth" if decile_concept == "wealth" else "income",
+            "income_variable": income_variable,
+            "decile_variable": decile_variable,
+            "grouping_variable": decile_variable or income_variable,
             "entity": "household",
             "quantiles": 10,
-            "measure_label": "household net income",
-            "grouping_label": "Household net income decile",
+            "measure_label": (
+                "equivalised HBAI net income"
+                if decile_concept == "equivalised_hbai_net_income"
+                else "household net income"
+            ),
+            "grouping_label": grouping_label,
             "deciles": [
                 {
                     "decile": decile,
@@ -251,10 +276,26 @@ def _society_derivative_result(identifier, payload):
             ],
         }
     if identifier == "compute_winners_losers":
+        decile_metadata = _society_derivative_result(
+            "compute_decile_impacts",
+            payload,
+        )
         return {
             **common,
-            "basis": "income",
-            "grouping_label": "Income decile",
+            **{
+                key: decile_metadata[key]
+                for key in (
+                    "decile_concept",
+                    "basis",
+                    "income_variable",
+                    "decile_variable",
+                    "grouping_variable",
+                    "entity",
+                    "quantiles",
+                    "measure_label",
+                    "grouping_label",
+                )
+            },
             "deciles": [
                 {
                     "decile": decile,
@@ -362,10 +403,31 @@ class ScriptedConversationModel:
             )
         else:
             outputs = result["value"]["result"]["outputs"]
-            text = "\n".join(
-                f"- {item['label']}: {item['value']:g} {item['unit']}"
-                for item in outputs
+            lines = []
+            for item in outputs:
+                if item["unit"] in {"people", "households"}:
+                    continue
+                if item["output_id"] == "winners_losers":
+                    decile = next(
+                        dimension["value"]
+                        for dimension in item["dimensions"]
+                        if dimension["name"] == "decile"
+                    )
+                    if decile == "overall":
+                        continue
+                    lines.append(
+                        f"- Decile {decile}, {item['label']}: "
+                        f"{item['value'] * 100:g}%"
+                    )
+                    continue
+                lines.append(f"- {item['label']}: {item['value']:g} {item['unit']}")
+            text = "\n".join(lines)
+            income_reporting_notes = result["value"].get(
+                "income_reporting_notes",
+                [],
             )
+            if income_reporting_notes:
+                text = f"{' '.join(income_reporting_notes)}\n\n{text}"
         return ConversationModelResponse(
             text=text,
             model="scripted-population-chat-model",
@@ -375,16 +437,24 @@ class ScriptedConversationModel:
     async def redraft_numerical(self, **kwargs):
         raise AssertionError(f"Typed output narration should verify: {kwargs}")
 
+    async def review_assessment_language(self, **kwargs):
+        raise AssertionError(
+            f"Neutral scripted narration should not need review: {kwargs}"
+        )
+
 
 def _society_action(
     reform_instruction: str | None = None,
     *requested_outputs: str,
+    decile_concept: str = "household_net_income",
 ) -> CapabilityAction:
     payload: dict[str, object] = {}
     if reform_instruction is not None:
         payload["reform_instruction"] = reform_instruction
     if requested_outputs:
         payload["requested_outputs"] = requested_outputs
+    if decile_concept != "household_net_income":
+        payload["decile_concept"] = decile_concept
     return CapabilityAction("society_analysis", payload)
 
 
@@ -480,7 +550,7 @@ POPULATION_OUTPUT_VARIANTS = ConversationPath(
         "Run the default population profile again.",
         "Recalculate the fiscal impact.",
         "Recalculate winners and losers.",
-        "Recalculate the decile impacts.",
+        "Recalculate the decile impacts using equivalised HBAI net income.",
         "Run all supported headline outputs again.",
         "Finish with another complete society-wide calculation.",
     ),
@@ -495,10 +565,15 @@ POPULATION_OUTPUT_VARIANTS = ConversationPath(
             "Raise the basic income-tax rate by 2 percentage points",
             "programme statistics",
         ),
-        *(
-            _society_action("Raise the basic income-tax rate by 2 percentage points")
-            for _ in range(6)
+        _society_action("Raise the basic income-tax rate by 2 percentage points"),
+        _society_action("Raise the basic income-tax rate by 2 percentage points"),
+        _society_action("Raise the basic income-tax rate by 2 percentage points"),
+        _society_action(
+            "Raise the basic income-tax rate by 2 percentage points",
+            decile_concept="equivalised_hbai_net_income",
         ),
+        _society_action("Raise the basic income-tax rate by 2 percentage points"),
+        _society_action("Raise the basic income-tax rate by 2 percentage points"),
     ),
     expected_society_runs=10,
     expected_compute_tools=frozenset(
@@ -831,6 +906,26 @@ def test_ten_user_turn_population_conversations(
         for index, action in enumerate(path.actions, start=1)
         if action.capability_id == "society_analysis"
     }
+    for index, turn in enumerate(completed_turns, start=1):
+        if f"turn-{index}" not in society_turn_ids:
+            continue
+        assert "People better off" not in turn.content
+        assert "People worse off" not in turn.content
+        assert "People with no change" not in turn.content
+        assert " people" not in turn.content
+        assert " households" not in turn.content
+        assert "Decile overall" not in turn.content
+        assert "Decile 1, Share losing more than 5%: 1%" in turn.content
+        action = path.actions[index - 1]
+        if action.input.get("decile_concept") == "equivalised_hbai_net_income":
+            assert SOCIETY_EQUIVALISED_DECILE_REPORTING_NOTE in turn.content
+        else:
+            assert SOCIETY_HOUSEHOLD_INCOME_REPORTING_NOTE in turn.content
+        requested_outputs = tuple(action.input.get("requested_outputs", ()))
+        if any("poverty" in output for output in requested_outputs):
+            assert SOCIETY_POVERTY_HBAI_REPORTING_NOTE in turn.content
+        if any("inequality" in output for output in requested_outputs):
+            assert SOCIETY_INEQUALITY_HBAI_REPORTING_NOTE in turn.content
     traces = trace_repository.list_for_conversation(
         path.name,
         include_private=True,

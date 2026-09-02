@@ -25,6 +25,7 @@ from capabilities.society import (
     SOCIETY_DEFAULT_PROFILE_VERSION,
     SocietyAnalysisOutput,
     current_dataset_version,
+    society_income_reporting_notes,
 )
 from tools.analysis_support import (
     ExtractResultFindingsOutput,
@@ -50,6 +51,7 @@ class AnalysisFollowUpOutput(StrictModel):
     reran_provider: bool = False
     narration_facts: tuple[NumericalFact, ...] = ()
     numerical_verification: Literal["disabled"] | None = None
+    income_reporting_notes: tuple[str, ...] = ()
 
 
 class AnalysisFollowUpCapability(
@@ -119,6 +121,7 @@ class AnalysisFollowUpCapability(
         source = candidates[0]
         result = source
         reran = False
+        selected_output_ids: tuple[str, ...] = ()
         if isinstance(source, SocietyAnalysisResultRef):
             compatibility = check_artifact_compatibility(
                 source,
@@ -145,6 +148,7 @@ class AnalysisFollowUpCapability(
             )
             if not isinstance(selected, SelectSupportedOutputsOutput):
                 raise TypeError("Follow-up output selection returned an incompatible result.")
+            selected_output_ids = selected.output_ids
             missing = set(selected.output_ids) - set(source.calculated_output_ids)
             if missing:
                 scenario = await self._scenario(source, context)
@@ -161,6 +165,7 @@ class AnalysisFollowUpCapability(
                         "referenced_policy_scenario_id": scenario.artifact_id,
                         "year": source.year,
                         "requested_outputs": list(capability_input.requested_outputs),
+                        "decile_concept": source.decile_concept,
                     },
                 )
                 if not isinstance(rerun, Completed) or not isinstance(
@@ -173,8 +178,17 @@ class AnalysisFollowUpCapability(
 
         facts: tuple[NumericalFact, ...] = ()
         numerical_verification = None
+        income_reporting_notes: tuple[str, ...] = ()
         if isinstance(result, SocietyAnalysisResultRef):
             numerical_verification = "disabled"
+            income_reporting_notes = society_income_reporting_notes(
+                tuple(
+                    output_id
+                    for output_id in selected_output_ids
+                    if output_id in result.calculated_output_ids
+                ),
+                result.decile_concept,
+            )
         else:
             extracted = await context.invoke_tool(
                 "extract_result_findings",
@@ -204,6 +218,7 @@ class AnalysisFollowUpCapability(
                 reran_provider=reran,
                 narration_facts=facts,
                 numerical_verification=numerical_verification,
+                income_reporting_notes=income_reporting_notes,
             )
         )
 

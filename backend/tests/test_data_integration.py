@@ -89,10 +89,17 @@ def test_enhanced_frs_full_society_derivative_lifecycle(live_society_run):
 
     winners_losers = _execute(
         "compute_winners_losers",
-        {"simulation_id": simulation_id, "basis": "income"},
+        {
+            "simulation_id": simulation_id,
+            "decile_concept": "household_net_income",
+        },
         context,
     )
     assert {row["decile"] for row in winners_losers["deciles"]} == set(range(11))
+    assert winners_losers["income_variable"] == "household_net_income"
+    assert winners_losers["decile_variable"] is None
+    assert winners_losers["grouping_variable"] == "household_net_income"
+    assert winners_losers["grouping_label"] == "Household net income decile"
     assert validated_aggregate_values("winners_losers", winners_losers)
 
     poverty = _execute(

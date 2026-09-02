@@ -161,7 +161,18 @@ class WinnersLosersRow(StrictModel):
 
 
 class WinnersLosers(PayloadModel):
+    decile_concept: Literal[
+        "household_net_income",
+        "equivalised_hbai_net_income",
+        "wealth",
+    ]
     basis: Literal["income", "wealth"]
+    income_variable: str = Field(min_length=1)
+    decile_variable: str | None
+    grouping_variable: str = Field(min_length=1)
+    entity: Literal["household"]
+    quantiles: Literal[10]
+    measure_label: str = Field(min_length=1)
     grouping_label: str = Field(min_length=1)
     deciles: tuple[WinnersLosersRow, ...]
 

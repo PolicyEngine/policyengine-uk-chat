@@ -298,14 +298,17 @@ def compute_decile_impacts(
 @register_tool(name="compute_winners_losers", description=DERIVATIVE_DESCRIPTION, input_schema=COMPUTE_WINNERS_LOSERS_INPUT_SCHEMA)
 def compute_winners_losers(
     simulation_id: str,
-    basis: str = "income",
+    decile_concept: str = DEFAULT_DECILE_CONCEPT.value,
     _context: ToolExecutionContext | None = None,
 ) -> Dict[str, Any]:
     payload = _society_payload(_context, simulation_id)
     summary = {
         "status": "success",
         "simulation_id": simulation_id,
-        **derivatives.winners_losers(payload, basis=basis),
+        **derivatives.winners_losers(
+            payload,
+            decile_concept=decile_concept,
+        ),
     }
     return _derivative_result(_context, "winners_losers", summary)
 

@@ -57,6 +57,7 @@ def sanitized_artifact_summary(artifact: ArtifactBase) -> dict[str, object]:
             "scenario_revision": artifact.scenario_revision,
             "dataset_version": artifact.dataset_version,
             "default_profile_version": artifact.default_profile_version,
+            "decile_concept": artifact.decile_concept,
             "outputs": tuple(output.model_dump(mode="json") for output in artifact.outputs),
             "requested_output_issues": tuple(
                 issue.model_dump(mode="json")

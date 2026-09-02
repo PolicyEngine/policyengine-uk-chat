@@ -19,6 +19,10 @@ from capabilities.policy_reform import (
 from capabilities.society import (
     SOCIETY_DEFAULT_OUTPUTS,
     SOCIETY_DEFAULT_PROFILE_VERSION,
+    SOCIETY_EQUIVALISED_DECILE_REPORTING_NOTE,
+    SOCIETY_HOUSEHOLD_INCOME_REPORTING_NOTE,
+    SOCIETY_INEQUALITY_HBAI_REPORTING_NOTE,
+    SOCIETY_POVERTY_HBAI_REPORTING_NOTE,
     SocietyAnalysisCapability,
 )
 from capabilities.society_outputs import validated_aggregate_values
@@ -95,16 +99,35 @@ def _budgetary_output():
 
 
 def _decile_output(decile_concept="household_net_income"):
+    income_variable = (
+        "equiv_hbai_household_net_income"
+        if decile_concept == "equivalised_hbai_net_income"
+        else "household_net_income"
+    )
+    decile_variable = (
+        "household_wealth_decile" if decile_concept == "wealth" else None
+    )
+    basis = "wealth" if decile_concept == "wealth" else "income"
+    measure_label = (
+        "equivalised HBAI net income"
+        if decile_concept == "equivalised_hbai_net_income"
+        else "household net income"
+    )
+    grouping_label = {
+        "household_net_income": "Household net income decile",
+        "equivalised_hbai_net_income": "Equivalised HBAI net income decile",
+        "wealth": "Wealth decile",
+    }[decile_concept]
     return {
         "decile_concept": decile_concept,
-        "basis": "income",
-        "income_variable": "household_net_income",
-        "decile_variable": None,
-        "grouping_variable": "household_net_income",
+        "basis": basis,
+        "income_variable": income_variable,
+        "decile_variable": decile_variable,
+        "grouping_variable": decile_variable or income_variable,
         "entity": "household",
         "quantiles": 10,
-        "measure_label": "household net income",
-        "grouping_label": "Household net income decile",
+        "measure_label": measure_label,
+        "grouping_label": grouping_label,
         "deciles": [
             {
                 "decile": decile,
@@ -121,10 +144,22 @@ def _decile_output(decile_concept="household_net_income"):
     }
 
 
-def _winners_losers_output():
+def _winners_losers_output(decile_concept="household_net_income"):
+    metadata = _decile_output(decile_concept)
     return {
-        "basis": "income",
-        "grouping_label": "Income decile",
+        key: metadata[key]
+        for key in (
+            "decile_concept",
+            "basis",
+            "income_variable",
+            "decile_variable",
+            "grouping_variable",
+            "entity",
+            "quantiles",
+            "measure_label",
+            "grouping_label",
+        )
+    } | {
         "deciles": [
             {
                 "decile": decile,
@@ -272,7 +307,7 @@ def _runtime(monkeypatch):
             return {
                 "status": "success",
                 "simulation_id": payload["simulation_id"],
-                **_winners_losers_output(),
+                **_winners_losers_output(payload["decile_concept"]),
                 "result_id": "winners-request-local",
             }
         if identifier == "compute_decile_impacts":
@@ -391,7 +426,24 @@ def test_baseline_run_always_calculates_and_persists_complete_default_profile(
         SOCIETY_DEFAULT_OUTPUTS
     )
     assert result.requested_output_issues == ()
+    assert result.decile_concept == "household_net_income"
     assert outcome.value.numerical_verification == "disabled"
+    assert outcome.value.income_reporting_notes == (
+        SOCIETY_HOUSEHOLD_INCOME_REPORTING_NOTE,
+    )
+    assert "Include every income_reporting_notes statement explicitly" in (
+        outcome.value.narration_requirement
+    )
+    assert "Report incidence only as percentages within a named decile" in (
+        outcome.value.narration_requirement
+    )
+    assert "Do not report or derive absolute numbers" in (
+        outcome.value.narration_requirement
+    )
+    assert "unit is people or households" in outcome.value.narration_requirement
+    assert "do not report the winners_losers overall row" in (
+        outcome.value.narration_requirement
+    )
     units = {
         (value.output_id, value.metric_id): value.unit for value in result.outputs
     }
@@ -418,6 +470,41 @@ def test_baseline_run_always_calculates_and_persists_complete_default_profile(
         "compute_winners_losers",
         "compute_budgetary_impact",
     ]
+    distributional_inputs = [
+        payload
+        for identifier, payload in calls
+        if identifier in {"compute_decile_impacts", "compute_winners_losers"}
+    ]
+    assert all(
+        payload["decile_concept"] == "household_net_income"
+        for payload in distributional_inputs
+    )
+
+
+def test_explicit_hbai_concept_applies_to_both_distributional_outputs(monkeypatch):
+    composition, context, _artifacts, calls, _heavy, _resolver = _runtime(monkeypatch)
+
+    outcome = _invoke(
+        composition,
+        context,
+        "society_analysis",
+        {"decile_concept": "equivalised_hbai_net_income"},
+    )
+
+    assert isinstance(outcome, Completed)
+    assert outcome.value.result.decile_concept == "equivalised_hbai_net_income"
+    assert outcome.value.income_reporting_notes == (
+        SOCIETY_EQUIVALISED_DECILE_REPORTING_NOTE,
+    )
+    distributional_inputs = [
+        payload
+        for identifier, payload in calls
+        if identifier in {"compute_decile_impacts", "compute_winners_losers"}
+    ]
+    assert all(
+        payload["decile_concept"] == "equivalised_hbai_net_income"
+        for payload in distributional_inputs
+    )
 
 
 def test_requested_outputs_are_additive_deduplicated_and_issues_keep_defaults(
@@ -451,6 +538,28 @@ def test_requested_outputs_are_additive_deduplicated_and_issues_keep_defaults(
     assert identifiers.count("compute_budgetary_impact") == 1
     assert identifiers.count("compute_poverty_metrics") == 1
     assert identifiers.count("compute_inequality_metrics") == 0
+    assert outcome.value.income_reporting_notes == (
+        SOCIETY_HOUSEHOLD_INCOME_REPORTING_NOTE,
+        SOCIETY_POVERTY_HBAI_REPORTING_NOTE,
+    )
+
+
+def test_poverty_and_inequality_results_require_explicit_hbai_notes(monkeypatch):
+    composition, context, _artifacts, _calls, _heavy, _resolver = _runtime(monkeypatch)
+
+    outcome = _invoke(
+        composition,
+        context,
+        "society_analysis",
+        {"requested_outputs": ["poverty", "inequality"]},
+    )
+
+    assert isinstance(outcome, Completed)
+    assert outcome.value.income_reporting_notes == (
+        SOCIETY_HOUSEHOLD_INCOME_REPORTING_NOTE,
+        SOCIETY_POVERTY_HBAI_REPORTING_NOTE,
+        SOCIETY_INEQUALITY_HBAI_REPORTING_NOTE,
+    )
 
 
 def test_ordinary_reform_is_verified_before_population_simulation(monkeypatch):
@@ -527,6 +636,9 @@ def test_follow_up_reuses_retained_aggregates_without_rerun(monkeypatch):
     assert follow_up.value.result.artifact_id == result_id
     assert follow_up.value.narration_facts == ()
     assert follow_up.value.numerical_verification == "disabled"
+    assert follow_up.value.income_reporting_notes == (
+        SOCIETY_HOUSEHOLD_INCOME_REPORTING_NOTE,
+    )
     assert len(_simulation_calls(calls)) == before
     assert set(follow_up.value.result.calculated_output_ids) == set(
         SOCIETY_DEFAULT_OUTPUTS
@@ -535,7 +647,12 @@ def test_follow_up_reuses_retained_aggregates_without_rerun(monkeypatch):
 
 def test_missing_follow_up_metric_reruns_with_full_defaults_and_new_output(monkeypatch):
     composition, context, _artifacts, calls, _heavy, _resolver = _runtime(monkeypatch)
-    analysis = _invoke(composition, context, "society_analysis", {})
+    analysis = _invoke(
+        composition,
+        context,
+        "society_analysis",
+        {"decile_concept": "equivalised_hbai_net_income"},
+    )
     result_id = analysis.value.result.artifact_id
 
     follow_up = _invoke(
@@ -554,6 +671,11 @@ def test_missing_follow_up_metric_reruns_with_full_defaults_and_new_output(monke
     assert follow_up.value.result.calculated_output_ids == (
         *SOCIETY_DEFAULT_OUTPUTS,
         "poverty",
+    )
+    assert follow_up.value.result.decile_concept == "equivalised_hbai_net_income"
+    assert follow_up.value.income_reporting_notes == (
+        SOCIETY_EQUIVALISED_DECILE_REPORTING_NOTE,
+        SOCIETY_POVERTY_HBAI_REPORTING_NOTE,
     )
     assert len(_simulation_calls(calls)) == 2
 

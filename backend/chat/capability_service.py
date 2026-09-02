@@ -60,7 +60,11 @@ from chat.model_port import (
     ModelCapabilityCall,
     ModelUsage,
 )
-from chat.narration import ClarificationNarrationGuard, NumericalNarrationVerifier
+from chat.narration import (
+    AssessmentLanguageGuard,
+    ClarificationNarrationGuard,
+    NumericalNarrationVerifier,
+)
 from chat.turn_input import ChatTurnInput
 from persistence.idempotency import (
     IdempotencyDecision,
@@ -116,10 +120,29 @@ is an optional follow-up after the completed values have been explained.
 When society_analysis completes, cover every category in required_output_ids and
 every successfully calculated requested output, and explain each requested-output
 issue. Follow its narration_requirement, but choose a natural layout for the answer.
+For ordinary distributional requests, use `decile_concept="household_net_income"`.
+Use `decile_concept="equivalised_hbai_net_income"` only when the user explicitly
+asks for equivalised HBAI net income, or `decile_concept="wealth"` only for a
+wealth-decile request. Include every returned income_reporting_notes statement
+explicitly. These statements distinguish annual household amounts from individual
+earnings and identify the equivalised HBAI definitions used by poverty or inequality.
+When analysis_follow_up returns income_reporting_notes for a retained population
+result, include every statement that applies to the outputs being presented.
+Report incidence only as percentages within a named decile, using the
+`winners_losers` rows for deciles 1 through 10. Do not report or derive absolute
+numbers of people or households, and do not report any society-analysis value whose
+unit is `people` or `households`. Do not report the `winners_losers` overall row.
+Apply this instruction to initial population analyses and follow-ups.
 Do not infer policy mechanisms, eligibility rules, or causal explanations from a
 calculation result alone. Use facts returned by policy_information for those claims;
 otherwise describe only the calculated values, supplied inputs, explicit assumptions,
 and clearly identified interpretation.
+For every completed calculation, report measured directions, magnitudes, incidence,
+and metric changes without adding a political, normative, or value judgment. Do not
+classify a policy or calculation as progressive or regressive, positive or negative,
+good or bad, fair or unfair, beneficial or harmful, desirable or undesirable, or use
+similar assessment language. Positive and negative may identify a literal numeric
+sign or established technical category, but must not assess the policy overall.
 
 When a capability returns needs_input, ask its supplied prompt as a conversational
 clarification. Do not call that capability again in the same turn without new user
@@ -283,6 +306,7 @@ class ChatTurnService:
         self._invocation_tasks = InvocationTaskController()
         self._narration = NumericalNarrationVerifier(executor)
         self._clarification_narration = ClarificationNarrationGuard()
+        self._assessment_language = AssessmentLanguageGuard()
 
     async def run(
         self,
@@ -450,7 +474,9 @@ class ChatTurnService:
             )
             narration_facts: list[NumericalFact] = []
             numerical_verification_disabled = False
+            calculation_result_seen = False
             assumption_statements: list[str] = []
+            income_reporting_notes: list[str] = []
             unresolved_fallbacks: list[str] = []
             completed_fallbacks: list[str] = []
             blocked_capabilities: dict[str, dict[str, object]] = {}
@@ -521,6 +547,20 @@ class ChatTurnService:
                         final_text,
                         assumption_statements,
                     )
+                    final_text = self._ensure_income_reporting_notes(
+                        final_text,
+                        income_reporting_notes,
+                    )
+                    if calculation_result_seen:
+                        final_text, assessment_review_usage = (
+                            await self._finalize_assessment_language(final_text)
+                        )
+                        if assessment_review_usage is not None:
+                            usage = self._add_usage(usage, assessment_review_usage)
+                        final_text = self._ensure_income_reporting_notes(
+                            final_text,
+                            income_reporting_notes,
+                        )
                     activity, trace_cursor = self._activity_since(
                         context,
                         trace_cursor,
@@ -598,12 +638,19 @@ class ChatTurnService:
                             context_validation.issues,
                         )
                     narration_facts.extend(self._narration_facts(result))
+                    calculation_result_seen = (
+                        calculation_result_seen
+                        or self._is_calculation_result(result)
+                    )
                     numerical_verification_disabled = (
                         numerical_verification_disabled
                         or self._numerical_verification_disabled(result)
                     )
                     assumption_statements.extend(
                         self._assumption_statements(result)
+                    )
+                    income_reporting_notes.extend(
+                        self._income_reporting_notes(result)
                     )
                     completed_fallback = self._completed_fallback(result)
                     if completed_fallback is not None:
@@ -870,6 +917,27 @@ class ChatTurnService:
         )
         return text, correction_usage
 
+    async def _finalize_assessment_language(
+        self,
+        draft: str,
+    ) -> tuple[str, ModelUsage | None]:
+        review_usage: ModelUsage | None = None
+
+        async def review(text: str, matched_terms: tuple[str, ...]) -> str:
+            nonlocal review_usage
+            response = await self._model.review_assessment_language(
+                draft=text,
+                matched_terms=matched_terms,
+            )
+            review_usage = response.usage
+            return response.text or text
+
+        text = await self._assessment_language.finalize(
+            draft=draft,
+            review=review,
+        )
+        return text, review_usage
+
     @staticmethod
     def _with_response_guidance(
         result: dict[str, object],
@@ -969,6 +1037,35 @@ class ChatTurnService:
         lines[section_end:section_end] = [f"- {item}" for item in missing]
         return "\n".join(lines)
 
+    @staticmethod
+    def _income_reporting_notes(result: dict[str, object]) -> tuple[str, ...]:
+        value = result.get("value")
+        if not isinstance(value, dict):
+            return ()
+        notes = value.get("income_reporting_notes")
+        if not isinstance(notes, list):
+            return ()
+        return tuple(
+            item.strip()
+            for item in notes
+            if isinstance(item, str) and item.strip()
+        )
+
+    @staticmethod
+    def _ensure_income_reporting_notes(
+        response: str,
+        notes: list[str],
+    ) -> str:
+        unique = tuple(dict.fromkeys(notes))
+        missing = [note for note in unique if note.casefold() not in response.casefold()]
+        if not missing:
+            return response
+        section = "### Income basis\n\n" + "\n".join(
+            f"- {note}" for note in missing
+        )
+        prefix = response.rstrip()
+        return f"{prefix}\n\n{section}" if prefix else section
+
     def _complete_turn(
         self,
         turn_id: str,
@@ -1004,6 +1101,12 @@ class ChatTurnService:
         return (
             isinstance(value, dict)
             and value.get("numerical_verification") == "disabled"
+        )
+
+    @classmethod
+    def _is_calculation_result(cls, result: dict[str, object]) -> bool:
+        return bool(cls._narration_facts(result)) or cls._numerical_verification_disabled(
+            result
         )
 
     @staticmethod

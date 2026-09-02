@@ -224,23 +224,20 @@ def decile_impacts(
 def winners_losers(
     run: SocietySimulationRun,
     *,
-    basis: Literal["income", "wealth"] = "income",
+    decile_concept: DecileConcept | str = DEFAULT_DECILE_CONCEPT,
 ) -> dict[str, Any]:
     """Return official people-weighted intra-decile impact rows."""
 
+    concept, config = resolve_decile_concept(decile_concept)
     from policyengine.outputs import compute_intra_decile_impacts
 
-    decile_variable = (
-        "household_income_decile"
-        if basis == "income"
-        else "household_wealth_decile"
-    )
     collection = compute_intra_decile_impacts(
         baseline_simulation=run.baseline,
         reform_simulation=run.reform_simulation,
-        income_variable="household_net_income",
-        decile_variable=decile_variable,
-        entity="household",
+        income_variable=config.income_variable,
+        decile_variable=config.decile_variable,
+        entity=config.entity,
+        quantiles=config.quantiles,
     )
     rows = [
         {
@@ -254,10 +251,15 @@ def winners_losers(
         for output in collection.outputs
     ]
     return {
-        "basis": basis,
-        "grouping_label": (
-            "Income decile" if basis == "income" else "Wealth decile"
-        ),
+        "decile_concept": concept.value,
+        "basis": config.basis,
+        "income_variable": config.income_variable,
+        "decile_variable": config.decile_variable,
+        "grouping_variable": config.decile_variable or config.income_variable,
+        "entity": config.entity,
+        "quantiles": config.quantiles,
+        "measure_label": config.measure_label,
+        "grouping_label": config.grouping_label,
         "deciles": rows,
     }
 

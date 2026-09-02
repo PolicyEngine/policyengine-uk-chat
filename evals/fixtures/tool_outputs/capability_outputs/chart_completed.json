@@ -36,7 +36,8 @@
       "catalogue_version": "5.0.1",
       "dataset_version": "2024-25",
       "calculation_engine_version": "5.0.1",
-      "default_profile_version": "2",
+      "default_profile_version": "3",
+      "decile_concept": "household_net_income",
       "calculated_output_ids": ["budgetary_impact", "winners_losers", "decile_impacts"],
       "outputs": [
         {

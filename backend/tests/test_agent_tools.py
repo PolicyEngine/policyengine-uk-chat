@@ -106,6 +106,21 @@ def test_decile_tool_exposes_three_state_concept():
     assert "exclude negative or non-finite" in tool["description"]
     assert "null impacts, not zero" in tool["description"]
 
+    winners_tool = _tool("compute_winners_losers")
+    winners_properties = winners_tool["input_schema"]["properties"]
+    assert set(winners_properties) == {"simulation_id", "decile_concept"}
+    assert winners_properties["decile_concept"]["enum"] == [
+        "household_net_income",
+        "equivalised_hbai_net_income",
+        "wealth",
+    ]
+    assert winners_properties["decile_concept"]["default"] == (
+        "household_net_income"
+    )
+    assert "only when the user explicitly requests" in (
+        winners_properties["decile_concept"]["description"]
+    )
+
 
 def test_decile_tool_passes_explicit_decile_concept_to_derivative(monkeypatch):
     captured = {}
@@ -136,6 +151,51 @@ def test_decile_tool_passes_explicit_decile_concept_to_derivative(monkeypatch):
     )
 
     result = agent_tools.compute_decile_impacts(
+        simulation_id,
+        decile_concept="equivalised_hbai_net_income",
+        _context=context,
+    )
+
+    assert captured == {
+        "payload": payload,
+        "decile_concept": "equivalised_hbai_net_income",
+    }
+    assert result["income_variable"] == "equiv_hbai_household_net_income"
+
+
+def test_winners_losers_tool_passes_explicit_decile_concept(monkeypatch):
+    captured = {}
+
+    def fake_winners_losers(payload, **kwargs):
+        captured["payload"] = payload
+        captured.update(kwargs)
+        return {
+            "decile_concept": kwargs["decile_concept"],
+            "basis": "income",
+            "income_variable": "equiv_hbai_household_net_income",
+            "decile_variable": None,
+            "grouping_variable": "equiv_hbai_household_net_income",
+            "entity": "household",
+            "quantiles": 10,
+            "measure_label": "equivalised HBAI net income",
+            "grouping_label": "Equivalised HBAI net income decile",
+            "deciles": [],
+        }
+
+    monkeypatch.setattr(
+        agent_tools.derivatives,
+        "winners_losers",
+        fake_winners_losers,
+    )
+    context = new_tool_context("winner-loser-income-concept")
+    payload = object()
+    simulation_id = context.result_store.put(
+        "society_simulation",
+        payload,
+        {},
+    )
+
+    result = agent_tools.compute_winners_losers(
         simulation_id,
         decile_concept="equivalised_hbai_net_income",
         _context=context,
