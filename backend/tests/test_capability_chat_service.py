@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict
 from sqlmodel import Session, SQLModel, create_engine
@@ -47,7 +48,9 @@ class EchoOutput(StrictModel):
     text: str
     narration_facts: tuple[NumericalFact, ...] = ()
     assumption_statements: tuple[str, ...] = ()
+    income_reporting_notes: tuple[str, ...] = ()
     narration_fallback: str | None = None
+    numerical_verification: Literal["disabled"] | None = None
 
 
 class EchoCapability(Capability[EchoInput, EchoOutput]):
@@ -65,7 +68,11 @@ class EchoCapability(Capability[EchoInput, EchoOutput]):
     async def run(self, capability_input, context):
         del context
         facts = ()
-        if capability_input.text == "numeric":
+        if capability_input.text in {
+            "numeric",
+            "numeric-unverified",
+            "assessment-with-requirements",
+        }:
             facts = (
                 NumericalFact(
                     label="Net cost",
@@ -75,7 +82,13 @@ class EchoCapability(Capability[EchoInput, EchoOutput]):
             )
         assumptions = (
             ("The household has no childcare expenses.",)
-            if capability_input.text == "requirements"
+            if capability_input.text
+            in {"requirements", "assessment-with-requirements"}
+            else ()
+        )
+        income_reporting_notes = (
+            ("Inequality calculations use equivalised HBAI household net income.",)
+            if capability_input.text == "income-note"
             else ()
         )
         return Completed(
@@ -83,9 +96,21 @@ class EchoCapability(Capability[EchoInput, EchoOutput]):
                 text=capability_input.text,
                 narration_facts=facts,
                 assumption_statements=assumptions,
+                income_reporting_notes=income_reporting_notes,
                 narration_fallback=(
                     "### Results\n\n- Net cost: £1.2 billion."
-                    if capability_input.text == "numeric"
+                    if capability_input.text
+                    in {
+                        "numeric",
+                        "numeric-unverified",
+                        "assessment-with-requirements",
+                    }
+                    else None
+                ),
+                numerical_verification=(
+                    "disabled"
+                    if capability_input.text
+                    in {"numeric-unverified", "assessment-with-requirements"}
                     else None
                 ),
             )
@@ -150,11 +175,13 @@ class FakeRelevanceAssessor:
 
 
 class FakeConversationModel:
-    def __init__(self, responses, redraft=""):
+    def __init__(self, responses, redraft="", assessment_review=None):
         self.responses = list(responses)
         self.requests = []
         self.redraft = redraft
         self.redraft_calls = []
+        self.assessment_review = assessment_review
+        self.assessment_review_calls = []
 
     async def respond(self, request):
         self.requests.append(request)
@@ -170,6 +197,18 @@ class FakeConversationModel:
         self.redraft_calls.append((draft, unsupported_claims, fact_summary))
         return ConversationModelResponse(
             text=self.redraft,
+            model="fake-model",
+            usage=ModelUsage(input_tokens=3, output_tokens=2),
+        )
+
+    async def review_assessment_language(self, *, draft, matched_terms):
+        self.assessment_review_calls.append((draft, matched_terms))
+        return ConversationModelResponse(
+            text=(
+                self.assessment_review
+                if self.assessment_review is not None
+                else draft
+            ),
             model="fake-model",
             usage=ModelUsage(input_tokens=3, output_tokens=2),
         )
@@ -276,7 +315,20 @@ def test_direct_answer_keeps_full_history_and_private_relevance_out_of_model_too
     assert "referenced_household_id" in model.requests[0].system
     assert "same household" in model.requests[0].system
     assert "every category in required_output_ids" in model.requests[0].system
+    normalized_system = model.requests[0].system.replace("\n", " ")
+    assert "annual household amounts from individual earnings" in normalized_system
+    assert '`decile_concept="household_net_income"`' in normalized_system
+    assert "identify the equivalised HBAI definitions" in normalized_system
+    assert "Report incidence only as percentages within a named decile" in (
+        normalized_system
+    )
+    assert "Do not report or derive absolute numbers" in normalized_system
+    assert "unit is `people` or `households`" in normalized_system
+    assert "Do not report the `winners_losers` overall row" in normalized_system
     assert "Do not infer policy mechanisms" in model.requests[0].system
+    assert "without adding a political, normative, or value judgment" in (
+        model.requests[0].system
+    )
     assert events[-1].usage.input_tokens == 7
     assert events[-1].usage.output_tokens == 5
 
@@ -529,6 +581,7 @@ def test_model_result_omits_verifier_only_narration_fields():
     )
     assert "narration_facts" not in model_result["value"]
     assert "narration_fallback" not in model_result["value"]
+    assert "numerical_verification" not in model_result["value"]
     assert model_result["value"]["text"] == "numeric"
     finished = next(
         event.record
@@ -726,6 +779,106 @@ def test_quantitative_response_gets_one_free_form_correction_and_usage_accountin
     assert events[-1].usage.output_tokens == 6
 
 
+def test_capability_can_disable_numerical_verification_for_model_narration():
+    model = FakeConversationModel(
+        [
+            ConversationModelResponse(
+                capability_calls=(
+                    ModelCapabilityCall(
+                        call_id="call-unverified",
+                        capability_id="echo_capability",
+                        input={"text": "numeric-unverified"},
+                    ),
+                ),
+                model="fake-model",
+            ),
+            ConversationModelResponse(
+                text="The model may describe this as approximately £1.2 billion.",
+                model="fake-model",
+            ),
+        ]
+    )
+    _composition, service, context = _runtime(model, FakeRelevanceAssessor())
+
+    events = _collect(service, _turn(debug=True), context)
+
+    assert events[-2].content == (
+        "The model may describe this as approximately £1.2 billion."
+    )
+    assert model.redraft_calls == []
+    assert model.assessment_review_calls == []
+    assert not any(
+        isinstance(event, InvocationActivity)
+        and event.record.identifier == "verify_numerical_response"
+        for event in events
+    )
+
+
+def test_calculation_language_with_assessment_terms_gets_one_text_only_review():
+    draft = "This is a progressive reform with a positive overall impact."
+    neutral = (
+        "The calculated cash gains rise across the reported household-income deciles."
+        "\n\n### Assumptions used\n\n"
+        "- The household has no childcare expenses."
+    )
+    model = FakeConversationModel(
+        [
+            ConversationModelResponse(
+                capability_calls=(
+                    ModelCapabilityCall(
+                        call_id="call-assessment-review",
+                        capability_id="echo_capability",
+                        input={"text": "assessment-with-requirements"},
+                    ),
+                ),
+                model="fake-model",
+            ),
+            ConversationModelResponse(text=draft, model="fake-model"),
+        ],
+        assessment_review=neutral,
+    )
+    _composition, service, context = _runtime(model, FakeRelevanceAssessor())
+
+    events = _collect(service, _turn(), context)
+
+    assert events[-2].content == neutral
+    assert model.assessment_review_calls == [
+        (
+            f"{draft}\n\n### Assumptions used\n\n"
+            "- The household has no childcare expenses.",
+            ("progressive", "positive"),
+        )
+    ]
+    assert model.redraft_calls == []
+    assert events[-1].usage.input_tokens == 5
+    assert events[-1].usage.output_tokens == 3
+
+
+def test_assessment_review_can_retain_a_technical_keyword_use():
+    draft = "The net budgetary impact is a negative £1.2 billion."
+    model = FakeConversationModel(
+        [
+            ConversationModelResponse(
+                capability_calls=(
+                    ModelCapabilityCall(
+                        call_id="call-technical-language",
+                        capability_id="echo_capability",
+                        input={"text": "numeric-unverified"},
+                    ),
+                ),
+                model="fake-model",
+            ),
+            ConversationModelResponse(text=draft, model="fake-model"),
+        ]
+    )
+    _composition, service, context = _runtime(model, FakeRelevanceAssessor())
+
+    events = _collect(service, _turn(), context)
+
+    assert events[-2].content == draft
+    assert model.assessment_review_calls == [(draft, ("negative",))]
+
+
 def test_remaining_unsupported_sentence_is_removed_before_fact_list_fallback():
     draft = (
         "The verified net cost is £1.2 billion.\n\n"
@@ -825,6 +978,44 @@ def test_bold_assumption_heading_is_not_duplicated():
 
     assert completed == response
     assert completed.casefold().count("assumptions used") == 1
+
+
+def test_missing_income_reporting_note_is_appended():
+    model = FakeConversationModel(
+        [
+            ConversationModelResponse(
+                capability_calls=(
+                    ModelCapabilityCall(
+                        call_id="call-income-note",
+                        capability_id="echo_capability",
+                        input={"text": "income-note"},
+                    ),
+                ),
+                model="fake-model",
+            ),
+            ConversationModelResponse(
+                text="The Gini coefficient is shown above.",
+                model="fake-model",
+            ),
+        ]
+    )
+    _composition, service, context = _runtime(model, FakeRelevanceAssessor())
+
+    events = _collect(service, _turn(), context)
+
+    assert events[-2].content == (
+        "The Gini coefficient is shown above.\n\n"
+        "### Income basis\n\n"
+        "- Inequality calculations use equivalised HBAI household net income."
+    )
+
+
+def test_present_income_reporting_note_is_not_duplicated():
+    note = "Inequality calculations use equivalised HBAI household net income."
+
+    completed = ChatTurnService._ensure_income_reporting_notes(note, [note, note])
+
+    assert completed == note
 
 
 def test_request_cancellation_stops_before_relevance_or_model():

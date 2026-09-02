@@ -204,7 +204,24 @@ cases:
           year: 2026
           requested_outputs: [poverty, regional results]
     expect:
-      required: [budget, winners, losers, decile, poverty, regional results, unsupported]
+      required:
+        - budget
+        - decile 1
+        - 10% lose
+        - 70% have no change
+        - 20% gain
+        - decile 10
+        - 60% gain
+        - poverty
+        - regional results
+        - unsupported
+        - annual household amounts, not individual earnings
+        - Poverty calculations use equivalised HBAI household net income
+      forbidden:
+        - million winners
+        - million losers
+        - people better off
+        - households better off
     capability_outputs:
       - name: society_analysis
         output_fixture: capability_outputs/society_completed.json
@@ -216,8 +233,14 @@ cases:
               year: 2026
               requested_outputs: [poverty, regional results]
       - text: >
-          The result includes the budget, winners and losers, income-decile
-          impacts, and poverty. Regional results are unsupported.
+          The result includes the budget, income-decile impacts, and poverty. In
+          decile 1, 10% lose less than 5%, 70% have no change, and 20% gain less
+          than 5%. In decile 10, 2% lose less than 5%, 38% have no change, and
+          60% gain less than 5%. Regional results are unsupported. Income levels
+          and income changes in the decile results are annual household amounts,
+          not individual earnings. Poverty calculations use equivalised HBAI
+          household net income: before-housing-cost income for BHC measures and
+          after-housing-cost income for AHC measures.
 
   - id: capability_tool_loop_follow_up_reuses_aggregate
     suite: tool_loop
@@ -229,7 +252,10 @@ cases:
           referenced_result_id: society-result-1
     forbidden_tools: [society_analysis]
     expect:
-      required: [£1.2 billion, retained aggregate]
+      required:
+        - £1.2 billion
+        - retained aggregate
+        - annual household amounts, not individual earnings
       grounded_numbers: true
       allowed_numbers: [1.2]
     capability_outputs:
@@ -241,7 +267,10 @@ cases:
             input:
               question: What was the budgetary impact?
               referenced_result_id: society-result-1
-      - text: The retained aggregate shows a £1.2 billion budgetary impact.
+      - text: >
+          The retained aggregate shows a £1.2 billion budgetary impact. Income
+          levels and income changes in the decile results are annual household
+          amounts, not individual earnings.
 
   - id: capability_tool_loop_follow_up_verified_rerun
     suite: tool_loop
@@ -253,7 +282,12 @@ cases:
           referenced_result_id: society-result-1
           requested_outputs: [inequality]
     expect:
-      required: [reran, Gini, "0.31"]
+      required:
+        - reran
+        - Gini
+        - "0.31"
+        - annual household amounts, not individual earnings
+        - Inequality calculations use equivalised HBAI household net income
       grounded_numbers: true
       allowed_numbers: [0.31]
     capability_outputs:
@@ -266,7 +300,11 @@ cases:
               question: Add the Gini coefficient.
               referenced_result_id: society-result-1
               requested_outputs: [inequality]
-      - text: I reran the verified scenario and the Gini coefficient is 0.31.
+      - text: >
+          I reran the verified scenario and the Gini coefficient is 0.31. Income
+          levels and income changes in the decile results are annual household
+          amounts, not individual earnings. Inequality calculations use
+          equivalised HBAI household net income.
 
   - id: capability_tool_loop_calculate_then_chart
     suite: tool_loop
@@ -279,7 +317,10 @@ cases:
           referenced_result_id: society-result-1
           requested_output: decile_impacts
     expect:
-      required: [chart, income-decile]
+      required:
+        - chart
+        - income-decile
+        - annual household amounts, not individual earnings
     capability_outputs:
       - name: society_analysis
         output_fixture: capability_outputs/society_completed.json
@@ -296,4 +337,7 @@ cases:
             input:
               referenced_result_id: society-result-1
               requested_output: decile_impacts
-      - text: I calculated the result and produced the income-decile chart.
+      - text: >
+          I calculated the result and produced the income-decile chart. Income
+          levels and income changes in the decile results are annual household
+          amounts, not individual earnings.

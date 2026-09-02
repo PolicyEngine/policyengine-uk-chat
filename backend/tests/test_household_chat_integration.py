@@ -202,6 +202,9 @@ class ScriptedConversationModel:
     async def redraft_numerical(self, **kwargs):
         raise AssertionError(f"The verified response should not need redrafting: {kwargs}")
 
+    async def review_assessment_language(self, **kwargs):
+        raise AssertionError(f"The neutral response should not need review: {kwargs}")
+
 
 class EmploymentIncomeMapper:
     def __init__(
@@ -645,6 +648,9 @@ class TenTurnConversationModel:
 
     async def redraft_numerical(self, **kwargs):
         raise AssertionError(f"The generated values should be verified: {kwargs}")
+
+    async def review_assessment_language(self, **kwargs):
+        raise AssertionError(f"The neutral response should not need review: {kwargs}")
 
 
 async def not_cancelled() -> bool:

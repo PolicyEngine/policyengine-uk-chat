@@ -208,6 +208,9 @@ class DirectModel:
     async def redraft_numerical(self, **kwargs):
         raise AssertionError(kwargs)
 
+    async def review_assessment_language(self, **kwargs):
+        raise AssertionError(kwargs)
+
 
 class PlainDirectModel:
     async def respond(self, request):
@@ -216,6 +219,9 @@ class PlainDirectModel:
         return ConversationModelResponse(text="Thanks.", stop_reason="end_turn")
 
     async def redraft_numerical(self, **kwargs):
+        raise AssertionError(kwargs)
+
+    async def review_assessment_language(self, **kwargs):
         raise AssertionError(kwargs)
 
 
@@ -237,6 +243,9 @@ class NaturalContextClarificationModel:
         )
 
     async def redraft_numerical(self, **kwargs):
+        raise AssertionError(kwargs)
+
+    async def review_assessment_language(self, **kwargs):
         raise AssertionError(kwargs)
 
 

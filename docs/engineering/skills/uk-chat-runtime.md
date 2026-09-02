@@ -354,8 +354,14 @@ Capability-specific and runtime tools add `assess_relevance`,
 `resolve_reform` performs catalogue search, one structured candidate decision,
 private deterministic validation, and at most one representation-only
 correction. It cannot introduce an unreturned catalogue path or change policy
-target, operation, value, unit, effective date, population, or jurisdiction.
-Semantic uncertainty returns focused clarification.
+parameter path, operation, value, unit, effective date, population, or
+jurisdiction. The model tool schema restricts `meaning.parameter_path` to the
+paths returned by the catalogue, while friendly labels are derived from the
+catalogue by the server. A mismatch between the semantic parameter path and the
+reform mapping receives at most one internal representation correction and then
+fails as inconsistent structured output; it is never presented as a user
+clarification. Genuine semantic uncertainty returned by the resolver still
+produces a focused clarification.
 
 ## Input precedence and calculation behavior
 
@@ -380,6 +386,11 @@ household membership and relationships, children, rent, Council Tax, UK
 country, policy year, requested outputs, and reform instruction. It also
 retains medical expenses as a conversational fact even though the current
 household calculation adapter does not consume it.
+
+Requested-output extraction records only explicitly named calculation metrics.
+Generic scope phrases such as “societal impact”, “society-wide impact”,
+“population impact”, and “overall impact” select population analysis and its
+default output profile; they do not create an `analysis.requested_outputs` fact.
 
 The registry may materialize an additional fact definition only from a verified
 PolicyEngine catalogue record. Its key is derived from the catalogue entity and
@@ -501,19 +512,69 @@ calculated values.
 Every population calculation includes the versioned default aggregate profile:
 
 - budgetary impact;
-- winners, losers, and unchanged;
-- income-decile impacts using `household_net_income`.
+- winners, losers, and unchanged using `household_net_income` for both the
+  change measure and computed income-decile groups;
+- decile impacts using `household_net_income` for both displayed income and
+  computed income-decile groups.
+
+The population capability has one shared three-state `decile_concept` for its
+decile-impact and winner/loser outputs. Ordinary distributional requests use
+`household_net_income`. Use `equivalised_hbai_net_income` only when the user
+explicitly requests equivalised HBAI income; both distributional outputs then
+measure and group by `equiv_hbai_household_net_income`. A wealth-decile request
+uses `wealth`, groups by `household_wealth_decile`, and measures changes in
+`household_net_income`. Persist the selected concept with the population result
+and preserve it on a later rerun.
+
+Poverty and inequality are exceptions to this shared distributional concept.
+UK poverty calculations use equivalised HBAI household net income, with the BHC
+and AHC variants corresponding to before- and after-housing-cost income.
+Inequality calculations use equivalised HBAI household net income. Whenever a
+response presents poverty or inequality results, it must state these income
+definitions explicitly. Whenever a response presents decile income levels or
+changes, it must state that the amounts are annual household amounts rather
+than individual earnings and identify the selected income concept. The response
+service retains the applicable statements returned by population analysis and
+follow-up capabilities. Before returning the response, it appends any statement
+that the conversational model omitted under an `Income basis` heading.
+
+The decile-impact payload retains household-weighted `count_better_off`,
+`count_worse_off`, and `count_no_change` values for calculation reconciliation.
+The conversational model must not report those values because they are not
+people counts. It must not report or derive any absolute number of affected
+people or households, report any society-analysis value whose unit is `people`
+or `households`, or report the winner/loser overall row.
+Incidence may be reported only as person-weighted winner/loser/unchanged
+percentages within a named decile from the decile 1 through 10 rows.
 
 Supported `requested_outputs` are additive and deduplicated against those
 defaults. Ambiguous or unsupported requests are retained as typed issues and
 must not be described as calculated. Every rerun recalculates the complete
 default profile plus supported additions.
+The output selector also treats normalized generic population-scope phrases as
+the default profile without producing an unsupported-output issue. This
+provides deterministic handling for older retained context or imperfect model
+extraction.
 
-Population simulations use the fixed `UK_CHAT_DATASET` declaration. Complete
-simulation objects and any record-level arrays exist only in the request-local
-`TurnResultStore`. Durable population artifacts contain aggregate values and
-compatibility metadata only. There is no shared record-level population result
-cache.
+Population simulations omit the dataset selector when calling policyengine.py's
+managed-data API. The installed policyengine.py release therefore chooses its
+certified default UK dataset and resolves the corresponding URI and revision.
+UK Chat does not contain a dataset name or URI and does not enable unmanaged-data
+loading. It contains one presentation-only constant for the friendly dataset
+title. Complete simulation objects and any record-level arrays exist only in the
+request-local `TurnResultStore`. Durable population artifacts contain aggregate
+values plus typed dataset provenance from policyengine.py: the logical dataset
+name, data-package name and version, dataset revision, checksum, and certification
+metadata. Model-visible results and later-turn artifact summaries include that
+provenance and the friendly title. There is no shared record-level population
+result cache.
+
+Each population derivative has an explicit validated projection into the
+durable aggregate artifact. Validation rejects non-finite values, incomplete or
+duplicate decile/group collections, out-of-range shares and rates, and invalid
+winner/loser totals before the result reaches the conversational model. The
+projection assigns metric-specific units and dimensions; it does not infer them
+by recursively inspecting field names.
 
 ## Transferable state and persistence
 
@@ -594,6 +655,25 @@ facts. If the corrected draft still contains unsupported expressions, the
 runtime removes only the affected sentences or Markdown lines and verifies the
 remaining prose again. It returns the deterministic fact summary only when no
 safe prose remains.
+
+Population analysis and follow-ups over a population artifact are not passed
+through `verify_numerical_response`. Their numerical values have already passed
+the output-specific aggregate validation described above, and the conversational
+model receives those complete validated outputs to summarize in ordinary
+Markdown. This exception also disables whole-response numerical verification on
+a turn that combines population analysis with another capability.
+
+Calculation responses must describe measured directions, magnitudes,
+incidence, and metric changes without assigning political, normative, or value
+judgments such as progressive, regressive, good, bad, fair, or unfair. After
+the response and deterministic assumption list are assembled, scan the final
+text for a narrow set of potentially evaluative keywords. When a keyword is
+present, request one free-form text review with no structured response schema.
+The reviewer removes evaluative uses while preserving every figure, fact,
+assumption, and Markdown structure. Because the scan is lexical rather than
+semantic, the reviewer may retain a matched term when it is technical,
+literal, quoted, or otherwise non-evaluative, including a positive or negative
+numeric sign.
 
 A clarification-only response has no calculated fact set and does not invoke
 `verify_numerical_response`. `ClarificationNarrationGuard` permits natural prose

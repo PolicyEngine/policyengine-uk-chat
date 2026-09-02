@@ -135,6 +135,40 @@ def test_numerical_redraft_removes_unverified_derived_values(monkeypatch):
     assert "do not repeat any expression listed as unsupported" in system
 
 
+def test_assessment_language_review_is_text_only_and_context_sensitive(monkeypatch):
+    calls = []
+
+    class FakeMessages:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="Neutral description.")],
+                stop_reason="end_turn",
+                usage=_usage(input_tokens=1, output_tokens=1),
+            )
+
+    monkeypatch.setattr(
+        model_port,
+        "get_async_client",
+        lambda: SimpleNamespace(messages=FakeMessages()),
+    )
+
+    response = asyncio.run(
+        AnthropicConversationModel(model="test-model").review_assessment_language(
+            draft="This is progressive, with a negative budget value.",
+            matched_terms=("progressive", "negative"),
+        )
+    )
+
+    assert response.text == "Neutral description."
+    call = calls[0]
+    assert "tools" not in call
+    assert "tool_choice" not in call
+    assert "literal keyword matching, not semantic classification" in call["system"]
+    assert "may remain when its context is clearly technical" in call["system"]
+    assert "progressive, negative" in call["messages"][0]["content"]
+
+
 def test_context_interpreter_uses_one_declarative_fact_claim_route(monkeypatch):
     calls = []
 
@@ -191,6 +225,9 @@ def test_context_interpreter_uses_one_declarative_fact_claim_route(monkeypatch):
     assert "every supported assertion exactly once" in system
     assert "do not infer an income source" in system
     assert "apply a default" in system
+    assert "societal impact" in system
+    assert "not metric names" in system
+    assert "must not create an analysis.requested_outputs fact" in system
     assert '"current_message":"I am 42"' in calls[0]["messages"][0]["content"]
 
 

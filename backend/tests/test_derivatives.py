@@ -222,7 +222,15 @@ def test_decile_and_winners_losers_use_official_collection_helpers(monkeypatch):
         _run(),
         decile_concept="wealth",
     )
-    winners = derivatives.winners_losers(_run(), basis="wealth")
+    default_winners = derivatives.winners_losers(_run())
+    hbai_winners = derivatives.winners_losers(
+        _run(),
+        decile_concept="equivalised_hbai_net_income",
+    )
+    wealth_winners = derivatives.winners_losers(
+        _run(),
+        decile_concept="wealth",
+    )
 
     assert deciles["deciles"][0]["relative_change"] == 10
     assert len(decile_calls) == 3
@@ -274,9 +282,39 @@ def test_decile_and_winners_losers_use_official_collection_helpers(monkeypatch):
     )
     assert wealth_deciles["measure_label"] == "household net income"
     assert wealth_deciles["grouping_label"] == "Wealth decile"
-    assert winners["deciles"][0]["gain_more_than_5pct"] == 0.2
-    assert winners["grouping_label"] == "Wealth decile"
-    assert winners_calls[0]["decile_variable"] == "household_wealth_decile"
+    assert default_winners["deciles"][0]["gain_more_than_5pct"] == 0.2
+    assert default_winners["decile_concept"] == "household_net_income"
+    assert default_winners["grouping_label"] == "Household net income decile"
+    assert hbai_winners["decile_concept"] == "equivalised_hbai_net_income"
+    assert hbai_winners["grouping_label"] == "Equivalised HBAI net income decile"
+    assert wealth_winners["decile_concept"] == "wealth"
+    assert wealth_winners["grouping_label"] == "Wealth decile"
+    assert winners_calls == [
+        {
+            "baseline_simulation": "baseline",
+            "reform_simulation": "reform",
+            "income_variable": "household_net_income",
+            "decile_variable": None,
+            "entity": "household",
+            "quantiles": 10,
+        },
+        {
+            "baseline_simulation": "baseline",
+            "reform_simulation": "reform",
+            "income_variable": "equiv_hbai_household_net_income",
+            "decile_variable": None,
+            "entity": "household",
+            "quantiles": 10,
+        },
+        {
+            "baseline_simulation": "baseline",
+            "reform_simulation": "reform",
+            "income_variable": "household_net_income",
+            "decile_variable": "household_wealth_decile",
+            "entity": "household",
+            "quantiles": 10,
+        },
+    ]
 
     with pytest.raises(
         ValueError,

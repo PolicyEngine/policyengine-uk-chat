@@ -44,7 +44,11 @@ class ReformResolutionKind(str, Enum):
 
 
 class ReformMeaning(StrictModel):
-    target: str
+    parameter_path: str = Field(
+        description=(
+            "Exact parameter path selected from the supplied catalogue candidates."
+        )
+    )
     operation: Literal["set", "increase", "decrease", "abolish"]
     value: Scalar
     unit: str | None
@@ -144,7 +148,7 @@ class AnthropicReformCandidateResolver:
         tool = {
             "name": "submit_reform_resolution",
             "description": "Return one bounded reform-resolution outcome.",
-            "input_schema": ReformResolutionDecision.model_json_schema(),
+            "input_schema": self._resolution_schema(candidates),
         }
         response = await client.messages.create(
             model=DEFAULT_FAST_MODEL,
@@ -153,11 +157,13 @@ class AnthropicReformCandidateResolver:
             system=(
                 "Resolve ordinary UK policy wording only against the supplied catalogue "
                 "entries. A resolved outcome must use only supplied parameter paths and "
-                "must state target, operation, value, unit, effective date, population, "
-                "and jurisdiction without inventing consequential meaning. The reform "
-                "field must be a flat JSON object whose key is the exact supplied "
-                "parameter path and whose value is the final scalar parameter value; "
-                "never put path, operation, from, or to fields inside reform. Return "
+                "must set meaning.parameter_path to the exact selected catalogue path, "
+                "then state operation, value, unit, effective date, population, and "
+                "jurisdiction without inventing consequential meaning. Never put a "
+                "friendly label in meaning.parameter_path. The reform field must be a "
+                "flat JSON object whose key is that same exact parameter path and whose "
+                "value is the final scalar parameter value; never put path, operation, "
+                "from, or to fields inside reform. Return "
                 "needs_clarification for semantic ambiguity and unsupported when the "
                 "engine cannot represent the instruction. On a correction request, fix "
                 "only serialization or type shape and preserve all ReformMeaning fields."
@@ -201,6 +207,28 @@ class AnthropicReformCandidateResolver:
             "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", 0),
         }
         return ReformResolutionDecision.model_validate(payload)
+
+    @staticmethod
+    def _resolution_schema(candidates):
+        schema = ReformResolutionDecision.model_json_schema()
+        definitions = schema.get("$defs")
+        if not isinstance(definitions, dict):
+            raise RuntimeError("Reform resolution schema has no definitions.")
+        meaning = definitions.get("ReformMeaning")
+        if not isinstance(meaning, dict):
+            raise RuntimeError("Reform resolution schema has no meaning definition.")
+        properties = meaning.get("properties")
+        if not isinstance(properties, dict):
+            raise RuntimeError("Reform meaning schema has no properties.")
+        parameter_path = properties.get("parameter_path")
+        if not isinstance(parameter_path, dict):
+            raise RuntimeError("Reform meaning schema has no parameter path.")
+        parameter_path["enum"] = [
+            candidate["path"]
+            for candidate in candidates
+            if isinstance(candidate.get("path"), str)
+        ]
+        return schema
 
 
 def _package_version(package: str) -> str:
@@ -261,34 +289,37 @@ class ResolveReformTool(Tool[ResolveReformInput, ResolveReformOutput]):
 
         decision = self._normalize_candidate_mapping(decision, candidates)
         checked = self._check_meaning(decision, candidates)
+        correction_used = False
         if checked is not None:
-            return self._output(
-                tool_input,
-                outcome=ReformResolutionKind.NEEDS_CLARIFICATION,
-                summary=checked,
-                clarification=checked,
+            if not self._can_correct_mapping(decision, candidates):
+                return self._inconsistent_output(tool_input)
+            corrected = await self._correct_representation(
+                decision=decision,
+                instruction=tool_input.instruction,
+                year=tool_input.year,
+                candidates=candidates,
+                errors=(checked,),
+                context=context,
             )
+            correction_used = True
+            if corrected is None:
+                return self._inconsistent_output(tool_input)
+            decision = corrected
         validation = await self._validate(decision.reform, tool_input.year, context)
         if not validation.get("valid"):
             errors = self._validation_errors(validation)
-            if self._representation_only(errors):
-                corrected = await self._resolver.correct_representation(
+            if self._representation_only(errors) and not correction_used:
+                corrected = await self._correct_representation(
+                    decision=decision,
                     instruction=tool_input.instruction,
                     year=tool_input.year,
                     candidates=candidates,
-                    previous=decision,
-                    validation_errors=errors,
+                    errors=errors,
+                    context=context,
                 )
-                context.record_model_usage(**corrected.usage.model_dump())
-                if corrected.meaning != decision.meaning:
-                    return self._output(
-                        tool_input,
-                        outcome=ReformResolutionKind.NEEDS_CLARIFICATION,
-                        summary="The proposed correction changed the policy meaning.",
-                        clarification=(
-                            "Please restate the intended target, operation, value, and unit."
-                        ),
-                    )
+                correction_used = True
+                if corrected is None:
+                    return self._inconsistent_output(tool_input)
                 decision = corrected
                 validation = await self._validate(
                     decision.reform,
@@ -373,7 +404,10 @@ class ResolveReformTool(Tool[ResolveReformInput, ResolveReformOutput]):
         if meaning is None:
             return decision
         paths = {candidate["path"] for candidate in candidates}
-        if meaning.target not in paths or set(decision.reform) == {meaning.target}:
+        if (
+            meaning.parameter_path not in paths
+            or set(decision.reform) == {meaning.parameter_path}
+        ):
             return decision
         final_value = None
         if meaning.operation == "set":
@@ -383,22 +417,66 @@ class ResolveReformTool(Tool[ResolveReformInput, ResolveReformOutput]):
         if final_value is None:
             return decision
         return decision.model_copy(
-            update={"reform": {meaning.target: final_value}}
+            update={"reform": {meaning.parameter_path: final_value}}
         )
 
     @staticmethod
     def _check_meaning(decision, candidates) -> str | None:
         if decision.meaning is None:
-            return "The reform target, operation, value, or scope is incomplete."
+            return "Resolved reform output has no semantic meaning object."
         if not decision.reform:
-            return "The resolved reform contains no policy change."
+            return "Resolved reform output has no parameter mapping."
         paths = {candidate["path"] for candidate in candidates}
+        if decision.meaning.parameter_path not in paths:
+            return "The semantic parameter path is absent from catalogue results."
         unknown = set(decision.reform) - paths
         if unknown:
-            return "The proposed reform used a parameter absent from catalogue results."
-        if decision.meaning.target not in decision.reform:
-            return "The stated reform target does not match the constructed reform."
+            return "The parameter mapping contains a path absent from catalogue results."
+        if decision.meaning.parameter_path not in decision.reform:
+            return "The semantic parameter path does not match the parameter mapping."
         return None
+
+    @staticmethod
+    def _can_correct_mapping(decision, candidates) -> bool:
+        return decision.meaning is not None and decision.meaning.parameter_path in {
+            candidate["path"] for candidate in candidates
+        }
+
+    async def _correct_representation(
+        self,
+        *,
+        decision,
+        instruction,
+        year,
+        candidates,
+        errors,
+        context,
+    ):
+        corrected = await self._resolver.correct_representation(
+            instruction=instruction,
+            year=year,
+            candidates=candidates,
+            previous=decision,
+            validation_errors=errors,
+        )
+        context.record_model_usage(**corrected.usage.model_dump())
+        if (
+            corrected.outcome is not ReformResolutionKind.RESOLVED
+            or corrected.meaning != decision.meaning
+        ):
+            return None
+        corrected = self._normalize_candidate_mapping(corrected, candidates)
+        if self._check_meaning(corrected, candidates) is not None:
+            return None
+        return corrected
+
+    @classmethod
+    def _inconsistent_output(cls, tool_input):
+        return cls._output(
+            tool_input,
+            outcome=ReformResolutionKind.FAILED,
+            summary="The reform resolver returned inconsistent structured output.",
+        )
 
     @staticmethod
     def _validation_errors(validation) -> tuple[str, ...]:

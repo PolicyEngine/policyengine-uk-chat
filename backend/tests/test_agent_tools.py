@@ -9,10 +9,7 @@ import tools.definitions as tool_definitions
 from conftest import requires_policyengine_py
 from engine import households as household_engine
 from engine import simulations as simulation_engine
-from engine.constants import (
-    HOUSEHOLD_COUNTRY_IDS,
-    UK_CHAT_DATASET,
-)
+from engine.constants import HOUSEHOLD_COUNTRY_IDS
 from engine.py_runtime import DatasetSpec
 from engine.simulations import SocietySimulationRun
 from tools.context import new_tool_context
@@ -56,12 +53,8 @@ def test_tool_inventory_matches_py_lifecycle():
     assert "list_datasets" not in names
 
 
-def test_simulation_schema_uses_current_year_and_fixed_dataset():
+def test_simulation_schema_uses_current_year_and_native_default_dataset():
     assert DEFAULT_SIMULATION_YEAR == date.today().year
-    assert UK_CHAT_DATASET.name == "enhanced_frs_2024_25"
-    assert UK_CHAT_DATASET.label == "Enhanced FRS 2024-25"
-    assert UK_CHAT_DATASET.uri.startswith("hf://")
-    assert "@" in UK_CHAT_DATASET.uri
     society_schema = _tool("run_society_simulation")["input_schema"]
     assert society_schema["properties"]["year"]["default"] == DEFAULT_SIMULATION_YEAR
     assert "dataset" not in society_schema["properties"]
@@ -113,6 +106,21 @@ def test_decile_tool_exposes_three_state_concept():
     assert "exclude negative or non-finite" in tool["description"]
     assert "null impacts, not zero" in tool["description"]
 
+    winners_tool = _tool("compute_winners_losers")
+    winners_properties = winners_tool["input_schema"]["properties"]
+    assert set(winners_properties) == {"simulation_id", "decile_concept"}
+    assert winners_properties["decile_concept"]["enum"] == [
+        "household_net_income",
+        "equivalised_hbai_net_income",
+        "wealth",
+    ]
+    assert winners_properties["decile_concept"]["default"] == (
+        "household_net_income"
+    )
+    assert "only when the user explicitly requests" in (
+        winners_properties["decile_concept"]["description"]
+    )
+
 
 def test_decile_tool_passes_explicit_decile_concept_to_derivative(monkeypatch):
     captured = {}
@@ -143,6 +151,51 @@ def test_decile_tool_passes_explicit_decile_concept_to_derivative(monkeypatch):
     )
 
     result = agent_tools.compute_decile_impacts(
+        simulation_id,
+        decile_concept="equivalised_hbai_net_income",
+        _context=context,
+    )
+
+    assert captured == {
+        "payload": payload,
+        "decile_concept": "equivalised_hbai_net_income",
+    }
+    assert result["income_variable"] == "equiv_hbai_household_net_income"
+
+
+def test_winners_losers_tool_passes_explicit_decile_concept(monkeypatch):
+    captured = {}
+
+    def fake_winners_losers(payload, **kwargs):
+        captured["payload"] = payload
+        captured.update(kwargs)
+        return {
+            "decile_concept": kwargs["decile_concept"],
+            "basis": "income",
+            "income_variable": "equiv_hbai_household_net_income",
+            "decile_variable": None,
+            "grouping_variable": "equiv_hbai_household_net_income",
+            "entity": "household",
+            "quantiles": 10,
+            "measure_label": "equivalised HBAI net income",
+            "grouping_label": "Equivalised HBAI net income decile",
+            "deciles": [],
+        }
+
+    monkeypatch.setattr(
+        agent_tools.derivatives,
+        "winners_losers",
+        fake_winners_losers,
+    )
+    context = new_tool_context("winner-loser-income-concept")
+    payload = object()
+    simulation_id = context.result_store.put(
+        "society_simulation",
+        payload,
+        {},
+    )
+
+    result = agent_tools.compute_winners_losers(
         simulation_id,
         decile_concept="equivalised_hbai_net_income",
         _context=context,
@@ -250,9 +303,12 @@ def test_validate_household_rejects_non_categorical_country_values():
 
 def test_society_simulation_result_handle_feeds_derivative_and_chart_tools(monkeypatch):
     dataset = DatasetSpec(
-        name=UK_CHAT_DATASET.name,
-        label="Enhanced FRS 2024-25",
+        name="enhanced_frs_2024_25",
+        title="Enhanced FRS 2024-25",
         uri="hf://policyengine/uk/enhanced_frs_2024_25",
+        data_package_name="policyengine-uk-data",
+        data_package_version="1.56.16",
+        revision="1.56.16",
         row_level_access=False,
     )
     payload = SocietySimulationRun(
@@ -303,9 +359,12 @@ def test_society_simulation_defaults_the_year_and_preserves_explicit_years(
         return SocietySimulationRun(
             year=kwargs["year"],
             dataset=DatasetSpec(
-                name=UK_CHAT_DATASET.name,
-                label="Enhanced FRS 2024-25",
+                name="enhanced_frs_2024_25",
+                title="Enhanced FRS 2024-25",
                 uri="hf://example",
+                data_package_name="policyengine-uk-data",
+                data_package_version="1.56.16",
+                revision="1.56.16",
                 row_level_access=False,
             ),
             reform_applied=False,
@@ -336,9 +395,12 @@ def test_society_simulation_defaults_the_year_and_preserves_explicit_years(
 def test_society_simulation_normalizes_unset_reform_values(monkeypatch):
     captured = {}
     dataset = DatasetSpec(
-        name=UK_CHAT_DATASET.name,
-        label="Enhanced FRS 2024-25",
+        name="enhanced_frs_2024_25",
+        title="Enhanced FRS 2024-25",
         uri="hf://example",
+        data_package_name="policyengine-uk-data",
+        data_package_version="1.56.16",
+        revision="1.56.16",
         row_level_access=False,
     )
     monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda: dataset)
@@ -360,12 +422,15 @@ def test_society_simulation_normalizes_unset_reform_values(monkeypatch):
     assert result.reform_applied is False
 
 
-def test_society_simulation_uses_fixed_dataset(monkeypatch):
+def test_society_simulation_uses_native_default_dataset(monkeypatch):
     captured = {}
     dataset = DatasetSpec(
-        name=UK_CHAT_DATASET.name,
-        label=UK_CHAT_DATASET.label,
-        uri=UK_CHAT_DATASET.uri,
+        name="enhanced_frs_2024_25",
+        title="Enhanced FRS 2024-25",
+        uri="hf://example/enhanced_frs_2024_25.h5@1.56.16",
+        data_package_name="policyengine-uk-data",
+        data_package_version="1.56.16",
+        revision="1.56.16",
         row_level_access=False,
     )
     monkeypatch.setattr(simulation_engine, "resolve_dataset", lambda: dataset)

@@ -17,7 +17,8 @@
       "catalogue_version": "5.0.1",
       "dataset_version": "2024-25",
       "calculation_engine_version": "5.0.1",
-      "default_profile_version": "1",
+      "default_profile_version": "3",
+      "decile_concept": "household_net_income",
       "calculated_output_ids": [
         "budgetary_impact",
         "winners_losers",
@@ -34,17 +35,51 @@
         },
         {
           "output_id": "winners_losers",
-          "metric_id": "winners",
-          "label": "Winners",
-          "value": 8400000,
-          "unit": "people"
+          "metric_id": "deciles.lose_less_than_5pct",
+          "label": "Share losing less than 5%",
+          "value": 0.1,
+          "unit": "ratio",
+          "dimensions": [{"name": "decile", "value": "1"}]
         },
         {
           "output_id": "winners_losers",
-          "metric_id": "losers",
-          "label": "Losers",
-          "value": 2100000,
-          "unit": "people"
+          "metric_id": "deciles.no_change",
+          "label": "Share with no change",
+          "value": 0.7,
+          "unit": "ratio",
+          "dimensions": [{"name": "decile", "value": "1"}]
+        },
+        {
+          "output_id": "winners_losers",
+          "metric_id": "deciles.gain_less_than_5pct",
+          "label": "Share gaining less than 5%",
+          "value": 0.2,
+          "unit": "ratio",
+          "dimensions": [{"name": "decile", "value": "1"}]
+        },
+        {
+          "output_id": "winners_losers",
+          "metric_id": "deciles.lose_less_than_5pct",
+          "label": "Share losing less than 5%",
+          "value": 0.02,
+          "unit": "ratio",
+          "dimensions": [{"name": "decile", "value": "10"}]
+        },
+        {
+          "output_id": "winners_losers",
+          "metric_id": "deciles.no_change",
+          "label": "Share with no change",
+          "value": 0.38,
+          "unit": "ratio",
+          "dimensions": [{"name": "decile", "value": "10"}]
+        },
+        {
+          "output_id": "winners_losers",
+          "metric_id": "deciles.gain_less_than_5pct",
+          "label": "Share gaining less than 5%",
+          "value": 0.6,
+          "unit": "ratio",
+          "dimensions": [{"name": "decile", "value": "10"}]
         },
         {
           "output_id": "decile_impacts",
@@ -79,13 +114,10 @@
       ]
     },
     "year_source": "server_default",
-    "narration_facts": [
-      {"label": "Net budgetary impact", "value": 1200000000, "unit": "GBP/year"},
-      {"label": "Winners", "value": 8400000, "unit": "people"},
-      {"label": "Losers", "value": 2100000, "unit": "people"},
-      {"label": "Income decile 1 change", "value": 45, "unit": "GBP/year"},
-      {"label": "Income decile 10 change", "value": 120, "unit": "GBP/year"},
-      {"label": "Relative poverty rate", "value": 0.18, "unit": "ratio"}
+    "numerical_verification": "disabled",
+    "income_reporting_notes": [
+      "Income levels and income changes in the decile results are annual household amounts, not individual earnings.",
+      "Poverty calculations use equivalised HBAI household net income: before-housing-cost income for BHC measures and after-housing-cost income for AHC measures."
     ]
   }
 }

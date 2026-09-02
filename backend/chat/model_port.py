@@ -54,6 +54,13 @@ class ConversationModel(Protocol):
         fact_summary: str,
     ) -> ConversationModelResponse: ...
 
+    async def review_assessment_language(
+        self,
+        *,
+        draft: str,
+        matched_terms: tuple[str, ...],
+    ) -> ConversationModelResponse: ...
+
 
 class AnthropicConversationModel:
     def __init__(self, model: str = DEFAULT_FAST_MODEL) -> None:
@@ -132,6 +139,55 @@ class AnthropicConversationModel:
                     "content": (
                         f"Draft:\n{draft}\n\nUnsupported expressions: "
                         f"{', '.join(unsupported_claims)}\n\nVerified facts:\n{fact_summary}"
+                    ),
+                }
+            ],
+        )
+        text = "".join(
+            getattr(block, "text", "")
+            for block in response.content
+            if getattr(block, "type", None) == "text"
+        )
+        return ConversationModelResponse(
+            text=text,
+            stop_reason=getattr(response, "stop_reason", None),
+            model=self._model,
+            usage=self._usage(response),
+        )
+
+    async def review_assessment_language(
+        self,
+        *,
+        draft: str,
+        matched_terms: tuple[str, ...],
+    ) -> ConversationModelResponse:
+        client = get_async_client()  # type: ignore[no-untyped-call]
+        response = await client.messages.create(
+            model=self._model,
+            max_tokens=4_000,
+            temperature=DEFAULT_TEMPERATURE,
+            system=(
+                "Review a completed PolicyEngine calculation response for political, "
+                "normative, or value-judgment language. The listed terms came from "
+                "literal keyword matching, not semantic classification. If a matched "
+                "term assesses the policy or calculation, rewrite only that wording "
+                "as a neutral description of the calculated direction, magnitude, "
+                "incidence, or metric change. Do not classify a policy or calculation "
+                "as progressive or regressive, positive or negative, good or bad, "
+                "fair or unfair, beneficial or harmful, or desirable or undesirable. "
+                "A matched term may remain when its context is clearly technical, "
+                "literal, quoted, or otherwise non-evaluative, such as a negative "
+                "numeric value or a positive tax liability. Preserve every figure, "
+                "unit, policy fact, assumption statement exactly as written, and "
+                "Markdown structure. Do not add claims or analysis. Return only the "
+                "final response text."
+            ),
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        f"Draft:\n{draft}\n\nPotential assessment terms: "
+                        f"{', '.join(matched_terms)}"
                     ),
                 }
             ],

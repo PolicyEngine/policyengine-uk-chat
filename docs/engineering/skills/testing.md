@@ -203,16 +203,31 @@ CI; the frontend upload runs after the production build and remains non-blocking
 Repository branch protection must explicitly require the backend Codecov status
 after its first upload creates that check.
 
-For an authenticated end-to-end check of the Enhanced FRS society lifecycle
-and every official derivative adapter, run:
+For an authenticated end-to-end check that materializes the managed Enhanced
+FRS data, runs a real baseline/reform population calculation, and exercises
+every official derivative adapter, run:
 
 ```bash
-HUGGING_FACE_TOKEN=... RUN_DATA_EVALS=1 PYTHONPATH=backend \
-  python -m pytest backend/tests/test_data_integration.py
+HUGGING_FACE_TOKEN=... make test-society-live
 ```
 
 This test is deliberately excluded from the default suite because it downloads
 managed data and runs a full baseline/reform society simulation.
+
+The default backend suite separately runs four SQL-backed ten-user-turn chat
+paths that use deterministic provider substitutes. They cover repeated
+population calculations, optional population outputs, a transition from a
+household calculation to population analysis, and the exact Basic Rate wording
+that previously exposed inconsistent reform-target serialization. The fourth
+path passes a deterministic Anthropic response through the production reform
+resolver and asserts that its tool schema restricts `meaning.parameter_path` to
+the returned catalogue paths. It also passes `societal_impact` through output
+selection on all ten turns and asserts that the phrase selects only the default
+profile without producing a requested-output issue. Every population turn must execute the three
+default derivative operations. The first three paths respectively add poverty,
+inequality, and programme statistics so their combined assertions cover every
+`compute_*` population derivative. They must also assert that population turns
+do not invoke numerical narration verification.
 
 If a command cannot run locally because dependencies or credentials are missing,
 state that explicitly in the handoff.

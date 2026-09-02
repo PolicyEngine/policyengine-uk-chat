@@ -1,4 +1,4 @@
-.PHONY: up down build logs restart shell-backend shell-frontend migrate migration-check migration-current test test-backend test-frontend typecheck-backend sync-policyengine-uk-evals check-policyengine-uk-evals eval-ai-offline eval-ai-live eval-ai-deployed-uk-population
+.PHONY: up down build logs restart shell-backend shell-frontend migrate migration-check migration-current test test-backend test-society-live test-frontend typecheck-backend sync-policyengine-uk-evals check-policyengine-uk-evals eval-ai-offline eval-ai-live eval-ai-deployed-uk-population
 
 # Start all services in dev mode (live reload)
 up:
@@ -57,6 +57,9 @@ test: test-backend test-frontend
 
 test-backend:
 	PYTHONPATH=backend:. python -m pytest backend/tests --cov --cov-config=.coveragerc --cov-report=term-missing --cov-report=xml --cov-fail-under=80
+
+test-society-live:
+	RUN_DATA_EVALS=1 PYTHONPATH=backend:. python -m pytest backend/tests/test_data_integration.py
 
 test-frontend:
 	cd frontend && npm run test:coverage

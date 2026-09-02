@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 from pydantic import BaseModel, ConfigDict
 
 from capabilities.artifacts import (
@@ -23,6 +25,7 @@ from capabilities.society import (
     SOCIETY_DEFAULT_PROFILE_VERSION,
     SocietyAnalysisOutput,
     current_dataset_version,
+    society_income_reporting_notes,
 )
 from tools.analysis_support import (
     ExtractResultFindingsOutput,
@@ -46,7 +49,9 @@ class AnalysisFollowUpOutput(StrictModel):
     source_artifact_id: str
     result: HouseholdResultRef | SocietyAnalysisResultRef
     reran_provider: bool = False
-    narration_facts: tuple[NumericalFact, ...]
+    narration_facts: tuple[NumericalFact, ...] = ()
+    numerical_verification: Literal["disabled"] | None = None
+    income_reporting_notes: tuple[str, ...] = ()
 
 
 class AnalysisFollowUpCapability(
@@ -116,6 +121,7 @@ class AnalysisFollowUpCapability(
         source = candidates[0]
         result = source
         reran = False
+        selected_output_ids: tuple[str, ...] = ()
         if isinstance(source, SocietyAnalysisResultRef):
             compatibility = check_artifact_compatibility(
                 source,
@@ -142,6 +148,7 @@ class AnalysisFollowUpCapability(
             )
             if not isinstance(selected, SelectSupportedOutputsOutput):
                 raise TypeError("Follow-up output selection returned an incompatible result.")
+            selected_output_ids = selected.output_ids
             missing = set(selected.output_ids) - set(source.calculated_output_ids)
             if missing:
                 scenario = await self._scenario(source, context)
@@ -158,6 +165,7 @@ class AnalysisFollowUpCapability(
                         "referenced_policy_scenario_id": scenario.artifact_id,
                         "year": source.year,
                         "requested_outputs": list(capability_input.requested_outputs),
+                        "decile_concept": source.decile_concept,
                     },
                 )
                 if not isinstance(rerun, Completed) or not isinstance(
@@ -168,27 +176,49 @@ class AnalysisFollowUpCapability(
                 result = rerun.value.result
                 reran = True
 
-        extracted = await context.invoke_tool(
-            "extract_result_findings",
-            {
-                "outputs": [
-                    output.model_dump(mode="json") for output in result.outputs
-                ]
-            },
-        )
-        if not isinstance(extracted, ExtractResultFindingsOutput):
-            raise TypeError("Follow-up finding extraction returned an incompatible result.")
-        facts = tuple(
-            NumericalFact(label=finding.label, value=finding.value, unit=finding.unit)
-            for finding in extracted.findings
-            if finding.value is not None
-        )
+        facts: tuple[NumericalFact, ...] = ()
+        numerical_verification = None
+        income_reporting_notes: tuple[str, ...] = ()
+        if isinstance(result, SocietyAnalysisResultRef):
+            numerical_verification = "disabled"
+            income_reporting_notes = society_income_reporting_notes(
+                tuple(
+                    output_id
+                    for output_id in selected_output_ids
+                    if output_id in result.calculated_output_ids
+                ),
+                result.decile_concept,
+            )
+        else:
+            extracted = await context.invoke_tool(
+                "extract_result_findings",
+                {
+                    "outputs": [
+                        output.model_dump(mode="json") for output in result.outputs
+                    ]
+                },
+            )
+            if not isinstance(extracted, ExtractResultFindingsOutput):
+                raise TypeError(
+                    "Follow-up finding extraction returned an incompatible result."
+                )
+            facts = tuple(
+                NumericalFact(
+                    label=finding.label,
+                    value=finding.value,
+                    unit=finding.unit,
+                )
+                for finding in extracted.findings
+                if finding.value is not None
+            )
         return Completed(
             value=AnalysisFollowUpOutput(
                 source_artifact_id=source.artifact_id,
                 result=result,
                 reran_provider=reran,
                 narration_facts=facts,
+                numerical_verification=numerical_verification,
+                income_reporting_notes=income_reporting_notes,
             )
         )
 

@@ -7,9 +7,6 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
-from engine.constants import UK_CHAT_DATASET
-
-
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -158,7 +155,6 @@ def test_dataset_reference_is_not_deployment_configuration():
 
     for content in (workflow, modal_app, env_example, compose):
         assert "POLICYENGINE_UK_DEFAULT_DATASET" not in content
-        assert UK_CHAT_DATASET.uri not in content
 
 
 def test_local_docker_exposes_enhanced_frs_credentials():

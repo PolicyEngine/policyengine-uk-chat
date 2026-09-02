@@ -5,6 +5,7 @@ import os
 
 import pytest
 
+from capabilities.society_outputs import validated_aggregate_values
 from tools.context import new_tool_context
 from tools.dispatch import execute_tool
 
@@ -22,7 +23,8 @@ def _execute(name: str, tool_input: dict, context) -> dict:
     return result
 
 
-def test_enhanced_frs_full_society_derivative_lifecycle():
+@pytest.fixture(scope="module")
+def live_society_run():
     context = new_tool_context("enhanced-frs-integration")
     simulation = _execute(
         "run_society_simulation",
@@ -34,6 +36,21 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
         },
         context,
     )
+    return context, simulation
+
+
+def test_live_society_simulation_smoke(live_society_run):
+    """Materialize and run one real managed-data baseline/reform pair."""
+
+    _context, simulation = live_society_run
+
+    assert simulation["status"] == "success"
+    assert simulation["year"] == 2026
+    assert simulation["result_id"].startswith("society_simulation_")
+
+
+def test_enhanced_frs_full_society_derivative_lifecycle(live_society_run):
+    context, simulation = live_society_run
     simulation_id = simulation["result_id"]
 
     budget = _execute(
@@ -42,6 +59,7 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
         context,
     )
     assert math.isfinite(budget["net_budgetary_impact"])
+    assert validated_aggregate_values("budgetary_impact", budget)
 
     programs = _execute(
         "compute_program_breakdown",
@@ -49,6 +67,7 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
         context,
     )
     assert [row["program"] for row in programs["programs"]] == ["income_tax"]
+    assert validated_aggregate_values("program_statistics", programs)
 
     deciles = _execute(
         "compute_decile_impacts",
@@ -66,13 +85,22 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
     assert deciles["quantiles"] == 10
     assert deciles["measure_label"] == "household net income"
     assert deciles["grouping_label"] == "Household net income decile"
+    assert validated_aggregate_values("decile_impacts", deciles)
 
     winners_losers = _execute(
         "compute_winners_losers",
-        {"simulation_id": simulation_id, "basis": "income"},
+        {
+            "simulation_id": simulation_id,
+            "decile_concept": "household_net_income",
+        },
         context,
     )
     assert {row["decile"] for row in winners_losers["deciles"]} == set(range(11))
+    assert winners_losers["income_variable"] == "household_net_income"
+    assert winners_losers["decile_variable"] is None
+    assert winners_losers["grouping_variable"] == "household_net_income"
+    assert winners_losers["grouping_label"] == "Household net income decile"
+    assert validated_aggregate_values("winners_losers", winners_losers)
 
     poverty = _execute(
         "compute_poverty_metrics",
@@ -80,6 +108,7 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
         context,
     )
     assert poverty["rates"]
+    assert validated_aggregate_values("poverty", poverty)
 
     inequality = _execute(
         "compute_inequality_metrics",
@@ -89,6 +118,7 @@ def test_enhanced_frs_full_society_derivative_lifecycle():
     assert {"gini", "top_10_share", "top_1_share", "bottom_50_share"}.issubset(
         inequality["metrics"]
     )
+    assert validated_aggregate_values("inequality", inequality)
 
     aggregate = _execute(
         "aggregate_result",

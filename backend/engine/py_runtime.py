@@ -7,15 +7,22 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any
 
-from engine.constants import DatasetConfig, UK_CHAT_DATASET
+
+UK_SOCIETY_DATASET_TITLE = "Enhanced FRS 2024-25"
 
 
 @dataclass(frozen=True)
 class DatasetSpec:
     name: str
-    label: str
+    title: str
     uri: str
+    data_package_name: str
+    data_package_version: str
+    revision: str
     row_level_access: bool
+    sha256: str | None = None
+    certification_basis: str | None = None
+    certified_for_model_version: str | None = None
     notes: str | None = None
 
 
@@ -30,9 +37,9 @@ def _policyengine_module():
 
 
 def _manifest_module():
-    from policyengine.provenance.manifest import resolve_dataset_reference
+    from policyengine.provenance.manifest import get_release_manifest
 
-    return resolve_dataset_reference
+    return get_release_manifest
 
 
 @lru_cache(maxsize=1)
@@ -44,61 +51,86 @@ def uk_model_version():
 
 @lru_cache(maxsize=1)
 def resolve_dataset() -> DatasetSpec:
-    """Resolve UK Chat's fixed dataset to its managed reference."""
+    """Describe policyengine.py's certified default UK dataset."""
 
-    uri = _manifest_module()("uk", UK_CHAT_DATASET.uri)
-    resolved = DatasetConfig(uri=uri)
-    return DatasetSpec(
-        name=resolved.name,
-        label=resolved.label,
-        uri=uri,
-        row_level_access=False,
-        notes="UK Chat's fixed society dataset.",
+    manifest = _manifest_module()("uk")
+    name = manifest.default_dataset
+    uri = manifest.default_dataset_uri
+    reference = manifest.datasets.get(name)
+    certified_artifact = manifest.certified_data_artifact
+    certification = manifest.certification
+    artifact_package = (
+        certified_artifact.data_package
+        if certified_artifact is not None
+        and certified_artifact.dataset == name
+        and certified_artifact.data_package is not None
+        else manifest.data_package
     )
+    revision = reference.revision if reference is not None else None
+    if revision is None:
+        revision = _dataset_revision(uri)
+    certified_sha256 = (
+        certified_artifact.sha256
+        if certified_artifact is not None and certified_artifact.dataset == name
+        else None
+    )
+    sha256 = certified_sha256 or (
+        reference.sha256 if reference is not None else None
+    )
+    return DatasetSpec(
+        name=name,
+        title=UK_SOCIETY_DATASET_TITLE,
+        uri=uri,
+        data_package_name=artifact_package.name,
+        data_package_version=artifact_package.version,
+        revision=revision,
+        row_level_access=False,
+        sha256=sha256,
+        certification_basis=(
+            certification.compatibility_basis if certification is not None else None
+        ),
+        certified_for_model_version=(
+            certification.certified_for_model_version
+            if certification is not None
+            else None
+        ),
+        notes="policyengine.py's certified default UK society dataset.",
+    )
+
+
+def _dataset_revision(uri: str) -> str:
+    _source, separator, revision = uri.rpartition("@")
+    if not separator or not revision:
+        raise RuntimeError(
+            "policyengine.py's certified default dataset URI has no revision."
+        )
+    return revision
 
 
 def _managed_dataset_folder() -> str:
     return os.environ.get("POLICYENGINE_DATA_FOLDER", "/tmp/policyengine-uk-chat-data")
 
 
-def _mirror_hugging_face_token() -> None:
-    """Expose HUGGING_FACE_TOKEN under HF_TOKEN for huggingface_hub.
-
-    policyengine.py's primary download helper reads HUGGING_FACE_TOKEN, but its
-    fallback for dataset-type repos calls hf_hub_download without an explicit
-    token, so huggingface_hub falls back to its own HF_TOKEN env var. The
-    deployment secret only sets HUGGING_FACE_TOKEN, which made private
-    dataset-repo downloads fail with 401.
-    """
-
-    token = os.environ.get("HUGGING_FACE_TOKEN")
-    if token and not os.environ.get("HF_TOKEN"):
-        os.environ["HF_TOKEN"] = token
-
-
 @lru_cache(maxsize=16)
-def _managed_dataset(reference: str, year: int, data_folder: str):
-    """Load one configured policyengine.py dataset/year combination."""
+def _managed_dataset(year: int, data_folder: str):
+    """Load policyengine.py's certified default UK dataset for one year."""
 
-    _mirror_hugging_face_token()
     datasets = _policyengine_module().uk.ensure_datasets(
-        datasets=[reference],
         years=[year],
         data_folder=data_folder,
     )
     if len(datasets) != 1:
         raise RuntimeError(
-            f"Expected one managed UK dataset for {reference!r} in {year}, "
+            f"Expected one certified default UK dataset in {year}, "
             f"received {list(datasets)}."
         )
     return next(iter(datasets.values()))
 
 
 def managed_dataset(*, year: int):
-    """Return UK Chat's fixed policyengine.py Dataset ready for Simulation."""
+    """Return policyengine.py's certified default UK Dataset for Simulation."""
 
-    spec = resolve_dataset()
-    return _managed_dataset(spec.uri, year, _managed_dataset_folder())
+    return _managed_dataset(year, _managed_dataset_folder())
 
 
 def managed_simulation_pair(

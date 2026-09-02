@@ -47,20 +47,35 @@ cases:
     expect:
       required:
         - £1.2 billion
-        - 8.4 million winners
-        - 2.1 million losers
         - decile 1
         - decile 10
+        - 10% lose
+        - 70% have no change
+        - 20% gain
+        - 60% gain
         - poverty
         - regional results are unsupported
+        - annual household amounts, not individual earnings
+        - Poverty calculations use equivalised HBAI household net income
       grounded_numbers: true
-      allowed_numbers: [2026, 1.2, 8.4, 2.1, 1, 10, 45, 120, 18]
+      forbidden:
+        - million winners
+        - million losers
+        - people better off
+        - households better off
+      allowed_numbers: [2026, 1.2, 1, 2, 5, 10, 18, 20, 38, 45, 60, 70, 120]
     offline_response:
       text: >
-        In 2026, the budgetary impact is £1.2 billion. There are 8.4 million
-        winners and 2.1 million losers. Annual income changes are £45 in decile
-        1 and £120 in decile 10. The relative poverty rate is 18%. Regional
-        results are unsupported by the registered outputs.
+        In 2026, the budgetary impact is £1.2 billion. In decile 1, 10% lose
+        less than 5%, 70% have no change, and 20% gain less than 5%. In decile
+        10, 2% lose less than 5%, 38% have no change, and 60% gain less than 5%.
+        Annual income changes are £45 in decile 1 and £120 in decile 10. The
+        relative poverty rate is 18%. Regional
+        results are unsupported by the registered outputs. Income levels and
+        income changes in the decile results are annual household amounts, not
+        individual earnings. Poverty calculations use equivalised HBAI household
+        net income: before-housing-cost income for BHC measures and
+        after-housing-cost income for AHC measures.
 
   - id: capability_answer_unsupported_number_fallback
     suite: answer
@@ -73,11 +88,20 @@ cases:
       required:
         - Net budgetary impact
         - 1200000000 GBP/year
-        - Winners
-        - 8400000 people
+        - 20% gain
+        - decile 1
+        - annual household amounts, not individual earnings
+        - Poverty calculations use equivalised HBAI household net income
       forbidden:
         - £9 billion
+        - people
+        - households
       grounded_numbers: true
-      allowed_numbers: [1200000000, 8400000]
+      allowed_numbers: [1200000000, 20, 5, 1]
     offline_response:
-      text: 'Net budgetary impact: 1200000000 GBP/year; Winners: 8400000 people.'
+      text: >
+        Net budgetary impact: 1200000000 GBP/year. In decile 1, 20% gain less
+        than 5%. Income levels and income changes in the decile results are annual
+        household amounts, not individual earnings. Poverty calculations use
+        equivalised HBAI household net income: before-housing-cost income for BHC
+        measures and after-housing-cost income for AHC measures.
