@@ -1,5 +1,17 @@
 # Deployment
 
+```{warning}
+The beta is paused and no backend is deployed. Since 2026-09-29 the production
+Modal app has been stopped, the `Deploy to Modal` workflow disabled, and PR
+preview deploys switched off in `.github/workflows/pr-beta-deploy.yml`. They
+stay off until
+[#128](https://github.com/PolicyEngine/policyengine-uk-chat/issues/128),
+[#130](https://github.com/PolicyEngine/policyengine-uk-chat/issues/130) and
+[#131](https://github.com/PolicyEngine/policyengine-uk-chat/issues/131) are
+fixed. [#275](https://github.com/PolicyEngine/policyengine-uk-chat/issues/275)
+records what was stopped and how to redeploy.
+```
+
 The backend can run in Docker or as the Modal ASGI app in `modal_app.py`. Both
 install `backend/requirements.txt`, whose exact `policyengine[uk]` pin keeps the
 policyengine.py runtime and its certified UK country package together.

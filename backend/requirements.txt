@@ -1,7 +1,12 @@
 fastapi
 uvicorn[standard]
 alembic
-sqlmodel
+# SQLModel 0.0.45 maps plain `datetime` fields to a timezone-aware UTCDateTime
+# type. That no longer matches the naive sa.DateTime() columns our Alembic
+# revisions create, and it rejects naive values. Stay below 0.0.45 until a
+# migration adopts aware timestamps; see
+# https://sqlmodel.tiangolo.com/advanced/datetime/#upgrade-existing-applications
+sqlmodel<0.0.45
 psycopg2-binary
 anthropic==0.125.0
 policyengine[uk]==5.3.0
