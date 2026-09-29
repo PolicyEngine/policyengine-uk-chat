@@ -385,6 +385,8 @@ def test_preview_backend_deploys_stay_paused_until_auth_is_fixed():
     assert re.search(
         r"^    if: github\.event\.action == 'closed' && ", cleanup, re.MULTILINE
     )
+    # With deploy always skipped, `needs: deploy` would skip cleanup too.
+    assert "needs:" not in cleanup
 
 
 def test_modal_secret_sync_omits_billing_credentials_when_disabled(tmp_path):
