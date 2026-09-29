@@ -245,6 +245,8 @@ def _run_modal_preview_cleanup(
     list_exit_code=0,
     stop_exit_code=0,
     database_schema=None,
+    secret_list='[{"name":"pe-uk-chat-123-secrets"}]',
+    secret_list_exit_code=0,
 ):
     calls_path = tmp_path / "modal-calls"
     fake_modal = tmp_path / "modal"
@@ -254,6 +256,10 @@ def _run_modal_preview_cleanup(
         'if [[ "$*" == "app list --json" ]]; then\n'
         '  printf "%s\\n" "$MODAL_APP_LIST_JSON"\n'
         '  exit "$MODAL_LIST_EXIT_CODE"\n'
+        "fi\n"
+        'if [[ "$*" == "secret list --json" ]]; then\n'
+        '  printf "%s\\n" "$MODAL_SECRET_LIST_JSON"\n'
+        '  exit "$MODAL_SECRET_LIST_EXIT_CODE"\n'
         "fi\n"
         'if [[ "$1 $2" == "app stop" ]]; then\n'
         '  exit "$MODAL_STOP_EXIT_CODE"\n'
@@ -268,6 +274,8 @@ def _run_modal_preview_cleanup(
         "MODAL_CALLS_FILE": str(calls_path),
         "MODAL_LIST_EXIT_CODE": str(list_exit_code),
         "MODAL_STOP_EXIT_CODE": str(stop_exit_code),
+        "MODAL_SECRET_LIST_JSON": secret_list,
+        "MODAL_SECRET_LIST_EXIT_CODE": str(secret_list_exit_code),
         "PATH": f"{tmp_path}:{os.environ['PATH']}",
     }
     if database_schema is not None:
@@ -307,11 +315,60 @@ def test_modal_preview_cleanup_removes_only_configured_preview_schema(tmp_path):
 
     assert result.returncode == 0, result.stderr
     assert calls == [
+        "secret list --json",
         "run --name pe-uk-chat-123-schema-cleanup modal_app.py::remove_preview_database_schema",
         "app list --json",
         "app stop pe-uk-chat-123 --yes",
         "secret delete pe-uk-chat-123-secrets --yes --allow-missing",
     ]
+
+
+def test_modal_preview_cleanup_skips_schema_when_preview_secret_is_missing(
+    tmp_path,
+):
+    # A PR that never deployed a preview (as while preview deploys are
+    # paused) has no secret, so it has no schema; `modal run` would fail on
+    # the missing secret and turn every close red.
+    result, calls = _run_modal_preview_cleanup(
+        tmp_path,
+        "[]",
+        database_schema="uk_chat_pr_123",
+        secret_list='[{"name":"pe-uk-chat-1234-secrets"}]',
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "no preview schema to remove" in result.stdout
+    assert calls == [
+        "secret list --json",
+        "app list --json",
+        "secret delete pe-uk-chat-123-secrets --yes --allow-missing",
+    ]
+
+
+def test_modal_preview_cleanup_fails_when_secret_lookup_fails(tmp_path):
+    result, calls = _run_modal_preview_cleanup(
+        tmp_path,
+        '[{"description":"pe-uk-chat-123","state":"deployed"}]',
+        database_schema="uk_chat_pr_123",
+        secret_list_exit_code=1,
+    )
+
+    assert result.returncode != 0
+    assert calls == ["secret list --json"]
+
+
+def test_modal_preview_cleanup_fails_on_unrecognised_secret_list(tmp_path):
+    # Reading an unfamiliar JSON shape as "missing" would silently skip the
+    # schema removal, so the lookup has to fail instead.
+    result, calls = _run_modal_preview_cleanup(
+        tmp_path,
+        '[{"description":"pe-uk-chat-123","state":"deployed"}]',
+        database_schema="uk_chat_pr_123",
+        secret_list='[{"Name":"pe-uk-chat-123-secrets"}]',
+    )
+
+    assert result.returncode != 0
+    assert calls == ["secret list --json"]
 
 
 def test_modal_preview_cleanup_deletes_secret_when_app_is_missing(tmp_path):
