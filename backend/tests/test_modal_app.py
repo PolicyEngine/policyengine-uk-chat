@@ -370,6 +370,23 @@ def test_preview_cleanup_uses_trusted_default_branch_scripts():
     assert "github.event.pull_request.head.sha" not in cleanup
 
 
+def test_preview_backend_deploys_stay_paused_until_auth_is_fixed():
+    # Each preview is a public copy of the backend, whose conversation routes
+    # have no auth. Keep deploys off until #128, #130 and #131 are fixed, but
+    # keep cleanup on so closing a PR still tears its preview down.
+    workflow = (REPO_ROOT / ".github/workflows/pr-beta-deploy.yml").read_text()
+    deploy, cleanup = workflow.split("  deploy:", maxsplit=1)[1].split(
+        "  cleanup:", maxsplit=1
+    )
+
+    assert re.search(r"^    if: false && ", deploy, re.MULTILINE)
+    for issue in (128, 130, 131):
+        assert f"PolicyEngine/policyengine-uk-chat/issues/{issue}" in deploy
+    assert re.search(
+        r"^    if: github\.event\.action == 'closed' && ", cleanup, re.MULTILINE
+    )
+
+
 def test_modal_secret_sync_omits_billing_credentials_when_disabled(tmp_path):
     args_path = tmp_path / "modal-args"
     fake_modal = tmp_path / "modal"

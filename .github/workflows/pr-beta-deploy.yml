@@ -29,7 +29,16 @@ env:
 jobs:
   deploy:
     name: Deploy beta preview
-    if: github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
+    # Paused 2026-09-29 while the beta is paused. Each preview is a public copy
+    # of the backend, and its conversation routes have no auth: anyone can
+    # read or delete a conversation by id. Drop `false &&` (and the test that
+    # pins it) only after these are fixed:
+    #   https://github.com/PolicyEngine/policyengine-uk-chat/issues/128
+    #   https://github.com/PolicyEngine/policyengine-uk-chat/issues/130
+    #   https://github.com/PolicyEngine/policyengine-uk-chat/issues/131
+    # Production is stopped for the same reason (#275). The cleanup job below
+    # stays on, so closing a PR still removes its preview app, secret and schema.
+    if: false && github.event.action != 'closed' && github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
 
     steps:
