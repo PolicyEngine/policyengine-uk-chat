@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from enum import Enum
 import json
-from typing import Protocol
+from typing import Any, Protocol
 
+from anthropic import transform_schema
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from config import (
@@ -81,7 +82,7 @@ class ContextProposalStatus(str, Enum):
 class ProposeContextChangeOutput(ContextChangeProposal):
     status: ContextProposalStatus = ContextProposalStatus.READY
     issues: tuple[ContextValidationIssue, ...] = ()
-    provider_attempts: int = Field(default=1, ge=1, le=2)
+    provider_attempts: int = Field(default=1, ge=1, le=3)
     usage: ContextModelUsage = Field(default_factory=ContextModelUsage)
 
 
@@ -300,33 +301,61 @@ class AnthropicContextInterpreter:
         )
         issues = request.repair_issues
         correction = self._repair_instruction(issues) if issues else ""
-        max_attempts = 1 if issues else 2
+        # A repair request gets one retry. An initial Haiku request can also
+        # escalate to Sonnet, whose automatic tool choice may need that retry.
+        max_attempts = 2 if issues else 3
         usage_total = ContextModelUsage()
         for attempt in range(max_attempts):
+            if issues and not DEFAULT_COMPLEX_MODEL.startswith("claude-haiku-"):
+                # Sonnet 5.5 repair cannot use sampling controls or forced tools.
+                request_options: dict[str, Any] = {
+                    "model": DEFAULT_COMPLEX_MODEL,
+                    "max_tokens": 16000,
+                    "output_config": {"effort": "low"},
+                    "tool_choice": {"type": "auto"},
+                    "tools": [
+                        {
+                            **tool,
+                            "strict": True,
+                            "input_schema": self._strict_proposal_schema(),
+                        }
+                    ],
+                    "system": system + " You must call submit_context_change.",
+                }
+                if DEFAULT_COMPLEX_MODEL.startswith("claude-sonnet-"):
+                    request_options["thinking"] = {"type": "adaptive"}
+            else:
+                request_options = {
+                    "model": DEFAULT_COMPLEX_MODEL if issues else DEFAULT_FAST_MODEL,
+                    "max_tokens": 1800,
+                    "temperature": DEFAULT_TEMPERATURE,
+                    "tool_choice": {
+                        "type": "tool", "name": "submit_context_change"
+                    },
+                    "tools": [tool],
+                    "system": system,
+                }
             response = await client.messages.create(
-                model=(DEFAULT_COMPLEX_MODEL if issues else DEFAULT_FAST_MODEL),
-                max_tokens=1800,
-                temperature=DEFAULT_TEMPERATURE,
-                system=system,
+                **request_options,
                 messages=[
                     {
                         "role": "user",
                         "content": request.model_dump_json() + correction,
                     }
                 ],
-                tools=[tool],
-                tool_choice={"type": "tool", "name": "submit_context_change"},
             )
             usage_total = usage_total.plus(self._usage(response))
-            block = next(
-                (
-                    item
-                    for item in response.content
-                    if getattr(item, "type", None) == "tool_use"
-                    and getattr(item, "name", None) == "submit_context_change"
-                ),
-                None,
-            )
+            block = None
+            if getattr(response, "stop_reason", None) != "refusal":
+                block = next(
+                    (
+                        item
+                        for item in response.content
+                        if getattr(item, "type", None) == "tool_use"
+                        and getattr(item, "name", None) == "submit_context_change"
+                    ),
+                    None,
+                )
             if block is None:
                 issues = (
                     ContextValidationIssue(
@@ -354,6 +383,8 @@ class AnthropicContextInterpreter:
                     for error in exc.errors(include_url=False, include_input=False)
                 )
                 correction = self._repair_instruction(issues)
+                if attempt >= 1:
+                    break
                 continue
             return ProposeContextChangeOutput(
                 **submission.model_dump(mode="python"),
@@ -364,9 +395,48 @@ class AnthropicContextInterpreter:
             status=ContextProposalStatus.NEEDS_CLARIFICATION,
             expected_revision=request.context.revision,
             issues=issues,
-            provider_attempts=max_attempts,
+            provider_attempts=attempt + 1,
             usage=usage_total,
         )
+
+    @staticmethod
+    def _strict_proposal_schema() -> dict[str, Any]:
+        schema = ContextChangeProposal.model_json_schema()
+        # Field supplements are grounded only when scalar or a list of strings
+        # (ContextChangeValidator._supplement_value_is_grounded). Project those
+        # accepted shapes instead of sending recursive, open-ended JsonValue.
+        schema["$defs"]["JsonValue"] = {
+            "anyOf": [
+                {"type": "boolean"},
+                {"type": "integer"},
+                {"type": "number"},
+                {"type": "string"},
+                {"type": "array", "items": {"type": "string"}},
+            ]
+        }
+
+        def prepare(node: Any) -> None:
+            if isinstance(node, dict):
+                # Preserve discriminated-union tags through SDK conversion:
+                # transform_schema supports enum but moves const to prose.
+                if "const" in node:
+                    node["enum"] = [node.pop("const")]
+                if node.get("type") == "object":
+                    required = node.setdefault("required", [])
+                    # Literal tags have only one possible value; requiring them
+                    # also keeps this schema below the strict optional-field cap.
+                    for name, field in node.get("properties", {}).items():
+                        if "const" in field and name not in required:
+                            required.append(name)
+                for child in node.values():
+                    prepare(child)
+            elif isinstance(node, list):
+                for child in node:
+                    prepare(child)
+
+        prepare(schema)
+        # Unsupported constraints remain enforced by model_validate below.
+        return transform_schema(schema)
 
     @staticmethod
     def _repair_instruction(issues: tuple[ContextValidationIssue, ...]) -> str:

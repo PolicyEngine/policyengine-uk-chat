@@ -46,7 +46,9 @@ and cache-read rates therefore remain part of per-turn billing.
 
 ### Pricing table
 
-USD per **million** tokens:
+USD per **million** tokens. Sonnet 5.5 rates follow
+[Anthropic's pricing](https://platform.claude.com/docs/en/about-claude/pricing);
+older entries remain available to price historical usage.
 
 ```{list-table}
 :header-rows: 1
@@ -67,6 +69,11 @@ USD per **million** tokens:
   - $15.00
   - $3.75
   - $0.30
+* - `claude-sonnet-5-5`
+  - $2.00
+  - $10.00
+  - $2.50
+  - $0.20
 ```
 
 ## Configuration

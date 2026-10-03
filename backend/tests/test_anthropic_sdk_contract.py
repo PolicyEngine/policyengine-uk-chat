@@ -5,7 +5,9 @@ import inspect
 import json
 from types import SimpleNamespace
 
+import httpx
 import pytest
+from anthropic import AsyncAnthropic
 
 import chat.model_port as model_port
 import conversation_context.tools as context_tools
@@ -70,12 +72,18 @@ def context_with_spouse(*, revision: int = 2) -> ConversationContext:
     return context.model_copy(update={"revision": revision})
 
 
-def _usage(*, input_tokens: int = 3, output_tokens: int = 2):
+def _usage(
+    *,
+    input_tokens: int = 3,
+    output_tokens: int = 2,
+    cache_creation_input_tokens: int = 0,
+    cache_read_input_tokens: int = 0,
+):
     return SimpleNamespace(
         input_tokens=input_tokens,
         output_tokens=output_tokens,
-        cache_creation_input_tokens=0,
-        cache_read_input_tokens=0,
+        cache_creation_input_tokens=cache_creation_input_tokens,
+        cache_read_input_tokens=cache_read_input_tokens,
     )
 
 
@@ -90,6 +98,82 @@ def _request(
         conversation=(ContextConversationExcerpt(role="user", content=message),),
         context=project_context(resolved_context),
         fact_definitions=build_default_fact_registry().definitions(),
+    )
+
+
+def _repair_request() -> ProposeContextChangeInput:
+    return _request("I am 42").model_copy(
+        update={
+            "previous_proposal": ContextChangeProposal(
+                expected_revision=0,
+                changes=(
+                    FactClaim(
+                        claim_id="age-claim",
+                        concept="age",
+                        definition_key="person.age",
+                        subject_references=("person:self",),
+                        value={"kind": "integer", "value": 41},
+                        evidence="I am 42",
+                    ),
+                ),
+            ),
+            "repair_issues": (
+                ContextValidationIssue(
+                    code="semantic_claim_mismatch",
+                    path=("changes", "0", "value"),
+                    message="The current message supplies age 42, not 41.",
+                    claim_index=0,
+                    evidence="I am 42",
+                ),
+                ContextValidationIssue(
+                    code="uncited_fact_value",
+                    path=("changes", "0", "value"),
+                    message="The proposed value does not appear in the evidence.",
+                    claim_index=0,
+                    evidence="I am 42",
+                ),
+            ),
+        }
+    )
+
+
+def _context_submission() -> dict:
+    return {
+        "expected_revision": 0,
+        "changes": [
+            {
+                "kind": "fact_claim",
+                "concept": "age",
+                "definition_key": "person.age",
+                "subject_references": ["person:self"],
+                "relationship": "direct",
+                "value": {"kind": "integer", "value": 42},
+                "evidence": "I am 42",
+            }
+        ],
+    }
+
+
+def _unsuccessful_context_response(failure: str):
+    class RefusedToolBlock:
+        type = "tool_use"
+        name = "submit_context_change"
+
+        @property
+        def input(self):
+            raise AssertionError("A refused response must never be parsed")
+
+    return SimpleNamespace(
+        stop_reason="refusal" if failure == "refusal" else "end_turn",
+        content=(
+            [RefusedToolBlock()]
+            if failure == "refusal"
+            else [SimpleNamespace(type="text", text="No structured proposal.")]
+        ),
+        usage=_usage(
+            cache_creation_input_tokens=5,
+            cache_read_input_tokens=7,
+        ),
     )
 
 
@@ -229,6 +313,236 @@ def test_context_interpreter_uses_one_declarative_fact_claim_route(monkeypatch):
     assert "not metric names" in system
     assert "must not create an analysis.requested_outputs fact" in system
     assert '"current_message":"I am 42"' in calls[0]["messages"][0]["content"]
+
+
+def test_context_repair_serializes_supported_sonnet_request_through_sdk(monkeypatch):
+    calls = []
+    request = _repair_request()
+
+    def handle_request(http_request):
+        calls.append(json.loads(http_request.content))
+        return httpx.Response(
+            200,
+            json={
+                "id": "msg_context_repair",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-sonnet-5-5",
+                "content": [
+                    {"type": "text", "text": "Submitting the corrected context."},
+                    {
+                        "type": "tool_use",
+                        "id": "toolu_context_repair",
+                        "name": "submit_context_change",
+                        "input": _context_submission(),
+                    },
+                ],
+                "stop_reason": "tool_use",
+                "stop_sequence": None,
+                "usage": {
+                    "input_tokens": 3,
+                    "output_tokens": 2,
+                    "cache_creation_input_tokens": 0,
+                    "cache_read_input_tokens": 0,
+                },
+            },
+        )
+
+    async def propose():
+        async with AsyncAnthropic(
+            api_key="test-key",
+            http_client=httpx.AsyncClient(transport=httpx.MockTransport(handle_request)),
+        ) as client:
+            monkeypatch.setattr(context_tools, "get_async_client", lambda: client)
+            return await AnthropicContextInterpreter().propose(request)
+
+    result = asyncio.run(propose())
+
+    assert result.status is ContextProposalStatus.READY
+    assert result.claims[0].value.value == 42
+    assert result.provider_attempts == 1
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["model"] == "claude-sonnet-5-5"
+    assert call["model"] == context_tools.DEFAULT_COMPLEX_MODEL
+    assert call["max_tokens"] >= 4096
+    assert call["output_config"] == {"effort": "low"}
+    assert call["thinking"] == {"type": "adaptive"}
+    assert call["tool_choice"] == {"type": "auto"}
+    assert not {"temperature", "top_p", "top_k"}.intersection(call)
+    assert "You must call submit_context_change." in call["system"]
+    tool = call["tools"][0]
+    assert tool["name"] == "submit_context_change"
+    assert tool["strict"] is True
+    schema = tool["input_schema"]
+    assert "expected_revision" in schema["required"]
+
+    def schema_nodes(node):
+        if isinstance(node, dict):
+            yield node
+            for child in node.values():
+                yield from schema_nodes(child)
+        elif isinstance(node, list):
+            for child in node:
+                yield from schema_nodes(child)
+
+    nodes = list(schema_nodes(schema))
+    objects = [node for node in nodes if node.get("type") == "object"]
+    assert objects
+    for node in objects:
+        assert node["additionalProperties"] is False
+        assert isinstance(node["required"], list)
+        for name, field in node["properties"].items():
+            if len(field.get("enum", ())) == 1:
+                assert name in node["required"]
+    assert sum(
+        len(set(node["properties"]) - set(node["required"])) for node in objects
+    ) <= 24
+    assert sum("anyOf" in node for node in nodes) <= 16
+    assert all("const" not in node and "oneOf" not in node for node in nodes)
+    assert "$ref" not in json.dumps(schema["$defs"]["JsonValue"])
+    payload, _ = json.JSONDecoder().raw_decode(call["messages"][0]["content"])
+    assert payload["previous_proposal"] == request.previous_proposal.model_dump(
+        mode="json"
+    )
+    assert payload["repair_issues"] == [
+        issue.model_dump(mode="json") for issue in request.repair_issues
+    ]
+
+
+@pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-haiku-4-5"])
+def test_context_repair_preserves_model_specific_override_options(monkeypatch, model):
+    calls = []
+
+    class FakeMessages:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                content=[SimpleNamespace(
+                    type="tool_use",
+                    name="submit_context_change",
+                    input=_context_submission(),
+                )],
+                stop_reason="tool_use",
+                usage=_usage(),
+            )
+
+    monkeypatch.setattr(context_tools, "DEFAULT_COMPLEX_MODEL", model)
+    monkeypatch.setattr(
+        context_tools,
+        "get_async_client",
+        lambda: SimpleNamespace(messages=FakeMessages()),
+    )
+
+    result = asyncio.run(AnthropicContextInterpreter().propose(_repair_request()))
+
+    assert result.status is ContextProposalStatus.READY
+    call = calls[0]
+    assert call["model"] == model
+    assert "thinking" not in call
+    if model == "claude-haiku-4-5":
+        assert call["max_tokens"] == 1800
+        assert call["temperature"] == context_tools.DEFAULT_TEMPERATURE
+        assert call["tool_choice"] == {"type": "tool", "name": "submit_context_change"}
+        assert "output_config" not in call
+    else:
+        assert call["max_tokens"] == 16000
+        assert call["output_config"] == {"effort": "low"}
+        assert call["tool_choice"] == {"type": "auto"}
+        assert call["tools"][0]["strict"] is True
+        assert "temperature" not in call
+
+
+@pytest.mark.parametrize("initial_repair", [True, False])
+@pytest.mark.parametrize("failure", ["missing", "refusal"])
+def test_context_repair_retries_missing_or_refused_output_and_counts_usage(
+    monkeypatch, initial_repair, failure
+):
+    calls = []
+    expected_attempts = 2 if initial_repair else 3
+
+    class FakeMessages:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            if len(calls) < expected_attempts:
+                return _unsuccessful_context_response(failure)
+            return SimpleNamespace(
+                content=[
+                    SimpleNamespace(type="thinking", thinking="Repairing the proposal."),
+                    SimpleNamespace(
+                        type="tool_use",
+                        name="submit_context_change",
+                        input=_context_submission(),
+                    ),
+                ],
+                stop_reason="tool_use",
+                usage=_usage(
+                    cache_creation_input_tokens=5,
+                    cache_read_input_tokens=7,
+                ),
+            )
+
+    monkeypatch.setattr(
+        context_tools,
+        "get_async_client",
+        lambda: SimpleNamespace(messages=FakeMessages()),
+    )
+    request = _repair_request() if initial_repair else _request("I am 42")
+    result = asyncio.run(AnthropicContextInterpreter().propose(request))
+
+    assert len(calls) == expected_attempts
+    assert result.status is ContextProposalStatus.READY
+    assert result.provider_attempts == expected_attempts
+    assert result.claims[0].value.value == 42
+    assert result.usage.model_dump() == {
+        "input_tokens": 3 * expected_attempts,
+        "output_tokens": 2 * expected_attempts,
+        "cache_creation_input_tokens": 5 * expected_attempts,
+        "cache_read_input_tokens": 7 * expected_attempts,
+    }
+    repair_calls = calls if initial_repair else calls[1:]
+    assert len(repair_calls) == 2
+    for call in repair_calls:
+        assert call["model"] == context_tools.DEFAULT_COMPLEX_MODEL
+        assert call["tool_choice"] == {"type": "auto"}
+        assert "temperature" not in call
+    assert "missing_structured_context_output" in calls[-1]["messages"][0]["content"]
+
+
+@pytest.mark.parametrize("initial_repair", [True, False])
+@pytest.mark.parametrize("failure", ["missing", "refusal"])
+def test_context_repair_exhaustion_returns_issues_without_accepting_output(
+    monkeypatch, initial_repair, failure
+):
+    calls = []
+
+    class FakeMessages:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            return _unsuccessful_context_response(failure)
+
+    monkeypatch.setattr(
+        context_tools,
+        "get_async_client",
+        lambda: SimpleNamespace(messages=FakeMessages()),
+    )
+    request = _repair_request() if initial_repair else _request("I am 42")
+    result = asyncio.run(AnthropicContextInterpreter().propose(request))
+
+    expected_attempts = 2 if initial_repair else 3
+    assert len(calls) == expected_attempts
+    assert result.status is ContextProposalStatus.NEEDS_CLARIFICATION
+    assert result.provider_attempts == expected_attempts
+    assert result.expected_revision == request.context.revision
+    assert result.changes == ()
+    assert result.candidate_entities == ()
+    assert [issue.code for issue in result.issues] == [
+        "missing_structured_context_output"
+    ]
+    assert result.usage.input_tokens == 3 * expected_attempts
+    assert result.usage.output_tokens == 2 * expected_attempts
+    assert result.usage.cache_creation_input_tokens == 5 * expected_attempts
+    assert result.usage.cache_read_input_tokens == 7 * expected_attempts
 
 
 def test_context_proposal_reviewer_uses_exact_claim_ids_without_retained_facts(

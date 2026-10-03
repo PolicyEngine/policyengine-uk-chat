@@ -331,22 +331,25 @@ def _run_tool_loop(case: ToolLoopCase, client: ModelClient) -> CaseResult:
         if not turn.tool_calls:
             break
 
-        assistant_content: List[Dict[str, Any]] = []
-        if turn.text:
+        assistant_content: List[Dict[str, Any]] = (
+            list(turn.assistant_content) if turn.assistant_content is not None else []
+        )
+        if turn.assistant_content is None and turn.text:
             assistant_content.append({"type": "text", "text": turn.text})
 
         tool_results: List[Dict[str, Any]] = []
         for index, call in enumerate(turn.tool_calls, start=1):
             tool_calls.append(call)
             tool_use_id = _tool_use_id(case, iteration, index, call.id)
-            assistant_content.append(
-                {
-                    "type": "tool_use",
-                    "id": tool_use_id,
-                    "name": call.name,
-                    "input": call.input,
-                }
-            )
+            if turn.assistant_content is None:
+                assistant_content.append(
+                    {
+                        "type": "tool_use",
+                        "id": tool_use_id,
+                        "name": call.name,
+                        "input": call.input,
+                    }
+                )
             try:
                 if not frozen_capability_outputs:
                     raise ValueError(

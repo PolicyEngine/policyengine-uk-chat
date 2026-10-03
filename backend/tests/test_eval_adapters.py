@@ -1,12 +1,28 @@
+import json
 import sys
 from types import ModuleType, SimpleNamespace
 
+import httpx
 import pytest
+from anthropic import Anthropic
 
 from eval import providers
 from eval import reporting
 from eval import run
-from eval.schemas import CaseResult, EvalReport, ModelTurn
+from eval import runner
+from eval.schemas import (
+    CaseResult,
+    EvalReport,
+    FrozenToolCall,
+    ModelTurn,
+    TextExpectation,
+    ToolCallExpectation,
+    ToolLoopCase,
+)
+
+
+def _block(**fields):
+    return SimpleNamespace(**fields, model_dump=lambda **_kwargs: fields)
 
 
 def _report(*, failed=0):
@@ -58,19 +74,66 @@ def test_anthropic_client_requires_api_key(monkeypatch):
         providers.AnthropicModelClient()
 
 
+def test_anthropic_client_defaults_to_sonnet_with_thinking_headroom(monkeypatch):
+    calls = []
+    anthropic = ModuleType("anthropic")
+    anthropic.Anthropic = lambda **_kwargs: SimpleNamespace(
+        messages=SimpleNamespace(
+            create=lambda **kwargs: calls.append(kwargs) or SimpleNamespace(content=[])
+        )
+    )
+    monkeypatch.setitem(sys.modules, "anthropic", anthropic)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("ANTHROPIC_EVAL_MODEL", raising=False)
+
+    client = providers.AnthropicModelClient()
+    client.generate(case_id="case", messages=[], system="system")
+
+    assert calls[0]["model"] == "claude-sonnet-5-5"
+    assert calls[0]["max_tokens"] == 16000
+    assert calls[0]["thinking"] == {"type": "adaptive"}
+    assert calls[0]["output_config"] == {"effort": "medium"}
+    assert "temperature" not in calls[0]
+
+
+@pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-haiku-4-5"])
+def test_anthropic_client_runtime_model_override_uses_compatible_settings(monkeypatch, model):
+    calls = []
+    anthropic = ModuleType("anthropic")
+    anthropic.Anthropic = lambda **_kwargs: SimpleNamespace(
+        messages=SimpleNamespace(
+            create=lambda **kwargs: calls.append(kwargs) or SimpleNamespace(content=[])
+        )
+    )
+    monkeypatch.setitem(sys.modules, "anthropic", anthropic)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("ANTHROPIC_EVAL_MODEL", model)
+
+    providers.AnthropicModelClient().generate(case_id="case", messages=[], system="")
+
+    assert calls[0]["model"] == model
+    assert "thinking" not in calls[0]
+    if model == "claude-haiku-4-5":
+        assert calls[0]["temperature"] == providers.DEFAULT_TEMPERATURE
+        assert "output_config" not in calls[0]
+    else:
+        assert calls[0]["output_config"] == {"effort": "medium"}
+        assert "temperature" not in calls[0]
+
+
 def test_anthropic_client_translates_text_and_tool_blocks(monkeypatch):
     calls = []
     response = SimpleNamespace(
         content=[
-            SimpleNamespace(type="text", text="Result: "),
-            SimpleNamespace(
+            _block(type="text", text="Result: "),
+            _block(
                 type="tool_use", id="tool-1", name="validate_reform", input={"x": 1}
             ),
-            SimpleNamespace(
+            _block(
                 type="tool_use", id="tool-2", name="ignored_input", input="not a dict"
             ),
-            SimpleNamespace(type="other"),
-            SimpleNamespace(type="text", text="done"),
+            _block(type="thinking", thinking="private reasoning", signature="signature"),
+            _block(type="text", text="done"),
         ]
     )
 
@@ -103,6 +166,91 @@ def test_anthropic_client_translates_text_and_tool_blocks(monkeypatch):
     assert calls[0]["model"] == "test-model"
     assert calls[0]["max_tokens"] == 123
     assert calls[0]["tools"] == [{"name": "validate_reform"}]
+    assert "thinking" not in calls[0]
+    assert calls[0]["output_config"] == {"effort": "medium"}
+    assert "temperature" not in calls[0]
+    assert turn.assistant_content == [block.model_dump() for block in response.content]
+
+
+def test_anthropic_tool_loop_replays_signed_thinking_and_block_order_through_sdk():
+    calls = []
+    content = [
+        {"type": "thinking", "thinking": "Choose the calculation.", "signature": "signed"},
+        {"type": "redacted_thinking", "data": "opaque"},
+        {"type": "text", "text": "Calculating. "},
+        {
+            "type": "tool_use",
+            "id": "toolu_household",
+            "name": "household_analysis",
+            "input": {"description": "One adult", "year": 2026},
+        },
+        {"type": "text", "text": "Checking the result. "},
+    ]
+
+    def handle_request(request):
+        payload = json.loads(request.content)
+        calls.append(payload)
+        if len(calls) == 2:
+            assert payload["messages"][-2] == {"role": "assistant", "content": content}
+            assert payload["messages"][-1]["content"][0]["tool_use_id"] == "toolu_household"
+        return httpx.Response(
+            200,
+            json={
+                "id": f"msg_eval_{len(calls)}",
+                "type": "message",
+                "role": "assistant",
+                "model": "claude-sonnet-5-5",
+                "content": content if len(calls) == 1 else [{"type": "text", "text": "Done."}],
+                "stop_reason": "tool_use" if len(calls) == 1 else "end_turn",
+                "stop_sequence": None,
+                "usage": {"input_tokens": 10, "output_tokens": 5},
+            },
+        )
+
+    case = ToolLoopCase(
+        id="signed_thinking_loop",
+        description="Replay provider content between a tool call and the final answer.",
+        prompt="Calculate, then answer.",
+        expected_tools=[ToolCallExpectation(name="household_analysis")],
+        expect=TextExpectation(required=["Done."]),
+        capability_outputs=[
+            FrozenToolCall(
+                name="household_analysis",
+                output_fixture="capability_outputs/household_completed.json",
+            )
+        ],
+    )
+    client = object.__new__(providers.AnthropicModelClient)
+    client.model = "claude-sonnet-5-5"
+    client.max_tokens = 16000
+    with Anthropic(
+        api_key="test-key",
+        http_client=httpx.Client(transport=httpx.MockTransport(handle_request)),
+    ) as sdk_client:
+        client.client = sdk_client
+        result = runner._run_tool_loop(case, client)
+
+    assert result.status == "passed", result.errors
+    assert len(calls) == 2
+    for payload in calls:
+        assert payload["thinking"] == {"type": "adaptive"}
+        assert payload["output_config"] == {"effort": "medium"}
+        assert payload["max_tokens"] == 16000
+        assert "temperature" not in payload
+
+
+def test_anthropic_client_fails_on_refusal_before_reading_content():
+    client = object.__new__(providers.AnthropicModelClient)
+    client.client = SimpleNamespace(
+        messages=SimpleNamespace(
+            create=lambda **_kwargs: SimpleNamespace(stop_reason="refusal")
+        )
+    )
+    client.model = "claude-sonnet-5-5"
+    client.max_tokens = 16000
+
+    with pytest.raises(RuntimeError, match="Anthropic refused evaluation case refused-case"):
+        client.generate(case_id="refused-case", messages=[], system="")
 
 
 def test_anthropic_client_omits_empty_tools(monkeypatch):
