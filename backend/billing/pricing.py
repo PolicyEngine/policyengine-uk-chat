@@ -18,6 +18,12 @@ MODEL_PRICING_USD_PER_MTOK = {
         "cache_write_5m": 3.75,
         "cache_read": 0.30,
     },
+    "claude-sonnet-5-5": {
+        "input": 2.0,
+        "output": 10.0,
+        "cache_write_5m": 2.5,
+        "cache_read": 0.20,
+    },
 }
 
 DEFAULT_BILLING_MODEL = os.environ.get("ANTHROPIC_DEFAULT_MODEL", "claude-haiku-4-5")

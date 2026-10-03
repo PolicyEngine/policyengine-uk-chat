@@ -58,6 +58,27 @@ def test_anthropic_client_requires_api_key(monkeypatch):
         providers.AnthropicModelClient()
 
 
+def test_anthropic_client_defaults_to_sonnet_with_thinking_headroom(monkeypatch):
+    calls = []
+    anthropic = ModuleType("anthropic")
+    anthropic.Anthropic = lambda **_kwargs: SimpleNamespace(
+        messages=SimpleNamespace(
+            create=lambda **kwargs: calls.append(kwargs) or SimpleNamespace(content=[])
+        )
+    )
+    monkeypatch.setitem(sys.modules, "anthropic", anthropic)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.delenv("ANTHROPIC_EVAL_MODEL", raising=False)
+
+    client = providers.AnthropicModelClient()
+    client.generate(case_id="case", messages=[], system="system")
+
+    assert calls[0]["model"] == "claude-sonnet-5-5"
+    assert calls[0]["max_tokens"] == 16000
+    assert calls[0]["output_config"] == {"effort": "medium"}
+    assert "temperature" not in calls[0]
+
+
 def test_anthropic_client_translates_text_and_tool_blocks(monkeypatch):
     calls = []
     response = SimpleNamespace(
@@ -69,7 +90,7 @@ def test_anthropic_client_translates_text_and_tool_blocks(monkeypatch):
             SimpleNamespace(
                 type="tool_use", id="tool-2", name="ignored_input", input="not a dict"
             ),
-            SimpleNamespace(type="other"),
+            SimpleNamespace(type="thinking", thinking="private reasoning"),
             SimpleNamespace(type="text", text="done"),
         ]
     )
@@ -103,6 +124,22 @@ def test_anthropic_client_translates_text_and_tool_blocks(monkeypatch):
     assert calls[0]["model"] == "test-model"
     assert calls[0]["max_tokens"] == 123
     assert calls[0]["tools"] == [{"name": "validate_reform"}]
+    assert calls[0]["output_config"] == {"effort": "medium"}
+    assert "temperature" not in calls[0]
+
+
+def test_anthropic_client_fails_on_refusal_before_reading_content():
+    client = object.__new__(providers.AnthropicModelClient)
+    client.client = SimpleNamespace(
+        messages=SimpleNamespace(
+            create=lambda **_kwargs: SimpleNamespace(stop_reason="refusal")
+        )
+    )
+    client.model = "claude-sonnet-5-5"
+    client.max_tokens = 16000
+
+    with pytest.raises(RuntimeError, match="Anthropic refused evaluation case refused-case"):
+        client.generate(case_id="refused-case", messages=[], system="")
 
 
 def test_anthropic_client_omits_empty_tools(monkeypatch):
