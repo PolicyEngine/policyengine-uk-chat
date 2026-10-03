@@ -367,8 +367,9 @@ def test_context_repair_serializes_supported_sonnet_request_through_sdk(monkeypa
     assert call["model"] == context_tools.DEFAULT_COMPLEX_MODEL
     assert call["max_tokens"] >= 4096
     assert call["output_config"] == {"effort": "low"}
+    assert call["thinking"] == {"type": "adaptive"}
     assert call["tool_choice"] == {"type": "auto"}
-    assert not {"temperature", "top_p", "top_k", "thinking"}.intersection(call)
+    assert not {"temperature", "top_p", "top_k"}.intersection(call)
     assert "You must call submit_context_change." in call["system"]
     tool = call["tools"][0]
     assert tool["name"] == "submit_context_change"
@@ -407,6 +408,49 @@ def test_context_repair_serializes_supported_sonnet_request_through_sdk(monkeypa
     assert payload["repair_issues"] == [
         issue.model_dump(mode="json") for issue in request.repair_issues
     ]
+
+
+@pytest.mark.parametrize("model", ["claude-opus-5-5", "claude-haiku-4-5"])
+def test_context_repair_preserves_model_specific_override_options(monkeypatch, model):
+    calls = []
+
+    class FakeMessages:
+        async def create(self, **kwargs):
+            calls.append(kwargs)
+            return SimpleNamespace(
+                content=[SimpleNamespace(
+                    type="tool_use",
+                    name="submit_context_change",
+                    input=_context_submission(),
+                )],
+                stop_reason="tool_use",
+                usage=_usage(),
+            )
+
+    monkeypatch.setattr(context_tools, "DEFAULT_COMPLEX_MODEL", model)
+    monkeypatch.setattr(
+        context_tools,
+        "get_async_client",
+        lambda: SimpleNamespace(messages=FakeMessages()),
+    )
+
+    result = asyncio.run(AnthropicContextInterpreter().propose(_repair_request()))
+
+    assert result.status is ContextProposalStatus.READY
+    call = calls[0]
+    assert call["model"] == model
+    assert "thinking" not in call
+    if model == "claude-haiku-4-5":
+        assert call["max_tokens"] == 1800
+        assert call["temperature"] == context_tools.DEFAULT_TEMPERATURE
+        assert call["tool_choice"] == {"type": "tool", "name": "submit_context_change"}
+        assert "output_config" not in call
+    else:
+        assert call["max_tokens"] == 16000
+        assert call["output_config"] == {"effort": "low"}
+        assert call["tool_choice"] == {"type": "auto"}
+        assert call["tools"][0]["strict"] is True
+        assert "temperature" not in call
 
 
 @pytest.mark.parametrize("initial_repair", [True, False])

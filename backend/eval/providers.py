@@ -3,6 +3,7 @@
 import os
 from typing import Any, Dict, List, Protocol
 
+from config import DEFAULT_TEMPERATURE
 from eval.schemas import ModelToolCall, ModelTurn
 
 
@@ -69,10 +70,15 @@ class AnthropicModelClient:
         kwargs: Dict[str, Any] = {
             "model": self.model,
             "max_tokens": self.max_tokens,
-            "output_config": {"effort": "medium"},
             "system": system,
             "messages": messages,
         }
+        if self.model.startswith("claude-haiku-"):
+            kwargs["temperature"] = DEFAULT_TEMPERATURE
+        else:
+            kwargs["output_config"] = {"effort": "medium"}
+            if self.model.startswith("claude-sonnet-"):
+                kwargs["thinking"] = {"type": "adaptive"}
         if tools:
             kwargs["tools"] = tools
         response = self.client.messages.create(**kwargs)
@@ -88,4 +94,11 @@ class AnthropicModelClient:
                 tool_input = block.input if isinstance(block.input, dict) else {}
                 tool_calls.append(ModelToolCall(id=block.id, name=block.name, input=tool_input))
 
-        return ModelTurn(text="".join(text_parts), tool_calls=tool_calls)
+        return ModelTurn(
+            text="".join(text_parts),
+            tool_calls=tool_calls,
+            assistant_content=[
+                block.model_dump(mode="json", exclude_unset=True)
+                for block in response.content
+            ],
+        )

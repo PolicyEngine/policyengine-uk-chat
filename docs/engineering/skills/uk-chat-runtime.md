@@ -194,12 +194,14 @@ semantic or deterministic validation receives one separate bounded repair
 attempt containing the exact rejected proposal and the complete structured
 issue set. The repair uses the configured complex model. Provider-format
 retries do not consume that repair opportunity.
-The Sonnet repair route uses low effort, automatic tool choice, a strict
-proposal schema, and a 16,000-token budget without sampling controls. Missing
-tool output or a refusal receives one retry on the complex model, including
+The Sonnet repair route uses adaptive thinking at low effort, automatic tool
+choice, a strict proposal schema, and a 16,000-token budget without sampling
+controls. Missing tool output or a refusal receives one retry on the complex model, including
 after escalation from a malformed fast-model response. Exhaustion returns a
 structured clarification outcome without applying context changes. The fast
 model's initial request retains its existing sampling and forced-tool settings.
+An explicit Haiku complex-model override retains those legacy request settings;
+an Opus override uses explicit effort without a thinking field.
 A deterministic `MonetaryExpressionParser` recognizes currency prefixes and
 suffixes, `k` and `m`, comma, period, space, and non-breaking-space grouping,
 `thousand`, `grand`, and `million`, and English number words ending in those

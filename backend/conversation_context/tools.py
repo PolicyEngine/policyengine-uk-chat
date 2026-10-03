@@ -306,9 +306,8 @@ class AnthropicContextInterpreter:
         max_attempts = 2 if issues else 3
         usage_total = ContextModelUsage()
         for attempt in range(max_attempts):
-            if issues:
-                # Repair uses adaptive thinking, which does not allow sampling
-                # controls or a forced tool choice on Sonnet 5.5.
+            if issues and not DEFAULT_COMPLEX_MODEL.startswith("claude-haiku-"):
+                # Sonnet 5.5 repair cannot use sampling controls or forced tools.
                 request_options: dict[str, Any] = {
                     "model": DEFAULT_COMPLEX_MODEL,
                     "max_tokens": 16000,
@@ -323,9 +322,11 @@ class AnthropicContextInterpreter:
                     ],
                     "system": system + " You must call submit_context_change.",
                 }
+                if DEFAULT_COMPLEX_MODEL.startswith("claude-sonnet-"):
+                    request_options["thinking"] = {"type": "adaptive"}
             else:
                 request_options = {
-                    "model": DEFAULT_FAST_MODEL,
+                    "model": DEFAULT_COMPLEX_MODEL if issues else DEFAULT_FAST_MODEL,
                     "max_tokens": 1800,
                     "temperature": DEFAULT_TEMPERATURE,
                     "tool_choice": {
