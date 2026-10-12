@@ -26,7 +26,7 @@ Then edit `.env`. The key variables (see `.env.example` and
 | --- | --- |
 | `ANTHROPIC_API_KEY` | Required — authenticates the chat agent |
 | `ANTHROPIC_FAST_MODEL` | Fast model for titles and bounded model-assisted operations (default `claude-haiku-4-5`) |
-| `ANTHROPIC_COMPLEX_MODEL` | Larger model for big-context analysis (default `claude-sonnet-4-6`) |
+| `ANTHROPIC_COMPLEX_MODEL` | Model for repairing rejected context proposals (default `claude-sonnet-5-5`) |
 | `ANTHROPIC_REASONING_MODEL` | Reasoning model for reform/distributional work (default `claude-opus-4-5`) |
 | `ANTHROPIC_TITLE_MODEL` | Model used to title conversations (defaults to the fast model) |
 | `DATABASE_URL` | Postgres connection string for conversation history |

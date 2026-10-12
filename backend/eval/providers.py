@@ -49,14 +49,14 @@ class FakeModelClient:
 class AnthropicModelClient:
     """Anthropic adapter behind the provider-neutral eval interface."""
 
-    def __init__(self, model: str | None = None, max_tokens: int = 4000):
+    def __init__(self, model: str | None = None, max_tokens: int = 16000):
         import anthropic
 
         api_key = os.environ.get("ANTHROPIC_API_KEY")
         if not api_key:
             raise RuntimeError("ANTHROPIC_API_KEY is required for live Anthropic evals")
         self.client = anthropic.Anthropic(api_key=api_key)
-        self.model = model or os.environ.get("ANTHROPIC_EVAL_MODEL", "claude-sonnet-4-6")
+        self.model = model or os.environ.get("ANTHROPIC_EVAL_MODEL", "claude-sonnet-5-5")
         self.max_tokens = max_tokens
 
     def generate(
@@ -70,13 +70,20 @@ class AnthropicModelClient:
         kwargs: Dict[str, Any] = {
             "model": self.model,
             "max_tokens": self.max_tokens,
-            "temperature": DEFAULT_TEMPERATURE,
             "system": system,
             "messages": messages,
         }
+        if self.model.startswith("claude-haiku-"):
+            kwargs["temperature"] = DEFAULT_TEMPERATURE
+        else:
+            kwargs["output_config"] = {"effort": "medium"}
+            if self.model.startswith("claude-sonnet-"):
+                kwargs["thinking"] = {"type": "adaptive"}
         if tools:
             kwargs["tools"] = tools
         response = self.client.messages.create(**kwargs)
+        if getattr(response, "stop_reason", None) == "refusal":
+            raise RuntimeError(f"Anthropic refused evaluation case {case_id}")
 
         text_parts: List[str] = []
         tool_calls: List[ModelToolCall] = []
@@ -87,4 +94,11 @@ class AnthropicModelClient:
                 tool_input = block.input if isinstance(block.input, dict) else {}
                 tool_calls.append(ModelToolCall(id=block.id, name=block.name, input=tool_input))
 
-        return ModelTurn(text="".join(text_parts), tool_calls=tool_calls)
+        return ModelTurn(
+            text="".join(text_parts),
+            tool_calls=tool_calls,
+            assistant_content=[
+                block.model_dump(mode="json", exclude_unset=True)
+                for block in response.content
+            ],
+        )

@@ -6,8 +6,8 @@ import os
 # classifier, titling, and follow-up suggestions.
 DEFAULT_FAST_MODEL = os.environ.get("ANTHROPIC_FAST_MODEL", "claude-haiku-4-5")
 
-# Complex model: used once a turn's estimated input exceeds the fast-model cap.
-DEFAULT_COMPLEX_MODEL = os.environ.get("ANTHROPIC_COMPLEX_MODEL", "claude-sonnet-4-6")
+# Complex model: repairs rejected context proposals and malformed submissions.
+DEFAULT_COMPLEX_MODEL = os.environ.get("ANTHROPIC_COMPLEX_MODEL", "claude-sonnet-5-5")
 
 # Reasoning model: used for reform, distributional, and chart-heavy turns where
 # the fast model tends to spend iterations guessing at the reform API shape.

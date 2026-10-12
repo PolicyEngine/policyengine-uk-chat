@@ -64,6 +64,9 @@ class ModelToolCall(StrictModel):
 class ModelTurn(StrictModel):
     text: str = ""
     tool_calls: List[ModelToolCall] = Field(default_factory=list)
+    # Preserve signed thinking and the original block order for provider replay.
+    # Offline responses omit this and use the runner's reconstructed content.
+    assistant_content: Optional[List[Dict[str, Any]]] = None
 
 
 class FrozenToolCall(StrictModel):

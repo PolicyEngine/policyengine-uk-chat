@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from billing.pricing import calculate_cost_gbp
 from billing import credits
 from billing import config
+from billing import pricing
 from billing import routes
 from billing import stripe_integration
 
@@ -126,6 +127,25 @@ def test_cache_tokens_contribute_to_cost():
         cache_read_input_tokens=5_000,
     )
     assert with_cache > baseline
+
+
+@pytest.mark.parametrize(
+    ("token_counter", "expected_usd"),
+    [
+        ("input_tokens", 2.0),
+        ("output_tokens", 10.0),
+        ("cache_creation_input_tokens", 2.5),
+        ("cache_read_input_tokens", 0.20),
+    ],
+)
+def test_sonnet_5_5_uses_its_own_token_rates(monkeypatch, token_counter, expected_usd):
+    monkeypatch.setattr(pricing, "USD_TO_GBP", 0.79)
+    monkeypatch.setattr(pricing, "MARKUP_RATE", 0.0)
+    usage = {"input_tokens": 0, "output_tokens": 0, token_counter: 1_000_000}
+
+    cost = calculate_cost_gbp(model="claude-sonnet-5-5", **usage)
+
+    assert cost == pytest.approx(expected_usd * 0.79)
 
 
 def test_get_supabase_requires_configuration_and_caches_client(monkeypatch):
