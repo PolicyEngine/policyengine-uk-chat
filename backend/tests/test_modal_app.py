@@ -217,8 +217,12 @@ def test_preview_deploy_seeds_credentials_and_cors_before_modal_starts():
         'modal.Function.from_name(os.environ["MODAL_APP_NAME"], "web")' in deploy_script
     )
     assert "BACKEND_URL: ${{ steps.modal_deploy.outputs.modal_url }}" in workflow
-    assert workflow.count("HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}") == 1
+    assert (
+        workflow.count("HUGGING_FACE_TOKEN: ${{ secrets.HF_RUNTIME_READ_TOKEN }}")
+        == 1
+    )
     assert sync_script.count('"HUGGING_FACE_TOKEN=$HUGGING_FACE_TOKEN"') == 1
+    assert ': "${HUGGING_FACE_TOKEN:?' in sync_script
     assert workflow.count("UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}") == 1
     assert sync_script.count('"UK_CHAT_EVAL_TOKEN=$UK_CHAT_EVAL_TOKEN"') == 1
     assert '"BILLING_ENABLED=$billing_enabled"' in sync_script
@@ -617,3 +621,21 @@ def test_preview_frontend_url_script_writes_github_outputs(tmp_path, monkeypatch
         "frontend_url=https://policyengine-uk-chat-git-"
         "agent-explicit-decile-income-concepts-policy-engine.vercel.app",
     ]
+
+
+def test_no_workflow_reads_the_org_wide_hugging_face_secret():
+    """The org-wide HUGGING_FACE_TOKEN secret is a personal token being retired.
+
+    The Modal runtime gets its data token from the repository secret
+    HF_RUNTIME_READ_TOKEN instead, in both the production and preview deploys.
+    """
+    workflows = sorted((REPO_ROOT / ".github/workflows").glob("*.y*ml"))
+    assert workflows
+    for path in workflows:
+        assert "secrets.HUGGING_FACE_TOKEN" not in path.read_text(), path.name
+    for name in ("deploy.yml", "pr-beta-deploy.yml"):
+        workflow = (REPO_ROOT / ".github/workflows" / name).read_text()
+        assert (
+            workflow.count("HUGGING_FACE_TOKEN: ${{ secrets.HF_RUNTIME_READ_TOKEN }}")
+            == 1
+        ), name

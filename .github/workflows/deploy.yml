@@ -110,8 +110,12 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           UK_CHAT_EVAL_TOKEN: ${{ secrets.UK_CHAT_EVAL_TOKEN }}
           POLICYENGINE_UK_DATA_TOKEN: ${{ secrets.POLICYENGINE_UK_DATA_TOKEN }}
-          # TEMPORARY: data access for the policyengine.py engine override.
-          HUGGING_FACE_TOKEN: ${{ secrets.HUGGING_FACE_TOKEN }}
+          # Data access for the policyengine.py engine override at runtime
+          # (TEMPORARY). The Modal secret outlives this run, so it needs a
+          # stored, read-only token for policyengine/policyengine-uk-data-private
+          # in the repository secret HF_RUNTIME_READ_TOKEN: never the org-wide
+          # HUGGING_FACE_TOKEN, and never a one-hour OIDC token.
+          HUGGING_FACE_TOKEN: ${{ secrets.HF_RUNTIME_READ_TOKEN }}
           DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}
           ALEMBIC_DATABASE_URL: ${{ secrets.POLICYENGINE_UK_CHAT_DATABASE_URL }}
           BILLING_ENABLED: "false"
