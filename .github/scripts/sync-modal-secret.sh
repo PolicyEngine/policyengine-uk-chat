@@ -8,6 +8,7 @@ set -euo pipefail
 : "${PUBLIC_BASE_URL:?PUBLIC_BASE_URL is required}"
 : "${UK_CHAT_EVAL_TOKEN:?UK_CHAT_EVAL_TOKEN is required}"
 : "${ALEMBIC_DATABASE_URL:?ALEMBIC_DATABASE_URL is required}"
+: "${HUGGING_FACE_TOKEN:?HUGGING_FACE_TOKEN is required: set the repository secret HF_RUNTIME_READ_TOKEN to a read-only token for policyengine/policyengine-uk-data-private}"
 
 billing_enabled="${BILLING_ENABLED:-false}"
 
