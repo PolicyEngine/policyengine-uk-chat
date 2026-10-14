@@ -7,6 +7,8 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -631,11 +633,54 @@ def test_no_workflow_reads_the_org_wide_hugging_face_secret():
     """
     workflows = sorted((REPO_ROOT / ".github/workflows").glob("*.y*ml"))
     assert workflows
+    org_secret = re.compile(
+        r"secrets\s*(\.\s*HUGGING_FACE_TOKEN\b|\[\s*['\"]HUGGING_FACE_TOKEN['\"]\s*\])"
+    )
     for path in workflows:
-        assert "secrets.HUGGING_FACE_TOKEN" not in path.read_text(), path.name
+        assert not org_secret.search(path.read_text()), path.name
     for name in ("deploy.yml", "pr-beta-deploy.yml"):
         workflow = (REPO_ROOT / ".github/workflows" / name).read_text()
         assert (
             workflow.count("HUGGING_FACE_TOKEN: ${{ secrets.HF_RUNTIME_READ_TOKEN }}")
             == 1
         ), name
+
+
+@pytest.mark.parametrize("token", [None, ""], ids=["missing", "empty"])
+def test_modal_secret_sync_refuses_to_run_without_a_data_token(tmp_path, token):
+    """No Modal secret is written without the runtime's data token."""
+    calls = tmp_path / "modal-called"
+    fake_modal = tmp_path / "modal"
+    fake_modal.write_text(f"#!/usr/bin/env bash\ntouch {calls}\n")
+    fake_modal.chmod(0o755)
+    environment = {
+        "MODAL_SECRET_NAME": "test-secret",
+        "ANTHROPIC_API_KEY": "anthropic",
+        "UK_CHAT_EVAL_TOKEN": "eval-token",
+        "POLICYENGINE_UK_DATA_TOKEN": "uk-data",
+        "DATABASE_URL": "postgresql://example",
+        "ALEMBIC_DATABASE_URL": "postgresql://migration-example",
+        "BILLING_ENABLED": "false",
+        "OBSERVABILITY_ENVIRONMENT": "test",
+        "OBSERVABILITY_GOOGLE_CLOUD_PROJECT": "project",
+        "OBSERVABILITY_GOOGLE_WORKLOAD_IDENTITY_PROVIDER": "provider",
+        "OBSERVABILITY_GOOGLE_SERVICE_ACCOUNT_EMAIL": "service@example.com",
+        "OBSERVABILITY_LOG_DESTINATIONS": "stdout",
+        "HOSTNAMES": "https://chat.example",
+        "PUBLIC_BASE_URL": "https://chat.example/uk/chat",
+        "PATH": f"{tmp_path}:{os.environ['PATH']}",
+    }
+    if token is not None:
+        environment["HUGGING_FACE_TOKEN"] = token
+
+    result = subprocess.run(
+        [REPO_ROOT / ".github/scripts/sync-modal-secret.sh"],
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "HF_RUNTIME_READ_TOKEN" in result.stderr
+    assert not calls.exists()
