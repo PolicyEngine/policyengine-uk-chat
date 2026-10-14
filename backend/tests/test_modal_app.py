@@ -633,8 +633,12 @@ def test_no_workflow_reads_the_org_wide_hugging_face_secret():
     """
     workflows = sorted((REPO_ROOT / ".github/workflows").glob("*.y*ml"))
     assert workflows
+    # Secret names are case-insensitive, and passing every secret on reaches
+    # the org-wide one too.
     org_secret = re.compile(
         r"secrets\s*(\.\s*HUGGING_FACE_TOKEN\b|\[\s*['\"]HUGGING_FACE_TOKEN['\"]\s*\])"
+        r"|secrets:\s*inherit|toJSON\(\s*secrets\s*\)",
+        re.IGNORECASE,
     )
     for path in workflows:
         assert not org_secret.search(path.read_text()), path.name
