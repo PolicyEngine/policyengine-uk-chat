@@ -49,6 +49,9 @@ class FakeImage:
     def pip_install(self, *args):
         return self._step("pip_install", *args)
 
+    def env(self, *args):
+        return self._step("env", *args)
+
     def add_local_dir(self, *args, **kwargs):
         return self._step("add_local_dir", *args, **kwargs)
 
@@ -99,8 +102,18 @@ def test_modal_deployment_definition_imports_without_remote_calls(monkeypatch):
             "debian_slim",
             "apt_install",
             "pip_install_from_requirements",
+            "apt_install",
+            "pip_install",
+            "env",
             "add_local_dir",
         ]
+        # The CA-list refresh follows the requirements step, so Modal keeps
+        # that step's cached build (see the comment in modal_app.py).
+        assert modal_app.image.steps[3][1] == ("ca-certificates",)
+        assert modal_app.image.steps[4][1] == ("certifi>=2026.10.19",)
+        assert modal_app.image.steps[5][1] == (
+            {"GRPC_DEFAULT_SSL_ROOTS_FILE_PATH": "/etc/ssl/certs/ca-certificates.crt"},
+        )
     finally:
         sys.modules.pop("modal_app", None)
 
@@ -140,6 +153,14 @@ def test_modal_eval_app_fans_out_twenty_cases_with_a_25_container_cap(
             "create_if_missing": True,
             "version": 2,
         }
+        assert [step[0] for step in modal_eval_app.image.steps] == [
+            "debian_slim",
+            "pip_install_from_requirements",
+            "pip_install",
+            "add_local_dir",
+            "add_local_dir",
+        ]
+        assert modal_eval_app.image.steps[2][1] == ("certifi>=2026.10.19",)
         source = (REPO_ROOT / "modal_eval_app.py").read_text()
         assert "evaluate_case.spawn_map(" in source
         assert "concurrency=3" in source
