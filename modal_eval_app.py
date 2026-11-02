@@ -33,12 +33,26 @@ REPORT_MOUNT = "/reports"
 app = modal.App(APP_NAME)
 image = (
     modal.Image.debian_slim(python_version="3.13")
+    # Stop pip trusting the compromised eMudhra root "emSign ECC Root CA - G3"
+    # (https://emudhra.we-have-a-problem.com) before it downloads the
+    # requirements. pip verifies against the operating-system store as well as
+    # its own bundled certifi, so both are replaced: Debian's ca-certificates
+    # (the debian_slim base ships 20230311, which includes the root), then the
+    # cached base's pip 26.0.1, whose bundled certifi 2026.01.04 includes it
+    # too; --cert or PIP_CERT would only add to that trust. --require-hashes
+    # installs only the pip 26.2.2 wheel with the sha256 PyPI publishes for it.
+    .apt_install("ca-certificates")
+    .run_commands(
+        "printf '%s\\n' 'pip==26.2.2 --hash=sha256:fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70'"
+        " > /tmp/pip-bootstrap.txt"
+        " && python -m pip install --require-hashes --no-deps -r /tmp/pip-bootstrap.txt"
+        " && rm /tmp/pip-bootstrap.txt"
+    )
     .pip_install_from_requirements("backend/requirements-modal-eval.txt")
     # httpx verifies the deployed backend's certificate against certifi, which
     # the requirements file does not pin. 2026.10.19 is the first release that
-    # no longer trusts the compromised eMudhra root "emSign ECC Root CA - G3"
-    # (https://emudhra.we-have-a-problem.com). This step follows the
-    # requirements step so Modal reuses its cached build.
+    # no longer trusts the root. A minimum, so a rebuild picks up later
+    # removals.
     .pip_install("certifi>=2026.10.19")
     .add_local_dir("backend", remote_path="/app/backend", copy=True)
     .add_local_dir("evals", remote_path="/app/evals", copy=True)

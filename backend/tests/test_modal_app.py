@@ -7,6 +7,8 @@ import subprocess
 import sys
 from types import SimpleNamespace
 
+import pytest
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -48,6 +50,9 @@ class FakeImage:
 
     def pip_install(self, *args):
         return self._step("pip_install", *args)
+
+    def run_commands(self, *args):
+        return self._step("run_commands", *args)
 
     def env(self, *args):
         return self._step("env", *args)
@@ -101,17 +106,16 @@ def test_modal_deployment_definition_imports_without_remote_calls(monkeypatch):
         assert [step[0] for step in modal_app.image.steps] == [
             "debian_slim",
             "apt_install",
-            "pip_install_from_requirements",
             "apt_install",
+            "run_commands",
+            "pip_install_from_requirements",
             "pip_install",
             "env",
             "add_local_dir",
         ]
-        # The CA-list refresh follows the requirements step, so Modal keeps
-        # that step's cached build (see the comment in modal_app.py).
-        assert modal_app.image.steps[3][1] == ("ca-certificates",)
-        assert modal_app.image.steps[4][1] == ("certifi>=2026.10.19",)
-        assert modal_app.image.steps[5][1] == (
+        assert modal_app.image.steps[2][1] == ("ca-certificates",)
+        assert modal_app.image.steps[5][1] == ("certifi>=2026.10.19",)
+        assert modal_app.image.steps[6][1] == (
             {"GRPC_DEFAULT_SSL_ROOTS_FILE_PATH": "/etc/ssl/certs/ca-certificates.crt"},
         )
     finally:
@@ -155,17 +159,67 @@ def test_modal_eval_app_fans_out_twenty_cases_with_a_25_container_cap(
         }
         assert [step[0] for step in modal_eval_app.image.steps] == [
             "debian_slim",
+            "apt_install",
+            "run_commands",
             "pip_install_from_requirements",
             "pip_install",
             "add_local_dir",
             "add_local_dir",
         ]
-        assert modal_eval_app.image.steps[2][1] == ("certifi>=2026.10.19",)
+        assert modal_eval_app.image.steps[4][1] == ("certifi>=2026.10.19",)
         source = (REPO_ROOT / "modal_eval_app.py").read_text()
         assert "evaluate_case.spawn_map(" in source
         assert "concurrency=3" in source
     finally:
         sys.modules.pop("modal_eval_app", None)
+
+
+PIP_BOOTSTRAP_COMMAND = (
+    "printf '%s\\n' 'pip==26.2.2 --hash=sha256:"
+    "fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70'"
+    " > /tmp/pip-bootstrap.txt"
+    " && python -m pip install --require-hashes --no-deps -r /tmp/pip-bootstrap.txt"
+    " && rm /tmp/pip-bootstrap.txt"
+)
+PIP_PACKAGE_INSTALL_STEPS = {"pip_install", "pip_install_from_requirements"}
+
+
+@pytest.mark.parametrize("module_name", ["modal_app", "modal_eval_app"])
+def test_modal_images_replace_the_base_pip_before_any_package_download(
+    monkeypatch, module_name
+):
+    """The cached base's pip downloads only the hash-pinned pip that replaces it."""
+    fake_modal = SimpleNamespace(
+        App=FakeApp,
+        Image=FakeImage,
+        Secret=FakeSecret,
+        Volume=FakeVolume,
+        asgi_app=identity_decorator,
+        concurrent=identity_decorator,
+    )
+    monkeypatch.setitem(sys.modules, "modal", fake_modal)
+    sys.modules.pop(module_name, None)
+
+    try:
+        image_steps = importlib.import_module(module_name).image.steps
+        step_names = [step[0] for step in image_steps]
+        assert step_names.count("run_commands") == 1
+        bootstrap_index = step_names.index("run_commands")
+        first_package_install_index = min(
+            index
+            for index, step_name in enumerate(step_names)
+            if step_name in PIP_PACKAGE_INSTALL_STEPS
+        )
+        assert bootstrap_index < first_package_install_index
+        assert image_steps[bootstrap_index][1] == (PIP_BOOTSTRAP_COMMAND,)
+        # pip also verifies against the operating-system CA store, so the
+        # Debian ca-certificates upgrade has to come before the bootstrap.
+        assert image_steps[bootstrap_index - 1][:2] == (
+            "apt_install",
+            ("ca-certificates",),
+        )
+    finally:
+        sys.modules.pop(module_name, None)
 
 
 def test_dataset_reference_is_not_deployment_configuration():
