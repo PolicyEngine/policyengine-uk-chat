@@ -17,23 +17,35 @@ app = modal.App(APP_NAME)
 image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("libpq-dev", "gcc")
-    .pip_install_from_requirements("backend/requirements.txt")
-    # Refresh the CA lists the backend's outbound HTTPS and gRPC calls verify
-    # against, so they stop trusting the compromised eMudhra root "emSign ECC
-    # Root CA - G3" (https://emudhra.we-have-a-problem.com):
-    # - Debian's ca-certificates, read by clients that use the operating-system
-    #   store, such as hf-xet for Hugging Face downloads. Modal's debian_slim
+    # Refresh the CA lists that pip's package downloads and the backend's
+    # outbound HTTPS and gRPC calls verify against, so they stop trusting the
+    # compromised eMudhra root "emSign ECC Root CA - G3"
+    # (https://emudhra.we-have-a-problem.com):
+    # - Debian's ca-certificates, the operating-system store. pip reads it as
+    #   well as its own bundled certifi, and so do the stdlib's ssl module and
+    #   clients such as hf-xet for Hugging Face downloads. Modal's debian_slim
     #   base ships 20230311, which includes the root.
+    # - pip. The cached base's pip 26.0.1 trusts the root through its bundled
+    #   certifi 2026.01.04, whatever the system store holds, and --cert or
+    #   PIP_CERT only add to that trust. pip 26.2.2's bundled certifi
+    #   (2026.10.19) drops it; --require-hashes installs only the wheel with
+    #   the sha256 PyPI publishes for it, whatever answers the download.
     # - certifi, read by httpx and requests (the Anthropic, Supabase and Stripe
-    #   clients). requirements.txt does not pin it, so the version is whatever
-    #   was current when the step above was last built; 2026.10.19 is the first
+    #   clients). requirements.txt does not pin it; 2026.10.19 is the first
     #   release without the root. A minimum, so a rebuild picks up later
     #   removals.
     # - gRPC (Google Cloud Logging) reads the CA list bundled in grpcio, which
     #   no grpcio release has fixed; point it at the refreshed Debian bundle.
-    # These steps follow the requirements step so Modal reuses its cached
-    # build; changing an earlier step would re-resolve every unpinned package.
+    # Every step above the requirements step is part of that step's cache key:
+    # changing one re-resolves every unpinned package in requirements.txt.
     .apt_install("ca-certificates")
+    .run_commands(
+        "printf '%s\\n' 'pip==26.2.2 --hash=sha256:fd7f4dfa8190e014013b9f08f3e973f4e4c26ffd179a204895533a7254813a70'"
+        " > /tmp/pip-bootstrap.txt"
+        " && python -m pip install --require-hashes --no-deps -r /tmp/pip-bootstrap.txt"
+        " && rm /tmp/pip-bootstrap.txt"
+    )
+    .pip_install_from_requirements("backend/requirements.txt")
     .pip_install("certifi>=2026.10.19")
     .env({"GRPC_DEFAULT_SSL_ROOTS_FILE_PATH": "/etc/ssl/certs/ca-certificates.crt"})
     .add_local_dir("backend", remote_path="/app/backend", copy=True)
