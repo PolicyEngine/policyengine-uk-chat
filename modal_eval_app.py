@@ -34,6 +34,12 @@ app = modal.App(APP_NAME)
 image = (
     modal.Image.debian_slim(python_version="3.13")
     .pip_install_from_requirements("backend/requirements-modal-eval.txt")
+    # httpx verifies the deployed backend's certificate against certifi, which
+    # the requirements file does not pin. 2026.10.19 is the first release that
+    # no longer trusts the compromised eMudhra root "emSign ECC Root CA - G3"
+    # (https://emudhra.we-have-a-problem.com). This step follows the
+    # requirements step so Modal reuses its cached build.
+    .pip_install("certifi>=2026.10.19")
     .add_local_dir("backend", remote_path="/app/backend", copy=True)
     .add_local_dir("evals", remote_path="/app/evals", copy=True)
 )

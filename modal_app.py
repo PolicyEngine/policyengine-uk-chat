@@ -18,6 +18,24 @@ image = (
     modal.Image.debian_slim(python_version="3.13")
     .apt_install("libpq-dev", "gcc")
     .pip_install_from_requirements("backend/requirements.txt")
+    # Refresh the CA lists the backend's outbound HTTPS and gRPC calls verify
+    # against, so they stop trusting the compromised eMudhra root "emSign ECC
+    # Root CA - G3" (https://emudhra.we-have-a-problem.com):
+    # - Debian's ca-certificates, read by clients that use the operating-system
+    #   store, such as hf-xet for Hugging Face downloads. Modal's debian_slim
+    #   base ships 20230311, which includes the root.
+    # - certifi, read by httpx and requests (the Anthropic, Supabase and Stripe
+    #   clients). requirements.txt does not pin it, so the version is whatever
+    #   was current when the step above was last built; 2026.10.19 is the first
+    #   release without the root. A minimum, so a rebuild picks up later
+    #   removals.
+    # - gRPC (Google Cloud Logging) reads the CA list bundled in grpcio, which
+    #   no grpcio release has fixed; point it at the refreshed Debian bundle.
+    # These steps follow the requirements step so Modal reuses its cached
+    # build; changing an earlier step would re-resolve every unpinned package.
+    .apt_install("ca-certificates")
+    .pip_install("certifi>=2026.10.19")
+    .env({"GRPC_DEFAULT_SSL_ROOTS_FILE_PATH": "/etc/ssl/certs/ca-certificates.crt"})
     .add_local_dir("backend", remote_path="/app/backend", copy=True)
 )
 
