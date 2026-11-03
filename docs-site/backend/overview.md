@@ -25,9 +25,9 @@ It hosts the chat agent and persists conversations. In production it runs as a
 - On **startup**, `verify_database_schema()` confirms that PostgreSQL is at the
   repository's Alembic revision without changing schema. It also refuses to
   start the app if row-level security would hide rows from the backend's
-  database role, or if the Supabase Data API's `anon` and `authenticated` roles
-  can reach any table, view or SECURITY DEFINER function in the schema. On
-  **shutdown**, the app flushes observability.
+  database role, or if the Supabase Data API's `anon` or `authenticated` role
+  can reach any table, view or SECURITY DEFINER function or procedure in the
+  schema. On **shutdown**, the app flushes observability.
 
 ## Operational endpoints
 

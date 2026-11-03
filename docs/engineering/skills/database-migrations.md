@@ -38,17 +38,41 @@ owns the tables. It changes every object the running role owns, directly or
 through a role it inherits, and skips any other object with a warning that
 names the object and its owner. It turns on row-level security for each table
 it changes and revokes what PUBLIC, `anon` and `authenticated` hold on each
-object it changes. PostgreSQL lets a role revoke only the grants it made, so a
-grant that another role made, for example through a grant option, stays. 005
-warns about each such grant, naming the privilege, the grantee and the role
-that made it, and the startup check below reports any table, view or SECURITY
-DEFINER routine such a grant leaves open. Revoke it as the role that made it.
+object it changes.
+
+PostgreSQL records a grantor with each grant. Each REVOKE acts as one role and
+removes only the grants with that role as grantor. For that role, PostgreSQL
+picks either the running role or a role that owns the object or holds grant
+options on it and whose privileges the running role holds; a superuser's
+REVOKE acts as the object's owner. When several roles qualify, PostgreSQL
+doesn't specify which one it picks, and its REVOKE reference recommends
+`SET ROLE` to choose. A grant with any other grantor stays. 005 warns about
+each grant that still reaches PUBLIC, `anon` or `authenticated`, names its
+grantor, and gives the statement that revokes it as that role:
+
+```sql
+set role <grantor>; revoke <privileges> on <object> from <grantee>; reset role;
+```
+
+A column grant's statement lists the column after the privilege. Run the
+statements in the order 005 prints them. The startup check below reports any
+table, view or SECURITY DEFINER routine such a grant leaves open.
+
+Without CASCADE, PostgreSQL refuses to revoke a privilege from a role that has
+granted it on through its grant option. When `anon` or `authenticated` has done
+that, 005 revokes nothing from that role on that object and warns with the
+CASCADE statement, which also revokes every grant that depends on that option.
+005 never cascades by itself. Either run that statement and then 005 again, or
+run the statements that follow the warning. PostgreSQL can still refuse one of
+those without CASCADE when `anon` or `authenticated` passed a grant option on
+to a role outside those three, or when the two gave each other one.
 
 005 also removes the running role's default grants to those three in `public`.
 On `user_credits` and `token_usage` it drops "Service manages credits" and
 "Service inserts usage", two policies that admit every role. The "Users read
-own" policies on both tables stay, so a SELECT grant someone adds back still
-reaches only the signed-in user's rows.
+own" policies on both tables stay, so unless another policy admits `anon` or
+`authenticated`, a SELECT grant someone adds back still reaches only the
+signed-in user's rows.
 
 Rerun 005 after a revision that adds a table or a function. The running role's
 default privileges in `public` give a new table no grant for either role, and
@@ -58,9 +82,9 @@ objects in `public`. 005 warns about each default for every schema that belongs
 to the running role, or to a role whose privileges it holds, and grants `anon`
 or `authenticated` anything, or grants PUBLIC anything on tables or sequences.
 The startup check reports the tables, views and SECURITY DEFINER routines those
-defaults open. A new function stays callable through PUBLIC until the rerun:
-PostgreSQL grants EXECUTE on each new function to PUBLIC, and revoking a
-default privilege for one schema can't remove that grant.
+defaults open. PUBLIC can also call a new function until then: PostgreSQL
+grants EXECUTE on each new function to PUBLIC, and revoking a default privilege
+for one schema can't remove that grant.
 
 005 waits at most 5 seconds for each lock. If a long query holds a table past
 that, 005 stops and changes nothing, so run it again. It takes an exclusive
@@ -75,11 +99,11 @@ still has one of them.
   privileges the backend's role doesn't hold, and the backend's role lacks both
   superuser status and BYPASSRLS.
 - The database's Alembic revision differs from the repository head.
-- `anon` or `authenticated` holds any privilege on a table, view, materialized
-  view or foreign table in the backend's schema, or on one of its columns,
-  directly or through PUBLIC.
-- Either role can execute a SECURITY DEFINER function or procedure in that
-  schema that belongs to no extension.
+- `anon` or `authenticated` can use the backend's schema and holds any
+  privilege on a table, view, materialized view or foreign table in it, or on
+  one of its columns, directly or through PUBLIC.
+- Either role can use that schema and execute a SECURITY DEFINER function or
+  procedure in it that belongs to no extension.
 
 The check reads catalogs and the Alembic revision, never application rows.
 Serving a table through the Data API takes a new Supabase migration with an

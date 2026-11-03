@@ -246,10 +246,107 @@ _OBJECT_PRIVILEGES = text(
 )
 
 
+# Each ACL entry that grants PUBLIC, anon or authenticated a privilege on an
+# object in public or on one of its columns. On a connection with an empty
+# search path, each object name carries its schema, as in 005's warnings.
+_DATA_API_GRANTS = text(
+    """
+    SELECT
+      acl.object,
+      acl.column_name,
+      CASE WHEN acl.grantee = 0 THEN 'PUBLIC' ELSE acl.grantee::regrole::text END
+        AS grantee,
+      acl.grantor::regrole::text AS grantor,
+      acl.privilege_type AS privilege
+    FROM (
+      SELECT c.oid::regclass::text AS object, NULL::text AS column_name, x.*
+      FROM pg_class AS c
+      CROSS JOIN LATERAL aclexplode(c.relacl) AS x
+      WHERE c.relnamespace = 'public'::regnamespace
+      UNION ALL
+      SELECT a.attrelid::regclass::text, a.attname::text, x.*
+      FROM pg_attribute AS a
+      JOIN pg_class AS c ON c.oid = a.attrelid
+      CROSS JOIN LATERAL aclexplode(a.attacl) AS x
+      WHERE c.relnamespace = 'public'::regnamespace AND NOT a.attisdropped
+      UNION ALL
+      SELECT p.oid::regprocedure::text, NULL, x.*
+      FROM pg_proc AS p
+      CROSS JOIN LATERAL aclexplode(p.proacl) AS x
+      WHERE p.pronamespace = 'public'::regnamespace
+    ) AS acl
+    WHERE acl.grantee = 0
+      OR acl.grantee IN (
+        SELECT oid FROM pg_roles WHERE rolname IN ('anon', 'authenticated')
+      )
+    """
+)
+
+# Each ACL entry that grants an object's owner a privilege on the object or one
+# of its columns, for every relation, sequence and routine in public. An empty
+# ACL stands for PostgreSQL's default, which acldefault spells out.
+_OWNER_ENTRIES = text(
+    """
+    SELECT o.object, o.column_name, x.grantor::regrole::text AS grantor,
+           x.privilege_type AS privilege, x.is_grantable
+    FROM (
+      SELECT c.oid::regclass::text AS object, NULL::text AS column_name,
+             c.relowner AS owner,
+             coalesce(
+               c.relacl,
+               acldefault(CAST(CASE WHEN c.relkind = 'S' THEN 's' ELSE 'r' END AS "char"),
+                          c.relowner)
+             ) AS acl
+      FROM pg_class AS c
+      WHERE c.relnamespace = 'public'::regnamespace
+        AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+      UNION ALL
+      SELECT a.attrelid::regclass::text, a.attname::text, c.relowner, a.attacl
+      FROM pg_attribute AS a
+      JOIN pg_class AS c ON c.oid = a.attrelid
+      WHERE c.relnamespace = 'public'::regnamespace
+        AND a.attacl IS NOT NULL
+        AND NOT a.attisdropped
+      UNION ALL
+      SELECT p.oid::regprocedure::text, NULL, p.proowner,
+             coalesce(p.proacl, acldefault('f', p.proowner))
+      FROM pg_proc AS p
+      WHERE p.pronamespace = 'public'::regnamespace
+    ) AS o
+    CROSS JOIN LATERAL aclexplode(o.acl) AS x
+    WHERE x.grantee = o.owner
+    ORDER BY 1, 2, 3, 4
+    """
+)
+
+# Every relation, sequence and routine in public, named as the queries above
+# name them.
+_PUBLIC_OBJECTS = text(
+    """
+    SELECT oid::regclass::text FROM pg_class
+    WHERE relnamespace = 'public'::regnamespace
+      AND relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+    UNION ALL
+    SELECT oid::regprocedure::text FROM pg_proc
+    WHERE pronamespace = 'public'::regnamespace
+    """
+)
+
+
 class Privilege(NamedTuple):
     role: str
     kind: str
     object: str
+    privilege: str
+
+
+class Grant(NamedTuple):
+    """One ACL entry: a grantor gave a grantee a privilege on an object or column."""
+
+    object: str
+    column: str | None
+    grantee: str
+    grantor: str
     privilege: str
 
 
@@ -318,6 +415,56 @@ def _run_sql(engine: Engine, statements: str | sql.Composable) -> list[str]:
 
 def _warnings(notices: list[str]) -> list[str]:
     return [notice for notice in notices if notice.startswith("WARNING:")]
+
+
+def _statement(warning: str) -> str:
+    """The statement that a 005 warning gives."""
+    for marker in ("; revoke it with: ", " depends on that option: "):
+        if marker in warning:
+            return warning.split(marker, 1)[1]
+    raise AssertionError(f"005 gave no statement in {warning!r}")
+
+
+def _kept_warning(grantee: str, privileges: str, keyword: str, target: str, grantor: str) -> str:
+    """What 005 prints for a grant it keeps, with the statement that revokes it."""
+    return (
+        f"WARNING:  {grantor} granted {grantee} {privileges} on {target}, and this run "
+        f"kept it; revoke it with: set role {grantor}; revoke {privileges} on {keyword} "
+        f"{target} from {grantee}; reset role;"
+    )
+
+
+def _passed_on_warning(role: str, keyword: str, target: str, runner: str) -> str:
+    """What 005 prints when a role has passed on a grant option on an object."""
+    return (
+        f"WARNING:  {role} has passed on a grant option on {target}, so this run "
+        f"revoked nothing from {role} there; this statement also revokes every grant "
+        f"that depends on that option: set role {runner}; revoke all on {keyword} "
+        f"{target} from {role} cascade; reset role;"
+    )
+
+
+@contextmanager
+def _qualified(bind: Engine) -> Iterator[Connection]:
+    """Connect with an empty search path, so names carry their schema, as in 005."""
+    with bind.connect() as connection:
+        connection.execute(text("SET LOCAL search_path = ''"))
+        yield connection
+
+
+def _data_api_grants(bind: Engine) -> set[Grant]:
+    with _qualified(bind) as connection:
+        return {Grant(*row) for row in connection.execute(_DATA_API_GRANTS)}
+
+
+def _owner_entries(bind: Engine) -> list[tuple[Any, ...]]:
+    with _qualified(bind) as connection:
+        return [tuple(row) for row in connection.execute(_OWNER_ENTRIES)]
+
+
+def _public_objects(bind: Engine) -> set[str]:
+    with _qualified(bind) as connection:
+        return set(connection.scalars(_PUBLIC_OBJECTS))
 
 
 @contextmanager
@@ -455,6 +602,12 @@ def owner(server_roles, owner_bypasses_rls: bool) -> str:
         "owner",
         f"NOSUPERUSER {bypass} IN ROLE anon, authenticated, service_role",
     )
+
+
+@pytest.fixture
+def helper(server_roles) -> str:
+    """A role the owner gives grant options to, and which passes them on."""
+    return server_roles("helper", "NOSUPERUSER")
 
 
 @pytest.fixture
@@ -878,13 +1031,21 @@ def test_service_role_keeps_the_billing_access_the_backend_uses(locked_database)
 @pytest.mark.parametrize(
     "owner_bypasses_rls", [True, False], ids=["bypassrls", "nobypassrls"]
 )
-def test_backend_repositories_keep_working_as_the_owner(locked_database):
-    assert verify_database_schema(locked_database) == _head()
+def test_backend_repositories_keep_working_as_the_owner(exposed_database):
+    # The owner belongs to service_role, whose grants also reach these tables,
+    # so the repositories below would still work if 005 took away the owner's
+    # own grants. The owner's ACL entries show it directly.
+    before = _owner_entries(exposed_database)
+    assert {entry[0] for entry in before} == _public_objects(exposed_database)
+    assert _warnings(_run_sql(exposed_database, LOCKDOWN.read_text())) == []
+    assert _owner_entries(exposed_database) == before
+
+    assert verify_database_schema(exposed_database) == _head()
 
     conversation_id = "owner-flow"
     disposable_id = "owner-flow-disposable"
     now = datetime.now(timezone.utc)
-    with Session(locked_database) as session:
+    with Session(exposed_database) as session:
         for session_id in (conversation_id, disposable_id):
             session.add(
                 ChatConversation(
@@ -902,22 +1063,22 @@ def test_backend_repositories_keep_working_as_the_owner(locked_database):
             select(ChatConversation).where(ChatConversation.session_id == session_id)
         ).one()
 
-    with Session(locked_database) as session:
+    with Session(exposed_database) as session:
         assert conversation(session, "seeded").title == "Seeded"
         conversation(session, conversation_id).title = "Renamed"
         session.delete(conversation(session, disposable_id))
         session.commit()
-    with Session(locked_database) as session:
+    with Session(exposed_database) as session:
         assert conversation(session, conversation_id).title == "Renamed"
 
-    contexts = SQLConversationContextRepository(engine=locked_database)
+    contexts = SQLConversationContextRepository(engine=exposed_database)
     saved = contexts.save(
         ConversationContext.initial(conversation_id),
         expected_revision=0,
     )
     assert contexts.load(conversation_id) == saved
 
-    receipts = SQLIdempotencyRepository(engine=locked_database)
+    receipts = SQLIdempotencyRepository(engine=exposed_database)
     assert (
         receipts.begin_turn(
             conversation_id=conversation_id,
@@ -971,6 +1132,30 @@ def test_lockdown_stops_after_a_five_second_lock_wait_and_changes_nothing(
     finally:
         lockdown.dispose()
     assert _access_snapshot(exposed_database) == before
+
+
+def test_a_revoke_that_waits_too_long_stops_the_run(locked_database, superuser, owner):
+    """005 catches only PostgreSQL's refusal over dependent privileges.
+
+    Another transaction's uncommitted GRANT on a table holds up 005's REVOKE
+    there. After 5 seconds the lock timeout stops 005, which changes nothing.
+    """
+    _run_sql(locked_database, "GRANT SELECT ON public.chat_conversations TO anon")
+    before = _access_snapshot(locked_database)
+    assert locked_database.url.database is not None
+    # The statement timeout ends the run if the lockdown waits with no limit.
+    lockdown = _engine(locked_database.url.database, owner, "statement_timeout=60s")
+    try:
+        with superuser.connect() as granter:
+            granter.execute(text("GRANT INSERT ON public.chat_conversations TO authenticated"))
+            started = time.monotonic()
+            with pytest.raises(LockNotAvailable, match="lock timeout"):
+                _run_sql(lockdown, LOCKDOWN.read_text())
+            assert time.monotonic() - started >= 5
+            granter.rollback()
+    finally:
+        lockdown.dispose()
+    assert _access_snapshot(locked_database) == before
 
 
 def test_a_rerun_waits_for_no_reader(locked_database, superuser, owner):
@@ -1097,13 +1282,14 @@ def test_lockdown_skips_objects_another_role_owns_and_commits_the_rest(
 
     notices = _run_sql(exposed_database, LOCKDOWN.read_text())
     assert _warnings(notices) == [
-        f"WARNING:  skipped admin_notes (owner {other}): the running role does not own it",
-        f"WARNING:  skipped distant_notes (owner {distant}): the running role does not "
-        "own it",
-        f"WARNING:  skipped admin_definer() (owner {other}): the running role does "
+        f"WARNING:  skipped public.admin_notes (owner {other}): the running role does "
         "not own it",
-        f"WARNING:  skipped distant_definer() (owner {distant}): the running role does "
-        "not own it",
+        f"WARNING:  skipped public.distant_notes (owner {distant}): the running role "
+        "does not own it",
+        f"WARNING:  skipped public.admin_definer() (owner {other}): the running role "
+        "does not own it",
+        f"WARNING:  skipped public.distant_definer() (owner {distant}): the running "
+        "role does not own it",
     ]
     # Everything the owner holds closed in the same run.
     assert {
@@ -1155,20 +1341,37 @@ def test_lockdown_skips_objects_another_role_owns_and_commits_the_rest(
 CHAIN_PRIVILEGES = {"S": ("SEQUENCE", "USAGE"), "routine": ("ROUTINE", "EXECUTE")}
 
 
-def test_lockdown_names_each_grant_it_cannot_revoke(
-    exposed_database, superuser, server_roles, owner
+class Chain(NamedTuple):
+    """A grant that 005 keeps, the warning it prints and what the grant opens."""
+
+    warning: str
+    grants: frozenset[Grant]
+    grantee: str
+    privilege: str
+    kind: str
+    # The object as _data_api_access names it.
+    access_name: str
+    # The object as the startup check names it, or None if the check skips it.
+    report_name: str | None
+    owner: str
+
+
+def test_lockdown_names_each_grant_it_keeps_with_the_statement_that_revokes_it(
+    exposed_database, superuser, server_roles, owner, helper
 ):
-    """PostgreSQL lets a role revoke only the grants it made.
+    """Each REVOKE removes only the grants whose grantor is the role it acts as.
 
     The owner gives a helper role a grant option on every object in public,
     and the helper passes the privilege to anon, authenticated or PUBLIC in
-    turn. A delegate's table shows the other direction: the owner inherits the
-    delegate and holds every grant option on the table itself, so its revoke
-    acts for the owner and leaves the delegate's grant.
+    turn, so PostgreSQL records the helper as each grant's grantor. On a
+    delegate's table, two roles qualify to act for the owner's REVOKE: the
+    owner, which holds every grant option there, and the delegate, which the
+    owner inherits and which owns the table. 005's REVOKE leaves the grant the
+    delegate made. Run in the order 005 prints them, the warnings' statements
+    then revoke each of those grants and nothing else.
     """
-    helper = server_roles("helper", "NOSUPERUSER")
     delegate = server_roles("delegate", "NOSUPERUSER")
-    with exposed_database.connect() as connection:
+    with _qualified(exposed_database) as connection:
         objects = connection.execute(
             text(
                 """
@@ -1191,7 +1394,6 @@ def test_lockdown_names_each_grant_it_cannot_revoke(
 
     grantees = ("anon", "authenticated", "PUBLIC")
     owner_grants, helper_grants = [], []
-    # Each passed-on privilege: (target, grantee, privilege, kind, object).
     chains = []
     for index, row in enumerate(objects):
         keyword, privilege = CHAIN_PRIVILEGES.get(row.kind, ("TABLE", "SELECT"))
@@ -1199,13 +1401,37 @@ def test_lockdown_names_each_grant_it_cannot_revoke(
         owner_grants.append(
             f'GRANT {privilege} ON {keyword} {row.object} TO "{helper}" WITH GRANT OPTION;'
         )
-        helper_grants.append(f"GRANT {privilege} ON {keyword} public.{row.object} TO {grantee};")
-        chains.append((row.object, grantee, privilege, row.kind, row.object))
+        helper_grants.append(f"GRANT {privilege} ON {keyword} {row.object} TO {grantee};")
+        chains.append(
+            Chain(
+                _kept_warning(grantee, privilege, keyword.lower(), row.object, helper),
+                frozenset({Grant(row.object, None, grantee, helper, privilege)}),
+                grantee,
+                privilege,
+                row.kind,
+                row.object.removeprefix("public."),
+                row.name if row.reportable else None,
+                owner,
+            )
+        )
     owner_grants.append(
-        f'GRANT UPDATE (title) ON chat_conversations TO "{helper}" WITH GRANT OPTION;'
+        f'GRANT UPDATE (title) ON public.chat_conversations TO "{helper}" WITH GRANT OPTION;'
     )
     helper_grants.append("GRANT UPDATE (title) ON public.chat_conversations TO PUBLIC;")
-    chains.append(("chat_conversations.title", "PUBLIC", "UPDATE", "r", "chat_conversations"))
+    chains.append(
+        Chain(
+            _kept_warning(
+                "PUBLIC", "UPDATE (title)", "table", "public.chat_conversations", helper
+            ),
+            frozenset({Grant("public.chat_conversations", "title", "PUBLIC", helper, "UPDATE")}),
+            "PUBLIC",
+            "UPDATE",
+            "r",
+            "chat_conversations",
+            "chat_conversations",
+            owner,
+        )
+    )
     _run_sql(exposed_database, "\n".join(owner_grants))
     _run_sql(
         superuser,
@@ -1222,15 +1448,23 @@ def test_lockdown_names_each_grant_it_cannot_revoke(
         RESET ROLE;
         """,
     )
-    chains.append(("delegated_notes", "anon", "SELECT", "r", "delegated_notes"))
-    grantors = {"delegated_notes": delegate}
-
-    notices = _run_sql(exposed_database, LOCKDOWN.read_text())
-    assert sorted(_warnings(notices)) == sorted(
-        f"WARNING:  {grantee} keeps {privilege} on {target}, granted by "
-        f"{grantors.get(target, helper)}: revoke it as that role"
-        for target, grantee, privilege, _, _ in chains
+    chains.append(
+        Chain(
+            _kept_warning("anon", "SELECT", "table", "public.delegated_notes", delegate),
+            frozenset({Grant("public.delegated_notes", None, "anon", delegate, "SELECT")}),
+            "anon",
+            "SELECT",
+            "r",
+            "delegated_notes",
+            "delegated_notes",
+            delegate,
+        )
     )
+
+    warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+    assert sorted(warnings) == sorted(chain.warning for chain in chains)
+    kept = {chain.warning: chain.grants for chain in chains}
+    assert _data_api_grants(superuser) == set().union(*kept.values())
 
     # Everything else closed, and what stays is what the warnings name.
     def reached(grantee: str) -> tuple[str, ...]:
@@ -1238,29 +1472,231 @@ def test_lockdown_names_each_grant_it_cannot_revoke(
 
     assert sorted(_data_api_access(exposed_database)) == sorted(
         {
-            Privilege(role, kind, name, privilege)
-            for _, grantee, privilege, kind, name in chains
-            for role in reached(grantee)
+            Privilege(role, chain.kind, chain.access_name, chain.privilege)
+            for chain in chains
+            for role in reached(chain.grantee)
         }
     )
 
     # The startup check reports the relations and the definer routine.
-    named = {row.object: row for row in objects}
-    named["delegated_notes"] = None
-    expected = set()
-    for _, grantee, _, kind, name in chains:
-        row = named[name]
-        if row is not None and not row.reportable:
-            continue
-        object_owner = delegate if row is None else owner
-        label = row.name if row is not None else name
-        report_kind = "function" if kind == "routine" else KIND_NAMES[kind]
-        for role in reached(grantee):
-            expected.add(DataApiExposure(role, report_kind, label, object_owner))
+    expected = {
+        DataApiExposure(
+            role,
+            "function" if chain.kind == "routine" else KIND_NAMES[chain.kind],
+            chain.report_name,
+            chain.owner,
+        )
+        for chain in chains
+        if chain.report_name is not None
+        for role in reached(chain.grantee)
+    }
     assert any(item.kind == "function" for item in expected)
     assert sorted(data_api_exposure(exposed_database)) == sorted(expected)
     with pytest.raises(DatabaseSchemaError, match="The Supabase Data API can reach"):
         verify_database_schema(exposed_database)
+
+    # Each statement revokes its warning's grant and nothing else, with no
+    # warning from PostgreSQL, and then a rerun finds nothing to report.
+    for warning in warnings:
+        before = _data_api_grants(superuser)
+        assert _warnings(_run_sql(superuser, _statement(warning))) == [], warning
+        assert _data_api_grants(superuser) == before - kept[warning], warning
+    assert _data_api_access(exposed_database) == []
+    assert data_api_exposure(exposed_database) == []
+    assert _warnings(_run_sql(exposed_database, LOCKDOWN.read_text())) == []
+
+
+def test_a_grant_the_running_role_made_stays_until_its_statement_runs(
+    exposed_database, superuser, server_roles, owner
+):
+    """The running role inherits the owner and made a grant through a grant option.
+
+    Two roles qualify to act for the runner's REVOKE ALL: the runner, which
+    holds one grant option on the table, and the owner it inherits. 005's
+    REVOKE removes the grants the owner made and keeps the one the runner made.
+    The runner's own targeted REVOKE, which the warning gives, then removes it.
+    """
+    runner = server_roles("runner", f'NOSUPERUSER INHERIT IN ROLE "{owner}"')
+    _run_sql(
+        exposed_database,
+        f"""
+        CREATE TABLE shared_notes (id int);
+        GRANT SELECT ON shared_notes TO "{runner}" WITH GRANT OPTION;
+        """,
+    )
+    _run_sql(superuser, f'SET ROLE "{runner}"; GRANT SELECT ON public.shared_notes TO anon')
+    shared = {
+        grant for grant in _data_api_grants(superuser) if grant.object == "public.shared_notes"
+    }
+    # The owner's default privileges made the other grants.
+    assert {grant.grantor for grant in shared} == {owner, runner}
+    assert Grant("public.shared_notes", None, "anon", runner, "SELECT") in shared
+
+    assert exposed_database.url.database is not None
+    as_runner = _engine(exposed_database.url.database, runner)
+    try:
+        statement = (
+            f"set role {runner}; revoke SELECT on table public.shared_notes from anon; "
+            "reset role;"
+        )
+        assert _warnings(_run_sql(as_runner, LOCKDOWN.read_text())) == [
+            _kept_warning("anon", "SELECT", "table", "public.shared_notes", runner)
+        ]
+        assert _data_api_grants(superuser) == {
+            Grant("public.shared_notes", None, "anon", runner, "SELECT")
+        }
+
+        assert _warnings(_run_sql(as_runner, statement)) == []
+        assert _data_api_grants(superuser) == set()
+        assert _data_api_access(exposed_database) == []
+        assert _warnings(_run_sql(as_runner, LOCKDOWN.read_text())) == []
+    finally:
+        as_runner.dispose()
+
+
+@pytest.mark.parametrize("closing", ["kept-grant statements", "cascade statements"])
+def test_lockdown_warns_when_anon_has_passed_on_a_grant_option(
+    exposed_database, superuser, owner, closing
+):
+    """Without CASCADE, PostgreSQL refuses to revoke a grant option someone used.
+
+    anon holds a grant option on a partitioned table and one of its columns, a
+    table, a column, a view, a sequence and a definer function, and grants each
+    privilege to authenticated. On the view and the partitioned table's column,
+    authenticated also gets the grant option and passes the privilege on to
+    PUBLIC. 005 revokes nothing from anon on those six objects, warns, closes
+    everything else and commits. Either set of statements the warnings give
+    then closes the six.
+    """
+    _run_sql(
+        exposed_database,
+        f"""
+        GRANT SELECT ON public.{PARTITIONED_TABLE} TO anon WITH GRANT OPTION;
+        GRANT SELECT (ran_on) ON public.{PARTITIONED_TABLE} TO anon WITH GRANT OPTION;
+        GRANT SELECT ON public.{UNMANAGED_TABLE} TO anon WITH GRANT OPTION;
+        GRANT UPDATE (title) ON public.chat_conversations TO anon WITH GRANT OPTION;
+        GRANT SELECT ON public.{VIEW} TO anon WITH GRANT OPTION;
+        GRANT USAGE ON SEQUENCE public.standalone_sequence TO anon WITH GRANT OPTION;
+        GRANT EXECUTE ON FUNCTION public.{DEFINER_FUNCTION} TO anon WITH GRANT OPTION;
+        """,
+    )
+    _run_sql(
+        superuser,
+        f"""
+        SET ROLE anon;
+        GRANT SELECT ON public.{PARTITIONED_TABLE} TO authenticated;
+        GRANT SELECT (ran_on) ON public.{PARTITIONED_TABLE} TO authenticated
+          WITH GRANT OPTION;
+        GRANT SELECT ON public.{UNMANAGED_TABLE} TO authenticated;
+        GRANT UPDATE (title) ON public.chat_conversations TO authenticated;
+        GRANT SELECT ON public.{VIEW} TO authenticated WITH GRANT OPTION;
+        GRANT USAGE ON SEQUENCE public.standalone_sequence TO authenticated;
+        GRANT EXECUTE ON FUNCTION public.{DEFINER_FUNCTION} TO authenticated;
+        SET ROLE authenticated;
+        GRANT SELECT (ran_on) ON public.{PARTITIONED_TABLE} TO PUBLIC;
+        GRANT SELECT ON public.{VIEW} TO PUBLIC;
+        """,
+    )
+    table_privileges = sorted(_privilege_types(exposed_database, "r"))
+    sequence_privileges = sorted(_privilege_types(exposed_database, "s"))
+    runs = f"public.{PARTITIONED_TABLE}"
+    table = f"public.{UNMANAGED_TABLE}"
+    view = f"public.{VIEW}"
+    function = f"public.{DEFINER_FUNCTION}"
+    everything = ", ".join(table_privileges)
+
+    warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+    assert warnings == [
+        # Revoking SELECT on the table from authenticated also revokes its
+        # SELECT on the column, which PUBLIC's grant depends on, so PUBLIC's
+        # statement comes first.
+        _passed_on_warning("anon", "table", runs, owner),
+        _kept_warning("PUBLIC", "SELECT (ran_on)", "table", runs, "authenticated"),
+        _kept_warning("authenticated", "SELECT", "table", runs, "anon"),
+        _kept_warning("authenticated", "SELECT (ran_on)", "table", runs, "anon"),
+        _kept_warning("anon", everything, "table", runs, owner),
+        _kept_warning("anon", "SELECT (ran_on)", "table", runs, owner),
+        _passed_on_warning("anon", "table", table, owner),
+        _kept_warning("authenticated", "SELECT", "table", table, "anon"),
+        _kept_warning("anon", everything, "table", table, owner),
+        _passed_on_warning("anon", "table", "public.chat_conversations", owner),
+        _kept_warning(
+            "authenticated", "UPDATE (title)", "table", "public.chat_conversations", "anon"
+        ),
+        _kept_warning("anon", everything, "table", "public.chat_conversations", owner),
+        _kept_warning("anon", "UPDATE (title)", "table", "public.chat_conversations", owner),
+        # PUBLIC's grant depends on authenticated's grant option, so its
+        # statement comes first.
+        _passed_on_warning("anon", "table", view, owner),
+        _kept_warning("PUBLIC", "SELECT", "table", view, "authenticated"),
+        _kept_warning("authenticated", "SELECT", "table", view, "anon"),
+        _kept_warning("anon", everything, "table", view, owner),
+        _passed_on_warning("anon", "sequence", "public.standalone_sequence", owner),
+        _kept_warning("authenticated", "USAGE", "sequence", "public.standalone_sequence", "anon"),
+        _kept_warning(
+            "anon", ", ".join(sequence_privileges), "sequence", "public.standalone_sequence", owner
+        ),
+        _passed_on_warning("anon", "routine", function, owner),
+        _kept_warning("authenticated", "EXECUTE", "routine", function, "anon"),
+        _kept_warning("anon", "EXECUTE", "routine", function, owner),
+    ]
+
+    # Both roles keep what the warnings name on those six objects, and nothing
+    # anywhere else.
+    assert sorted(_data_api_access(exposed_database)) == sorted(
+        [Privilege("anon", "p", PARTITIONED_TABLE, privilege) for privilege in table_privileges]
+        + [Privilege("anon", "r", UNMANAGED_TABLE, privilege) for privilege in table_privileges]
+        + [Privilege("anon", "r", "chat_conversations", privilege) for privilege in table_privileges]
+        + [Privilege("anon", "v", VIEW, privilege) for privilege in table_privileges]
+        + [
+            Privilege("anon", "S", "standalone_sequence", privilege)
+            for privilege in sequence_privileges
+        ]
+        + [
+            Privilege("anon", "routine", DEFINER_FUNCTION, "EXECUTE"),
+            Privilege("authenticated", "p", PARTITIONED_TABLE, "SELECT"),
+            Privilege("authenticated", "r", UNMANAGED_TABLE, "SELECT"),
+            Privilege("authenticated", "r", "chat_conversations", "UPDATE"),
+            Privilege("authenticated", "v", VIEW, "SELECT"),
+            Privilege("authenticated", "S", "standalone_sequence", "USAGE"),
+            Privilege("authenticated", "routine", DEFINER_FUNCTION, "EXECUTE"),
+        ]
+    )
+    # The rest of the run committed.
+    with exposed_database.connect() as connection:
+        assert connection.execute(_DEFAULT_GRANTS).all() == []
+        assert connection.scalar(
+            text(
+                "SELECT bool_and(relrowsecurity) FROM pg_class "
+                "WHERE relnamespace = 'public'::regnamespace AND relkind IN ('r', 'p')"
+            )
+        )
+    assert sorted(data_api_exposure(exposed_database)) == sorted(
+        DataApiExposure(role, kind, name, owner)
+        for role in DATA_API_ROLES
+        for kind, name in (
+            ("table", PARTITIONED_TABLE),
+            ("table", UNMANAGED_TABLE),
+            ("table", "chat_conversations"),
+            ("view", VIEW),
+            ("function", DEFINER_FUNCTION),
+        )
+    )
+
+    # Run in the order 005 prints them, the kept-grant statements close all
+    # six objects. So do the CASCADE statements on their own.
+    passed_on = [warning for warning in warnings if " has passed on " in warning]
+    chosen = (
+        [warning for warning in warnings if warning not in passed_on]
+        if closing == "kept-grant statements"
+        else passed_on
+    )
+    for warning in chosen:
+        assert _warnings(_run_sql(superuser, _statement(warning))) == [], warning
+    assert _data_api_grants(superuser) == set()
+    assert _data_api_access(exposed_database) == []
+    assert _warnings(_run_sql(exposed_database, LOCKDOWN.read_text())) == []
+    assert data_api_exposure(exposed_database) == []
 
 
 def test_lockdown_warns_about_defaults_for_every_schema(
@@ -1269,24 +1705,51 @@ def test_lockdown_warns_about_defaults_for_every_schema(
     """PostgreSQL adds public's defaults to the defaults for every schema."""
     delegate = server_roles("delegate", "NOSUPERUSER")
     other = server_roles("other", "NOSUPERUSER")
+    # The owner belongs to this role only through a NOINHERIT role, so it
+    # doesn't hold the role's privileges.
+    distant = server_roles("distant", "NOSUPERUSER")
+    bridge = server_roles("bridge", f'NOSUPERUSER NOINHERIT IN ROLE "{distant}"')
     _run_sql(
         superuser,
         f"""
         GRANT CREATE ON SCHEMA public TO "{delegate}";
-        GRANT "{delegate}" TO "{owner}";
+        GRANT "{delegate}", "{bridge}" TO "{owner}";
+        CREATE SCHEMA elsewhere;
         ALTER DEFAULT PRIVILEGES FOR ROLE "{owner}" GRANT SELECT ON TABLES TO anon;
         ALTER DEFAULT PRIVILEGES FOR ROLE "{owner}" GRANT USAGE ON SEQUENCES TO PUBLIC;
         ALTER DEFAULT PRIVILEGES FOR ROLE "{owner}"
           GRANT EXECUTE ON FUNCTIONS TO authenticated;
         ALTER DEFAULT PRIVILEGES FOR ROLE "{delegate}"
           GRANT INSERT ON TABLES TO authenticated, PUBLIC;
-        -- No warning for either: this one keeps PostgreSQL's EXECUTE for
-        -- PUBLIC, and the owner doesn't hold the other role's privileges.
+        -- No warning for any of these four. The first keeps PostgreSQL's
+        -- EXECUTE for PUBLIC. The owner holds neither the other role's
+        -- privileges nor the distant role's. The last applies in one schema
+        -- other than public.
         ALTER DEFAULT PRIVILEGES FOR ROLE "{delegate}"
           GRANT EXECUTE ON FUNCTIONS TO service_role;
         ALTER DEFAULT PRIVILEGES FOR ROLE "{other}" GRANT SELECT ON TABLES TO anon;
+        ALTER DEFAULT PRIVILEGES FOR ROLE "{distant}" GRANT SELECT ON TABLES TO anon;
+        ALTER DEFAULT PRIVILEGES FOR ROLE "{owner}" IN SCHEMA elsewhere
+          GRANT SELECT ON TABLES TO anon;
         """,
     )
+    with exposed_database.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT pg_has_role(CAST(:role AS regrole), 'MEMBER'), "
+                "pg_has_role(CAST(:role AS regrole), 'USAGE')"
+            ),
+            {"role": f'"{distant}"'},
+        ).one() == (True, False)
+        assert connection.execute(
+            text(
+                "SELECT defaclnamespace::regnamespace::text, defaclobjtype::text "
+                "FROM pg_default_acl "
+                "WHERE defaclrole = CAST(:role AS regrole) AND defaclnamespace <> 0 "
+                "AND defaclnamespace <> 'public'::regnamespace"
+            ),
+            {"role": f'"{owner}"'},
+        ).all() == [("elsewhere", "r")]
     suffix = "it creates in any schema; only a revoke without IN SCHEMA removes that default"
     expected_warnings = sorted(
         [
@@ -1357,6 +1820,8 @@ IDENTIFIERS = st.text(
     min_size=1,
     max_size=20,
 ).filter(lambda name: len(name.encode()) <= 63)
+# PostgreSQL reserves these column names for system columns.
+SYSTEM_COLUMNS = {"tableoid", "cmax", "xmax", "cmin", "xmin", "ctid"}
 
 
 @settings(
@@ -1367,12 +1832,18 @@ IDENTIFIERS = st.text(
     phases=(Phase.explicit, Phase.generate),
     suppress_health_check=[HealthCheck.function_scoped_fixture],
 )
-@example(names=["text", "Mixed Case", 'quote"inside', "select"])
-@example(names=["%s", "a.b", " ", "0"])
-@given(names=st.lists(IDENTIFIERS, min_size=4, max_size=4, unique=True))
-def test_lockdown_closes_objects_whatever_their_names(locked_database, names):
-    """The lockdown quotes names through regclass and regprocedure."""
-    table, view, sequence, function = names
+@example(names=["text", "Mixed Case", 'quote"inside', "select", "Column Name"])
+@example(names=["%s", "a.b", " ", "0", "%I"])
+@given(names=st.lists(IDENTIFIERS, min_size=5, max_size=5, unique=True))
+def test_lockdown_closes_objects_whatever_their_names(
+    locked_database, superuser, helper, names
+):
+    """The lockdown quotes names through regclass and regprocedure.
+
+    A helper role also passes on a grant option on each object, or on the
+    table's column, so 005 keeps four grants and gives a statement for each.
+    """
+    table, view, sequence, function, column = names
     with locked_database.connect() as connection:
         existing = set(
             connection.scalars(
@@ -1383,33 +1854,52 @@ def test_lockdown_closes_objects_whatever_their_names(locked_database, names):
             )
         )
     assume(not {table, view, sequence} & existing)
+    assume(column not in SYSTEM_COLUMNS)
     identifiers = {
         "table": sql.Identifier("public", table),
         "view": sql.Identifier("public", view),
         "sequence": sql.Identifier("public", sequence),
         "function": sql.Identifier("public", function),
+        "column": sql.Identifier(column),
+        "helper": sql.Identifier(helper),
     }
     _run_sql(
         locked_database,
         sql.SQL(
             """
-            CREATE TABLE {table} (id int);
-            CREATE VIEW {view} AS SELECT id FROM {table};
+            CREATE TABLE {table} ({column} int);
+            CREATE VIEW {view} AS SELECT {column} FROM {table};
             CREATE SEQUENCE {sequence};
             CREATE FUNCTION {function}(item {table}) RETURNS int LANGUAGE sql
               SECURITY DEFINER AS 'SELECT 1';
             GRANT ALL ON {table}, {view} TO anon, authenticated, PUBLIC;
             GRANT ALL ON SEQUENCE {sequence} TO anon, authenticated, PUBLIC;
             GRANT ALL ON FUNCTION {function}({table}) TO anon, authenticated, PUBLIC;
+            GRANT UPDATE ({column}) ON {table} TO {helper} WITH GRANT OPTION;
+            GRANT SELECT ON {view} TO {helper} WITH GRANT OPTION;
+            GRANT USAGE ON SEQUENCE {sequence} TO {helper} WITH GRANT OPTION;
+            GRANT EXECUTE ON FUNCTION {function}({table}) TO {helper} WITH GRANT OPTION;
+            """
+        ).format(**identifiers),
+    )
+    _run_sql(
+        superuser,
+        sql.SQL(
+            """
+            SET ROLE {helper};
+            GRANT UPDATE ({column}) ON {table} TO PUBLIC;
+            GRANT SELECT ON {view} TO anon;
+            GRANT USAGE ON SEQUENCE {sequence} TO authenticated;
+            GRANT EXECUTE ON FUNCTION {function}({table}) TO anon;
             """
         ).format(**identifiers),
     )
     try:
         assert len({privilege.object for privilege in _data_api_access(locked_database)}) == 4
 
-        assert _warnings(_run_sql(locked_database, LOCKDOWN.read_text())) == []
-
-        assert _data_api_access(locked_database) == []
+        warnings = _warnings(_run_sql(locked_database, LOCKDOWN.read_text()))
+        assert len(warnings) == 4
+        assert {grant.grantor for grant in _data_api_grants(superuser)} == {helper}
         with locked_database.connect() as connection:
             assert connection.scalar(
                 text(
@@ -1418,6 +1908,14 @@ def test_lockdown_closes_objects_whatever_their_names(locked_database, names):
                 ),
                 {"name": table},
             )
+
+        # Each statement runs without a warning from PostgreSQL, and together
+        # they close all four objects.
+        for warning in warnings:
+            assert _warnings(_run_sql(superuser, _statement(warning))) == [], warning
+        assert _data_api_grants(superuser) == set()
+        assert _data_api_access(locked_database) == []
+        assert _warnings(_run_sql(locked_database, LOCKDOWN.read_text())) == []
     finally:
         _run_sql(
             locked_database,

@@ -240,8 +240,8 @@ def verify_database_schema(engine: Engine | None = None) -> str | None:
         raise DatabaseSchemaError(
             f"The Supabase Data API can reach {objects}. Run {LOCKDOWN_MIGRATION} "
             "as each object's owner before starting the backend; it skips "
-            "objects the running role doesn't own and names each grant it "
-            "can't revoke."
+            "objects the running role doesn't own and gives the statement that "
+            "revokes each grant it keeps."
         )
 
     logger.info("Database schema revision %s verified", current)
