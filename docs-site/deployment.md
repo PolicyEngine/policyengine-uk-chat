@@ -42,6 +42,13 @@ and Stripe credentials are needed only when billing is explicitly enabled.
 Access to a restricted Enhanced FRS source must also be available through
 `HUGGING_FACE_TOKEN`.
 
+## Database
+
+Run `alembic -c backend/alembic.ini upgrade head`, then run
+`supabase/migrations/005_lock_down_data_api.sql` in the Supabase SQL editor. The
+backend refuses to start until the database reaches the Alembic head and the
+Data API's `anon` and `authenticated` roles can no longer reach its tables.
+
 ## Version checks
 
 `GET /version` reports:
