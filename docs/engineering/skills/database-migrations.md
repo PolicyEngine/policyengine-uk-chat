@@ -37,17 +37,36 @@ Run it in the Supabase SQL editor after `alembic upgrade head`, as the role that
 owns the tables. It changes every object the running role owns, directly or
 through a role it inherits, and skips any other object with a warning that
 names the object and its owner. It turns on row-level security for each table
-it changes and revokes every privilege from PUBLIC, `anon` and `authenticated`
-on each object it changes. It also removes the running role's default grants
-to those three in `public`. The `token_usage` and `user_credits` "Users read
-own" policies stay, so a SELECT grant someone adds back still reaches only the
-signed-in user's rows.
+it changes and revokes what PUBLIC, `anon` and `authenticated` hold on each
+object it changes. PostgreSQL lets a role revoke only the grants it made, so a
+grant that another role made, for example through a grant option, stays. 005
+warns about each such grant, naming the privilege, the grantee and the role
+that made it, and the startup check below reports any table, view or SECURITY
+DEFINER routine such a grant leaves open. Revoke it as the role that made it.
 
-Rerun 005 after a revision that adds a table or a function. A new table gets no
-grant for either role, and the rerun turns on its row-level security. A new
-function stays callable through PUBLIC until the rerun: PostgreSQL grants
-EXECUTE on each new function to PUBLIC, and revoking a default privilege for
-one schema can't remove that grant.
+005 also removes the running role's default grants to those three in `public`.
+On `user_credits` and `token_usage` it drops "Service manages credits" and
+"Service inserts usage", two policies that admit every role. The "Users read
+own" policies on both tables stay, so a SELECT grant someone adds back still
+reaches only the signed-in user's rows.
+
+Rerun 005 after a revision that adds a table or a function. The running role's
+default privileges in `public` give a new table no grant for either role, and
+the rerun turns on its row-level security. Until the rerun, other roles'
+default privileges and default privileges for every schema still reach new
+objects in `public`. 005 warns about each default for every schema that belongs
+to the running role, or to a role whose privileges it holds, and grants `anon`
+or `authenticated` anything, or grants PUBLIC anything on tables or sequences.
+The startup check reports the tables, views and SECURITY DEFINER routines those
+defaults open. A new function stays callable through PUBLIC until the rerun:
+PostgreSQL grants EXECUTE on each new function to PUBLIC, and revoking a
+default privilege for one schema can't remove that grant.
+
+005 waits at most 5 seconds for each lock. If a long query holds a table past
+that, 005 stops and changes nothing, so run it again. It takes an exclusive
+lock only to turn on row-level security or drop one of those two billing
+policies, so a rerun locks only a table that still lacks row-level security or
+still has one of them.
 
 `verify_database_schema` refuses to start the backend when any of these holds:
 

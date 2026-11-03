@@ -51,7 +51,7 @@ requires_policyengine_py = pytest.mark.skipif(
     reason="policyengine.py UK packages are not installed",
 )
 
-# Tests needing disposable PostgreSQL skip locally without
+# Tests marked requires_test_postgres skip locally without
 # CAPABILITY_TEST_POSTGRES_URL. The pull-request workflow also sets
 # CAPABILITY_TEST_POSTGRES_REQUIRED=1, so a run that loses the URL fails them
 # instead of skipping them green. The deploy workflow's test job has no

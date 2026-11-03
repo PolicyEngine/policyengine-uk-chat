@@ -200,7 +200,7 @@ def verify_database_schema(engine: Engine | None = None) -> str | None:
     SQLite is reserved for isolated repository tests, whose fixtures construct
     temporary schemas directly from SQLModel metadata.
     """
-    database_engine = engine or get_engine()
+    database_engine = engine or get_engine()  # type: ignore[no-untyped-call]
     if database_engine.dialect.name == "sqlite":
         logger.info(
             "Skipping Alembic revision validation for an isolated SQLite test database"
@@ -240,7 +240,8 @@ def verify_database_schema(engine: Engine | None = None) -> str | None:
         raise DatabaseSchemaError(
             f"The Supabase Data API can reach {objects}. Run {LOCKDOWN_MIGRATION} "
             "as each object's owner before starting the backend; it skips "
-            "objects the running role doesn't own."
+            "objects the running role doesn't own and names each grant it "
+            "can't revoke."
         )
 
     logger.info("Database schema revision %s verified", current)

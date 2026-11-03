@@ -192,7 +192,9 @@ these tests instead of skipping them. The deploy workflow's test job has no
 PostgreSQL service and leaves the variable unset. The URL's user must be a
 superuser: these tests create and drop databases and server-wide roles,
 including roles with BYPASSRLS, and install `file_fdw` in each disposable
-database.
+database. Each test that creates roles holds an advisory lock on the server
+until it ends, so under pytest-xdist the file's tests take turns across
+workers.
 
 `make test-backend` writes branch-aware Python coverage to `coverage.xml` and
 prints missing lines. Its coverage boundary includes all repository Python:

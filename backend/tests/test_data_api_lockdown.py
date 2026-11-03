@@ -1,18 +1,20 @@
 """Data API access tests against disposable PostgreSQL databases.
 
-Each test builds a database the way Supabase does. A superuser, standing in for
-Supabase's administrator, creates the anon, authenticated and service_role
-roles, a stand-in auth schema, and an owner role that isn't a superuser. Like
-Supabase's postgres role, the owner belongs to all three roles and owns the
-database, and its default privileges grant the three roles every new object in
-public. The owner runs the billing migrations, the Alembic upgrade and the
-lockdown, and creates one object of each other kind. The owner has BYPASSRLS,
-as Supabase's postgres does; the tests that depend on it also run with an owner
-that lacks it, as on plain PostgreSQL.
+The fixture builds a database the way Supabase's setup scripts do. A superuser,
+standing in for Supabase's administrator, creates the anon, authenticated and
+service_role roles, a stand-in auth schema, and an owner role that isn't a
+superuser. Like Supabase's postgres role, the owner belongs to all three roles
+and owns the database, and its default privileges grant the three roles every
+new object in public. The owner runs the billing migrations, the Alembic
+upgrade and the lockdown, and creates one object of each other kind. The owner
+has BYPASSRLS, as Supabase's postgres does; the tests that depend on it also
+run with an owner that lacks it, as on plain PostgreSQL.
 
 These tests create and drop server-wide roles, so the configured server must
 hold nothing valuable. Its user must be a superuser: the fixtures create roles
-with BYPASSRLS, install file_fdw and hand objects between roles.
+with BYPASSRLS, install file_fdw and hand objects between roles. Each test that
+creates roles holds an advisory lock on the server until it ends, so tests in
+parallel pytest-xdist workers take turns.
 """
 
 from __future__ import annotations
@@ -20,6 +22,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import threading
 import time
 from collections import deque
 from collections.abc import Callable, Iterator
@@ -36,9 +39,10 @@ from alembic.config import Config
 from hypothesis import HealthCheck, Phase, assume, example, given, settings
 from hypothesis import strategies as st
 from psycopg2 import sql
+from psycopg2.errors import LockNotAvailable
 from sqlalchemy import create_engine, pool, text
 from sqlalchemy.engine import Connection, Engine, make_url
-from sqlalchemy.exc import ProgrammingError
+from sqlalchemy.exc import OperationalError, ProgrammingError
 from sqlmodel import Session, select
 
 from conftest import requires_test_postgres
@@ -69,6 +73,11 @@ SUPABASE_MIGRATIONS = REPO_ROOT / "supabase/migrations"
 LOCKDOWN = REPO_ROOT / LOCKDOWN_MIGRATION
 TESTS_WORKFLOW = REPO_ROOT / ".github/workflows/tests.yml"
 POSTGRES_URL = os.environ.get("CAPABILITY_TEST_POSTGRES_URL")
+# Tests that create server-wide roles hold this advisory lock until they end,
+# so pytest-xdist workers on one server don't create and drop the same roles
+# under each other. A test gives up after waiting this long for it.
+SERVER_LOCK = 3_090_005
+SERVER_LOCK_WAIT = "10min"
 
 pytestmark = requires_test_postgres
 
@@ -331,17 +340,41 @@ def _admin() -> Iterator[Connection]:
         engine.dispose()
 
 
-def _url(database: str, role: str | None = None) -> str:
-    """Connect as the configured user, acting as `role` when one is given."""
+def _url(database: str, role: str | None = None, *settings: str) -> str:
+    """Build a URL for POSTGRES_URL's user, acting as `role` when the caller names one.
+
+    Each setting, such as "statement_timeout=30s", applies to the session.
+    """
     assert POSTGRES_URL is not None
     url = make_url(POSTGRES_URL).set(database=database)
-    if role is not None:
-        url = url.update_query_dict({"options": f"-c role={role}"})
+    options = [f"-c role={role}"] if role is not None else []
+    options += [f"-c {setting}" for setting in settings]
+    if options:
+        url = url.update_query_dict({"options": " ".join(options)})
     return url.render_as_string(hide_password=False)
 
 
-def _engine(database: str, role: str | None = None) -> Engine:
-    return create_engine(_url(database, role), poolclass=pool.NullPool)
+def _engine(database: str, role: str | None = None, *settings: str) -> Engine:
+    return create_engine(_url(database, role, *settings), poolclass=pool.NullPool)
+
+
+@contextmanager
+def _server_lock(wait: str = SERVER_LOCK_WAIT) -> Iterator[None]:
+    """Hold this file's advisory lock on the server, waiting at most `wait`."""
+    with _admin() as connection:
+        connection.execute(text(f"SET lock_timeout = '{wait}'"))
+        try:
+            connection.execute(text("SELECT pg_advisory_lock(:key)"), {"key": SERVER_LOCK})
+        except OperationalError as error:
+            if getattr(error.orig, "pgcode", None) != "55P03":
+                raise
+            pytest.fail(
+                f"Another test held the lockdown tests' server lock for {wait}",
+                pytrace=False,
+            )
+        connection.execute(text("RESET lock_timeout"))
+        # Closing the connection releases the lock.
+        yield
 
 
 @contextmanager
@@ -358,8 +391,16 @@ def _temporary_database(owner: str | None = None) -> Iterator[str]:
 
 
 @pytest.fixture
-def data_api_roles() -> Iterator[None]:
+def server_lock() -> Iterator[None]:
+    """Hold the server lock for one test, through its role setup and teardown."""
+    with _server_lock():
+        yield
+
+
+@pytest.fixture
+def data_api_roles(server_lock) -> Iterator[None]:
     """Create the Supabase roles for one test, keeping any that already exist."""
+    del server_lock
     with _admin() as connection:
         existing = set(
             connection.scalars(
@@ -912,6 +953,57 @@ def test_lockdown_can_run_again_without_changing_access(locked_database):
     assert _access_snapshot(locked_database) == before
 
 
+def test_lockdown_stops_after_a_five_second_lock_wait_and_changes_nothing(
+    exposed_database, superuser, owner
+):
+    before = _access_snapshot(exposed_database)
+    assert exposed_database.url.database is not None
+    # The statement timeout ends the run if the lockdown waits with no limit.
+    lockdown = _engine(exposed_database.url.database, owner, "statement_timeout=30s")
+    try:
+        with superuser.connect() as reader:
+            reader.execute(text("SELECT 1 FROM public.chat_conversations LIMIT 1"))
+            started = time.monotonic()
+            with pytest.raises(LockNotAvailable, match="lock timeout"):
+                _run_sql(lockdown, LOCKDOWN.read_text())
+            assert time.monotonic() - started >= 5
+            reader.rollback()
+    finally:
+        lockdown.dispose()
+    assert _access_snapshot(exposed_database) == before
+
+
+def test_a_rerun_waits_for_no_reader(locked_database, superuser, owner):
+    """After the first run, a rerun takes no lock that conflicts with a reader's."""
+    _run_sql(locked_database, "GRANT SELECT ON public.chat_conversations TO anon")
+    assert locked_database.url.database is not None
+    lockdown = _engine(locked_database.url.database, owner, "statement_timeout=30s")
+    try:
+        with superuser.connect() as reader:
+            relations = reader.scalars(
+                text(
+                    "SELECT oid::regclass::text FROM pg_class "
+                    "WHERE relnamespace = 'public'::regnamespace "
+                    "AND relkind IN ('r', 'p', 'v', 'm', 'f', 'S')"
+                )
+            ).all()
+            for relation in relations:
+                reader.execute(text(f"SELECT 1 FROM {relation} LIMIT 0"))
+            held = reader.scalars(
+                text(
+                    "SELECT relation::regclass::text FROM pg_locks "
+                    "WHERE pid = pg_backend_pid() AND locktype = 'relation' "
+                    "AND mode = 'AccessShareLock'"
+                )
+            ).all()
+            assert set(relations) <= set(held)
+            assert _warnings(_run_sql(lockdown, LOCKDOWN.read_text())) == []
+            reader.rollback()
+    finally:
+        lockdown.dispose()
+    assert _data_api_access(locked_database) == []
+
+
 def test_objects_created_later_until_the_rerun(locked_database, owner):
     _run_sql(
         locked_database,
@@ -968,11 +1060,15 @@ def test_lockdown_skips_objects_another_role_owns_and_commits_the_rest(
     # The owner inherits this role's privileges, so the lockdown treats its
     # objects as the owner's own.
     delegate = server_roles("delegate", "NOSUPERUSER")
+    # The owner belongs to this role only through a NOINHERIT role, so it
+    # doesn't hold the role's privileges and can't change its objects.
+    distant = server_roles("distant", "NOSUPERUSER")
+    bridge = server_roles("bridge", f'NOSUPERUSER NOINHERIT IN ROLE "{distant}"')
     _run_sql(
         superuser,
         f"""
-        GRANT CREATE ON SCHEMA public TO "{other}", "{delegate}";
-        GRANT "{delegate}" TO "{owner}";
+        GRANT CREATE ON SCHEMA public TO "{other}", "{delegate}", "{distant}";
+        GRANT "{delegate}", "{bridge}" TO "{owner}";
         SET ROLE "{delegate}";
         CREATE TABLE public.delegated_notes (id int PRIMARY KEY);
         GRANT SELECT ON public.delegated_notes TO anon;
@@ -982,14 +1078,31 @@ def test_lockdown_skips_objects_another_role_owns_and_commits_the_rest(
         CREATE FUNCTION public.admin_definer() RETURNS int LANGUAGE sql
           SECURITY DEFINER AS $$ SELECT 1 $$;
         ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO anon;
+        SET ROLE "{distant}";
+        CREATE TABLE public.distant_notes (id int PRIMARY KEY);
+        GRANT SELECT ON public.distant_notes TO anon;
+        CREATE FUNCTION public.distant_definer() RETURNS int LANGUAGE sql
+          SECURITY DEFINER AS $$ SELECT 1 $$;
         RESET ROLE;
         """,
     )
+    with exposed_database.connect() as connection:
+        assert connection.execute(
+            text(
+                "SELECT pg_has_role(CAST(:role AS regrole), 'MEMBER'), "
+                "pg_has_role(CAST(:role AS regrole), 'USAGE')"
+            ),
+            {"role": f'"{distant}"'},
+        ).one() == (True, False)
 
     notices = _run_sql(exposed_database, LOCKDOWN.read_text())
     assert _warnings(notices) == [
         f"WARNING:  skipped admin_notes (owner {other}): the running role does not own it",
+        f"WARNING:  skipped distant_notes (owner {distant}): the running role does not "
+        "own it",
         f"WARNING:  skipped admin_definer() (owner {other}): the running role does "
+        "not own it",
+        f"WARNING:  skipped distant_definer() (owner {distant}): the running role does "
         "not own it",
     ]
     # Everything the owner holds closed in the same run.
@@ -999,30 +1112,244 @@ def test_lockdown_skips_objects_another_role_owns_and_commits_the_rest(
         ("anon", "admin_notes"),
         ("anon", "admin_definer()"),
         ("authenticated", "admin_definer()"),
+        ("anon", "distant_notes"),
+        ("anon", "distant_definer()"),
+        ("authenticated", "distant_definer()"),
     }
     with exposed_database.connect() as connection:
-        assert connection.scalars(
-            text(
-                "SELECT relname FROM pg_class WHERE relnamespace = 'public'::regnamespace "
-                "AND relkind IN ('r', 'p') AND NOT relrowsecurity"
+        assert sorted(
+            connection.scalars(
+                text(
+                    "SELECT relname::text FROM pg_class "
+                    "WHERE relnamespace = 'public'::regnamespace "
+                    "AND relkind IN ('r', 'p') AND NOT relrowsecurity"
+                )
             )
-        ).all() == ["admin_notes"]
-    # admin_notes has no row-level security, so it hides nothing from the owner.
+        ) == ["admin_notes", "distant_notes"]
+    # Neither table has row-level security, so neither hides rows from the owner.
     assert row_security_gaps(exposed_database) == []
 
-    assert sorted(data_api_exposure(exposed_database)) == [
-        DataApiExposure("anon", "function", "admin_definer()", other),
-        DataApiExposure("anon", "table", "admin_notes", other),
-        DataApiExposure("authenticated", "function", "admin_definer()", other),
-    ]
-    with pytest.raises(DatabaseSchemaError, match=rf"admin_notes \(owner {other}\)"):
+    assert sorted(data_api_exposure(exposed_database)) == sorted(
+        [
+            DataApiExposure("anon", "function", "admin_definer()", other),
+            DataApiExposure("anon", "table", "admin_notes", other),
+            DataApiExposure("authenticated", "function", "admin_definer()", other),
+            DataApiExposure("anon", "function", "distant_definer()", distant),
+            DataApiExposure("anon", "table", "distant_notes", distant),
+            DataApiExposure("authenticated", "function", "distant_definer()", distant),
+        ]
+    )
+    with pytest.raises(DatabaseSchemaError) as raised:
         verify_database_schema(exposed_database)
+    assert f"admin_notes (owner {other})" in str(raised.value)
+    assert f"distant_notes (owner {distant})" in str(raised.value)
 
     # The lockdown changes only the running role's default privileges.
     _run_sql(superuser, f'SET ROLE "{other}"; CREATE TABLE public.admin_notes_later (id int)')
     assert DataApiExposure(
         "anon", "table", "admin_notes_later", other
     ) in data_api_exposure(exposed_database)
+
+
+# The privilege a grant-option chain passes on, by kind of object.
+CHAIN_PRIVILEGES = {"S": ("SEQUENCE", "USAGE"), "routine": ("ROUTINE", "EXECUTE")}
+
+
+def test_lockdown_names_each_grant_it_cannot_revoke(
+    exposed_database, superuser, server_roles, owner
+):
+    """PostgreSQL lets a role revoke only the grants it made.
+
+    The owner gives a helper role a grant option on every object in public,
+    and the helper passes the privilege to anon, authenticated or PUBLIC in
+    turn. A delegate's table shows the other direction: the owner inherits the
+    delegate and holds every grant option on the table itself, so its revoke
+    acts for the owner and leaves the delegate's grant.
+    """
+    helper = server_roles("helper", "NOSUPERUSER")
+    delegate = server_roles("delegate", "NOSUPERUSER")
+    with exposed_database.connect() as connection:
+        objects = connection.execute(
+            text(
+                """
+                SELECT c.oid::regclass::text AS object, c.relname::text AS name,
+                       c.relkind::text AS kind, c.relkind <> 'S' AS reportable
+                FROM pg_class AS c
+                WHERE c.relnamespace = 'public'::regnamespace
+                  AND c.relkind IN ('r', 'p', 'v', 'm', 'f', 'S')
+                UNION ALL
+                SELECT p.oid::regprocedure::text,
+                       p.proname || '(' || pg_get_function_identity_arguments(p.oid) || ')',
+                       'routine', p.prosecdef
+                FROM pg_proc AS p
+                WHERE p.pronamespace = 'public'::regnamespace
+                ORDER BY 1
+                """
+            )
+        ).all()
+    assert {row.kind for row in objects} == {"r", "p", "v", "m", "f", "S", "routine"}
+
+    grantees = ("anon", "authenticated", "PUBLIC")
+    owner_grants, helper_grants = [], []
+    # Each passed-on privilege: (target, grantee, privilege, kind, object).
+    chains = []
+    for index, row in enumerate(objects):
+        keyword, privilege = CHAIN_PRIVILEGES.get(row.kind, ("TABLE", "SELECT"))
+        grantee = grantees[index % len(grantees)]
+        owner_grants.append(
+            f'GRANT {privilege} ON {keyword} {row.object} TO "{helper}" WITH GRANT OPTION;'
+        )
+        helper_grants.append(f"GRANT {privilege} ON {keyword} public.{row.object} TO {grantee};")
+        chains.append((row.object, grantee, privilege, row.kind, row.object))
+    owner_grants.append(
+        f'GRANT UPDATE (title) ON chat_conversations TO "{helper}" WITH GRANT OPTION;'
+    )
+    helper_grants.append("GRANT UPDATE (title) ON public.chat_conversations TO PUBLIC;")
+    chains.append(("chat_conversations.title", "PUBLIC", "UPDATE", "r", "chat_conversations"))
+    _run_sql(exposed_database, "\n".join(owner_grants))
+    _run_sql(
+        superuser,
+        f"""
+        SET ROLE "{helper}";
+        {" ".join(helper_grants)}
+        RESET ROLE;
+        GRANT CREATE ON SCHEMA public TO "{delegate}";
+        GRANT "{delegate}" TO "{owner}";
+        SET ROLE "{delegate}";
+        CREATE TABLE public.delegated_notes (id int);
+        GRANT ALL ON public.delegated_notes TO "{owner}" WITH GRANT OPTION;
+        GRANT SELECT ON public.delegated_notes TO anon;
+        RESET ROLE;
+        """,
+    )
+    chains.append(("delegated_notes", "anon", "SELECT", "r", "delegated_notes"))
+    grantors = {"delegated_notes": delegate}
+
+    notices = _run_sql(exposed_database, LOCKDOWN.read_text())
+    assert sorted(_warnings(notices)) == sorted(
+        f"WARNING:  {grantee} keeps {privilege} on {target}, granted by "
+        f"{grantors.get(target, helper)}: revoke it as that role"
+        for target, grantee, privilege, _, _ in chains
+    )
+
+    # Everything else closed, and what stays is what the warnings name.
+    def reached(grantee: str) -> tuple[str, ...]:
+        return DATA_API_ROLES if grantee == "PUBLIC" else (grantee,)
+
+    assert sorted(_data_api_access(exposed_database)) == sorted(
+        {
+            Privilege(role, kind, name, privilege)
+            for _, grantee, privilege, kind, name in chains
+            for role in reached(grantee)
+        }
+    )
+
+    # The startup check reports the relations and the definer routine.
+    named = {row.object: row for row in objects}
+    named["delegated_notes"] = None
+    expected = set()
+    for _, grantee, _, kind, name in chains:
+        row = named[name]
+        if row is not None and not row.reportable:
+            continue
+        object_owner = delegate if row is None else owner
+        label = row.name if row is not None else name
+        report_kind = "function" if kind == "routine" else KIND_NAMES[kind]
+        for role in reached(grantee):
+            expected.add(DataApiExposure(role, report_kind, label, object_owner))
+    assert any(item.kind == "function" for item in expected)
+    assert sorted(data_api_exposure(exposed_database)) == sorted(expected)
+    with pytest.raises(DatabaseSchemaError, match="The Supabase Data API can reach"):
+        verify_database_schema(exposed_database)
+
+
+def test_lockdown_warns_about_defaults_for_every_schema(
+    exposed_database, superuser, server_roles, owner
+):
+    """PostgreSQL adds public's defaults to the defaults for every schema."""
+    delegate = server_roles("delegate", "NOSUPERUSER")
+    other = server_roles("other", "NOSUPERUSER")
+    _run_sql(
+        superuser,
+        f"""
+        GRANT CREATE ON SCHEMA public TO "{delegate}";
+        GRANT "{delegate}" TO "{owner}";
+        ALTER DEFAULT PRIVILEGES FOR ROLE "{owner}" GRANT SELECT ON TABLES TO anon;
+        ALTER DEFAULT PRIVILEGES FOR ROLE "{owner}" GRANT USAGE ON SEQUENCES TO PUBLIC;
+        ALTER DEFAULT PRIVILEGES FOR ROLE "{owner}"
+          GRANT EXECUTE ON FUNCTIONS TO authenticated;
+        ALTER DEFAULT PRIVILEGES FOR ROLE "{delegate}"
+          GRANT INSERT ON TABLES TO authenticated, PUBLIC;
+        -- No warning for either: this one keeps PostgreSQL's EXECUTE for
+        -- PUBLIC, and the owner doesn't hold the other role's privileges.
+        ALTER DEFAULT PRIVILEGES FOR ROLE "{delegate}"
+          GRANT EXECUTE ON FUNCTIONS TO service_role;
+        ALTER DEFAULT PRIVILEGES FOR ROLE "{other}" GRANT SELECT ON TABLES TO anon;
+        """,
+    )
+    suffix = "it creates in any schema; only a revoke without IN SCHEMA removes that default"
+    expected_warnings = sorted(
+        [
+            f"WARNING:  {owner} grants anon privileges on each table {suffix}",
+            f"WARNING:  {owner} grants PUBLIC privileges on each sequence {suffix}",
+            f"WARNING:  {owner} grants authenticated privileges on each function {suffix}",
+            f"WARNING:  {delegate} grants PUBLIC, authenticated privileges on each table "
+            f"{suffix}",
+        ]
+    )
+    assert sorted(_warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))) == (
+        expected_warnings
+    )
+    assert _data_api_access(exposed_database) == []
+    with exposed_database.connect() as connection:
+        # The owner's defaults in public grant none of the three anything.
+        assert connection.execute(_DEFAULT_GRANTS).all() == []
+
+    # Until the rerun, objects created later get what those defaults grant,
+    # and the startup check reports the tables and the definer function.
+    _run_sql(
+        exposed_database,
+        """
+        CREATE TABLE later_table (id int);
+        CREATE SEQUENCE later_sequence;
+        CREATE FUNCTION later_definer() RETURNS int LANGUAGE sql
+          SECURITY DEFINER AS $$ SELECT 1 $$;
+        """,
+    )
+    _run_sql(superuser, f'SET ROLE "{delegate}"; CREATE TABLE public.delegate_later (id int)')
+    assert sorted(_data_api_access(exposed_database)) == sorted(
+        [
+            Privilege("anon", "r", "later_table", "SELECT"),
+            Privilege("anon", "S", "later_sequence", "USAGE"),
+            Privilege("authenticated", "S", "later_sequence", "USAGE"),
+            Privilege("anon", "routine", "later_definer()", "EXECUTE"),
+            Privilege("authenticated", "routine", "later_definer()", "EXECUTE"),
+            Privilege("anon", "r", "delegate_later", "INSERT"),
+            Privilege("authenticated", "r", "delegate_later", "INSERT"),
+        ]
+    )
+    assert sorted(data_api_exposure(exposed_database)) == sorted(
+        [
+            DataApiExposure("anon", "table", "later_table", owner),
+            DataApiExposure("anon", "function", "later_definer()", owner),
+            DataApiExposure("authenticated", "function", "later_definer()", owner),
+            DataApiExposure("anon", "table", "delegate_later", delegate),
+            DataApiExposure("authenticated", "table", "delegate_later", delegate),
+        ]
+    )
+
+    assert sorted(_warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))) == (
+        expected_warnings
+    )
+    assert _data_api_access(exposed_database) == []
+    assert data_api_exposure(exposed_database) == []
+    with exposed_database.connect() as connection:
+        assert connection.scalar(
+            text(
+                "SELECT bool_and(relrowsecurity) FROM pg_class "
+                "WHERE relname IN ('later_table', 'delegate_later')"
+            )
+        )
 
 
 IDENTIFIERS = st.text(
@@ -1420,7 +1747,8 @@ def test_preview_schema_stays_outside_the_data_api(monkeypatch, exposed_database
         assert _denied(connection, "anon", f"SELECT * FROM {schema}.chat_conversations")
 
 
-def test_startup_check_passes_without_data_api_roles():
+def test_startup_check_passes_without_data_api_roles(server_lock):
+    del server_lock
     with _temporary_database() as name:
         engine = _engine(name)
         try:
@@ -1438,6 +1766,32 @@ def test_startup_check_passes_without_data_api_roles():
             assert row_security_gaps(engine) == []
         finally:
             engine.dispose()
+
+
+def test_tests_that_create_roles_take_turns_on_the_server(data_api_roles):
+    del data_api_roles
+    with _admin() as connection:
+        assert (
+            connection.scalar(text("SELECT pg_try_advisory_lock(:key)"), {"key": SERVER_LOCK})
+            is False
+        )
+
+    outcome: list[BaseException | None] = []
+
+    def wait_briefly() -> None:
+        try:
+            with _server_lock(wait="100ms"):
+                outcome.append(None)
+        except BaseException as error:  # pytest.fail raises a BaseException.
+            outcome.append(error)
+
+    waiter = threading.Thread(target=wait_briefly, daemon=True)
+    waiter.start()
+    waiter.join(timeout=30)
+    assert not waiter.is_alive(), "the wait for the server lock has no time limit"
+    assert len(outcome) == 1
+    assert isinstance(outcome[0], pytest.fail.Exception)
+    assert "held the lockdown tests' server lock for 100ms" in str(outcome[0])
 
 
 def test_pull_request_ci_requires_disposable_postgres():
