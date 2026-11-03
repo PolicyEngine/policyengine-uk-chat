@@ -55,8 +55,9 @@ set role <grantor>; revoke <privileges> on <object> from <grantee>; reset role;
 ```
 
 A column grant's statement lists the column after the privilege. Run the
-statements in the order 005 prints them. The startup check below reports any
-table, view or SECURITY DEFINER routine such a grant leaves open.
+statements in the order 005 prints them, each from a session that can
+`SET ROLE` to its grantor. The startup check below reports any table, view or
+SECURITY DEFINER routine such a grant leaves open.
 
 Without CASCADE, PostgreSQL refuses to revoke a privilege from a role that has
 granted it on through its grant option. When `anon` or `authenticated` has done

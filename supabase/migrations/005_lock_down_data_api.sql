@@ -65,7 +65,7 @@ set local lock_timeout = '5s';
 
 -- With an empty search path, regclass and regprocedure print each name with its
 -- schema, so every statement below and in the warnings names its object
--- exactly, whatever search path runs it later.
+-- exactly, whatever search path a later session uses.
 set local search_path = '';
 
 do $$

@@ -319,8 +319,8 @@ _OWNER_ENTRIES = text(
     """
 )
 
-# Every relation, sequence and routine in public, named as the queries above
-# name them.
+# Every relation, sequence and routine in public, with the names the queries
+# above give them.
 _PUBLIC_OBJECTS = text(
     """
     SELECT oid::regclass::text FROM pg_class
@@ -1683,8 +1683,9 @@ def test_lockdown_warns_when_anon_has_passed_on_a_grant_option(
         )
     )
 
-    # Run in the order 005 prints them, the kept-grant statements close all
-    # six objects. So do the CASCADE statements on their own.
+    # When a superuser runs them in the order 005 prints them, the kept-grant
+    # statements close all six objects. So do the CASCADE statements on their
+    # own.
     passed_on = [warning for warning in warnings if " has passed on " in warning]
     chosen = (
         [warning for warning in warnings if warning not in passed_on]
