@@ -45,9 +45,12 @@ Access to a restricted Enhanced FRS source must also be available through
 ## Database
 
 Run `alembic -c backend/alembic.ini upgrade head`, then run
-`supabase/migrations/005_lock_down_data_api.sql` in the Supabase SQL editor. The
-backend refuses to start until the database reaches the Alembic head and the
-Data API's `anon` and `authenticated` roles can no longer reach its tables.
+`supabase/migrations/005_lock_down_data_api.sql` in the Supabase SQL editor as
+the tables' owner, and rerun it after a revision that adds a table or a
+function. The backend refuses to start until the database reaches the Alembic
+head, row-level security hides no rows from the backend's own role, and the
+Data API's `anon` and `authenticated` roles hold no privilege on its tables or
+views and can execute none of its SECURITY DEFINER functions.
 
 ## Version checks
 

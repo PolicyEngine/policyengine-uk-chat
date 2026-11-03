@@ -29,19 +29,42 @@ Temporary databases owned by unit tests may use `create_all` as fixture setup.
 
 Supabase's Data API serves the `public` schema, and Supabase's default
 privileges grant `anon` and `authenticated` access to each new object. Neither
-role needs application tables: the backend connects as the table owner, billing
-uses the service role, and the frontend uses Supabase for auth only.
+role needs application tables: the backend connects as the tables' owner,
+billing uses the service role, and the frontend uses Supabase for auth only.
 
 `supabase/migrations/005_lock_down_data_api.sql` closes `public` to both roles.
-Run it in the Supabase SQL editor after `alembic upgrade head`. Rerun it after a
-revision that adds a table, to turn on that table's row-level security; the
-table stays closed until then, because the migration also removes the default
-grants. Signed-in users keep read access to their own `token_usage` and
-`user_credits` rows.
+Run it in the Supabase SQL editor after `alembic upgrade head`, as the role that
+owns the tables. It changes every object the running role owns, directly or
+through a role it inherits, and skips any other object with a warning that
+names the object and its owner. It turns on row-level security for each table
+it changes and revokes every privilege from PUBLIC, `anon` and `authenticated`
+on each object it changes. It also removes the running role's default grants
+to those three in `public`. The `token_usage` and `user_credits` "Users read
+own" policies stay, so a SELECT grant someone adds back still reaches only the
+signed-in user's rows.
 
-`verify_database_schema` stops the backend from starting while either role can
-reach a table in its schema. Serving a table through the Data API takes a new
-Supabase migration with an explicit policy and a matching change to that check.
+Rerun 005 after a revision that adds a table or a function. A new table gets no
+grant for either role, and the rerun turns on its row-level security. A new
+function stays callable through PUBLIC until the rerun: PostgreSQL grants
+EXECUTE on each new function to PUBLIC, and revoking a default privilege for
+one schema can't remove that grant.
+
+`verify_database_schema` refuses to start the backend when any of these holds:
+
+- Row-level security would hide rows from the backend's role. A table has
+  row-level security and either forces it or belongs to a role whose
+  privileges the backend's role doesn't hold, and the backend's role lacks both
+  superuser status and BYPASSRLS.
+- The database's Alembic revision differs from the repository head.
+- `anon` or `authenticated` holds any privilege on a table, view, materialized
+  view or foreign table in the backend's schema, or on one of its columns,
+  directly or through PUBLIC.
+- Either role can execute a SECURITY DEFINER function or procedure in that
+  schema that belongs to no extension.
+
+The check reads catalogs and the Alembic revision, never application rows.
+Serving a table through the Data API takes a new Supabase migration with an
+explicit policy and a matching change to that check.
 
 ## Revision creation
 
@@ -66,9 +89,12 @@ Record any such edit in the revision comment. Review every generated operation,
 including its downgrade, before applying it.
 
 Use `ALEMBIC_DATABASE_URL` for migration commands and `DATABASE_URL` for the
-application. They may refer to the same database locally, but deployed
-migration credentials may have schema-change permissions that the runtime
-credential does not. Never commit or print either credential.
+application. They may refer to the same database locally. Deployed migration
+credentials may hold schema-change permissions that the runtime credential
+lacks, but the runtime role must still own the tables, inherit their owner's
+privileges, or have BYPASSRLS. Otherwise row-level security hides the tables'
+rows from it, and the backend refuses to start. Never commit or print either
+credential.
 
 ## Verification
 

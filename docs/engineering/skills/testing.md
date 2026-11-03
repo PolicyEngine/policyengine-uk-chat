@@ -184,6 +184,16 @@ re-upgrades. It also proves that an unmanaged `analysis_*` sentinel remains
 unchanged. Read `docs/engineering/skills/database-migrations.md` before changing
 this test or any migration.
 
+`test_data_api_lockdown.py` reads the same URL. Its tests carry the
+`requires_test_postgres` marker from `backend/tests/conftest.py`, which skips
+them when the URL is unset unless `CAPABILITY_TEST_POSTGRES_REQUIRED=1`. The
+pull-request workflow sets that variable, so a run that loses the URL fails
+these tests instead of skipping them. The deploy workflow's test job has no
+PostgreSQL service and leaves the variable unset. The URL's user must be a
+superuser: these tests create and drop databases and server-wide roles,
+including roles with BYPASSRLS, and install `file_fdw` in each disposable
+database.
+
 `make test-backend` writes branch-aware Python coverage to `coverage.xml` and
 prints missing lines. Its coverage boundary includes all repository Python:
 `backend/`, `.github/scripts/`, and `modal_app.py`, excluding

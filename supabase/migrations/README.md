@@ -10,7 +10,10 @@ This directory is the migration history for Supabase-specific database objects.
   these files as the schema authority for a new database.
 - `005_lock_down_data_api.sql` closes the `public` schema to the Data API's
   `anon` and `authenticated` roles. Run it after `alembic upgrade head`, and
-  again after a revision that adds a table.
+  again after a revision that adds a table or a function: a new function stays
+  callable through PUBLIC until the rerun. The backend refuses to start while
+  either role can execute a SECURITY DEFINER routine in its schema that belongs
+  to no extension.
 
 Alembic owns `chat_conversations` and every `capability_*` or
 `waiting_capability_invocations` table. Do not add SQLModel table, column,

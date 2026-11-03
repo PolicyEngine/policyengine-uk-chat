@@ -51,6 +51,18 @@ requires_policyengine_py = pytest.mark.skipif(
     reason="policyengine.py UK packages are not installed",
 )
 
+# Tests needing disposable PostgreSQL skip locally without
+# CAPABILITY_TEST_POSTGRES_URL. The pull-request workflow also sets
+# CAPABILITY_TEST_POSTGRES_REQUIRED=1, so a run that loses the URL fails them
+# instead of skipping them green. The deploy workflow's test job has no
+# PostgreSQL service, so it leaves the variable unset.
+TEST_POSTGRES_URL = os.environ.get("CAPABILITY_TEST_POSTGRES_URL")
+TEST_POSTGRES_REQUIRED = os.environ.get("CAPABILITY_TEST_POSTGRES_REQUIRED") == "1"
+requires_test_postgres = pytest.mark.skipif(
+    not TEST_POSTGRES_REQUIRED and not TEST_POSTGRES_URL,
+    reason="CAPABILITY_TEST_POSTGRES_URL is not configured for disposable PostgreSQL tests",
+)
+
 
 @pytest.fixture
 def isolated_conversations_table(tmp_path, monkeypatch):
