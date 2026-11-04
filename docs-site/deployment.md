@@ -52,7 +52,7 @@ the database reaches the Alembic head and row-level security hides no rows from
 the backend's own role. It also refuses while the Data API's `anon` or
 `authenticated` role can use the backend's schema and either holds a privilege
 on one of its tables or views or can execute one of its SECURITY DEFINER
-functions or procedures.
+functions or procedures that belong to no extension.
 
 ## Version checks
 

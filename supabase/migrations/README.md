@@ -12,7 +12,14 @@ This directory is the migration history for Supabase-specific database objects.
   `anon` and `authenticated` roles. Run it after `alembic upgrade head`, again
   if it stops on a lock timeout, and again after a revision that adds a table
   or a function: until the rerun, PUBLIC can call a new function. For each
-  grant it keeps, it prints the statement that revokes that grant. The backend
+  grant it keeps, it prints SQL to revoke that grant as its grantor. If the
+  grantor lacks its own grant option, the SQL temporarily restores the option
+  and restores the prior ACL in one transaction per grantor and object. A
+  dependent grant outside that transaction can block restoration with 2BP01,
+  which rolls the transaction back. A column grant can outlive a printed
+  CASCADE; rerun 005 for its recovery SQL. The migration also warns about each
+  direct inherited membership of either role and prints its REVOKE statement;
+  removing a membership affects every database on the server. The backend
   refuses to start while either role can use its schema and execute a SECURITY
   DEFINER routine there that belongs to no extension.
 

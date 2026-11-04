@@ -48,25 +48,46 @@ REVOKE acts as the object's owner. When several roles qualify, PostgreSQL
 doesn't specify which one it picks, and its REVOKE reference recommends
 `SET ROLE` to choose. A grant with any other grantor stays. 005 warns about
 each grant that still reaches PUBLIC, `anon` or `authenticated`, names its
-grantor, and gives the statement that revokes it as that role:
+grantor, and gives SQL to revoke it as that role. If the grantor still holds
+the necessary grant option in its own name, the warning gives:
 
 ```sql
 set role <grantor>; revoke <privileges> on <object> from <grantee>; reset role;
 ```
 
-A column grant's statement lists the column after the privilege. Run the
-statements in the order 005 prints them, each from a session that can
-`SET ROLE` to its grantor. The startup check below reports any table, view or
-SECURITY DEFINER routine such a grant leaves open.
+A column grant's statement lists the column after the privilege; a direct
+table-level option also authorizes a column revoke. Otherwise, 005 prints one
+transaction for all the grants that grantor made to PUBLIC, `anon` and
+`authenticated` on that object. The transaction acts as the owner to grant the
+missing options, acts as the grantor to revoke the kept grants, then acts as
+the owner to restore the grantor's prior ACL entries. It removes each temporary
+privilege entirely unless the owner already granted that privilege to the
+grantor on that object or column, in which case it removes only the option.
+
+Run the SQL in the order 005 prints it, from a session that can `SET ROLE` to
+each named role. If the grantor made another grant that depends on a temporary
+option, the restore fails with SQLSTATE 2BP01 and PostgreSQL rolls back the
+whole transaction. The startup check below reports any table, view or
+SECURITY DEFINER routine the remaining grants leave open.
 
 Without CASCADE, PostgreSQL refuses to revoke a privilege from a role that has
 granted it on through its grant option. When `anon` or `authenticated` has done
 that, 005 revokes nothing from that role on that object and warns with the
-CASCADE statement, which also revokes every grant that depends on that option.
+CASCADE statement, which also revokes dependent grants.
 005 never cascades by itself. Either run that statement and then 005 again, or
-run the statements that follow the warning. PostgreSQL can still refuse one of
-those without CASCADE when `anon` or `authenticated` passed a grant option on
-to a role outside those three, or when the two gave each other one.
+run the SQL that follows the warning. A column grant can outlive that CASCADE;
+the rerun then prints the recovery transaction for it. PostgreSQL can still
+refuse a revoke or restore without CASCADE when `anon` or `authenticated`
+passed a grant option on to a role outside those three, or when the two gave
+each other one.
+
+005 also warns once for each direct membership through which `anon` or
+`authenticated` inherits another role's privileges, and prints a quoted
+`REVOKE <role> FROM <member>` statement. On PostgreSQL 16 and later it checks
+the membership's `inherit_option`; on PostgreSQL 14 and 15 it checks the
+member's `rolinherit`. Run each statement after checking the membership's
+purpose: removing it affects every database on the server. 005 never revokes
+memberships itself.
 
 005 also removes the running role's default grants to those three in `public`.
 On `user_credits` and `token_usage` it drops "Service manages credits" and
