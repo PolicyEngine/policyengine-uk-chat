@@ -63,6 +63,9 @@ missing options, acts as the grantor to revoke the kept grants, then acts as
 the owner to restore the grantor's prior ACL entries. It removes each temporary
 privilege entirely unless the owner already granted that privilege to the
 grantor on that object or column, in which case it removes only the option.
+Because a table revoke also affects column privileges, a table restore then
+reinstates the owner's prior column grants and their grant options. Recovery
+orders downstream grantors before the grantor whose option they used.
 
 Run the SQL in the order 005 prints it, from a session that can `SET ROLE` to
 each named role. If the grantor made another grant that depends on a temporary

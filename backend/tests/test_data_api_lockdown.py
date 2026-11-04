@@ -39,7 +39,8 @@ from alembic.config import Config
 from hypothesis import HealthCheck, Phase, assume, example, given, settings
 from hypothesis import strategies as st
 from psycopg2 import sql
-from psycopg2.errors import LockNotAvailable
+from psycopg2.errors import DependentObjectsStillExist, LockNotAvailable
+from psycopg2.extensions import TRANSACTION_STATUS_IDLE
 from sqlalchemy import create_engine, pool, text
 from sqlalchemy.engine import Connection, Engine, make_url
 from sqlalchemy.exc import OperationalError, ProgrammingError
@@ -423,6 +424,76 @@ def _statement(warning: str) -> str:
         if marker in warning:
             return warning.split(marker, 1)[1]
     raise AssertionError(f"005 gave no statement in {warning!r}")
+
+
+def _run_as_session_role(engine: Engine, role: str, statements: str) -> list[str]:
+    """Execute the printed SQL without the administrator's superuser privileges."""
+    connection = engine.raw_connection()
+    try:
+        driver: Any = connection.driver_connection
+        driver.autocommit = True
+        driver.notices = deque()
+        with driver.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("SET SESSION AUTHORIZATION {}").format(sql.Identifier(role))
+            )
+            try:
+                cursor.execute(statements)
+            finally:
+                # A failed printed transaction must finish rolling back before
+                # either this session or a catalog observer can continue.
+                if driver.get_transaction_status() != TRANSACTION_STATUS_IDLE:
+                    cursor.execute("ROLLBACK")
+                cursor.execute("RESET SESSION AUTHORIZATION")
+        return [notice.strip() for notice in driver.notices]
+    finally:
+        connection.close()
+
+
+def _grantee_acl_entries(engine: Engine, role: str) -> list[tuple[Any, ...]]:
+    """All explicit ACL entries the named role receives, including grant options."""
+    with _qualified(engine) as connection:
+        return [
+            tuple(row)
+            for row in connection.execute(
+                text(
+                    """
+                    WITH entries AS (
+                      SELECT 'relation' AS kind, c.oid::regclass::text AS object,
+                             '' AS column_name, a.*
+                      FROM pg_class AS c
+                      CROSS JOIN LATERAL aclexplode(c.relacl) AS a
+                      WHERE c.relnamespace = 'public'::regnamespace
+                      UNION ALL
+                      SELECT 'column', c.oid::regclass::text, att.attname::text, a.*
+                      FROM pg_class AS c
+                      JOIN pg_attribute AS att ON att.attrelid = c.oid
+                      CROSS JOIN LATERAL aclexplode(att.attacl) AS a
+                      WHERE c.relnamespace = 'public'::regnamespace
+                      UNION ALL
+                      SELECT 'routine', p.oid::regprocedure::text, '', a.*
+                      FROM pg_proc AS p
+                      CROSS JOIN LATERAL aclexplode(p.proacl) AS a
+                      WHERE p.pronamespace = 'public'::regnamespace
+                    )
+                    SELECT kind, object, column_name, grantor::regrole::text,
+                           privilege_type, is_grantable
+                    FROM entries
+                    WHERE grantee = (SELECT oid FROM pg_roles WHERE rolname = :role)
+                    ORDER BY 1, 2, 3, 4, 5, 6
+                    """
+                ),
+                {"role": role},
+            )
+        ]
+
+
+def _assert_lockdown_closed(engine: Engine) -> None:
+    """Check the same privilege paths startup checks, and a silent rerun."""
+    assert _data_api_access(engine) == []
+    assert data_api_exposure(engine) == []
+    verify_database_schema(engine)
+    assert _warnings(_run_sql(engine, LOCKDOWN.read_text())) == []
 
 
 def _kept_warning(grantee: str, privileges: str, keyword: str, target: str, grantor: str) -> str:
@@ -962,6 +1033,25 @@ def test_only_the_own_row_read_policies_remain(locked_database):
         ]
 
 
+def test_lockdown_preserves_an_unrelated_billing_policy(exposed_database):
+    _run_sql(
+        exposed_database,
+        'CREATE POLICY "Service audits credits" ON public.user_credits '
+        'FOR SELECT TO service_role USING (balance_gbp >= 0)',
+    )
+    before = _access_snapshot(exposed_database)["policies"]
+    unrelated = [row for row in before if row[1] == "Service audits credits"]
+    assert len(unrelated) == 1
+
+    assert _warnings(_run_sql(exposed_database, LOCKDOWN.read_text())) == []
+    assert _access_snapshot(exposed_database)["policies"] == [
+        row
+        for row in before
+        if row[1] not in {"Service manages credits", "Service inserts usage"}
+    ]
+    _assert_lockdown_closed(exposed_database)
+
+
 def test_own_row_policies_limit_a_select_grant_added_back(locked_database, owner):
     with locked_database.connect() as connection:
         for table in BILLING_TABLES:
@@ -1090,20 +1180,27 @@ def test_backend_repositories_keep_working_as_the_owner(exposed_database):
 
 
 def test_lockdown_keeps_every_row(exposed_database, superuser):
-    def counts() -> dict[str, int]:
+    def rows() -> dict[str, list[str]]:
         with superuser.connect() as connection:
             return {
-                table: connection.scalar(text(f'SELECT count(*) FROM public."{table}"'))
+                table: list(
+                    connection.scalars(
+                        text(
+                            f'SELECT row_to_json(t)::text FROM public."{table}" AS t '
+                            "ORDER BY 1"
+                        )
+                    )
+                )
                 for table in _public_tables(connection)
             }
 
-    before = counts()
+    before = rows()
     _run_sql(exposed_database, LOCKDOWN.read_text())
-    assert counts() == before
-    assert before["chat_conversations"] == 1
-    assert before["user_credits"] == 2
-    assert before[UNMANAGED_TABLE] == 1
-    assert before[PARTITIONED_TABLE] == 1
+    assert rows() == before
+    assert len(before["chat_conversations"]) == 1
+    assert len(before["user_credits"]) == 2
+    assert len(before[UNMANAGED_TABLE]) == 1
+    assert len(before[PARTITIONED_TABLE]) == 1
 
 
 def test_lockdown_can_run_again_without_changing_access(locked_database):
@@ -1114,24 +1211,49 @@ def test_lockdown_can_run_again_without_changing_access(locked_database):
     assert _access_snapshot(locked_database) == before
 
 
+@pytest.mark.parametrize("hold_seconds", [7.5, 3.0])
 def test_lockdown_stops_after_a_five_second_lock_wait_and_changes_nothing(
-    exposed_database, superuser, owner
+    exposed_database, superuser, owner, hold_seconds
 ):
     before = _access_snapshot(exposed_database)
     assert exposed_database.url.database is not None
     # The statement timeout ends the run if the lockdown waits with no limit.
     lockdown = _engine(exposed_database.url.database, owner, "statement_timeout=30s")
+    locked = threading.Event()
+    release = threading.Event()
+    failures: list[BaseException] = []
+
+    def hold_reader_lock() -> None:
+        try:
+            with superuser.connect() as reader:
+                reader.execute(text("SELECT 1 FROM public.chat_conversations LIMIT 1"))
+                locked.set()
+                release.wait(hold_seconds)
+                reader.rollback()
+        except BaseException as error:
+            failures.append(error)
+            locked.set()
+
+    reader_thread = threading.Thread(target=hold_reader_lock)
+    reader_thread.start()
     try:
-        with superuser.connect() as reader:
-            reader.execute(text("SELECT 1 FROM public.chat_conversations LIMIT 1"))
-            started = time.monotonic()
+        assert locked.wait(30), "The reader failed to acquire its lock"
+        assert failures == []
+        started = time.monotonic()
+        if hold_seconds > 5:
             with pytest.raises(LockNotAvailable, match="lock timeout"):
                 _run_sql(lockdown, LOCKDOWN.read_text())
             assert time.monotonic() - started >= 5
-            reader.rollback()
+            assert _access_snapshot(exposed_database) == before
+        else:
+            assert _warnings(_run_sql(lockdown, LOCKDOWN.read_text())) == []
+            _assert_lockdown_closed(exposed_database)
     finally:
+        release.set()
+        reader_thread.join(timeout=30)
         lockdown.dispose()
-    assert _access_snapshot(exposed_database) == before
+    assert not reader_thread.is_alive()
+    assert failures == []
 
 
 def test_a_revoke_that_waits_too_long_stops_the_run(locked_database, superuser, owner):
@@ -1552,6 +1674,415 @@ def test_a_grant_the_running_role_made_stays_until_its_statement_runs(
         assert _warnings(_run_sql(as_runner, LOCKDOWN.read_text())) == []
     finally:
         as_runner.dispose()
+
+
+@pytest.mark.parametrize("kind", ["table", "routine"])
+def test_kept_grant_transaction_restores_a_grantor_that_inherits_the_owner(
+    exposed_database, superuser, server_roles, owner, kind
+):
+    """P4/P5: losing a direct option leaves an inherited owner as a REVOKE candidate."""
+    grantor = server_roles("grantor", f'NOSUPERUSER INHERIT IN ROLE "{owner}"')
+    operator = server_roles(
+        "operator", f'NOSUPERUSER INHERIT IN ROLE "{owner}", "{grantor}"'
+    )
+    if kind == "table":
+        setup = "CREATE TABLE public.shifted_grant (id int)"
+        target, privilege = "table public.shifted_grant", "SELECT"
+    else:
+        setup = (
+            "CREATE TABLE public.shifted_source (id int); "
+            "INSERT INTO public.shifted_source VALUES (1); "
+            "CREATE FUNCTION public.shifted_grant() RETURNS bigint LANGUAGE sql "
+            "SECURITY DEFINER AS $$ SELECT count(*) FROM public.shifted_source $$"
+        )
+        target, privilege = "routine public.shifted_grant()", "EXECUTE"
+    _run_sql(
+        exposed_database,
+        f'{setup}; GRANT {privilege} ON {target} TO "{grantor}" WITH GRANT OPTION;',
+    )
+    assert _warnings(
+        _run_as_session_role(
+            superuser, grantor, f"GRANT {privilege} ON {target} TO anon;"
+        )
+    ) == []
+    _run_sql(
+        exposed_database,
+        f'REVOKE GRANT OPTION FOR {privilege} ON {target} FROM "{grantor}";',
+    )
+
+    warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+    assert len(warnings) == 1
+    assert "public.shifted_grant" in warnings[0]
+    assert data_api_exposure(exposed_database)
+    if kind == "routine":
+        with exposed_database.connect() as connection:
+            assert [
+                tuple(row)
+                for row in _rows_as(connection, "anon", "SELECT public.shifted_grant()")
+            ] == [(1,)]
+    before = _grantee_acl_entries(superuser, grantor)
+    assert before and all(not row[-1] for row in before)
+    assert _warnings(
+        _run_as_session_role(superuser, operator, _statement(warnings[0]))
+    ) == []
+    assert _grantee_acl_entries(superuser, grantor) == before
+    if kind == "routine":
+        with exposed_database.connect() as connection:
+            assert _denied(connection, "anon", "SELECT public.shifted_grant()")
+    _assert_lockdown_closed(exposed_database)
+
+
+@pytest.mark.parametrize("grantor_kind", ["anon", "helper", "sibling grants"])
+def test_kept_column_grant_transaction_restores_a_grantor_without_table_privileges(
+    exposed_database, superuser, server_roles, owner, grantor_kind
+):
+    """P6/P7: a column grant can outlive the table-level option that made it."""
+    grantor = (
+        "anon" if grantor_kind == "anon" else server_roles("grantor", "NOSUPERUSER")
+    )
+    operator = server_roles(
+        "operator", f'NOSUPERUSER INHERIT IN ROLE "{owner}", "{grantor}"'
+    )
+    _run_sql(
+        exposed_database,
+        f'CREATE TABLE public.column_grants (id int, "kept Column" int); '
+        f'GRANT SELECT ON public.column_grants TO "{grantor}" WITH GRANT OPTION;',
+    )
+    recipients = (
+        ("anon", "authenticated", "PUBLIC")
+        if grantor_kind == "sibling grants"
+        else ("authenticated",) if grantor_kind == "anon" else ("anon",)
+    )
+    _run_as_session_role(
+        superuser,
+        grantor,
+        '; '.join(
+            f'GRANT SELECT ("kept Column") ON public.column_grants TO {recipient}'
+            for recipient in recipients
+        ),
+    )
+    if grantor != "anon":
+        _run_sql(
+            exposed_database, f'REVOKE ALL ON public.column_grants FROM "{grantor}";'
+        )
+
+    warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+    assert len(warnings) == 1, warnings
+    assert "public.column_grants" in warnings[0]
+    assert data_api_exposure(exposed_database)
+    before = _grantee_acl_entries(superuser, grantor)
+    assert before == []
+    assert _warnings(
+        _run_as_session_role(superuser, operator, _statement(warnings[0]))
+    ) == []
+    assert _grantee_acl_entries(superuser, grantor) == before
+    _assert_lockdown_closed(exposed_database)
+
+
+@pytest.mark.parametrize("prior_scope", ["table", "column"])
+def test_kept_column_transaction_restores_the_original_acl_scope(
+    exposed_database, superuser, server_roles, owner, prior_scope
+):
+    grantor = server_roles("grantor", f'NOSUPERUSER INHERIT IN ROLE "{owner}"')
+    operator = server_roles(
+        "operator", f'NOSUPERUSER INHERIT IN ROLE "{owner}", "{grantor}"'
+    )
+    original_privilege = "SELECT" if prior_scope == "table" else "SELECT (c)"
+    _run_sql(
+        exposed_database,
+        'CREATE TABLE public.original_scope (id int, c int); '
+        f'GRANT {original_privilege} ON public.original_scope TO "{grantor}" '
+        'WITH GRANT OPTION;',
+    )
+    _run_as_session_role(
+        superuser, grantor, 'GRANT SELECT (c) ON public.original_scope TO anon;'
+    )
+    _run_sql(
+        exposed_database,
+        f'REVOKE GRANT OPTION FOR {original_privilege} ON public.original_scope '
+        f'FROM "{grantor}";',
+    )
+    warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+    assert len(warnings) == 1
+    before = _grantee_acl_entries(superuser, grantor)
+    assert len(before) == 1
+    assert before[0][2] == ("" if prior_scope == "table" else "c")
+    assert not before[0][-1]
+    assert _warnings(
+        _run_as_session_role(superuser, operator, _statement(warnings[0]))
+    ) == []
+    assert _grantee_acl_entries(superuser, grantor) == before
+    _assert_lockdown_closed(exposed_database)
+
+
+@pytest.mark.parametrize("prior_table", ["none", "plain"])
+@pytest.mark.parametrize("prior_column", ["plain", "grant-option"])
+def test_temporary_table_option_preserves_existing_column_acl(
+    exposed_database, superuser, server_roles, owner, prior_table, prior_column
+):
+    grantor = server_roles("grantor", f'NOSUPERUSER INHERIT IN ROLE "{owner}"')
+    operator = server_roles(
+        "operator", f'NOSUPERUSER INHERIT IN ROLE "{owner}", "{grantor}"'
+    )
+    _run_sql(
+        exposed_database,
+        'CREATE TABLE public.existing_columns (id int, c int); '
+        f'GRANT SELECT ON public.existing_columns TO "{grantor}" WITH GRANT OPTION;',
+    )
+    _run_as_session_role(
+        superuser, grantor, 'GRANT SELECT ON public.existing_columns TO anon;'
+    )
+    revoke = "GRANT OPTION FOR SELECT" if prior_table == "plain" else "SELECT"
+    column_option = " WITH GRANT OPTION" if prior_column == "grant-option" else ""
+    _run_sql(
+        exposed_database,
+        f'REVOKE {revoke} ON public.existing_columns FROM "{grantor}"; '
+        # Install the independent column ACL after removing the original option.
+        f'GRANT SELECT (c) ON public.existing_columns TO "{grantor}"{column_option};',
+    )
+    warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+    assert len(warnings) == 1
+    before = _grantee_acl_entries(superuser, grantor)
+    assert len(before) == (2 if prior_table == "plain" else 1)
+    assert [(row[2], row[-1]) for row in before if row[0] == "column"] == [
+        ("c", prior_column == "grant-option")
+    ]
+    assert _warnings(
+        _run_as_session_role(superuser, operator, _statement(warnings[0]))
+    ) == []
+    assert _grantee_acl_entries(superuser, grantor) == before
+    _assert_lockdown_closed(exposed_database)
+
+
+def test_grouped_remedies_revoke_dependents_before_the_grantor_transaction(
+    exposed_database, superuser, owner
+):
+    _run_sql(
+        exposed_database,
+        'CREATE TABLE public.mixed (a int, z int); '
+        'GRANT SELECT, UPDATE ON public.mixed TO anon WITH GRANT OPTION;',
+    )
+    _run_as_session_role(
+        superuser,
+        "anon",
+        'GRANT SELECT ON public.mixed TO authenticated WITH GRANT OPTION; '
+        'GRANT UPDATE (a) ON public.mixed TO PUBLIC;',
+    )
+    _run_as_session_role(
+        superuser, "authenticated", 'GRANT SELECT (z) ON public.mixed TO PUBLIC;'
+    )
+    _run_sql(exposed_database, 'REVOKE UPDATE ON public.mixed FROM anon;')
+    warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+    assert any(" has passed on " in warning for warning in warnings)
+    assert Grant("public.mixed", "a", "PUBLIC", "anon", "UPDATE") in _data_api_grants(
+        superuser
+    )
+    assert Grant(
+        "public.mixed", "z", "PUBLIC", "authenticated", "SELECT"
+    ) in _data_api_grants(superuser)
+
+    transactions = 0
+    for warning in warnings:
+        if " has passed on " in warning:
+            continue
+        statement = _statement(warning)
+        before = _grantee_acl_entries(superuser, "anon")
+        assert _warnings(_run_as_session_role(superuser, owner, statement)) == []
+        if statement.startswith("begin;"):
+            transactions += 1
+            # The temporary UPDATE column option must disappear. A later
+            # owner remedy intentionally removes anon's original table grant.
+            assert _grantee_acl_entries(superuser, "anon") == before
+    assert transactions == 1
+    _assert_lockdown_closed(exposed_database)
+
+
+def test_kept_grant_transaction_rolls_back_if_another_grant_depends_on_its_option(
+    exposed_database, superuser, server_roles, owner
+):
+    grantor = server_roles("grantor", "NOSUPERUSER")
+    outsider = server_roles("outsider", "NOSUPERUSER")
+    operator = server_roles(
+        "operator", f'NOSUPERUSER INHERIT IN ROLE "{owner}", "{grantor}"'
+    )
+    _run_sql(
+        exposed_database,
+        f'CREATE TABLE public.other_dependency (id int, c int); '
+        f'GRANT SELECT ON public.other_dependency TO "{grantor}" WITH GRANT OPTION;',
+    )
+    _run_as_session_role(
+        superuser,
+        grantor,
+        'GRANT SELECT (c) ON public.other_dependency TO anon; '
+        f'GRANT SELECT (c) ON public.other_dependency TO "{outsider}";',
+    )
+    _run_sql(
+        exposed_database, f'REVOKE ALL ON public.other_dependency FROM "{grantor}";'
+    )
+    warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+    assert len(warnings) == 1
+    assert "2BP01" in warnings[0]
+    before = _access_snapshot(superuser)
+    before_grantor = _grantee_acl_entries(superuser, grantor)
+    with pytest.raises(DependentObjectsStillExist) as raised:
+        _run_as_session_role(superuser, operator, _statement(warnings[0]))
+    assert raised.value.pgcode == "2BP01"
+    assert _access_snapshot(superuser) == before
+    assert _grantee_acl_entries(superuser, grantor) == before_grantor
+    assert _warnings(_run_sql(exposed_database, LOCKDOWN.read_text())) == warnings
+
+
+@pytest.mark.parametrize("closing", ["cascade", "kept grants"])
+def test_a_column_grant_left_by_cascade_closes_with_the_rerun_transaction(
+    exposed_database, superuser, owner, closing
+):
+    """P8: a table CASCADE can leave authenticated's column grant to PUBLIC."""
+    _run_sql(
+        exposed_database,
+        "CREATE TABLE public.cascade_columns (id int, c int); "
+        "GRANT SELECT ON public.cascade_columns TO anon WITH GRANT OPTION;",
+    )
+    _run_as_session_role(
+        superuser,
+        "anon",
+        "GRANT SELECT ON public.cascade_columns TO authenticated WITH GRANT OPTION;",
+    )
+    _run_as_session_role(
+        superuser,
+        "authenticated",
+        "GRANT SELECT (c) ON public.cascade_columns TO PUBLIC;",
+    )
+    warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+    cascade = [warning for warning in warnings if " has passed on " in warning]
+    assert len(cascade) == 1
+    if closing == "kept grants":
+        for warning in warnings:
+            if warning not in cascade:
+                assert _warnings(
+                    _run_as_session_role(superuser, owner, _statement(warning))
+                ) == []
+        _assert_lockdown_closed(exposed_database)
+        return
+    assert _warnings(
+        _run_as_session_role(superuser, owner, _statement(cascade[0]))
+    ) == []
+    assert _data_api_grants(superuser) == {
+        Grant("public.cascade_columns", "c", "PUBLIC", "authenticated", "SELECT")
+    }
+    warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+    assert len(warnings) == 1
+    before = _grantee_acl_entries(superuser, "authenticated")
+    assert before == []
+    assert _warnings(
+        _run_as_session_role(superuser, owner, _statement(warnings[0]))
+    ) == []
+    assert _grantee_acl_entries(superuser, "authenticated") == before
+    _assert_lockdown_closed(exposed_database)
+
+
+def test_a_quoted_grantor_can_run_its_printed_statement(
+    exposed_database, superuser, server_roles, owner
+):
+    """P9: quoted role names survive the warning's SET ROLE and REVOKE."""
+    grantor = server_roles("Quoted Grantor", "NOSUPERUSER")
+    operator = server_roles(
+        "operator", f'NOSUPERUSER INHERIT IN ROLE "{owner}", "{grantor}"'
+    )
+    _run_sql(
+        exposed_database,
+        f'CREATE TABLE public.quoted_grantor (id int); '
+        f'GRANT SELECT ON public.quoted_grantor TO "{grantor}" WITH GRANT OPTION;',
+    )
+    _run_as_session_role(
+        superuser, grantor, "GRANT SELECT ON public.quoted_grantor TO anon;"
+    )
+    warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+    assert len(warnings) == 1
+    before = _grantee_acl_entries(superuser, grantor)
+    assert _warnings(
+        _run_as_session_role(superuser, operator, _statement(warnings[0]))
+    ) == []
+    assert _grantee_acl_entries(superuser, grantor) == before
+    _assert_lockdown_closed(exposed_database)
+
+
+@pytest.mark.parametrize("member", DATA_API_ROLES)
+@pytest.mark.parametrize("inherits", [True, False])
+def test_lockdown_warns_only_about_memberships_that_inherit_privileges(
+    exposed_database, superuser, server_roles, owner, member, inherits
+):
+    """P10: the membership's INHERIT option, rather than rolinherit, controls 16+."""
+    inherited_roles = [
+        server_roles("Inherited Reader", "NOSUPERUSER"),
+        server_roles("Other Inherited Reader", "NOSUPERUSER"),
+    ]
+    _run_sql(
+        exposed_database,
+        "CREATE TABLE public.inherited_notes (id int); "
+        "INSERT INTO public.inherited_notes VALUES (1); "
+        "CREATE FUNCTION public.inherited_reader() RETURNS bigint LANGUAGE sql "
+        "SECURITY DEFINER AS $$ SELECT count(*) FROM public.inherited_notes $$; "
+        + " ".join(
+            f'GRANT SELECT ON public.inherited_notes TO "{role}"; '
+            f'GRANT EXECUTE ON FUNCTION public.inherited_reader() TO "{role}";'
+            for role in inherited_roles
+        ),
+    )
+    with superuser.connect() as connection:
+        version = connection.scalar(text("SELECT current_setting('server_version_num')::int"))
+    if version >= 160000:
+        _run_sql(
+            superuser,
+            f"ALTER ROLE {member} {'NOINHERIT' if inherits else 'INHERIT'}; "
+            + " ".join(
+                f'GRANT "{role}" TO {member} WITH INHERIT {str(inherits).upper()};'
+                for role in inherited_roles
+            )
+            # Repeating NOINHERIT does not alter an existing INHERIT TRUE membership.
+            + (f" ALTER ROLE {member} NOINHERIT;" if inherits else ""),
+        )
+    else:
+        _run_sql(
+            superuser,
+            f"ALTER ROLE {member} {'INHERIT' if inherits else 'NOINHERIT'}; "
+            + " ".join(f'GRANT "{role}" TO {member};' for role in inherited_roles),
+        )
+    try:
+        warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+        expected = {
+            DataApiExposure(member, "table", "inherited_notes", owner),
+            DataApiExposure(member, "function", "inherited_reader()", owner),
+        }
+        assert set(data_api_exposure(exposed_database)) == (expected if inherits else set())
+        with exposed_database.connect() as connection:
+            if inherits:
+                assert [
+                    tuple(row)
+                    for row in _rows_as(
+                        connection, member, "SELECT public.inherited_reader()"
+                    )
+                ] == [(1,)]
+            else:
+                assert _denied(connection, member, "SELECT public.inherited_reader()")
+        if inherits:
+            assert len(warnings) == len(inherited_roles)
+            assert {_statement(warning) for warning in warnings} == {
+                f'revoke "{role}" from {member};' for role in inherited_roles
+            }
+            for warning in warnings:
+                assert member in warning
+                assert _warnings(_run_sql(superuser, _statement(warning))) == []
+        else:
+            assert warnings == []
+        with exposed_database.connect() as connection:
+            assert _denied(connection, member, "SELECT public.inherited_reader()")
+        _assert_lockdown_closed(exposed_database)
+    finally:
+        _run_sql(
+            superuser,
+            " ".join(f'REVOKE "{role}" FROM {member};' for role in inherited_roles)
+            + f" ALTER ROLE {member} NOINHERIT;",
+        )
 
 
 @pytest.mark.parametrize("closing", ["kept-grant statements", "cascade statements"])
