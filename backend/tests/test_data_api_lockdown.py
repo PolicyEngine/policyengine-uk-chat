@@ -39,7 +39,11 @@ from alembic.config import Config
 from hypothesis import HealthCheck, Phase, assume, example, given, settings
 from hypothesis import strategies as st
 from psycopg2 import sql
-from psycopg2.errors import DependentObjectsStillExist, LockNotAvailable
+from psycopg2.errors import (
+    DependentObjectsStillExist,
+    InsufficientPrivilege,
+    LockNotAvailable,
+)
 from psycopg2.extensions import TRANSACTION_STATUS_IDLE
 from sqlalchemy import create_engine, pool, text
 from sqlalchemy.engine import Connection, Engine, make_url
@@ -2065,6 +2069,7 @@ def test_lockdown_warns_only_about_memberships_that_inherit_privileges(
     )
     with superuser.connect() as connection:
         version = connection.scalar(text("SELECT current_setting('server_version_num')::int"))
+        bootstrap = connection.scalar(text("SELECT 10::regrole::text"))
     if version >= 160000:
         _run_sql(
             superuser,
@@ -2101,8 +2106,10 @@ def test_lockdown_warns_only_about_memberships_that_inherit_privileges(
                 assert _denied(connection, member, "SELECT public.inherited_reader()")
         if inherits:
             assert len(warnings) == len(inherited_roles)
+            # From 16, a superuser's grant records the bootstrap superuser as grantor.
+            granted_by = f" granted by {bootstrap}" if version >= 160000 else ""
             assert {_statement(warning) for warning in warnings} == {
-                f'revoke "{role}" from {member};' for role in inherited_roles
+                f'revoke "{role}" from {member}{granted_by};' for role in inherited_roles
             }
             for warning in warnings:
                 assert member in warning
@@ -2118,6 +2125,107 @@ def test_lockdown_warns_only_about_memberships_that_inherit_privileges(
             " ".join(f'REVOKE "{role}" FROM {member};' for role in inherited_roles)
             + f" ALTER ROLE {member} NOINHERIT;",
         )
+
+
+def _anon_memberships(engine: Engine, role: str) -> list[tuple[Any, ...]]:
+    """Each membership of anon in role, with the grantor PostgreSQL recorded."""
+    with engine.connect() as connection:
+        return [
+            tuple(row)
+            for row in connection.execute(
+                text(
+                    "SELECT m.grantor::regrole::text FROM pg_auth_members AS m "
+                    "WHERE m.roleid = CAST(:role AS regrole) AND m.member = 'anon'::regrole"
+                ),
+                {"role": f'"{role}"'},
+            )
+        ]
+
+
+@pytest.mark.parametrize("grantor_kind", ["superuser", "operator's role", "another role"])
+def test_the_printed_membership_revoke_needs_the_grantors_privileges(
+    exposed_database, superuser, server_roles, owner, grantor_kind
+):
+    """From PostgreSQL 16, a revoke removes only a membership that its role granted.
+
+    The operator inherits one role that holds ADMIN OPTION on the inherited role and
+    is not a superuser, like Supabase's postgres role in the SQL editor.
+    """
+    inherited = server_roles("Granted Reader", "NOSUPERUSER")
+    holders = [
+        server_roles("membership_admin", "NOSUPERUSER"),
+        server_roles("other_membership_admin", "NOSUPERUSER"),
+    ]
+    operator = server_roles("membership_operator", f'NOSUPERUSER INHERIT IN ROLE "{holders[0]}"')
+    _run_sql(
+        exposed_database,
+        "CREATE TABLE public.granted_notes (id int); "
+        "INSERT INTO public.granted_notes VALUES (1); "
+        f'GRANT SELECT ON public.granted_notes TO "{inherited}";',
+    )
+    with superuser.connect() as connection:
+        version = connection.scalar(text("SELECT current_setting('server_version_num')::int"))
+        bootstrap = connection.scalar(text("SELECT 10::regrole::text"))
+    _run_sql(
+        superuser,
+        " ".join(f'GRANT "{inherited}" TO "{holder}" WITH ADMIN OPTION;' for holder in holders)
+        + ("" if version >= 160000 else " ALTER ROLE anon INHERIT;"),
+    )
+    grant = f'GRANT "{inherited}" TO anon' + (" WITH INHERIT TRUE;" if version >= 160000 else ";")
+    grantor = {
+        "superuser": None,
+        "operator's role": holders[0],
+        "another role": holders[1],
+    }[grantor_kind]
+    if grantor is None:
+        _run_sql(superuser, grant)
+    else:
+        _run_as_session_role(superuser, grantor, grant)
+    try:
+        warnings = [
+            warning
+            for warning in _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
+            if inherited in warning
+        ]
+        assert len(warnings) == 1, warnings
+        statement = _statement(warnings[0])
+        assert DataApiExposure("anon", "table", "granted_notes", owner) in set(
+            data_api_exposure(exposed_database)
+        )
+        if version < 160000:
+            # Before 16, any role with ADMIN OPTION removes the membership.
+            assert statement == f'revoke "{inherited}" from anon;'
+            assert _warnings(_run_as_session_role(superuser, operator, statement)) == []
+        else:
+            with superuser.connect() as connection:
+                recorded = (
+                    bootstrap
+                    if grantor is None
+                    else connection.scalar(text("SELECT quote_ident(:name)"), {"name": grantor})
+                )
+            assert _anon_memberships(superuser, inherited) == [(recorded,)]
+            assert f"that {recorded} granted" in warnings[0]
+            assert statement == f'revoke "{inherited}" from anon granted by {recorded};'
+            if grantor == holders[0]:
+                assert _warnings(_run_as_session_role(superuser, operator, statement)) == []
+            else:
+                with pytest.raises(InsufficientPrivilege):
+                    _run_as_session_role(superuser, operator, statement)
+                assert _anon_memberships(superuser, inherited) == [(recorded,)]
+                if grantor is None:
+                    assert _warnings(_run_sql(superuser, statement)) == []
+                else:
+                    assert _warnings(_run_as_session_role(superuser, grantor, statement)) == []
+        assert _anon_memberships(superuser, inherited) == []
+        _assert_lockdown_closed(exposed_database)
+    finally:
+        for (recorded,) in _anon_memberships(superuser, inherited):
+            _run_sql(
+                superuser,
+                f'REVOKE "{inherited}" FROM anon'
+                + (f" GRANTED BY {recorded};" if version >= 160000 else ";"),
+            )
+        _run_sql(superuser, "ALTER ROLE anon NOINHERIT;")
 
 
 @pytest.mark.parametrize("closing", ["kept-grant statements", "cascade statements"])

@@ -87,10 +87,12 @@ each other one.
 005 also warns once for each direct membership through which `anon` or
 `authenticated` inherits another role's privileges, and prints a quoted
 `REVOKE <role> FROM <member>` statement. On PostgreSQL 16 and later it checks
-the membership's `inherit_option`; on PostgreSQL 14 and 15 it checks the
-member's `rolinherit`. Run each statement after checking the membership's
-purpose: removing it affects every database on the server. 005 never revokes
-memberships itself.
+the membership's `inherit_option` and adds `GRANTED BY <grantor>`, because from
+16 a revoke removes only a membership that its own role granted; only a
+superuser or a role with the grantor's privileges can run that statement.
+Earlier versions check the member's `rolinherit`. Run each statement after
+checking the membership's purpose: removing it affects every database on the
+server. 005 never revokes memberships itself.
 
 005 also removes the running role's default grants to those three in `public`.
 On `user_credits` and `token_usage` it drops "Service manages credits" and

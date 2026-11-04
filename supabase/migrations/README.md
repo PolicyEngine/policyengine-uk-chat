@@ -18,8 +18,9 @@ This directory is the migration history for Supabase-specific database objects.
   dependent grant outside that transaction can block restoration with 2BP01,
   which rolls the transaction back. A column grant can outlive a printed
   CASCADE; rerun 005 for its recovery SQL. The migration also warns about each
-  direct inherited membership of either role and prints its REVOKE statement;
-  removing a membership affects every database on the server. The backend
+  direct inherited membership of either role and prints its REVOKE statement,
+  which names the membership's grantor on PostgreSQL 16 and later; removing a
+  membership affects every database on the server. The backend
   refuses to start while either role can use its schema and execute a SECURITY
   DEFINER routine there that belongs to no extension.
 

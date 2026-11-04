@@ -48,8 +48,10 @@
 -- authenticated gave each other one.
 --
 -- The file also warns about each direct role membership through which anon or
--- authenticated inherits privileges, and prints the REVOKE for it. It never
--- revokes a membership itself: memberships reach every database on the server.
+-- authenticated inherits privileges, and prints the REVOKE for it. On PostgreSQL
+-- 16 and later the REVOKE names the membership's grantor, and only a superuser or
+-- a role with the grantor's privileges can run it. The file never revokes a
+-- membership itself: memberships reach every database on the server.
 --
 -- The file removes the running role's default grants to those three in public.
 -- Other roles keep theirs. PostgreSQL also applies defaults for every schema in
@@ -332,29 +334,44 @@ $$;
 
 -- Role memberships are server-wide. Report inherited memberships without
 -- changing them, including PostgreSQL 16+'s per-membership INHERIT setting.
+-- From PostgreSQL 16, each membership records its grantor, and a revoke removes
+-- only a membership that the role it acts as granted, so the printed statement
+-- names the grantor. Before 16, the grantor plays no part in a revoke.
 do $$
 declare
   membership record;
   inheritance_condition text;
+  grantor_column text;
 begin
   if current_setting('server_version_num')::integer >= 160000 then
     inheritance_condition := 'm.inherit_option';
+    grantor_column := 'm.grantor::regrole::text';
   else
     inheritance_condition := 'member_role.rolinherit';
+    grantor_column := 'null::text';
   end if;
   for membership in execute format($query$
-    select distinct member_role.rolname as member_name, granted_role.rolname as role_name
+    select distinct member_role.rolname as member_name, granted_role.rolname as role_name,
+      %s as grantor
     from pg_auth_members as m
     join pg_roles as member_role on member_role.oid = m.member
     join pg_roles as granted_role on granted_role.oid = m.roleid
     where member_role.rolname in ('anon', 'authenticated')
       and %s
-    order by 1, 2
-  $query$, inheritance_condition)
+    order by 1, 2, 3
+  $query$, grantor_column, inheritance_condition)
   loop
-    raise warning '% inherits privileges from % through a direct membership; memberships apply to every database on the server, so this run kept it; revoke it with: %',
-      quote_ident(membership.member_name), quote_ident(membership.role_name),
-      format('revoke %I from %I;', membership.role_name, membership.member_name);
+    if membership.grantor is null then
+      raise warning '% inherits privileges from % through a direct membership; memberships apply to every database on the server, so this run kept it; revoke it with: %',
+        quote_ident(membership.member_name), quote_ident(membership.role_name),
+        format('revoke %I from %I;', membership.role_name, membership.member_name);
+    else
+      raise warning '% inherits privileges from % through a direct membership that % granted; memberships apply to every database on the server, so this run kept it. Only a superuser or a role with the privileges of % can remove it; revoke it with: %',
+        quote_ident(membership.member_name), quote_ident(membership.role_name),
+        membership.grantor, membership.grantor,
+        format('revoke %I from %I granted by %s;',
+          membership.role_name, membership.member_name, membership.grantor);
+    end if;
   end loop;
 end
 $$;
