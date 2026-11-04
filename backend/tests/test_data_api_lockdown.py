@@ -1219,25 +1219,44 @@ def test_lockdown_stops_after_a_five_second_lock_wait_and_changes_nothing(
     assert exposed_database.url.database is not None
     # The statement timeout ends the run if the lockdown waits with no limit.
     lockdown = _engine(exposed_database.url.database, owner, "statement_timeout=30s")
-    locked = threading.Event()
-    release = threading.Event()
+    reader = superuser.raw_connection()
+    driver: Any = reader.driver_connection
+    driver.autocommit = True
+    reader_pid = driver.get_backend_pid()
     failures: list[BaseException] = []
 
     def hold_reader_lock() -> None:
         try:
-            with superuser.connect() as reader:
-                reader.execute(text("SELECT 1 FROM public.chat_conversations LIMIT 1"))
-                locked.set()
-                release.wait(hold_seconds)
-                reader.rollback()
+            with driver.cursor() as cursor:
+                # PostgreSQL releases the lock after its own timer expires,
+                # without waiting for this Python thread to wake up.
+                cursor.execute(
+                    "BEGIN; SELECT 1 FROM public.chat_conversations LIMIT 1; "
+                    "SELECT pg_sleep(%s); ROLLBACK;",
+                    (hold_seconds,),
+                )
         except BaseException as error:
             failures.append(error)
-            locked.set()
+        finally:
+            if driver.get_transaction_status() != TRANSACTION_STATUS_IDLE:
+                with driver.cursor() as cursor:
+                    cursor.execute("ROLLBACK")
 
     reader_thread = threading.Thread(target=hold_reader_lock)
-    reader_thread.start()
     try:
-        assert locked.wait(30), "The reader failed to acquire its lock"
+        with superuser.connect().execution_options(isolation_level="AUTOCOMMIT") as monitor:
+            reader_thread.start()
+            deadline = time.monotonic() + 30
+            while time.monotonic() < deadline:
+                assert failures == []
+                if monitor.scalar(
+                    text("SELECT wait_event = 'PgSleep' FROM pg_stat_activity WHERE pid = :pid"),
+                    {"pid": reader_pid},
+                ):
+                    break
+                time.sleep(0.01)
+            else:
+                pytest.fail("The reader failed to acquire its lock and start sleeping")
         assert failures == []
         started = time.monotonic()
         if hold_seconds > 5:
@@ -1249,8 +1268,12 @@ def test_lockdown_stops_after_a_five_second_lock_wait_and_changes_nothing(
             assert _warnings(_run_sql(lockdown, LOCKDOWN.read_text())) == []
             _assert_lockdown_closed(exposed_database)
     finally:
-        release.set()
-        reader_thread.join(timeout=30)
+        if reader_thread.ident is not None:
+            reader_thread.join(timeout=30)
+            if reader_thread.is_alive():
+                driver.cancel()
+                reader_thread.join(timeout=30)
+        reader.close()
         lockdown.dispose()
     assert not reader_thread.is_alive()
     assert failures == []
