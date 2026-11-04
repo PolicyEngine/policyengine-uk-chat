@@ -1844,6 +1844,7 @@ def test_temporary_table_option_preserves_existing_column_acl(
     exposed_database, superuser, server_roles, owner, prior_table, prior_column
 ):
     grantor = server_roles("grantor", f'NOSUPERUSER INHERIT IN ROLE "{owner}"')
+    column_grantor = server_roles("column_grantor", "NOSUPERUSER")
     operator = server_roles(
         "operator", f'NOSUPERUSER INHERIT IN ROLE "{owner}", "{grantor}"'
     )
@@ -1863,13 +1864,24 @@ def test_temporary_table_option_preserves_existing_column_acl(
         # Install the independent column ACL after removing the original option.
         f'GRANT SELECT (c) ON public.existing_columns TO "{grantor}"{column_option};',
     )
+    _run_sql(
+        exposed_database,
+        f'GRANT SELECT (id) ON public.existing_columns TO "{column_grantor}" '
+        'WITH GRANT OPTION;',
+    )
+    _run_as_session_role(
+        superuser,
+        column_grantor,
+        f'GRANT SELECT (id) ON public.existing_columns TO "{grantor}";',
+    )
     warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
     assert len(warnings) == 1
     before = _grantee_acl_entries(superuser, grantor)
-    assert len(before) == (2 if prior_table == "plain" else 1)
-    assert [(row[2], row[-1]) for row in before if row[0] == "column"] == [
-        ("c", prior_column == "grant-option")
-    ]
+    assert len(before) == (3 if prior_table == "plain" else 2)
+    assert {(row[2], row[3], row[-1]) for row in before if row[0] == "column"} == {
+        ("c", owner, prior_column == "grant-option"),
+        ("id", column_grantor, False),
+    }
     assert _warnings(
         _run_as_session_role(superuser, operator, _statement(warnings[0]))
     ) == []
