@@ -90,9 +90,16 @@ each other one.
 the membership's `inherit_option` and adds `GRANTED BY <grantor>`, because from
 16 a revoke removes only a membership that its own role granted; only a
 superuser or a role with the grantor's privileges can run that statement.
-Earlier versions check the member's `rolinherit`. Run each statement after
-checking the membership's purpose: removing it affects every database on the
-server. 005 never revokes memberships itself.
+Earlier versions check the member's `rolinherit`. From 16, PostgreSQL also
+refuses to take a role's last ADMIN OPTION while a membership that role granted
+stands, so 005 prints those memberships too, even when they give `anon` and
+`authenticated` nothing, each ahead of the membership it depends on. To keep a
+role in one of those memberships, grant it again as another role first. Where
+an ADMIN OPTION comes only through a loop of grants, PostgreSQL refuses every
+plain revoke, so those statements use `CASCADE`, which removes only memberships
+005 prints. Run the statements in the printed order, after checking each
+membership's purpose: removing it affects every database on the server. 005
+never revokes memberships itself.
 
 005 also removes the running role's default grants to those three in `public`.
 On `user_credits` and `token_usage` it drops "Service manages credits" and
@@ -162,8 +169,9 @@ Use `ALEMBIC_DATABASE_URL` for migration commands and `DATABASE_URL` for the
 application. They may refer to the same database locally. Deployed migration
 credentials may hold schema-change permissions that the runtime credential
 lacks, but the runtime role must still own the tables, inherit their owner's
-privileges, or have BYPASSRLS. Otherwise row-level security hides the tables'
-rows from it, and the backend refuses to start. Never commit or print either
+privileges, or have BYPASSRLS, and a table that forces row-level security needs
+BYPASSRLS or a superuser. Otherwise row-level security hides the tables' rows
+from it, and the backend refuses to start. Never commit or print either
 credential.
 
 ## Verification

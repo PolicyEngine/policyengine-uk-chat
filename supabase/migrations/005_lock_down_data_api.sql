@@ -3,10 +3,12 @@
 -- Supabase's Data API serves the public schema, and Supabase's default
 -- privileges grant both roles access to each new object. This app reads nothing
 -- through them: the backend connects as the tables' owner, billing uses the
--- service role, and the frontend uses Supabase for auth only. Table owners and
--- the service role bypass row-level security, so both keep working. The
--- backend's role must own the tables, inherit their owner's privileges, or have
--- BYPASSRLS; the backend refuses to start otherwise.
+-- service role, and the frontend uses Supabase for auth only. The service role
+-- bypasses row-level security. So does a table's owner, unless the table has FORCE
+-- ROW LEVEL SECURITY and the owner lacks BYPASSRLS; this file leaves that setting
+-- as it finds it. The backend's role must own the tables, inherit their owner's
+-- privileges, or have BYPASSRLS. The backend refuses to start otherwise, or when
+-- row-level security would hide a table's rows from it.
 --
 -- This file revokes what PUBLIC, anon and authenticated hold here, including on
 -- the billing tables. The "Users read own" policies in 001_billing.sql
@@ -50,8 +52,15 @@
 -- The file also warns about each direct role membership through which anon or
 -- authenticated inherits privileges, and prints the REVOKE for it. On PostgreSQL
 -- 16 and later the REVOKE names the membership's grantor, and only a superuser or
--- a role with the grantor's privileges can run it. The file never revokes a
--- membership itself: memberships reach every database on the server.
+-- a role with the grantor's privileges can run it. PostgreSQL 16 and later also
+-- refuse to take a role's last ADMIN OPTION on another role while a membership it
+-- granted stands. So the file prints those memberships too, even when they give
+-- anon and authenticated nothing, each ahead of the membership it depends on: run
+-- the statements in the printed order. To keep a role in one of those memberships,
+-- grant it again as another role first. Where an ADMIN OPTION comes only through a
+-- loop of grants, PostgreSQL refuses every plain REVOKE, so those statements use
+-- CASCADE, which removes only memberships the file prints. The file never revokes
+-- a membership itself: memberships reach every database on the server.
 --
 -- The file removes the running role's default grants to those three in public.
 -- Other roles keep theirs. PostgreSQL also applies defaults for every schema in
@@ -334,43 +343,107 @@ $$;
 
 -- Role memberships are server-wide. Report inherited memberships without
 -- changing them, including PostgreSQL 16+'s per-membership INHERIT setting.
--- From PostgreSQL 16, each membership records its grantor, and a revoke removes
--- only a membership that the role it acts as granted, so the printed statement
--- names the grantor. Before 16, the grantor plays no part in a revoke.
+-- From PostgreSQL 16, each membership records its grantor, a revoke removes only
+-- a membership that the role it acts as granted, and PostgreSQL refuses to take a
+-- role's last ADMIN OPTION while a membership that role granted stands. So on 16+
+-- the printed statements name the grantor, cover the memberships in the way, and
+-- start from the far end of each chain of grants. Before 16, neither the grantor
+-- nor a dependent membership plays any part in a revoke.
 do $$
 declare
+  planned oid[];
+  added oid[];
+  rooted oid[] := '{}';
   membership record;
-  inheritance_condition text;
-  grantor_column text;
+  statement text;
 begin
-  if current_setting('server_version_num')::integer >= 160000 then
-    inheritance_condition := 'm.inherit_option';
-    grantor_column := 'm.grantor::regrole::text';
-  else
-    inheritance_condition := 'member_role.rolinherit';
-    grantor_column := 'null::text';
-  end if;
-  for membership in execute format($query$
-    select distinct member_role.rolname as member_name, granted_role.rolname as role_name,
-      %s as grantor
-    from pg_auth_members as m
-    join pg_roles as member_role on member_role.oid = m.member
-    join pg_roles as granted_role on granted_role.oid = m.roleid
-    where member_role.rolname in ('anon', 'authenticated')
-      and %s
-    order by 1, 2, 3
-  $query$, grantor_column, inheritance_condition)
-  loop
-    if membership.grantor is null then
+  if current_setting('server_version_num')::integer < 160000 then
+    for membership in
+      select member_role.rolname as member_name, granted_role.rolname as role_name
+      from pg_auth_members as m
+      join pg_roles as member_role on member_role.oid = m.member
+      join pg_roles as granted_role on granted_role.oid = m.roleid
+      where member_role.rolname in ('anon', 'authenticated') and member_role.rolinherit
+      order by 1, 2
+    loop
       raise warning '% inherits privileges from % through a direct membership; memberships apply to every database on the server, so this run kept it; revoke it with: %',
         quote_ident(membership.member_name), quote_ident(membership.role_name),
         format('revoke %I from %I;', membership.role_name, membership.member_name);
-    else
+    end loop;
+    return;
+  end if;
+
+  select array_agg(m.oid) into planned
+  from pg_auth_members as m
+  join pg_roles as member_role on member_role.oid = m.member
+  where member_role.rolname in ('anon', 'authenticated') and m.inherit_option;
+
+  -- A membership joins the plan when the plan would leave its grantor with no
+  -- ADMIN OPTION on the role.
+  loop
+    select array_agg(dependent.oid) into added
+    from pg_auth_members as revoked
+    join pg_auth_members as dependent
+      on dependent.roleid = revoked.roleid and dependent.grantor = revoked.member
+    where revoked.oid = any(planned)
+      and revoked.admin_option
+      and dependent.oid <> all(planned)
+      and not exists (
+        select from pg_auth_members as kept
+        where kept.roleid = revoked.roleid and kept.member = revoked.member
+          and kept.admin_option and kept.oid <> all(planned));
+    exit when added is null;
+    planned := planned || added;
+  end loop;
+
+  -- Walk each chain of grants from its start: first the memberships whose grantor
+  -- holds no ADMIN OPTION to lose or keeps one outside the plan, then the
+  -- memberships granted by their members, and so on. The walk never reaches a
+  -- membership whose grantor's ADMIN OPTION comes only through a loop of grants.
+  loop
+    select array_agg(m.oid order by m.oid) into added
+    from pg_auth_members as m
+    where m.oid = any(planned) and m.oid <> all(rooted)
+      and coalesce((
+        select bool_or(held.oid <> all(planned) or held.oid = any(rooted))
+        from pg_auth_members as held
+        where held.roleid = m.roleid and held.member = m.grantor and held.admin_option
+      ), true);
+    exit when added is null;
+    rooted := rooted || added;
+  end loop;
+
+  -- The walk's last memberships print first, so that a grantor loses its last
+  -- ADMIN OPTION only after the memberships it granted have gone.
+  for membership in
+    select member_role.rolname as member_name, granted_role.rolname as role_name,
+      m.grantor::regrole::text as grantor,
+      m.inherit_option and member_role.rolname in ('anon', 'authenticated') as inherited,
+      walk.step is null as in_loop
+    from pg_auth_members as m
+    join pg_roles as member_role on member_role.oid = m.member
+    join pg_roles as granted_role on granted_role.oid = m.roleid
+    left join unnest(rooted) with ordinality as walk(membership_oid, step)
+      on walk.membership_oid = m.oid
+    where m.oid = any(planned)
+    order by walk.step desc nulls last, member_name, role_name, grantor
+  loop
+    statement := format('revoke %I from %I granted by %s',
+      membership.role_name, membership.member_name, membership.grantor);
+    if membership.in_loop then
+      raise warning '% holds % through a membership that % granted. The ADMIN OPTION of % on that role comes only through a loop of grants, so PostgreSQL refuses a plain revoke inside the loop. Memberships apply to every database on the server, so this run kept it. Only a superuser or a role with the privileges of % can remove it. If an earlier statement already removed it, PostgreSQL warns and changes nothing; this statement also revokes every membership that depends on that option: %',
+        quote_ident(membership.member_name), quote_ident(membership.role_name),
+        membership.grantor, membership.grantor, membership.grantor,
+        statement || ' cascade;';
+    elsif membership.inherited then
       raise warning '% inherits privileges from % through a direct membership that % granted; memberships apply to every database on the server, so this run kept it. Only a superuser or a role with the privileges of % can remove it; revoke it with: %',
         quote_ident(membership.member_name), quote_ident(membership.role_name),
+        membership.grantor, membership.grantor, statement || ';';
+    else
+      raise warning '% holds % through a membership that % granted, so PostgreSQL refuses to take the last ADMIN OPTION of % on that role until this membership goes; a CASCADE there would remove this one too. Memberships apply to every database on the server, so this run kept it. To keep % in the role, grant it again as another role first. Only a superuser or a role with the privileges of % can remove it; revoke it with: %',
+        quote_ident(membership.member_name), quote_ident(membership.role_name),
         membership.grantor, membership.grantor,
-        format('revoke %I from %I granted by %s;',
-          membership.role_name, membership.member_name, membership.grantor);
+        quote_ident(membership.member_name), membership.grantor, statement || ';';
     end if;
   end loop;
 end
