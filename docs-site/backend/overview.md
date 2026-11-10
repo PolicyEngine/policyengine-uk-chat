@@ -23,8 +23,12 @@ It hosts the chat agent and persists conversations. In production it runs as a
 - **Rate limiting** uses `slowapi`; the handler in `api/errors.py` returns `429`
   with a `Retry-After` header.
 - On **startup**, `verify_database_schema()` confirms that PostgreSQL is at the
-  repository's Alembic revision without changing schema; on **shutdown**,
-  observability is flushed.
+  repository's Alembic revision without changing schema. It also refuses to
+  start the app if row-level security would hide rows from the backend's
+  database role, or if the Supabase Data API's `anon` or `authenticated` role
+  can reach any table or view in the schema, or execute a SECURITY DEFINER
+  function or procedure there that belongs to no extension. On **shutdown**,
+  the app flushes observability.
 
 ## Operational endpoints
 

@@ -38,6 +38,9 @@ jobs:
           --health-retries 10
     env:
       CAPABILITY_TEST_POSTGRES_URL: postgresql://postgres:postgres@localhost:5432/capability_test
+      # Tests marked requires_test_postgres fail here, instead of skipping, if
+      # the URL above goes missing.
+      CAPABILITY_TEST_POSTGRES_REQUIRED: "1"
 
     steps:
       - name: Checkout

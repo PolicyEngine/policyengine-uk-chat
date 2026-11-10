@@ -42,6 +42,18 @@ and Stripe credentials are needed only when billing is explicitly enabled.
 Access to a restricted Enhanced FRS source must also be available through
 `HUGGING_FACE_TOKEN`.
 
+## Database
+
+Run `alembic -c backend/alembic.ini upgrade head`, then run
+`supabase/migrations/005_lock_down_data_api.sql` in the Supabase SQL editor as
+the tables' owner. Run it again if it stops on a lock timeout, and after a
+revision that adds a table or a function. The backend refuses to start until
+the database reaches the Alembic head and row-level security hides no rows from
+the backend's own role. It also refuses while the Data API's `anon` or
+`authenticated` role can use the backend's schema and either holds a privilege
+on one of its tables or views or can execute one of its SECURITY DEFINER
+functions or procedures that belong to no extension.
+
 ## Version checks
 
 `GET /version` reports:
