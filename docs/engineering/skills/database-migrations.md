@@ -88,18 +88,21 @@ each other one.
 `authenticated` inherits another role's privileges, and prints a quoted
 `REVOKE <role> FROM <member>` statement. On PostgreSQL 16 and later it checks
 the membership's `inherit_option` and adds `GRANTED BY <grantor>`, because from
-16 a revoke removes only a membership that its own role granted; only a
-superuser or a role with the grantor's privileges can run that statement.
-Earlier versions check the member's `rolinherit`. From 16, PostgreSQL also
-refuses to take a role's last ADMIN OPTION while a membership that role granted
-stands, so 005 prints those memberships too, even when they give `anon` and
-`authenticated` nothing, each ahead of the membership it depends on. To keep a
-role in one of those memberships, grant it again as another role first. Where
-an ADMIN OPTION comes only through a loop of grants, PostgreSQL refuses every
-plain revoke, so those statements use `CASCADE`, which removes only memberships
-005 prints. Run the statements in the printed order, after checking each
-membership's purpose: removing it affects every database on the server. 005
-never revokes memberships itself.
+16 a revoke removes only a membership that its own role granted. PostgreSQL
+accepts that statement from a superuser and, unless the role it revokes has
+`SUPERUSER`, from a role with both the grantor's privileges and the ADMIN OPTION
+on that role. Each warning names who can run it. Earlier versions check the
+member's `rolinherit`. From 16, PostgreSQL also refuses to take a role's
+last ADMIN OPTION while a membership that role granted stands, so 005 prints
+those memberships too, even when they give `anon` and `authenticated` nothing,
+each ahead of the membership it depends on. To keep a role in one of those
+memberships, grant it again as another role first. Where an ADMIN OPTION comes
+only through a loop of grants, PostgreSQL refuses every plain revoke. There 005
+gives a `CASCADE` statement for each membership that earlier statements leave
+standing, and the warnings name every membership each `CASCADE` removes. Run
+the statements in the printed order, after checking each membership's purpose:
+removing it affects every database on the server. 005 never revokes memberships
+itself.
 
 005 also removes the running role's default grants to those three in `public`.
 On `user_credits` and `token_usage` it drops "Service manages credits" and

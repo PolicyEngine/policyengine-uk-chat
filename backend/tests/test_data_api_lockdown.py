@@ -2322,6 +2322,117 @@ def _membership_warnings(engine: Engine, role: str) -> list[str]:
     ]
 
 
+def _named_membership(
+    warning: str, role: str, memberships: set[tuple[str, str]]
+) -> tuple[str, str]:
+    """The one membership in role that a 005 warning names, as (member, grantor)."""
+    text = warning.removeprefix("WARNING:").strip()
+    named = [
+        (member, grantor)
+        for member, grantor in memberships
+        if text.startswith(
+            (
+                f'{member} holds "{role}" through a membership that {grantor} granted',
+                f'{member} inherits privileges from "{role}" through a direct membership '
+                f"that {grantor} granted",
+            )
+        )
+    ]
+    assert len(named) == 1, (warning, named)
+    return named[0]
+
+
+def _printed_statements(warnings: list[str]) -> list[str]:
+    """The statements that 005's membership warnings print, in printed order."""
+    return [_statement(warning) for warning in warnings if "; revoke it with: " in warning]
+
+
+def _run_as_warned(superuser: Engine, role: str, warnings: list[str]) -> list[str]:
+    """Run every printed membership statement in one transaction, each as its warning says.
+
+    Each warning says who can run its statement, and this checks that against the
+    catalog first. When the warning names only a superuser, because the role or
+    the grantor is one, the superuser runs the statement. Otherwise a new role
+    that inherits the grantor runs it, and that role also gets the ADMIN OPTION
+    on the role when the warning says the grantor holds none of its own. Returns
+    the warnings PostgreSQL sent while the transaction ran.
+    """
+    deputies: list[str] = []
+    cascaded: list[str] = []
+    batch = ["BEGIN;"]
+    try:
+        for warning in warnings:
+            if "; revoke it with: " not in warning:
+                assert "so it needs no statement of its own." in warning, warning
+                assert any(
+                    f"The CASCADE printed for {source} removes it too" in warning
+                    for source in cascaded
+                ), (cascaded, warning)
+                continue
+            statement = _statement(warning)
+            member, grantor = statement.removeprefix(f'revoke "{role}" from ').split(" granted by ")
+            grantor = grantor.removesuffix(";")
+            if grantor.endswith(" cascade"):
+                grantor = grantor.removesuffix(" cascade")
+                cascaded.append(f"the membership that {member} holds from {grantor}")
+            with superuser.connect() as connection:
+                role_is_superuser, grantor_is_superuser, grantor_holds_option = (
+                    connection.execute(
+                        text(
+                            "SELECT r.rolsuper, g.rolsuper, EXISTS ("
+                            "  SELECT FROM pg_auth_members AS m"
+                            "  WHERE m.roleid = r.oid AND m.member = g.oid AND m.admin_option) "
+                            "FROM pg_roles AS r, pg_roles AS g "
+                            "WHERE r.oid = CAST(:role AS regrole) "
+                            "  AND g.oid = CAST(:grantor AS regrole)"
+                        ),
+                        {"role": f'"{role}"', "grantor": grantor},
+                    ).one()
+                )
+            only_superuser = role_is_superuser or grantor_is_superuser
+            lacks_option = not only_superuser and not grantor_holds_option
+            if role_is_superuser:
+                runner = f'"{role}" has SUPERUSER, so only a superuser can remove it'
+            elif grantor_is_superuser:
+                runner = "A superuser can remove it"
+            elif grantor_holds_option:
+                runner = (
+                    "A superuser can remove it, and so can a role with the privileges "
+                    f"of {grantor}"
+                )
+            else:
+                runner = (
+                    f"A superuser can remove it. {grantor} holds no ADMIN OPTION of its own "
+                    f'on "{role}", so a role with the privileges of {grantor} also needs that '
+                    "option to remove it"
+                )
+            assert (
+                f"{runner}; revoke it with: " in warning
+                or f"{runner}. The statement uses CASCADE" in warning
+            ), (runner, warning)
+            if not only_superuser:
+                deputy = f"uk_chat_deputy_{uuid4().hex[:8]}"
+                _run_sql(
+                    superuser,
+                    f'CREATE ROLE "{deputy}" NOLOGIN NOSUPERUSER INHERIT; '
+                    f'GRANT {grantor} TO "{deputy}" WITH INHERIT TRUE;',
+                )
+                deputies.append(deputy)
+                if lacks_option:
+                    _run_sql(
+                        superuser,
+                        f'GRANT "{role}" TO "{deputy}" WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;',
+                    )
+                batch.append(f'SET ROLE "{deputy}"; {statement} RESET ROLE;')
+            else:
+                batch.append(statement)
+        batch.append("COMMIT;")
+        return _warnings(_run_sql(superuser, " ".join(batch)))
+    finally:
+        for deputy in deputies:
+            _run_sql(superuser, f'DROP ROLE "{deputy}"')
+
+
 @pytest.fixture
 def membership_names(superuser: Engine, server_roles) -> dict[str, str]:
     """The role behind each name in a history of grants, from PostgreSQL 16."""
@@ -2366,6 +2477,33 @@ def membership_names(superuser: Engine, server_roles) -> dict[str, str]:
             ],
             [],
             id="a chain through an outsider",
+        ),
+        pytest.param(
+            [
+                _granted("anon", admin=True),
+                _granted("outsider", "anon", admin=True, inherit=False),
+                _granted("second", "outsider"),
+            ],
+            [],
+            id="anon's option reaches a role two grants away",
+        ),
+        pytest.param(
+            [
+                _granted("outsider", admin=True, inherit=False),
+                _granted("anon", "outsider"),
+                _granted("outsider", admin=False, inherit=False),
+            ],
+            [("outsider", None)],
+            id="the grantor lost its option after it granted anon",
+        ),
+        pytest.param(
+            [
+                _granted("anon", admin=True),
+                _granted("authenticated", "anon"),
+                _granted("anon", admin=False),
+            ],
+            [],
+            id="anon lost its option after it granted authenticated",
         ),
         pytest.param(
             [
@@ -2458,7 +2596,8 @@ def test_printed_membership_statements_run_in_order_and_close_both_roles(
 
     PostgreSQL 16+ refuses to take a role's last ADMIN OPTION while a membership
     it granted stands, even when that membership gives anon and authenticated
-    nothing.
+    nothing. Each statement runs as the role its warning names, and all of them
+    run in one transaction.
     """
     role = server_roles("Granted Reader", "NOSUPERUSER")
     _run_sql(
@@ -2495,8 +2634,7 @@ def test_printed_membership_statements_run_in_order_and_close_both_roles(
             assert f"{member} inherits privileges from" in warning, warning
         else:
             assert f"To keep {member} in the role" in warning, warning
-    for statement in statements:
-        assert _warnings(_run_sql(superuser, statement)) == [], statement
+    assert _run_as_warned(superuser, role, warnings) == []
     assert _memberships(superuser, role) == expected_to_stay
     assert not _inherits(superuser, "anon", role)
     assert not _inherits(superuser, "authenticated", role)
@@ -2522,19 +2660,15 @@ def test_a_membership_in_another_role_stays_out_of_the_plan(
         _apply_membership_step(superuser, other, membership_names, step)
     other_memberships = _memberships(superuser, other)
 
-    statements = [
-        _statement(warning)
-        for warning in _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
-    ]
+    warnings = _warnings(_run_sql(exposed_database, LOCKDOWN.read_text()))
 
     outsider = f'"{membership_names["outsider"]}"'
     second = f'"{membership_names["second"]}"'
-    assert statements == [
+    assert _printed_statements(warnings) == [
         _membership_revoke(role, (outsider, "anon")),
         _membership_revoke(role, ("anon", second)),
     ]
-    for statement in statements:
-        assert _warnings(_run_sql(superuser, statement)) == [], statement
+    assert _run_as_warned(superuser, role, warnings) == []
     assert _memberships(superuser, role) == {(second, _bootstrap_superuser(superuser))}
     assert _memberships(superuser, other) == other_memberships
     _assert_lockdown_closed(exposed_database)
@@ -2553,8 +2687,7 @@ def test_a_role_keeps_a_dependent_membership_through_a_new_grant(
     assert f'To keep "{outsider}" in the role, grant it again as another role first' in warnings[0]
 
     _apply_membership_step(superuser, role, membership_names, _granted("outsider"))
-    for warning in warnings:
-        assert _warnings(_run_sql(superuser, _statement(warning))) == [], warning
+    assert _run_as_warned(superuser, role, warnings) == []
 
     bootstrap = _bootstrap_superuser(superuser)
     assert _memberships(superuser, role) == {(f'"{outsider}"', bootstrap)}
@@ -2563,41 +2696,217 @@ def test_a_role_keeps_a_dependent_membership_through_a_new_grant(
     _assert_lockdown_closed(exposed_database)
 
 
+_LOOP_ROOTS = [
+    _granted("anon", admin=True),
+    _granted("authenticated", admin=True),
+    _granted("anon", "authenticated", admin=True),
+    _granted("authenticated", "anon", admin=True),
+]
+
+
+@pytest.mark.parametrize(
+    "history, cascades",
+    [
+        pytest.param(
+            [*_LOOP_ROOTS, _revoked("anon"), _revoked("authenticated")],
+            [("anon", "authenticated")],
+            id="anon and authenticated lost their roots",
+        ),
+        pytest.param(
+            [
+                *_LOOP_ROOTS,
+                _revoked("anon"),
+                _revoked("authenticated"),
+                _granted("outsider", "anon"),
+            ],
+            [("anon", "authenticated")],
+            id="the loop also gave an outsider the role",
+        ),
+        pytest.param(
+            [
+                *_LOOP_ROOTS,
+                _granted("outsider", "authenticated", admin=True, inherit=False),
+                _granted("second", "outsider"),
+                _revoked("anon"),
+                _revoked("authenticated"),
+            ],
+            [("anon", "authenticated")],
+            id="the CASCADE reaches two grants past the loop",
+        ),
+        pytest.param(
+            [
+                _granted("anon", admin=True),
+                _granted("outsider", admin=True),
+                _granted("second", admin=True),
+                _granted("outsider", "anon", admin=True, inherit=False),
+                _granted("second", "anon", admin=True, inherit=False),
+                _granted("anon", "outsider", admin=True),
+                _granted("anon", "second", admin=True),
+                _revoked("anon"),
+                _revoked("outsider"),
+                _revoked("second"),
+            ],
+            [("anon", "outsider"), ("anon", "second")],
+            id="two loops run through anon",
+        ),
+    ],
+)
 def test_a_loop_of_admin_grants_takes_cascade(
-    exposed_database, superuser, membership_names, server_roles
+    exposed_database, superuser, membership_names, server_roles, history, cascades
 ):
-    """PostgreSQL refuses every plain revoke once a loop has lost its roots."""
+    """Once a loop of ADMIN grants has lost its roots, only CASCADE closes it.
+
+    Each CASCADE also removes the memberships that depend on it, so 005 prints
+    a statement only for a membership that the earlier statements leave standing,
+    and names the others. A role with the grantor's privileges runs each one.
+    """
     role = server_roles("Granted Reader", "NOSUPERUSER")
-    history = [
-        _granted("anon", admin=True),
-        _granted("authenticated", admin=True),
-        _granted("anon", "authenticated", admin=True),
-        _granted("authenticated", "anon", admin=True),
-        _revoked("anon"),
-        _revoked("authenticated"),
-        _granted("outsider", "anon"),
-    ]
     for step in history:
         _apply_membership_step(superuser, role, membership_names, step)
-    outsider = f'"{membership_names["outsider"]}"'
-    memberships = {("anon", "authenticated"), ("authenticated", "anon"), (outsider, "anon")}
-    assert _memberships(superuser, role) == memberships
-    for membership in memberships - {(outsider, "anon")}:
-        with pytest.raises(DependentObjectsStillExist):
-            _run_sql(superuser, _membership_revoke(role, membership))
+    before = _memberships(superuser, role)
+
+    def quoted(name: str) -> str:
+        return name if name in DATA_API_ROLES else f'"{membership_names[name]}"'
 
     warnings = _membership_warnings(exposed_database, role)
 
+    assert _memberships(superuser, role) == before
     assert all("comes only through a loop of grants" in warning for warning in warnings)
-    statements = [_statement(warning) for warning in warnings]
-    assert sorted(statements) == sorted(
-        _membership_revoke(role, membership).replace(";", " cascade;")
-        for membership in memberships
+    assert sorted(_named_membership(warning, role, before) for warning in warnings) == sorted(
+        before
     )
-    assert _memberships(superuser, role) == memberships
-    for statement in statements:
-        _run_sql(superuser, statement)
+    statements = _printed_statements(warnings)
+    assert statements == [
+        _membership_revoke(role, (quoted(member), quoted(grantor))).replace(";", " cascade;")
+        for member, grantor in cascades
+    ]
+    plain = " ".join(statement.replace(" cascade;", ";") for statement in statements)
+    with pytest.raises(DependentObjectsStillExist):
+        _run_sql(superuser, f"BEGIN; {plain} ROLLBACK;")
+    assert _memberships(superuser, role) == before
+
+    assert _run_as_warned(superuser, role, warnings) == []
     assert _memberships(superuser, role) == set()
+    _assert_lockdown_closed(exposed_database)
+
+
+def test_a_loop_beside_memberships_the_walk_reaches(
+    exposed_database, superuser, membership_names, server_roles
+):
+    """Plain revokes for what the walk reaches print first, then the loop's CASCADE.
+
+    The outsider keeps its own ADMIN OPTION, so both of its grants start a chain
+    and the loop's CASCADE leaves them alone. The warning for the membership the
+    CASCADE takes with it names that CASCADE.
+    """
+    role = server_roles("Granted Reader", "NOSUPERUSER")
+    outsider = f'"{membership_names["outsider"]}"'
+    for step in [
+        _granted("outsider", admin=True, inherit=False),
+        _granted("anon", "outsider"),
+        _granted("authenticated", "outsider"),
+        *_LOOP_ROOTS,
+        _revoked("anon"),
+        _revoked("authenticated"),
+    ]:
+        _apply_membership_step(superuser, role, membership_names, step)
+    before = _memberships(superuser, role)
+
+    warnings = _membership_warnings(exposed_database, role)
+
+    named = [_named_membership(warning, role, before) for warning in warnings]
+    kept = {(outsider, _bootstrap_superuser(superuser))}
+    assert sorted(named) == sorted(before - kept)
+    statements = _printed_statements(warnings)
+    assert sorted(statements[:2]) == sorted(
+        _membership_revoke(role, (member, outsider)) for member in DATA_API_ROLES
+    )
+    assert statements[2:] == [
+        _membership_revoke(role, ("anon", "authenticated")).replace(";", " cascade;")
+    ]
+    assert len(warnings) == 4
+    assert (
+        "The CASCADE printed for the membership that anon holds from authenticated removes it too"
+        in warnings[3]
+    )
+
+    assert _run_as_warned(superuser, role, warnings) == []
+    assert _memberships(superuser, role) == kept
+    _assert_lockdown_closed(exposed_database)
+
+
+def test_a_grantor_without_its_option_leaves_the_revoke_to_a_role_that_holds_one(
+    exposed_database, superuser, membership_names, server_roles
+):
+    """GRANT ... WITH ADMIN FALSE takes the option even while the grantor's grant stands.
+
+    PostgreSQL then refuses the printed revoke from the grantor and from every
+    role that only shares its privileges, as the warning says. The grantor's
+    ADMIN OPTION on another role changes nothing.
+    """
+    role = server_roles("Granted Reader", "NOSUPERUSER")
+    other = server_roles("Other Reader", "NOSUPERUSER")
+    outsider = membership_names["outsider"]
+    for step in [
+        _granted("outsider", admin=True, inherit=False),
+        _granted("anon", "outsider"),
+        _granted("outsider", admin=False, inherit=False),
+    ]:
+        _apply_membership_step(superuser, role, membership_names, step)
+    _run_sql(superuser, f'GRANT "{other}" TO "{outsider}" WITH ADMIN TRUE, INHERIT FALSE;')
+
+    warnings = _membership_warnings(exposed_database, role)
+
+    assert len(warnings) == 1, warnings
+    assert (
+        f'"{outsider}" holds no ADMIN OPTION of its own on "{role}", so a role with the '
+        "privileges" in warnings[0]
+    )
+    statement = _statement(warnings[0])
+    assert statement == _membership_revoke(role, ("anon", f'"{outsider}"'))
+    deputy = server_roles("deputy", f'NOSUPERUSER INHERIT IN ROLE "{outsider}"')
+    for runner in (outsider, deputy):
+        with pytest.raises(InsufficientPrivilege):
+            _run_as_session_role(superuser, runner, statement)
+    assert _inherits(superuser, "anon", role)
+    _run_sql(superuser, f'GRANT "{role}" TO "{deputy}" WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;')
+    assert _warnings(_run_as_session_role(superuser, deputy, statement)) == []
+    assert not _inherits(superuser, "anon", role)
+    _assert_lockdown_closed(exposed_database)
+
+
+def test_only_a_superuser_removes_a_membership_in_a_superuser_role(
+    exposed_database, superuser, membership_names, server_roles
+):
+    """PostgreSQL lets only a superuser change who belongs to a superuser role.
+
+    The warning says so although the grantor holds the ADMIN OPTION, and a role
+    with both the grantor's privileges and that option can't run the statement.
+    """
+    role = server_roles("Superuser Reader", "SUPERUSER")
+    outsider = membership_names["outsider"]
+    _apply_membership_step(
+        superuser, role, membership_names, _granted("outsider", admin=True, inherit=False)
+    )
+    _run_sql(superuser, f'GRANT "{role}" TO anon WITH INHERIT TRUE GRANTED BY "{outsider}";')
+
+    warnings = _membership_warnings(exposed_database, role)
+
+    assert len(warnings) == 1, warnings
+    assert (
+        f'"{role}" has SUPERUSER, so only a superuser can remove it; revoke it with: '
+        in warnings[0]
+    )
+    statement = _statement(warnings[0])
+    assert statement == _membership_revoke(role, ("anon", f'"{outsider}"'))
+    deputy = server_roles("deputy", f'NOSUPERUSER INHERIT IN ROLE "{outsider}"')
+    _run_sql(superuser, f'GRANT "{role}" TO "{deputy}" WITH ADMIN TRUE, INHERIT FALSE, SET FALSE;')
+    for runner in (outsider, deputy):
+        with pytest.raises(InsufficientPrivilege):
+            _run_as_session_role(superuser, runner, statement)
+    assert _inherits(superuser, "anon", role)
+    assert _run_as_warned(superuser, role, warnings) == []
+    assert not _inherits(superuser, "anon", role)
     _assert_lockdown_closed(exposed_database)
 
 
@@ -2683,11 +2992,13 @@ def test_printed_membership_statements_undo_any_history_of_grants(
 ):
     """For every catalog that grants and revokes can reach, from PostgreSQL 16:
 
-    - a run changes no membership and prints the same statements each time;
-    - the statements cover every membership through which anon or authenticated
-      inherits the role, and PostgreSQL accepts each one in the printed order;
+    - a run changes no membership and prints the same warnings each time;
+    - the warnings name every membership through which anon or authenticated
+      inherits the role, one membership each;
+    - PostgreSQL accepts the printed statements in one transaction, in the
+      printed order, each from the role its warning names, and warns about none;
     - afterwards neither role inherits the role, and a rerun says nothing about it;
-    - they remove exactly the memberships they name; and
+    - the statements remove exactly the memberships the warnings name; and
     - each membership that gives neither role access has to go: without its
       statement, PostgreSQL refuses a later one.
     """
@@ -2707,11 +3018,13 @@ def test_printed_membership_statements_undo_any_history_of_grants(
 
         assert _membership_warnings(locked_database, role) == warnings
         assert _memberships(superuser, role) == before
-        statements = [_statement(warning) for warning in warnings]
+        named = [_named_membership(warning, role, before) for warning in warnings]
+        assert len(set(named)) == len(named)
+        assert inherited <= set(named)
+        statements = _printed_statements(warnings)
         plain = [statement.replace(" cascade;", ";") for statement in statements]
-        assert len(set(plain)) == len(plain)
-        assert {_membership_revoke(role, membership) for membership in inherited} <= set(plain)
         if not any(statement.endswith(" cascade;") for statement in statements):
+            assert plain == [_membership_revoke(role, membership) for membership in named]
             needed = set(plain) - {
                 _membership_revoke(role, membership) for membership in inherited
             }
@@ -2721,12 +3034,10 @@ def test_printed_membership_statements_undo_any_history_of_grants(
                     _run_sql(superuser, f"BEGIN; {others} ROLLBACK;")
             assert _memberships(superuser, role) == before
 
-        for statement in statements:
-            reported = _warnings(_run_sql(superuser, statement))
-            assert statement.endswith(" cascade;") or reported == [], statement
+        assert _run_as_warned(superuser, role, warnings) == []
 
         after = _memberships(superuser, role)
-        assert {_membership_revoke(role, membership) for membership in before - after} == set(plain)
+        assert before - after == set(named)
         assert not _inherits(superuser, "anon", role)
         assert not _inherits(superuser, "authenticated", role)
         assert _membership_warnings(locked_database, role) == []
